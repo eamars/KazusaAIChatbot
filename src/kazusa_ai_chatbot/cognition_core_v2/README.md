@@ -689,6 +689,15 @@ limit, attempt disposition, and final branch disposition. The invocation-wide
 ledger is protected diagnostic data and does not enter event logs, public
 responses, or operational status.
 
+When the live persona connector is bound to the parent-checkpoint guardrail,
+the model ledger keeps the existing three-call owner cap independently in epoch
+zero and the one permitted parent-recovery epoch. Epoch one remains active for
+later resolver cycles and cannot create another epoch. The unguarded
+`cognition_attempt_ledger.v1` snapshot remains unchanged and is retained by
+each inner `run_cognition` capsule. The outer guardrail writer may additionally
+store bounded `cognition_attempt_ledger.v2` epoch metadata; it contains only
+owner coordinates, dispositions, and the parent-recovery summary.
+
 ## Aggregate Prompt Budgets
 
 Each V2 model owner budgets its complete deterministic serialization, including

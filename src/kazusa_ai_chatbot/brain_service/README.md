@@ -453,6 +453,14 @@ Brain service responsibilities:
   Goal-cognition calls retain one invocation-wide per-branch ledger across
   both graph attempts; goal exhaustion is non-retryable after cumulative call
   three, while a later-stage failure may reuse only the goal budget left.
+- The live persona graph binds one context-local replay coordinator across the
+  whole queued invocation. The first owner to claim its token is either the
+  existing service graph retry or the persona connector's parent-checkpoint
+  guardrail; the other owner cannot stack another retry. Parent recovery is
+  limited to escaped pre-commit `goal_bid_structure_exhausted` and
+  `goal_bid_provider_exhausted` errors and replays only the non-committing
+  cognition child. Preparation, capabilities, actions, surfaces, delivery,
+  and the final commit remain one-shot.
 - Operational response text is a system notice. It creates no assistant
   conversation row, progress record, consolidation input, or delivery receipt.
 - The brain service may run post-turn consolidation for selected surface

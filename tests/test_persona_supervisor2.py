@@ -582,6 +582,84 @@ async def test_persona_stage_uses_canonical_resolver_loop(
 
 
 @pytest.mark.asyncio
+async def test_persona_stage_passes_bound_parent_coordinator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The live stage carries the service-owned coordinator to its connector."""
+
+    coordinator = object()
+    captured: dict[str, object] = {}
+
+    async def load_action_context(state: dict) -> dict:
+        return {**state, "action_selection_context": {"coding_runs": []}}
+
+    async def load_pending(state: dict) -> dict:
+        return state
+
+    async def run_resolver_loop(state: dict, **kwargs: object) -> dict:
+        captured["update"] = await kwargs[
+            "call_cognition_subgraph_func"
+        ](state)
+        return {
+            **state,
+            "cognition_core_output": _cognition_output("silence"),
+        }
+
+    cognition_subgraph = AsyncMock(return_value={
+        "cognition_core_output": _cognition_output("silence"),
+    })
+    monkeypatch.setattr(
+        persona_module,
+        "_load_live_action_selection_context",
+        load_action_context,
+    )
+    monkeypatch.setattr(
+        persona_module,
+        "load_matching_pending_resume_into_state",
+        load_pending,
+    )
+    monkeypatch.setattr(
+        persona_module,
+        "ensure_initial_resolver_inputs",
+        lambda state, *, max_cycles: state,
+    )
+    monkeypatch.setattr(
+        persona_module,
+        "call_cognition_resolver_loop",
+        run_resolver_loop,
+    )
+    monkeypatch.setattr(
+        persona_module,
+        "call_cognition_subgraph",
+        cognition_subgraph,
+    )
+    monkeypatch.setattr(
+        persona_module,
+        "current_cognition_retry_coordinator",
+        lambda: coordinator,
+    )
+    commit = AsyncMock()
+    monkeypatch.setattr(persona_module, "commit_cognition_output", commit)
+
+    await persona_module.stage_1_goal_resolver({
+        "storage_timestamp_utc": NOW,
+    })
+
+    assert captured["update"] == {
+        "cognition_core_output": _cognition_output("silence"),
+    }
+    cognition_subgraph.assert_awaited_once_with(
+        {
+            "storage_timestamp_utc": NOW,
+            "action_selection_context": {"coding_runs": []},
+        },
+        commit=False,
+        retry_coordinator=coordinator,
+    )
+    commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_call_action_subgraph_preserves_dialog_and_trace(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

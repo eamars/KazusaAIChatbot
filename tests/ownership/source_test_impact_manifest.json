@@ -5,6 +5,8 @@
     "src/kazusa_ai_chatbot/cognition_episode.py",
     "src/kazusa_ai_chatbot/cognition_core_v2",
     "src/kazusa_ai_chatbot/cognition_resolver",
+    "src/kazusa_ai_chatbot/cognition_resolver/guardrail.py",
+    "src/kazusa_ai_chatbot/llm_tracing",
     "src/kazusa_ai_chatbot/db/self_cognition.py",
     "src/kazusa_ai_chatbot/event_logging/__init__.py",
     "src/kazusa_ai_chatbot/event_logging/models.py",
@@ -15,10 +17,12 @@
     "src/kazusa_ai_chatbot/self_cognition/worker.py",
     "src/kazusa_ai_chatbot/version.py",
     "src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition.py",
+    "src/kazusa_ai_chatbot/nodes/persona_supervisor2.py",
     "src/kazusa_ai_chatbot/nodes/persona_supervisor2_l3_surface.py",
     "src/kazusa_ai_chatbot/nodes/persona_supervisor2_msg_decontextualizer.py",
     "src/kazusa_ai_chatbot/nodes/dialog_agent.py",
     "src/kazusa_ai_chatbot/nodes/persona_supervisor2_schema.py",
+    "src/kazusa_ai_chatbot/service.py",
     "src/scripts/export_trace_correlation_manifest.py"
   ],
   "entries": [
@@ -443,6 +447,23 @@
       "supplemental_tests": []
     },
     {
+      "source": "src/kazusa_ai_chatbot/cognition_resolver/guardrail.py",
+      "owner": "parent cognition guardrail owner",
+      "contract": "one invocation-wide replay token and bounded parent recovery",
+      "required_unit_tests": [
+        "tests/unit/cognition_resolver/test_guardrail.py::test_guardrail_exposes_owned_contract",
+        "tests/unit/cognition_resolver/test_guardrail.py::test_coordinator_claim_is_atomic_between_service_and_parent",
+        "tests/unit/cognition_resolver/test_guardrail.py::test_parent_epoch_persists_after_recovery",
+        "tests/unit/cognition_resolver/test_guardrail.py::test_parent_recovery_allows_only_goal_exhaustion_codes",
+        "tests/unit/cognition_resolver/test_guardrail.py::test_parent_recovery_rejects_postcommit_and_unknown_failures",
+        "tests/unit/cognition_resolver/test_guardrail.py::test_parent_recovery_isolated_between_concurrent_contexts",
+        "tests/unit/cognition_resolver/test_guardrail.py::test_parent_recovery_cancellation_restores_context"
+      ],
+      "supplemental_tests": [
+        "tests/integration/cognition_core_v2/test_parent_checkpoint_guardrail.py::test_parent_recovery_failure_preserves_typed_error_and_no_side_effect"
+      ]
+    },
+    {
       "source": "src/kazusa_ai_chatbot/cognition_resolver/capabilities.py",
       "owner": "cognition_resolver owner",
       "contract": "capabilities public contract",
@@ -500,14 +521,64 @@
       "supplemental_tests": []
     },
     {
+      "source": "src/kazusa_ai_chatbot/llm_tracing/correlation.py",
+      "owner": "protected trace correlation owner",
+      "contract": "typed trace correlation resolution",
+      "required_unit_tests": [
+        "tests/test_trace_correlation_manifest.py::test_strict_resolver_fixture_cases"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/llm_tracing/failure_capsule.py",
+      "owner": "protected failure capsule owner",
+      "contract": "bounded inner cognition failure capsule",
+      "required_unit_tests": [
+        "tests/test_cognition_core_v2_failures.py::test_run_cognition_capsule_preserves_original_exception"
+      ],
+      "supplemental_tests": [
+        "tests/test_llm_tracing.py::test_failure_capsule_promotes_exact_input_and_attempt"
+      ]
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/llm_tracing/guardrail_capsule.py",
+      "owner": "parent guardrail tracing owner",
+      "contract": "bounded outer parent-recovery capsule",
+      "required_unit_tests": [
+        "tests/unit/llm_tracing/test_guardrail_capsule.py::test_guardrail_capsule_exposes_owned_contract",
+        "tests/unit/llm_tracing/test_guardrail_capsule.py::test_guardrail_capsule_contains_only_bounded_metadata",
+        "tests/unit/llm_tracing/test_guardrail_capsule.py::test_guardrail_capsule_projects_adversarial_metadata"
+      ],
+      "supplemental_tests": [
+        "tests/test_llm_tracing.py::test_guarded_failure_capsule_contains_outer_parent_metadata"
+      ]
+    },
+    {
       "source": "src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition.py",
       "owner": "nodes owner",
       "contract": "persona_supervisor2_cognition public contract",
       "required_unit_tests": [
         "tests/unit/nodes/test_persona_supervisor2_cognition.py::test_group_self_cognition_proposal_materializes_existing_speak_surface",
-        "tests/unit/nodes/test_persona_supervisor2_cognition.py::test_persona_supervisor2_cognition_exposes_owned_contract"
+        "tests/unit/nodes/test_persona_supervisor2_cognition.py::test_persona_supervisor2_cognition_exposes_owned_contract",
+        "tests/test_persona_supervisor2_cognition_prewarm.py::test_parent_retry_does_not_repeat_shared_memory_prewarm",
+        "tests/test_persona_supervisor2_cognition_prewarm.py::test_omitted_coordinator_does_not_use_ambient_guardrail"
       ],
-      "supplemental_tests": []
+      "supplemental_tests": [
+        "tests/test_persona_supervisor2_cognition_prewarm.py::test_parent_retry_does_not_repeat_shared_memory_prewarm",
+        "tests/test_persona_supervisor2_cognition_prewarm.py::test_omitted_coordinator_does_not_use_ambient_guardrail"
+      ]
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/nodes/persona_supervisor2.py",
+      "owner": "persona stage owner",
+      "contract": "live stage coordinator propagation and one final commit",
+      "required_unit_tests": [
+        "tests/test_persona_supervisor2.py::test_persona_stage_uses_canonical_resolver_loop",
+        "tests/test_persona_supervisor2.py::test_persona_stage_passes_bound_parent_coordinator"
+      ],
+      "supplemental_tests": [
+        "tests/integration/cognition_core_v2/test_parent_checkpoint_guardrail.py::test_parent_retry_does_not_repeat_capability_or_commit"
+      ]
     },
     {
       "source": "src/kazusa_ai_chatbot/nodes/persona_supervisor2_l3_surface.py",
@@ -560,6 +631,22 @@
       ],
       "supplemental_tests": [
         "tests/test_decontextualizer_live_llm.py::test_live_decontextualizer_reward_offer_preserves_user_actor_character_target"
+      ]
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/service.py",
+      "owner": "brain service retry owner",
+      "contract": "shared service and parent replay arbitration",
+      "required_unit_tests": [
+        "tests/test_service_input_queue.py::test_precommit_cognition_failure_retries_once_then_succeeds",
+        "tests/test_service_input_queue.py::test_service_graph_retry_reuses_goal_attempt_ledger",
+        "tests/test_service_input_queue.py::test_goal_cognition_exhaustion_skips_service_retry",
+        "tests/test_service_input_queue.py::test_parent_guardrail_failure_does_not_start_outer_graph_retry"
+      ],
+      "supplemental_tests": [
+        "tests/integration/cognition_core_v2/test_parent_checkpoint_guardrail.py::test_parent_first_blocks_later_service_retry",
+        "tests/integration/cognition_core_v2/test_parent_checkpoint_guardrail.py::test_service_first_blocks_parent_recovery",
+        "tests/integration/cognition_core_v2/test_parent_checkpoint_guardrail.py::test_parent_recovery_success_then_service_failure_has_one_replay"
       ]
     },
     {

@@ -98,6 +98,28 @@ class V2InvocationAttemptLedger:
     branch_dispositions: dict[str, V2BranchDispositionRecord] = field(
         default_factory=dict,
     )
+    guarded: bool = False
+    epoch: int = 0
+    guarded_producer_attempts: dict[tuple[int, str, str], int] = field(
+        default_factory=dict,
+        repr=False,
+    )
+    guarded_attempts: list[dict[str, object]] = field(
+        default_factory=list,
+        repr=False,
+    )
+    attempt_epochs: list[int] = field(
+        default_factory=list,
+        repr=False,
+    )
+    guarded_epoch_branch_dispositions: dict[
+        tuple[int, str],
+        V2BranchDispositionRecord,
+    ] = field(default_factory=dict, repr=False)
+    parent_recovery: dict[str, object] = field(
+        default_factory=dict,
+        repr=False,
+    )
 
 
 class V2AttemptBudgetExhausted(RuntimeError):
@@ -271,6 +293,57 @@ def reset_v2_attempt_ledger(
     _CURRENT_ATTEMPT_LEDGER.reset(token)
 
 
+def enable_guarded_v2_attempt_ledger() -> None:
+    """Enable epoch-aware producer accounting for one guarded invocation."""
+
+    ledger = _CURRENT_ATTEMPT_LEDGER.get()
+    if ledger is None:
+        raise RuntimeError("guarded V2 attempts require an invocation ledger")
+    ledger.guarded = True
+
+
+def set_v2_attempt_epoch(epoch: int) -> None:
+    """Select the bounded epoch used by the guarded producer ledger."""
+
+    if isinstance(epoch, bool) or not isinstance(epoch, int):
+        raise ValueError("V2 attempt epoch must be an integer")
+    if epoch not in (0, 1):
+        raise ValueError("V2 attempt epoch is outside the two-epoch bound")
+    ledger = _CURRENT_ATTEMPT_LEDGER.get()
+    if ledger is None:
+        raise RuntimeError("V2 attempt epoch requires an invocation ledger")
+    ledger.epoch = epoch
+
+
+def set_v2_parent_recovery_metadata(
+    *,
+    disposition: str,
+    claimed_by: str,
+    epoch: int,
+    checkpoint_sha256: str,
+) -> None:
+    """Store bounded parent-recovery metadata beside the V1 ledger."""
+
+    if disposition not in {"attempted", "recovered", "exhausted"}:
+        raise ValueError("V2 parent recovery disposition is invalid")
+    if claimed_by != "parent_checkpoint":
+        raise ValueError("V2 parent recovery owner is invalid")
+    if epoch != 1:
+        raise ValueError("V2 parent recovery epoch is invalid")
+    if len(checkpoint_sha256) != 64:
+        raise ValueError("V2 parent recovery digest is invalid")
+    ledger = _CURRENT_ATTEMPT_LEDGER.get()
+    if ledger is None:
+        return
+    ledger.parent_recovery = {
+        "disposition": disposition,
+        "claimed_by": claimed_by,
+        "epoch": epoch,
+        "checkpoint_sha256": checkpoint_sha256,
+        "max_replays": 1,
+    }
+
+
 def reserve_v2_model_attempt(
     *,
     stage: str,
@@ -296,8 +369,12 @@ def reserve_v2_model_attempt(
     configured_limit = V2_MODEL_OWNER_POLICIES[stage][
         "total_attempt_limit"
     ]
-    producer_key = (stage, branch_id)
-    consumed = ledger.producer_attempts.get(producer_key, 0)
+    if ledger.guarded:
+        guarded_key = (ledger.epoch, stage, branch_id)
+        consumed = ledger.guarded_producer_attempts.get(guarded_key, 0)
+    else:
+        producer_key = (stage, branch_id)
+        consumed = ledger.producer_attempts.get(producer_key, 0)
     if consumed >= configured_limit:
         raise V2AttemptBudgetExhausted(
             stage=stage,
@@ -306,7 +383,10 @@ def reserve_v2_model_attempt(
         )
 
     cumulative_attempt = consumed + 1
-    ledger.producer_attempts[producer_key] = cumulative_attempt
+    if ledger.guarded:
+        ledger.guarded_producer_attempts[guarded_key] = cumulative_attempt
+    else:
+        ledger.producer_attempts[producer_key] = cumulative_attempt
     coordinates: V2AttemptCoordinates = {
         "cognition_invocation_id": ledger.cognition_invocation_id,
         "graph_attempt": ledger.graph_attempt,
@@ -321,6 +401,13 @@ def reserve_v2_model_attempt(
         "attempt_disposition": "started",
     })
     ledger.attempts.append(record)
+    ledger.attempt_epochs.append(ledger.epoch)
+    if ledger.guarded:
+        ledger.guarded_attempts.append({
+            **coordinates,
+            "epoch": ledger.epoch,
+            "attempt_disposition": "started",
+        })
     return coordinates
 
 
@@ -339,8 +426,21 @@ def record_v2_attempt_disposition(
     for record in reversed(ledger.attempts):
         if all(record.get(key) == value for key, value in coordinates.items()):
             record["attempt_disposition"] = disposition
-            return
-    raise ValueError("V2 attempt coordinates are not reserved")
+            break
+    else:
+        raise ValueError("V2 attempt coordinates are not reserved")
+    if ledger.guarded:
+        for record in reversed(ledger.guarded_attempts):
+            if (
+                record.get("epoch") == ledger.epoch
+                and all(
+                    record.get(key) == value
+                    for key, value in coordinates.items()
+                )
+            ):
+                record["attempt_disposition"] = disposition
+                return
+        raise ValueError("guarded V2 attempt coordinates are not reserved")
 
 
 def record_v2_branch_disposition(
@@ -361,6 +461,12 @@ def record_v2_branch_disposition(
         "disposition": disposition,
         "error_code": error_code,
     }
+    if ledger.guarded:
+        ledger.guarded_epoch_branch_dispositions[(ledger.epoch, branch_id)] = {
+            "branch_id": branch_id,
+            "disposition": disposition,
+            "error_code": error_code,
+        }
 
 
 def snapshot_v2_attempt_ledger() -> dict[str, object] | None:
@@ -369,14 +475,64 @@ def snapshot_v2_attempt_ledger() -> dict[str, object] | None:
     ledger = _CURRENT_ATTEMPT_LEDGER.get()
     if ledger is None:
         return None
+    if ledger.guarded:
+        attempts = [
+            dict(record)
+            for index, record in enumerate(ledger.attempts)
+            if ledger.attempt_epochs[index] == ledger.epoch
+        ]
+        branch_dispositions = [
+            dict(ledger.guarded_epoch_branch_dispositions[(ledger.epoch, branch_id)])
+            for epoch, branch_id in sorted(
+                ledger.guarded_epoch_branch_dispositions
+            )
+            if epoch == ledger.epoch
+        ]
+    else:
+        attempts = [dict(record) for record in ledger.attempts]
+        branch_dispositions = [
+            dict(ledger.branch_dispositions[branch_id])
+            for branch_id in sorted(ledger.branch_dispositions)
+        ]
     return {
         "schema_version": "cognition_attempt_ledger.v1",
         "cognition_invocation_id": ledger.cognition_invocation_id,
-        "attempts": [dict(record) for record in ledger.attempts],
-        "branch_dispositions": [
-            dict(ledger.branch_dispositions[branch_id])
-            for branch_id in sorted(ledger.branch_dispositions)
-        ],
+        "attempts": attempts,
+        "branch_dispositions": branch_dispositions,
+    }
+
+
+def snapshot_v2_guarded_attempt_ledger() -> dict[str, object] | None:
+    """Return bounded two-epoch metadata for the outer guardrail capsule."""
+
+    ledger = _CURRENT_ATTEMPT_LEDGER.get()
+    if ledger is None or not ledger.guarded:
+        return None
+    epochs: list[dict[str, object]] = []
+    for epoch in (0, 1):
+        attempts = [
+            dict(record)
+            for record in ledger.guarded_attempts
+            if record.get("epoch") == epoch
+        ]
+        branch_dispositions = [
+            dict(ledger.guarded_epoch_branch_dispositions[(epoch, branch_id)])
+            for current_epoch, branch_id in sorted(
+                ledger.guarded_epoch_branch_dispositions
+            )
+            if current_epoch == epoch
+        ]
+        if attempts or branch_dispositions:
+            epochs.append({
+                "epoch": epoch,
+                "attempts": attempts,
+                "branch_dispositions": branch_dispositions,
+            })
+    return {
+        "schema_version": "cognition_attempt_ledger.v2",
+        "cognition_invocation_id": ledger.cognition_invocation_id,
+        "epochs": epochs,
+        "parent_recovery": dict(ledger.parent_recovery),
     }
 
 

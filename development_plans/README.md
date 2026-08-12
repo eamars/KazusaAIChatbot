@@ -51,6 +51,12 @@ recorded evidence.
 
 No active bugfix plans are currently registered.
 
+### Completed Bugfix Plans
+
+| Document | Type | Status |
+|---|---|---|
+| [cognition_v2_parent_checkpoint_guardrail_plan.md](archive/completed/cognition_v2_parent_checkpoint_guardrail_plan.md) | Cognition V2 parent-checkpoint guardrail and bounded recovery epoch | completed |
+
 ## Working-Tree Policy
 
 - Executable implementation work belongs under `active/short_term/` or

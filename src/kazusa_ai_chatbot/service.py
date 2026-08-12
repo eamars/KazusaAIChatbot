@@ -112,7 +112,10 @@ from kazusa_ai_chatbot.past_dialog_cognition import (
 )
 from kazusa_ai_chatbot.llm_interface.route_report import render_llm_route_table
 from kazusa_ai_chatbot import llm_tracing
-from kazusa_ai_chatbot.llm_tracing import failure_capsule
+from kazusa_ai_chatbot.llm_tracing import (
+    failure_capsule,
+    guardrail_capsule,
+)
 from kazusa_ai_chatbot.reflection_cycle.phase_scheduler import (
     REFLECTION_PHASE_GROUPS_PER_SLOT,
 )
@@ -229,6 +232,12 @@ from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
     bind_v2_attempt_ledger,
     create_v2_attempt_ledger,
     reset_v2_attempt_ledger,
+    snapshot_v2_guarded_attempt_ledger,
+)
+from kazusa_ai_chatbot.cognition_resolver.guardrail import (
+    bind_cognition_retry_coordinator,
+    create_cognition_retry_coordinator,
+    reset_cognition_retry_coordinator,
 )
 from kazusa_ai_chatbot.relevance import (
     SettledRelevanceContractError,
@@ -5918,6 +5927,8 @@ async def _process_queued_chat_item(
     scheduled_followup_count = 0
     debug_mode_names: list[str] = []
     settled_trace: dict[str, object] | None = None
+    cognition_retry_coordinator = None
+    cognition_retry_coordinator_token = None
     settlement_items = [item]
     if settlement_fragments:
         settlement_items = [
@@ -6374,6 +6385,12 @@ async def _process_queued_chat_item(
         original_initial_state = deepcopy(initial_state)
         cognition_attempt_count = 0
         cognition_attempt_ledger = create_v2_attempt_ledger(correlation_id)
+        cognition_retry_coordinator = create_cognition_retry_coordinator(
+            cognition_attempt_ledger.cognition_invocation_id,
+        )
+        cognition_retry_coordinator_token = bind_cognition_retry_coordinator(
+            cognition_retry_coordinator,
+        )
         while True:
             cognition_attempt_count += 1
             attempt_ledger_token = bind_v2_attempt_ledger(
@@ -6389,9 +6406,15 @@ async def _process_queued_chat_item(
                     reset_v2_attempt_ledger(attempt_ledger_token)
                 break
             except Exception as exc:
-                if _can_retry_cognition_failure(
-                    exc,
-                    cognition_attempt_count,
+                if (
+                    cognition_retry_coordinator is not None
+                    and _can_retry_cognition_failure(
+                        exc,
+                        cognition_attempt_count,
+                    )
+                    and cognition_retry_coordinator.claim_replay(
+                        "service_graph",
+                    )
                 ):
                     stages_reached.append("cognition_safe_retry")
                     logger.warning(
@@ -6893,6 +6916,42 @@ async def _process_queued_chat_item(
             delivery_tracking_id="",
         )
     finally:
+        guardrail_session = guardrail_capsule.current_guardrail_capsule()
+        if (
+            guardrail_session is not None
+            and cognition_retry_coordinator is not None
+            and cognition_retry_coordinator.parent_recovery_attempted
+        ):
+            guardrail_disposition = (
+                cognition_retry_coordinator.parent_recovery_disposition
+            )
+            if guardrail_disposition in {"recovered", "exhausted"}:
+                snapshot_token = bind_v2_attempt_ledger(
+                    cognition_attempt_ledger,
+                    graph_attempt=cognition_attempt_count,
+                )
+                try:
+                    guarded_attempt_ledger = (
+                        snapshot_v2_guarded_attempt_ledger()
+                    )
+                finally:
+                    reset_v2_attempt_ledger(snapshot_token)
+                guardrail_capsule.finish_guardrail_capsule(
+                    guardrail_session,
+                    coordinator_snapshot=(
+                        cognition_retry_coordinator.snapshot()
+                    ),
+                    attempt_ledger=guarded_attempt_ledger,
+                    disposition=guardrail_disposition,
+                )
+            else:
+                guardrail_capsule.discard_guardrail_capsule(
+                    guardrail_session,
+                )
+        if cognition_retry_coordinator_token is not None:
+            reset_cognition_retry_coordinator(
+                cognition_retry_coordinator_token,
+            )
         await _release_queued_pipeline_handle(item)
 
 

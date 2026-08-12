@@ -135,6 +135,12 @@ from kazusa_ai_chatbot.cognition_resolver.capabilities import (
     project_resolver_observation_for_cognition,
     run_first_cycle_shared_memory_prewarm,
 )
+from kazusa_ai_chatbot.cognition_resolver.guardrail import (
+    CognitionRetryCoordinator,
+    bind_cognition_retry_coordinator,
+    reset_cognition_retry_coordinator,
+    run_guarded_cognition,
+)
 from kazusa_ai_chatbot.character_identity_growth.models import (
     TOP_LEVEL_IDENTITY_KEYS,
 )
@@ -700,6 +706,7 @@ async def call_cognition_subgraph(
     state: GlobalPersonaState,
     *,
     commit: bool = True,
+    retry_coordinator: CognitionRetryCoordinator | None = None,
 ) -> GlobalPersonaState:
     """Run V2 cognition, commit its one replacement state, then expose projections."""
 
@@ -868,12 +875,32 @@ async def call_cognition_subgraph(
     trace_token = llm_tracing.bind_trace_id(
         str(state.get("llm_trace_id") or ""),
     )
+    coordinator_token = None
     try:
-        output = await run_cognition(
-            cognition_input,
-            build_cognition_core_services(),
-        )
+        if retry_coordinator is not None:
+            coordinator_token = bind_cognition_retry_coordinator(
+                retry_coordinator,
+            )
+        cognition_services = build_cognition_core_services()
+        if commit:
+            output = await run_cognition(
+                cognition_input,
+                cognition_services,
+            )
+        elif retry_coordinator is None:
+            output = await run_cognition(
+                cognition_input,
+                cognition_services,
+            )
+        else:
+            output = await run_guarded_cognition(
+                cognition_input,
+                cognition_services,
+                run_child=run_cognition,
+            )
     finally:
+        if coordinator_token is not None:
+            reset_cognition_retry_coordinator(coordinator_token)
         llm_tracing.reset_trace_id(trace_token)
     if commit:
         await _commit_cognition_state(

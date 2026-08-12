@@ -8,6 +8,15 @@ import pytest
 from kazusa_ai_chatbot.cognition_resolver.capabilities import (
     project_resolver_observation_for_cognition,
 )
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionExecutionError,
+)
+from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+    bind_v2_attempt_ledger,
+    create_v2_attempt_ledger,
+    reset_v2_attempt_ledger,
+)
+from kazusa_ai_chatbot.cognition_resolver import guardrail
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
@@ -145,6 +154,126 @@ async def test_later_cycle_does_not_repeat_shared_memory_prewarm(
     await connector.call_cognition_subgraph(state, commit=False)
 
     prewarm.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_omitted_coordinator_does_not_use_ambient_guardrail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Direct connector callers remain unguarded despite ambient context."""
+
+    state = _global_state()
+    state["resolver_state"] = {
+        "cycle_index": 1,
+        "observations": [],
+    }
+    monkeypatch.setattr(
+        connector,
+        "get_user_cognition_state",
+        AsyncMock(return_value=build_acquaintance_user_state(
+            global_user_id="user-1",
+            updated_at=NOW,
+        )),
+    )
+    monkeypatch.setattr(
+        connector,
+        "get_character_cognition_state",
+        AsyncMock(return_value=build_character_production_state(
+            updated_at=NOW,
+        )),
+    )
+    run_cognition = AsyncMock(return_value=_core_output())
+    monkeypatch.setattr(connector, "run_cognition", run_cognition)
+
+    ledger = create_v2_attempt_ledger("ambient-direct")
+    ledger_token = bind_v2_attempt_ledger(ledger, graph_attempt=1)
+    coordinator = guardrail.create_cognition_retry_coordinator(
+        "ambient-direct",
+    )
+    coordinator_token = guardrail.bind_cognition_retry_coordinator(coordinator)
+    try:
+        await connector.call_cognition_subgraph(state, commit=False)
+    finally:
+        guardrail.reset_cognition_retry_coordinator(coordinator_token)
+        reset_v2_attempt_ledger(ledger_token)
+
+    run_cognition.assert_awaited_once()
+    assert coordinator.replay_claimed is False
+    assert coordinator.parent_recovery_disposition == "not_attempted"
+
+
+@pytest.mark.asyncio
+async def test_parent_retry_does_not_repeat_shared_memory_prewarm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Parent replay reuses cycle-zero preparation and calls only the child."""
+
+    state = _global_state()
+    state["resolver_state"] = {
+        "cycle_index": 0,
+        "observations": [],
+    }
+    prewarm = AsyncMock(return_value={
+        "answer": "",
+        "memory_evidence": [],
+        "user_memory_unit_candidates": [],
+    })
+    monkeypatch.setattr(
+        connector,
+        "run_first_cycle_shared_memory_prewarm",
+        prewarm,
+    )
+    monkeypatch.setattr(
+        connector,
+        "get_user_cognition_state",
+        AsyncMock(return_value=build_acquaintance_user_state(
+            global_user_id="user-1",
+            updated_at=NOW,
+        )),
+    )
+    monkeypatch.setattr(
+        connector,
+        "get_character_cognition_state",
+        AsyncMock(return_value=build_character_production_state(
+            updated_at=NOW,
+        )),
+    )
+    child_calls = 0
+
+    async def run_child(_payload: object, _services: object) -> dict:
+        nonlocal child_calls
+        child_calls += 1
+        if child_calls == 1:
+            raise CognitionExecutionError(
+                "goal bid exhausted",
+                error_code="goal_bid_structure_exhausted",
+                branch_id="ordinary_response",
+                stage="goal_cognition",
+                attempt_count=3,
+                safe_checkpoint="pre_state_commit",
+                retryable=False,
+            )
+        return _core_output()
+
+    monkeypatch.setattr(connector, "run_cognition", run_child)
+    ledger = create_v2_attempt_ledger("prewarm-guardrail")
+    ledger_token = bind_v2_attempt_ledger(ledger, graph_attempt=1)
+    coordinator = guardrail.create_cognition_retry_coordinator(
+        "prewarm-guardrail",
+    )
+    coordinator_token = guardrail.bind_cognition_retry_coordinator(coordinator)
+    try:
+        await connector.call_cognition_subgraph(
+            state,
+            commit=False,
+            retry_coordinator=coordinator,
+        )
+    finally:
+        guardrail.reset_cognition_retry_coordinator(coordinator_token)
+        reset_v2_attempt_ledger(ledger_token)
+
+    assert child_calls == 2
+    prewarm.assert_awaited_once_with(state)
 
 
 @pytest.mark.asyncio

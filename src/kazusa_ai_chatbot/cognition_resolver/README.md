@@ -51,6 +51,27 @@ CognitionCoreInputV2
 The loop carries the latest in-memory V2 output forward. It does not reload or
 write cognition state between cycles. The caller commits only the final output.
 
+### Persona parent-checkpoint guardrail
+
+The live persona stage may bind one context-local
+`CognitionRetryCoordinator` around its queued service graph. The canonical
+connector owns the checkpoint: it resolves identity, reads mutable state,
+joins cycle-zero shared-memory prewarm, builds one `CognitionCoreInputV2`, and
+only then invokes the non-committing `run_cognition` child. A parent recovery
+replays that child from independent copies of the same checkpoint with the
+same services and one stable checkpoint digest. Preparation, capability
+execution, pending writes, action execution, surface rendering, delivery, and
+the final commit remain outside the replay.
+
+The coordinator has one replay token and exactly two epochs. The first claim
+belongs to either the existing service graph retry or the parent checkpoint;
+the other owner cannot start a second replay. Parent recovery is limited to an
+escaped pre-commit `CognitionExecutionError` whose code is exactly
+`goal_bid_structure_exhausted` or `goal_bid_provider_exhausted`. The generic
+resolver loop remains unchanged, and idle `self_cognition` calls do not bind
+this guardrail. Direct connector, facade, goal-owner, and loop calls without a
+bound coordinator retain their direct failure contracts.
+
 Before the first V2 input is built, the persona connector may start the
 shared-memory prewarm owned by `capabilities.py`. This happens only at resolver
 cycle zero for `user_message` and `internal_thought` episodes. The task overlaps

@@ -142,6 +142,22 @@ It does not reload or persist cognition state between cycles. The connector
 commits only the terminal replacement state, before action execution, surface
 planning, dialog, consolidation, or delivery.
 
+### Parent-checkpoint guardrail boundary
+
+`stage_1_goal_resolver` receives the service-owned context-local
+`CognitionRetryCoordinator` and passes it through the non-committing connector
+closure. `call_cognition_subgraph` completes identity resolution, mutable-state
+reads, cycle-zero shared-memory prewarm, and canonical `CognitionCoreInputV2`
+construction before entering the guardrail. The guardrail may rerun only the
+`run_cognition` child from independent copies of that input. `commit=True`
+never enters the guardrail, and the stage commits the final validated output
+exactly once after resolver recurrence.
+
+The parent token is available only for an escaped pre-commit goal-bid
+structure/provider exhaustion. Existing sibling recovery runs first. The
+generic resolver loop and idle self-cognition runner remain outside this live
+persona guardrail.
+
 The live persona capability connector currently executes bounded local-context
 recall. A capability failure returns a fixed semantic failure observation;
 exception type may be logged, while exception text and operational details stay

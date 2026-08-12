@@ -87,6 +87,25 @@ Failure capsules reuse the trace-step collection, indexes, and
 `DEBUG_LOG_TTL_DAYS` expiry. Their `cognition_invocation_id` distinguishes safe
 retries and concurrent Cognition V2 calls under the same turn trace.
 
+### Parent guardrail lineage
+
+The live persona path has a separate protected outer writer named
+`cognition_parent_guardrail_capsule.v1`. It is created only after the
+canonical connector checkpoint has produced an eligible parent-recovery
+trigger. The outer row stores the trace reference, scope, cycle index,
+checkpoint SHA-256, bounded trigger coordinates, parent disposition, and the
+epoch-aware `cognition_attempt_ledger.v2` aggregate. It stores no checkpoint
+state, user content, prompts, model responses, credentials, or raw exception
+messages.
+
+The existing `cognition_failure_capsule.v3` rows remain the owners of exact
+inner model attempts and retain the unchanged `cognition_attempt_ledger.v1`
+shape when used without the guardrail. Clean guarded invocations discard the
+outer session; a recovered or exhausted parent child schedules one additional
+bounded outer row without delaying the chat response. Direct and idle
+self-cognition calls do not create this outer lineage unless they explicitly
+bind the live persona coordinator.
+
 ## Failure Behavior
 
 Trace capture must not be required for normal chat delivery. Capture failures

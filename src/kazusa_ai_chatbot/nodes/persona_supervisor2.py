@@ -48,6 +48,9 @@ from kazusa_ai_chatbot.cognition_resolver.capabilities import (
 from kazusa_ai_chatbot.cognition_resolver.loop import (
     call_cognition_resolver_loop,
 )
+from kazusa_ai_chatbot.cognition_resolver.guardrail import (
+    current_cognition_retry_coordinator,
+)
 from kazusa_ai_chatbot.cognition_resolver.pending import (
     apply_pending_resolution,
     load_matching_pending_resume_into_state,
@@ -667,10 +670,18 @@ async def stage_1_goal_resolver(state: GlobalPersonaState) -> dict:
     async def cognition_cycle(
         current_state: GlobalPersonaState,
     ) -> GlobalPersonaState:
-        update = await call_cognition_subgraph(
-            current_state,
-            commit=False,
-        )
+        coordinator = current_cognition_retry_coordinator()
+        if coordinator is None:
+            update = await call_cognition_subgraph(
+                current_state,
+                commit=False,
+            )
+        else:
+            update = await call_cognition_subgraph(
+                current_state,
+                commit=False,
+                retry_coordinator=coordinator,
+            )
         return_value = update
         return return_value
 

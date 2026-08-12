@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from kazusa_ai_chatbot import chat_input_queue as queue_module
 from kazusa_ai_chatbot import service as service_module
 from kazusa_ai_chatbot.cognition_core_v2 import model_attempt_policy
+from kazusa_ai_chatbot.cognition_resolver import guardrail
 from kazusa_ai_chatbot.brain_service import intake as brain_intake
 from kazusa_ai_chatbot.brain_service.turn_settlement import (
     AssessmentLease,
@@ -2125,6 +2126,40 @@ async def test_goal_cognition_exhaustion_skips_service_retry(
     finalize_trace.assert_awaited_once()
     assert finalize_trace.await_args.kwargs["final_dialog_count"] == 0
     await _reset_queue_state()
+
+
+def test_parent_guardrail_failure_does_not_start_outer_graph_retry() -> None:
+    """The terminal parent error remains outside generic service retry."""
+
+    first_error = service_module.CognitionExecutionError(
+        "goal bid exhausted",
+        error_code="goal_bid_structure_exhausted",
+        branch_id="ordinary_response",
+        stage="goal_cognition",
+        attempt_count=3,
+        safe_checkpoint="pre_state_commit",
+        retryable=False,
+    )
+    second_error = service_module.CognitionExecutionError(
+        "goal bid exhausted again",
+        error_code="goal_bid_structure_exhausted",
+        branch_id="ordinary_response",
+        stage="goal_cognition",
+        attempt_count=3,
+        safe_checkpoint="pre_state_commit",
+        retryable=False,
+    )
+    terminal_error = guardrail.ParentRecoveryExhaustedError(
+        first_error=first_error,
+        second_error=second_error,
+        checkpoint_sha256="0" * 64,
+        recovery_epoch=1,
+    )
+
+    assert service_module._can_retry_cognition_failure(
+        terminal_error,
+        attempt_count=1,
+    ) is False
 
 
 @pytest.mark.asyncio
