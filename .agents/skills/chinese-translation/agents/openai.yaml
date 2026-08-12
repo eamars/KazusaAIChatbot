@@ -1,0 +1,4 @@
+interface:
+  display_name: "Chinese Translation"
+  short_description: "Context-first native Simplified Chinese"
+  default_prompt: "Use $chinese-translation to produce native, context-aware Simplified Chinese while preserving technical structure."
