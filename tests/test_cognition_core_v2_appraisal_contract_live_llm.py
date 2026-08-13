@@ -149,6 +149,11 @@ def _build_case(
         ),
         'evidence_handles': ['e1'],
         'permitted_role_handles': ['r1', 'current_user', 'self'],
+        'permitted_role_assignment_handles': [
+            'r1',
+            'current_user',
+            'self',
+        ],
         'permitted_delta_paths': permitted_delta_paths,
         'dependencies': [],
     }
@@ -297,6 +302,14 @@ async def test_live_appraisal_projects_exact_paths_without_crossing_domains(
         'current_user',
         'self',
     }
+    assert set(handle_domains['entity_handle']) == {
+        'r1',
+        'current_user',
+        'self',
+    }
+    assert set(handle_domains['entity_handle']) == set(
+        question_payload['permitted_role_assignment_handles']
+    )
     prompt_chars = sum(
         len(str(message['content']))
         for message in calls[0]['messages']

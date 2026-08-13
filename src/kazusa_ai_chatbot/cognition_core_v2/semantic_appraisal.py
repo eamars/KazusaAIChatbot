@@ -22,6 +22,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionContextLimitError,
     CognitionEvidenceV2,
     CognitionExecutionError,
+    ROLE_ENTITY_KINDS,
     SemanticAppraisalResultV2,
     SemanticQuestionV2,
 )
@@ -125,15 +126,15 @@ micro_appraisal。本阶段只判断证据已经支持的含义；动作选择�
 1. 先读 question.question_id、question.question_kind 和 question.semantic_question，确定这一题要判断的含义。
    再读 evidence；每行的 source_kind 说明来源，角色自己的反思或内部观察仍是证据，不是当前用户的即时发言。
    只使用本次输入允许的 handle 和证据，不把来源包标题、时间戳、传输摘要、schema key 或运行元数据当成新事实。
-2. 先完成句柄映射，再写语义文字。question.handle_field_domains 说明每个字段能用哪些 handle：subject_handle、
-   object_handle 和 role_assignments[*].entity_handle 使用 permitted_role_handles，evidence_handles 使用其中的
-   evidence handle。ceN、ctN、ckN 分别是候选事件、威胁和知识缺口，evN 是持久事件，eN 是证据；它们不是人物。
-   人物角色使用 self 或 current_user，role 只使用 actor、experiencer、target、object、affected_goal、
-   affected_relationship 这六个 enum token。证据标签或关系注释（如 beneficiary）只是待解读的事实，
-   不是 role 值；不支持时省略该 assignment，不编造、不照抄。
+2. 先完成句柄映射，再写语义文字。question.handle_field_domains 说明每个字段能用哪些 handle：subject_handle
+   和 object_handle 使用 permitted_role_handles，role_assignments[*].entity_handle 使用
+   permitted_role_assignment_handles，evidence_handles 使用其中的 evidence handle。ceN、ctN、ckN 是候选事件、
+   威胁和知识缺口，evN 是持久事件，eN 是证据；它们不是人物。pN 是群聊中的其他参与者。人物角色使用
+   self、current_user 或允许的 pN，role 只用 actor、experiencer、target、object、affected_goal、
+   affected_relationship 六个 enum token。证据标签不是 role 值；不支持时省略该 assignment，不编造、不照抄。
 3. 使用 question.candidate_origin_evidence 做来源核对。一个 proposition 或 delta 的 subject_handle、object_handle、
    role assignment 或 target_path 只要出现 ceN、ctN 或 ckN，就把映射出的来源 evidence handle 放进同一个对象的
-   evidence_handles；这就是候选来源引用。找不到对应来源时，省略这个候选或整个对象。角色 handle 不能代替
+   evidence_handles；这就是候选来源引用。找不到时省略该候选或整个对象。角色 handle 不能代替
    evidence handle，未知 handle 也不能靠猜测补齐。
 
 # 继续按顺序完成输出
@@ -145,7 +146,7 @@ micro_appraisal。本阶段只判断证据已经支持的含义；动作选择�
    temporal_loss；污染或基本规范/边界受到侵害可选 contamination_risk 或 norm_violation。axis 只描述
    证据中的可观察后果，不得因此增添情绪、归因类别、未给出的角色或事实；不在允许表中的 axis 不能使用，
    证据不足时返回 null。
-5. 每次只生成一个 micro_appraisal item。proposition 和 delta 各自只能是一个对象或 null，不能使用数组，也不能列举多个候选。
+5. 每次只生成一个 micro_appraisal item。proposition 和 delta 各自只能是一个对象或 null，不能使用数组。
    没有新的受支持项目时，两者都返回 null 以结束循环。semantic_value 写简洁的简体中文，
    目标约 120 字、上限 200 字，不重复标准或证据解释，也不写数值；delta reason 使用简体中文且不超过 300 字。
    引用的用户原文、专有名词、代码、URL 以及必要的 schema 或 enum token 保持原样，普通自由文本使用“当前角色”
@@ -233,6 +234,9 @@ async def appraise_semantic_question(
             "question_kind": question["question_kind"],
             "semantic_question": question["semantic_question"],
             "permitted_role_handles": question["permitted_role_handles"],
+            "permitted_role_assignment_handles": question[
+                "permitted_role_assignment_handles"
+            ],
             "permitted_target_paths": list(
                 question["permitted_delta_paths"]
             ),
@@ -253,7 +257,9 @@ async def appraise_semantic_question(
             "handle_field_domains": {
                 "subject_handle": question["permitted_role_handles"],
                 "object_handle": question["permitted_role_handles"],
-                "entity_handle": question["permitted_role_handles"],
+                "entity_handle": question[
+                    "permitted_role_assignment_handles"
+                ],
                 "evidence_handles": question["evidence_handles"],
             },
             "role_handle_semantics": {
@@ -264,6 +270,18 @@ async def appraise_semantic_question(
                 "current_user": {
                     "structured_handle": "current_user",
                     "semantic_text_reference": '当前用户',
+                },
+                **{
+                    handle: {
+                        "structured_handle": handle,
+                        "semantic_text_reference": '群聊中的其他参与者',
+                    }
+                    for handle, ref in projection.handle_to_ref.items()
+                    if (
+                        ref.get("kind") == "third_party"
+                        and handle
+                        in set(question["permitted_role_assignment_handles"])
+                    )
                 },
             },
         },
@@ -305,7 +323,11 @@ async def appraise_semantic_question(
             ),
             "emitted_delta_paths": sorted(emitted_paths),
         }
-        payload_text, surviving_role_handles = _fit_appraisal_payload(
+        (
+            payload_text,
+            surviving_role_handles,
+            surviving_assignment_handles,
+        ) = _fit_appraisal_payload(
             payload,
             system_prompt_chars=len(system_message.content),
         )
@@ -324,6 +346,13 @@ async def appraise_semantic_question(
             handle
             for handle in item_question["permitted_role_handles"]
             if handle in surviving_role_handles
+        ]
+        item_question["permitted_role_assignment_handles"] = [
+            handle
+            for handle in item_question[
+                "permitted_role_assignment_handles"
+            ]
+            if handle in surviving_assignment_handles
         ]
         item_question["permitted_delta_paths"] = [
             path
@@ -963,6 +992,8 @@ def _appraisal_repair_messages(
             "proposition 的 role_assignments 是必填字段，证据不支持任何角色时写 []；"
             "role 只能是六个 enum token：actor、experiencer、target、object、affected_goal、"
             "affected_relationship；证据标签（如 beneficiary）不能写入 role，不支持时省略该 assignment。"
+            "role_assignments[*].entity_handle 只能来自 allowed_values.handle_field_domains.entity_handle；"
+            "ceN、ctN、ckN 是候选事件、威胁和知识缺口，不是角色实体，不能放在 entity_handle。"
             "顶层字段必须恰好是 question_id、proposition 和 delta；两者各自只能是一个对象或 null，"
             "不能使用数组，也不能输出 Markdown、解释段落或 JSON 以外的文字。"
         ),
@@ -1066,12 +1097,16 @@ def validate_semantic_appraisal_result(
         maximum=len(evidence_handles),
     )
     selected_evidence_set = set(selected_evidence)
-    selected_roles = _validate_handles(
+    _validate_handles(
         parsed["selected_role_handles"],
-        set(question["permitted_role_handles"]),
+        set(question["permitted_role_handles"])
+        | set(question["permitted_role_assignment_handles"]),
         "selected roles",
         minimum=0,
-        maximum=len(question["permitted_role_handles"]),
+        maximum=(
+            len(question["permitted_role_handles"])
+            + len(question["permitted_role_assignment_handles"])
+        ),
     )
     propositions = [
         _validate_proposition(
@@ -1091,6 +1126,22 @@ def validate_semantic_appraisal_result(
         )
         for row in parsed["deltas"]
     ]
+    referenced_role_handles = _referenced_role_handles(
+        propositions,
+        deltas,
+    )
+    selected_roles = _validate_handles(
+        parsed["selected_role_handles"],
+        referenced_role_handles,
+        "selected roles",
+        minimum=0,
+        maximum=len(referenced_role_handles),
+    )
+    if set(selected_roles) != referenced_role_handles:
+        raise ValueError(
+            "selected roles must match the handles referenced by valid "
+            "subject, object, assignment, and delta fields"
+        )
     paths = [delta["target_path"] for delta in deltas]
     if len(paths) != len(set(paths)):
         raise ValueError("one appraisal cannot duplicate a target path")
@@ -1212,10 +1263,10 @@ def _validate_proposition(
         }:
             raise ValueError("semantic role value is invalid")
         if assignment["entity_handle"] not in set(
-            question["permitted_role_handles"]
+            question["permitted_role_assignment_handles"]
         ):
             permitted_handles = sorted(
-                set(question["permitted_role_handles"])
+                set(question["permitted_role_assignment_handles"])
             )
             raise ValueError(
                 "role_assignments[*].entity_handle must be one of "
@@ -1353,6 +1404,26 @@ def _validate_handles(
     return list(value)
 
 
+def _referenced_role_handles(
+    propositions: Sequence[Mapping[str, Any]],
+    deltas: Sequence[Mapping[str, Any]],
+) -> set[str]:
+    """Return every role handle referenced by valid proposition or delta rows."""
+
+    referenced: set[str] = set()
+    for proposition in propositions:
+        referenced.add(proposition["subject_handle"])
+        if "object_handle" in proposition:
+            referenced.add(proposition["object_handle"])
+        referenced.update(
+            assignment["entity_handle"]
+            for assignment in proposition["role_assignments"]
+        )
+    for delta in deltas:
+        referenced.add(delta["target_path"].split(".")[1])
+    return referenced
+
+
 def _validate_candidate_evidence_binding(
     candidate_handles: Sequence[str],
     cited_evidence_handles: Sequence[str],
@@ -1478,6 +1549,18 @@ def _validate_question_handle_authority(
     permitted_handles = set(question["permitted_role_handles"])
     if not permitted_handles <= canonical_handles:
         raise ValueError("semantic question contains a non-canonical role handle")
+    assignment_handles = set(question["permitted_role_assignment_handles"])
+    if not assignment_handles <= canonical_handles:
+        raise ValueError(
+            "semantic question contains a non-canonical assignment handle"
+        )
+    for handle in assignment_handles:
+        if handle in {"self", "current_user"}:
+            continue
+        if handle_to_ref[handle]["kind"] not in ROLE_ENTITY_KINDS:
+            raise ValueError(
+                "semantic question contains a non-role assignment handle"
+            )
     for path in question["permitted_delta_paths"]:
         pieces = path.split(".")
         if len(pieces) >= 3 and pieces[1] not in canonical_handles:
@@ -1503,8 +1586,17 @@ def _fit_appraisal_payload(
     payload: dict[str, Any],
     *,
     system_prompt_chars: int,
-) -> tuple[str, frozenset[str]]:
-    """Fit one appraisal packet and return its text and surviving handles."""
+) -> tuple[str, frozenset[str], frozenset[str]]:
+    """Fit one appraisal packet and return its text and surviving handles.
+
+    Subject/object handles and role-assignment handles are pruned
+    independently: a participant or self handle survives fitting even when
+    every causal subject or delta path was removed, and vice versa.
+
+    Returns:
+        The fitted packet text, the surviving subject/object handle set, and
+        the surviving role-assignment handle set.
+    """
 
     supplemental_order = (
         "knowledge_gaps",
@@ -1551,7 +1643,14 @@ def _fit_appraisal_payload(
             surviving_handles = frozenset(
                 question.get("permitted_role_handles", ())
             )
-            return payload_text, surviving_handles
+            surviving_assignment_handles = frozenset(
+                question.get("permitted_role_assignment_handles", ())
+            )
+            return (
+                payload_text,
+                surviving_handles,
+                surviving_assignment_handles,
+            )
         identity = projected_state.get("character_identity")
         if isinstance(identity, Mapping) and reduce_identity_projection(
             identity
@@ -1602,17 +1701,33 @@ def _fit_appraisal_payload(
                         for handle in permitted_handles
                         if handle != removed_handle
                     ]
+                permitted_assignment_handles = question[
+                    "permitted_role_assignment_handles"
+                ]
+                if removed_handle in permitted_assignment_handles:
+                    question["permitted_role_assignment_handles"] = [
+                        handle
+                        for handle in permitted_assignment_handles
+                        if handle != removed_handle
+                    ]
                 field_domains = question["handle_field_domains"]
                 for field_name in (
                     "subject_handle",
                     "object_handle",
-                    "entity_handle",
                 ):
                     values = field_domains[field_name]
                     if removed_handle in values:
                         field_domains[field_name] = [
                             value
                             for value in values
+                            if value != removed_handle
+                        ]
+                if removed_handle in permitted_assignment_handles:
+                    entity_values = field_domains["entity_handle"]
+                    if removed_handle in entity_values:
+                        field_domains["entity_handle"] = [
+                            value
+                            for value in entity_values
                             if value != removed_handle
                         ]
                 origin_evidence = question["candidate_origin_evidence"]
@@ -1665,7 +1780,14 @@ def _fit_appraisal_payload(
         surviving_handles = frozenset(
             question.get("permitted_role_handles", ())
         )
-        return fitted_payload, surviving_handles
+        surviving_assignment_handles = frozenset(
+            question.get("permitted_role_assignment_handles", ())
+        )
+        return (
+            fitted_payload,
+            surviving_handles,
+            surviving_assignment_handles,
+        )
 
 
 def _compact_permitted_delta_path_domains(

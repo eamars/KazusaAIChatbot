@@ -614,6 +614,7 @@ class SemanticQuestionV2(TypedDict):
     semantic_question: str
     evidence_handles: list[str]
     permitted_role_handles: list[str]
+    permitted_role_assignment_handles: list[str]
     permitted_delta_paths: list[str]
     dependencies: list[str]
 

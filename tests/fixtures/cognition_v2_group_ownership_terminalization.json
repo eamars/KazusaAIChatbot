@@ -1,0 +1,107 @@
+{
+  "schema_version": "cognition_v2_group_ownership_terminalization.v1",
+  "description": "Sanitized deterministic low-salience-before-terminal reproduction fixture. Contains typed state, evidence, appraisal results, and prompt handles only.",
+  "state": {
+    "schema_version": "cognition_state.v2",
+    "state_scope": "user",
+    "owner_user_id": "fixture-user",
+    "updated_at": "2026-08-14T00:00:00Z",
+    "relationship": {
+      "relationship_id": "relationship:user:fixture-user",
+      "other_user_id": "fixture-user",
+      "familiarity": 10,
+      "positive_regard": 0,
+      "trust": 0,
+      "attachment": 0,
+      "desired_closeness": 10,
+      "perceived_closeness": 10,
+      "care": 0,
+      "boundary_safety": 0,
+      "exclusivity": 0,
+      "unresolved_injury": 0,
+      "salience": 0,
+      "updated_at": "2026-08-14T00:00:00Z",
+      "evidence_refs": []
+    },
+    "goals": [],
+    "threats": [],
+    "active_events": [],
+    "knowledge_gaps": [],
+    "affect_activations": []
+  },
+  "evidence": [
+    {
+      "evidence_handle": "e1",
+      "evidence_ref": {
+        "source_kind": "episode",
+        "source_id": "episode-group-ownership-terminalization",
+        "occurred_at": "2026-08-14T00:00:00Z",
+        "semantic_summary": "The group outcome evidence is available."
+      },
+      "semantic_text": "The group outcome evidence is available.",
+      "visible_to": [
+        "q:event_agency",
+        "q:goal_threat_outcome"
+      ],
+      "authority": "current_event"
+    }
+  ],
+  "appraisals": [
+    {
+      "question_id": "q:event_agency",
+      "selected_evidence_handles": ["e1"],
+      "selected_role_handles": ["ce1"],
+      "propositions": [
+        {
+          "proposition_kind": "intentionality",
+          "subject_handle": "ce1",
+          "evidence_handles": ["e1"],
+          "role_assignments": [],
+          "semantic_value": "The group event candidate appears deliberate."
+        }
+      ],
+      "deltas": [
+        {
+          "target_path": "active_events.ce1.intentionality",
+          "delta": 20,
+          "evidence_handles": ["e1"],
+          "reason": "The bounded group evidence supports a weak salience."
+        }
+      ],
+      "explanation": "The bounded evidence supports a low-salience causal event."
+    },
+    {
+      "question_id": "q:goal_threat_outcome",
+      "selected_evidence_handles": ["e1"],
+      "selected_role_handles": ["ce1"],
+      "propositions": [
+        {
+          "proposition_kind": "event_completed",
+          "subject_handle": "ce1",
+          "evidence_handles": ["e1"],
+          "role_assignments": [],
+          "semantic_value": "The group event candidate has reached its terminal outcome."
+        }
+      ],
+      "deltas": [],
+      "explanation": "The bounded evidence supports the terminal outcome."
+    }
+  ],
+  "handle_to_ref": {
+    "ce1": {
+      "scope": "user",
+      "kind": "event",
+      "entity_id": "candidate:event:e1"
+    },
+    "self": {
+      "scope": "character",
+      "kind": "meaning",
+      "entity_id": "meaning:character"
+    },
+    "current_user": {
+      "scope": "user",
+      "kind": "relationship",
+      "entity_id": "relationship:user:fixture-user"
+    }
+  }
+}

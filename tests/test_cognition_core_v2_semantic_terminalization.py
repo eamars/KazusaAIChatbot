@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -27,6 +28,7 @@ from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
     _apply_proposition_transition,
+    _causal_candidate_id,
     _matching_event,
     _retain_current_batch_evidence,
     apply_semantic_appraisals,
@@ -48,6 +50,11 @@ _OUTCOME_KINDS = (
     "event_repaired",
     "knowledge_answered",
     "outcome_pending",
+)
+_FIXTURE_PATH = (
+    Path(__file__).parent
+    / "fixtures"
+    / "cognition_v2_group_ownership_terminalization.json"
 )
 
 
@@ -475,6 +482,7 @@ def test_terminal_proposition_rejects_the_wrong_subject_kind() -> None:
         "semantic_question": "Assess exact terminal outcomes.",
         "evidence_handles": ["e1"],
         "permitted_role_handles": ["g1"],
+        "permitted_role_assignment_handles": ["g1"],
         "permitted_delta_paths": [],
         "dependencies": [],
     }
@@ -506,6 +514,7 @@ def test_invalid_role_handle_reports_its_structured_domain() -> None:
         "semantic_question": "Assess exact terminal outcomes.",
         "evidence_handles": ["e1"],
         "permitted_role_handles": ["ce1", "self"],
+        "permitted_role_assignment_handles": ["self"],
         "permitted_delta_paths": [],
         "dependencies": [],
     }
@@ -519,7 +528,7 @@ def test_invalid_role_handle_reports_its_structured_domain() -> None:
         ValueError,
         match=(
             r"role_assignments\[\*\]\.entity_handle must be one of "
-            r'\["ce1", "self"\]'
+            r'\["self"\]'
         ),
     ):
         validate_semantic_appraisal_result(
@@ -589,7 +598,7 @@ async def test_appraisal_classifies_state_incompatibility_without_retry() -> Non
     assert handle_domains == {
         "subject_handle": question["permitted_role_handles"],
         "object_handle": question["permitted_role_handles"],
-        "entity_handle": question["permitted_role_handles"],
+        "entity_handle": question["permitted_role_assignment_handles"],
         "evidence_handles": question["evidence_handles"],
     }
     assert first_payload["question"]["role_handle_semantics"] == {
@@ -606,6 +615,43 @@ async def test_appraisal_classifies_state_incompatibility_without_retry() -> Non
         question["permitted_delta_paths"]
     )
     assert state == _state_with_goals()
+
+
+def test_terminalized_low_salience_candidate_survives_same_batch_pruning(
+) -> None:
+    """A same-batch terminal proposition outranks weak-candidate pruning."""
+
+    document = json.loads(_FIXTURE_PATH.read_text(encoding="utf-8"))
+    state = document["state"]
+    evidence = document["evidence"]
+    handle_to_ref = document["handle_to_ref"]
+
+    updated = apply_semantic_appraisals(
+        state,
+        document["appraisals"],
+        evidence,
+        handle_to_ref,
+    )
+
+    assert len(updated["active_events"]) == 1
+    surviving = updated["active_events"][0]
+    assert surviving["status"] == "resolved"
+    assert surviving["repair_need"] == 0
+    assert surviving["salience"] == 20
+    expected_id = _causal_candidate_id(
+        state,
+        "event",
+        evidence[0]["evidence_ref"],
+    )
+    assert surviving["entity_id"] == expected_id
+
+    weak_updated = apply_semantic_appraisals(
+        state,
+        [deepcopy(document["appraisals"][0])],
+        evidence,
+        handle_to_ref,
+    )
+    assert weak_updated["active_events"] == []
 
 
 @pytest.mark.asyncio

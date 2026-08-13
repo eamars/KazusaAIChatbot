@@ -1106,6 +1106,26 @@ async def test_appraisal_question_keeps_candidate_origin_contract() -> None:
     """Candidate origins stay in the retained question, not removable state."""
 
     state, evidence, projection, questions = _production_appraisal_context()
+    projection = project_state_for_prompt(
+        state,
+        character_constraints=_character_constraints(),
+        character_identity_context=canonical_identity_context(),
+        scene_context={
+            "participant_bindings": [
+                {
+                    "handle": f"p{index}",
+                    "display_name": f"participant {index}",
+                }
+                for index in range(1, 6)
+            ],
+        },
+        evidence=evidence,
+    )
+    questions = plan_semantic_questions(
+        evidence,
+        state,
+        projection.handle_to_ref,
+    )
     question = next(
         item for item in questions if item["question_kind"] == "event_agency"
     )
@@ -1126,6 +1146,21 @@ async def test_appraisal_question_keeps_candidate_origin_contract() -> None:
     assert set(origins.values()) <= set(question["evidence_handles"])
     assert all(handle.startswith("ce") for handle in origins)
     assert "causal_candidates" not in prompt_payload["state"]
+    assert set(
+        question["permitted_role_assignment_handles"]
+    ) >= {"self", "current_user", "p1", "p2", "p3", "p4", "p5"}
+    handle_domains = prompt_payload["question"]["handle_field_domains"]
+    assert {"p1", "p2", "p3", "p4", "p5"} <= set(
+        handle_domains["entity_handle"]
+    )
+    assert not any(
+        handle.startswith("ce")
+        for handle in handle_domains["entity_handle"]
+    )
+    assert any(
+        handle.startswith("ce")
+        for handle in handle_domains["subject_handle"]
+    )
 
 
 @pytest.mark.asyncio
@@ -1365,7 +1400,7 @@ def test_appraisal_exact_cap_and_cap_plus_one_are_distinct() -> None:
     appraisal_cap = semantic_appraisal_module.SEMANTIC_APPRAISAL_PROMPT_CAP
     _pad_to_serialized_length(payload, question, appraisal_cap)
 
-    fitted, _ = semantic_appraisal_module._fit_appraisal_payload(
+    fitted, _, _ = semantic_appraisal_module._fit_appraisal_payload(
         payload,
         system_prompt_chars=0,
     )
@@ -2379,6 +2414,7 @@ async def test_appraisal_repair_uses_residual_budget_for_second_call(
         "_fit_appraisal_payload",
         lambda payload, *, system_prompt_chars: (
             "p" * 7900,
+            frozenset(),
             frozenset(),
         ),
     )

@@ -131,11 +131,15 @@ def _appraisal_handle_refs(
     """Build canonical prompt refs for direct appraisal validation tests."""
 
     refs = {
-        "self": {"entity_id": "meaning:character"},
-        "current_user": {"entity_id": "relationship:user:user-c"},
+        "self": {"kind": "meaning", "entity_id": "meaning:character"},
+        "current_user": {
+            "kind": "relationship",
+            "entity_id": "relationship:user:user-c",
+        },
     }
     for index, evidence_handle in enumerate(evidence_handles, start=1):
         refs[f"ce{index}"] = {
+            "kind": "event",
             "entity_id": f"candidate:event:{evidence_handle}",
         }
     return refs
@@ -449,6 +453,7 @@ def test_unsupported_appraisal_can_select_no_evidence() -> None:
         "semantic_question": "Assess responsibility and intentionality.",
         "evidence_handles": ["e1"],
         "permitted_role_handles": ["ce1", "current_user", "self"],
+        "permitted_role_assignment_handles": ["current_user", "self"],
         "permitted_delta_paths": ["active_events.ce1.intentionality"],
         "dependencies": [],
     }
@@ -560,20 +565,21 @@ def test_candidate_proposition_rejects_mismatched_evidence() -> None:
         "semantic_question": "Assess responsibility and intentionality.",
         "evidence_handles": ["e1", "e2", "e3"],
         "permitted_role_handles": ["ce1", "ce2", "current_user", "self"],
+        "permitted_role_assignment_handles": ["current_user", "self"],
         "permitted_delta_paths": ["active_events.ce1.intentionality"],
         "dependencies": [],
     }
     parsed = {
         "question_id": "q:event_agency",
         "selected_evidence_handles": ["e3"],
-        "selected_role_handles": ["ce1", "ce2"],
+        "selected_role_handles": ["ce1"],
         "propositions": [{
             "proposition_kind": "intentionality",
             "subject_handle": "ce1",
             "evidence_handles": ["e3"],
             "role_assignments": [{
                 "role": "target",
-                "entity_handle": "ce2",
+                "entity_handle": "current_user",
             }],
             "semantic_value": "The action appears deliberate.",
         }],
@@ -589,7 +595,6 @@ def test_candidate_proposition_rejects_mismatched_evidence() -> None:
             _appraisal_handle_refs("e1", "e2", "e3"),
         )
     assert "ce1->e1" in str(exc_info.value)
-    assert "ce2->e2" in str(exc_info.value)
 
 
 def test_candidate_delta_rejects_mismatched_evidence() -> None:
@@ -601,6 +606,7 @@ def test_candidate_delta_rejects_mismatched_evidence() -> None:
         "semantic_question": "Assess responsibility and intentionality.",
         "evidence_handles": ["e1", "e2"],
         "permitted_role_handles": ["ce1", "ce2", "current_user", "self"],
+        "permitted_role_assignment_handles": ["current_user", "self"],
         "permitted_delta_paths": ["active_events.ce1.intentionality"],
         "dependencies": [],
     }
@@ -636,6 +642,7 @@ def test_candidate_binding_uses_canonical_projection_reference() -> None:
         "semantic_question": "Assess responsibility and intentionality.",
         "evidence_handles": ["e7"],
         "permitted_role_handles": ["ce1", "current_user", "self"],
+        "permitted_role_assignment_handles": ["current_user", "self"],
         "permitted_delta_paths": ["active_events.ce1.intentionality"],
         "dependencies": [],
     }

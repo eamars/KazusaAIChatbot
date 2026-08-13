@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
@@ -34,7 +33,6 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_l3_surface import (
     build_text_surface_input_from_global_state,
 )
 from tests.cognition_core_v2_test_helpers import canonical_character_identity
-
 
 _ROOT = Path(__file__).resolve().parents[1]
 _ARTIFACT_ROOT = (
@@ -183,6 +181,7 @@ async def _run_boundary_once(
     *,
     input_payload: Mapping[str, Any],
     question: Mapping[str, Any],
+    planned_questions: Sequence[Mapping[str, Any]] | None = None,
     question_id: str,
     mode: str,
     candidate_result: Mapping[str, Any] | None,
@@ -295,6 +294,11 @@ async def _run_boundary_once(
     )
     monkeypatch.setattr(cognition_node, "record_cognition_v2_event", record_event)
 
+    planned_question_rows = (
+        [deepcopy(dict(row)) for row in planned_questions]
+        if planned_questions is not None
+        else [deepcopy(dict(question))]
+    )
     if mode == "omit":
         monkeypatch.setattr(
             facade,
@@ -305,7 +309,7 @@ async def _run_boundary_once(
         monkeypatch.setattr(
             facade,
             "plan_semantic_questions",
-            lambda *_args, **_kwargs: [deepcopy(dict(question))],
+            lambda *_args, **_kwargs: deepcopy(planned_question_rows),
         )
 
     base_services = build_cognition_core_services()
@@ -485,7 +489,7 @@ async def replay_appraisal_through_public_boundary(
 
     question_id = question.get("question_id")
     if not isinstance(question_id, str):
-        raise AssertionError("replay question id is invalid")
+        raise TypeError("replay question id is invalid")
     if source_sha256 is None:
         source_sha256 = hashlib.sha256(first_response_text.encode()).hexdigest()
     candidate_run = await _run_boundary_once(
@@ -598,7 +602,7 @@ async def replay_appraisal_through_public_boundary(
         raise AssertionError("the public replay did not expose one appraisal row")
     appraisal_row = appraisal_rows[0]
     if not isinstance(appraisal_row, Mapping):
-        raise AssertionError("the appraisal observability row is invalid")
+        raise TypeError("the appraisal observability row is invalid")
     accepted = (
         appraisal_row.get("status") == "completed"
         and not appraisal_row.get("failure_code")

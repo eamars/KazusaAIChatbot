@@ -256,6 +256,7 @@ def _semantic_question(
     question_id: str = "q:relationship_social",
     roles: list[str] | None = None,
     paths: list[str] | None = None,
+    assignment_roles: list[str] | None = None,
 ) -> dict[str, Any]:
     """Build the smallest prompt-owned semantic question for one validator."""
 
@@ -265,6 +266,11 @@ def _semantic_question(
         "semantic_question": "bounded semantic question",
         "evidence_handles": ["e1", "e2"],
         "permitted_role_handles": roles or ["current_user", "self", "r1"],
+        "permitted_role_assignment_handles": (
+            assignment_roles
+            if assignment_roles is not None
+            else (roles or ["current_user", "self", "r1"])
+        ),
         "permitted_delta_paths": paths or [
             "relationship.r1.axes.perceived_closeness",
         ],
@@ -508,6 +514,7 @@ def test_candidate_origin_evidence_missing_is_rejected() -> None:
     question = _semantic_question(
         roles=["ce1", "current_user", "self"],
         paths=["active_events.ce1.intentionality"],
+        assignment_roles=["current_user", "self"],
     )
     result = _empty_semantic_result()
     result["propositions"] = [_semantic_proposition(
@@ -552,6 +559,7 @@ def test_semantic_proposition_subject_kind_mismatch_is_rejected() -> None:
         question_kind="goal_threat_outcome",
         question_id="q:goal_threat_outcome",
         roles=["ce1", "current_user", "self"],
+        assignment_roles=["current_user", "self"],
     )
     result = _empty_semantic_result("q:goal_threat_outcome")
     result["propositions"] = [_semantic_proposition(
@@ -652,6 +660,7 @@ def test_relationship_delta_narrow_bound_is_enforced() -> None:
 
     accepted = _empty_semantic_result()
     accepted["selected_evidence_handles"] = ["e1"]
+    accepted["selected_role_handles"] = ["r1"]
     accepted["deltas"] = [_semantic_delta(
         target_path="relationship.r1.attachment",
         delta=10,
@@ -663,6 +672,35 @@ def test_relationship_delta_narrow_bound_is_enforced() -> None:
         _semantic_handle_refs(),
     )
     assert validated["deltas"][0]["delta"] == 10
+
+
+def test_candidate_role_assignment_handle_is_rejected() -> None:
+    """A causal candidate cannot be selected as a role-assignment entity."""
+
+    question = _semantic_question(
+        question_kind="event_agency",
+        question_id="q:event_agency",
+        roles=["ce1", "current_user", "self"],
+        paths=["active_events.ce1.intentionality"],
+        assignment_roles=["current_user", "self"],
+    )
+    result = _empty_semantic_result("q:event_agency")
+    result["selected_evidence_handles"] = ["e1"]
+    result["propositions"] = [_semantic_proposition(
+        proposition_kind="intentionality",
+        subject_handle="ce1",
+        entity_handle="ce1",
+    )]
+    _assert_value_error(
+        lambda: validate_semantic_appraisal_result(
+            result,
+            question,
+            {"e1", "e2"},
+            _semantic_handle_refs(),
+        ),
+        'role_assignments[*].entity_handle must be one of '
+        '["current_user", "self"]',
+    )
 
 
 def test_semantic_micro_appraisal_fields_not_exact_is_rejected() -> None:

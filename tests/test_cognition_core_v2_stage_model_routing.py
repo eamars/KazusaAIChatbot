@@ -388,6 +388,7 @@ async def test_each_appraisal_family_reuses_its_route_for_repair_and_trace(
                 "semantic_question": "Inspect this bounded semantic family.",
                 "evidence_handles": [],
                 "permitted_role_handles": [],
+                "permitted_role_assignment_handles": [],
                 "permitted_delta_paths": [],
             },
             [],

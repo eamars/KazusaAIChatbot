@@ -10,6 +10,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CURRENT_EPISODE_EVIDENCE_SOURCE_KINDS,
     RELATIONAL_STANCE_VALUES,
     RELATIONAL_CURRENT_USER_RELATIONSHIP_STATE_VALUES,
+    SemanticQuestionV2,
     validate_action_bid,
     validate_relational_willingness,
 )
@@ -210,3 +211,11 @@ def test_promoted_reflection_projects_conditional_guidance_authority() -> None:
     )
 
     contracts_module._validate_evidence_rows([row])
+
+
+def test_semantic_question_v2_requires_role_assignment_handles() -> None:
+    """Semantic questions carry one separated role-assignment handle domain."""
+
+    assert "permitted_role_assignment_handles" in (
+        SemanticQuestionV2.__required_keys__
+    )

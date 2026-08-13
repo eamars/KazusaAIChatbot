@@ -234,7 +234,8 @@
         "tests/unit/cognition_core_v2/test_contracts.py::test_goal_and_action_confidence_reject_numeric_values",
         "tests/unit/cognition_core_v2/test_contracts.py::test_group_confidence_rejects_numeric_values",
         "tests/unit/cognition_core_v2/test_contracts.py::test_cognition_evidence_requires_closed_typed_authority",
-        "tests/unit/cognition_core_v2/test_contracts.py::test_promoted_reflection_projects_conditional_guidance_authority"
+        "tests/unit/cognition_core_v2/test_contracts.py::test_promoted_reflection_projects_conditional_guidance_authority",
+        "tests/unit/cognition_core_v2/test_contracts.py::test_semantic_question_v2_requires_role_assignment_handles"
       ],
       "supplemental_tests": []
     },
@@ -417,9 +418,16 @@
       "contract": "character constraint question projection",
       "required_unit_tests": [
         "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_character_constraint_projection_excludes_standard_handles",
-        "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_semantic_appraisal_exposes_owned_contract"
+        "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_semantic_appraisal_exposes_owned_contract",
+        "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_causal_candidate_is_rejected_as_role_assignment_handle"
       ],
-      "supplemental_tests": []
+      "supplemental_tests": [
+        "tests/test_cognition_core_v2_trace_failure_mode_matrix.py::test_candidate_role_assignment_handle_is_rejected",
+        "tests/test_cognition_core_v2_semantic_terminalization.py::test_invalid_role_handle_reports_its_structured_domain",
+        "tests/test_cognition_core_v2_prompt_contract_guidance.py::test_prompt_payloads_preserve_contract_order",
+        "tests/test_cognition_core_v2_prompt_budget_continuity.py::test_appraisal_question_keeps_candidate_origin_contract",
+        "tests/test_cognition_core_v2_prompt_budget_continuity.py::test_appraisal_repair_uses_residual_budget_for_second_call"
+      ]
     },
     {
       "source": "src/kazusa_ai_chatbot/cognition_core_v2/semantic_source_planner.py",
@@ -429,11 +437,13 @@
         "tests/unit/cognition_core_v2/test_semantic_source_planner.py::test_moral_identity_questions_exclude_standard_handles",
         "tests/unit/cognition_core_v2/test_semantic_source_planner.py::test_semantic_source_planner_exposes_owned_contract",
         "tests/unit/cognition_core_v2/test_semantic_source_planner.py::test_goal_outcome_filters_terminal_handles_and_delta_paths",
-        "tests/unit/cognition_core_v2/test_semantic_source_planner.py::test_goal_outcome_keeps_eligible_handles_and_candidates"
+        "tests/unit/cognition_core_v2/test_semantic_source_planner.py::test_goal_outcome_keeps_eligible_handles_and_candidates",
+        "tests/unit/cognition_core_v2/test_semantic_source_planner.py::test_group_questions_separate_causal_and_role_assignment_handles"
       ],
       "supplemental_tests": [
         "tests/test_cognition_core_v2_alignment_gates.py::test_scheduler_evidence_selects_only_goal_threat_outcome",
         "tests/test_cognition_core_v2_alignment_gates.py::test_each_question_receives_only_family_local_handles_and_state",
+        "tests/test_cognition_core_v2_alignment_gates.py::test_candidate_handles_share_the_projection_authority",
         "tests/test_cognition_core_v2_trace_failure_mode_matrix.py::test_resolved_knowledge_gap_transition_is_rejected",
         "tests/test_cognition_core_v2_trace_failure_mode_matrix.py::test_terminal_event_transition_is_rejected"
       ]
@@ -461,7 +471,13 @@
       "owner": "cognition_core_v2 owner",
       "contract": "state_reducers public contract",
       "required_unit_tests": [
-        "tests/unit/cognition_core_v2/test_state_reducers.py::test_state_reducers_exposes_owned_contract"
+        "tests/unit/cognition_core_v2/test_state_reducers.py::test_state_reducers_exposes_owned_contract",
+        "tests/test_cognition_core_v2_semantic_terminalization.py::test_terminalized_low_salience_candidate_survives_same_batch_pruning",
+        "tests/test_cognition_core_v2_semantic_terminalization.py::test_terminal_postconditions_survive_same_batch_deltas[event_completed-event-active_events-axis_deltas0-expected0]",
+        "tests/test_cognition_core_v2_semantic_terminalization.py::test_terminal_postconditions_survive_same_batch_deltas[event_repaired-event-active_events-axis_deltas1-expected1]",
+        "tests/test_cognition_core_v2_semantic_terminalization.py::test_terminal_postconditions_survive_same_batch_deltas[threat_resolved-threat-threats-axis_deltas2-expected2]",
+        "tests/test_cognition_core_v2_semantic_terminalization.py::test_terminal_postconditions_survive_same_batch_deltas[knowledge_answered-knowledge_gap-knowledge_gaps-axis_deltas3-expected3]",
+        "tests/test_cognition_core_v2_semantic_terminalization.py::test_final_reduction_preserves_cross_appraisal_composition"
       ],
       "supplemental_tests": []
     },

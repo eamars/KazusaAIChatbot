@@ -61,6 +61,7 @@ recorded evidence.
 | [dialog_language_and_model_output_contract_cleanup_plan.md](archive/completed/dialog_language_and_model_output_contract_cleanup_plan.md) | Final-dialog language delegation and deterministic model-output contract cleanup | completed |
 | [group_topic_continuity_authority_fix_plan.md](archive/completed/group_topic_continuity_authority_fix_plan.md) | Group multi-user topic-continuity authority and weak-local-model quality fix | completed |
 | [cognition_v2_parent_checkpoint_guardrail_plan.md](archive/completed/cognition_v2_parent_checkpoint_guardrail_plan.md) | Cognition V2 parent-checkpoint guardrail and bounded recovery epoch | completed |
+| [cognition_v2_group_ownership_terminalization_bugfix_plan.md](archive/completed/cognition_v2_group_ownership_terminalization_bugfix_plan.md) | Cognition V2 group ownership terminalization and role-domain bugfix | completed |
 
 ## Working-Tree Policy
 

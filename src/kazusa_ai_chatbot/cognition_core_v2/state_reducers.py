@@ -113,6 +113,7 @@ def apply_semantic_appraisals(
         updated,
         translated,
         new_causal_ids,
+        batch_terminalizations,
     )
     for proposal in unsupported:
         _apply_unretained_character_delta(updated, proposal)
@@ -574,8 +575,15 @@ def _recompute_new_causal_salience(
     state: dict[str, Any],
     translated_deltas: Sequence[Mapping[str, Any]],
     new_causal_ids: set[str],
+    batch_terminalizations: set[tuple[str, str, str]],
 ) -> None:
-    """Set candidate salience from accepted causal deltas and reject weak creates."""
+    """Set candidate salience and reject weak creates without a terminal claim.
+
+    A candidate terminalized by an accepted proposition in this same batch is
+    retained through salience recomputation so its terminal postcondition can
+    resolve against the surviving native entity. Non-terminal candidates below
+    the threshold remain prunable.
+    """
 
     counts: dict[str, int] = {}
     magnitudes: dict[str, int] = {}
@@ -595,6 +603,10 @@ def _recompute_new_causal_salience(
             abs(int(proposal["delta"])),
         )
 
+    terminalized_ids = {
+        entity_id
+        for _, entity_id, _ in batch_terminalizations
+    }
     for field_name in ("threats", "active_events", "knowledge_gaps"):
         retained = []
         for entity in state[field_name]:
@@ -602,7 +614,10 @@ def _recompute_new_causal_salience(
                 retained.append(entity)
                 continue
             entity["salience"] = magnitudes.get(entity["entity_id"], 0)
-            if entity["salience"] >= 25:
+            if (
+                entity["salience"] >= 25
+                or entity["entity_id"] in terminalized_ids
+            ):
                 retained.append(entity)
         state[field_name] = retained
 

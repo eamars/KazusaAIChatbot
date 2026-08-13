@@ -205,11 +205,13 @@ def test_core_v2_prompts_keep_one_authoritative_handle_domain() -> None:
     semantic_prompt = SEMANTIC_APPRAISAL_PROMPT
     for required_text in (
         "question.handle_field_domains",
+        "permitted_role_assignment_handles",
         "question.candidate_origin_evidence",
         "question.permitted_delta_path_domains",
         "来源 evidence handle",
         "state_field.handle.axis",
         "delta_limit",
+        "群聊中的其他参与者",
         "role_assignments 是必填字段，证据不支持任何角色时写 []",
         "不要输出 explanation、selected_evidence_handles、selected_role_handles、propositions",
     ):
@@ -323,13 +325,17 @@ def test_active_selection_prompt_keeps_nonordinary_output_contract() -> None:
 def test_prompt_payloads_preserve_contract_order() -> None:
     """Keep production-shaped prompt declarations in stable source order."""
 
-    semantic_text, _ = _fit_appraisal_payload(
+    semantic_text, _, _ = _fit_appraisal_payload(
         {
             "question": {
                 "question_id": "q:event_agency",
                 "question_kind": "event_agency",
                 "semantic_question": "Identify the current event agency.",
                 "permitted_role_handles": ["ce1"],
+                "permitted_role_assignment_handles": [
+                    "self",
+                    "current_user",
+                ],
                 "candidate_origin_evidence": {"ce1": "e1"},
                 "permitted_delta_path_domains": [{
                     "state_field": "events",
@@ -343,7 +349,7 @@ def test_prompt_payloads_preserve_contract_order() -> None:
                 "handle_field_domains": {
                     "subject_handle": ["ce1"],
                     "object_handle": ["ce1"],
-                    "entity_handle": ["ce1"],
+                    "entity_handle": ["self", "current_user"],
                     "evidence_handles": ["e1"],
                 },
                 "role_handle_semantics": {
@@ -368,6 +374,7 @@ def test_prompt_payloads_preserve_contract_order() -> None:
         "question_kind",
         "semantic_question",
         "permitted_role_handles",
+        "permitted_role_assignment_handles",
         "candidate_origin_evidence",
         "permitted_delta_path_domains",
         "permitted_proposition_kinds",
@@ -382,6 +389,12 @@ def test_prompt_payloads_preserve_contract_order() -> None:
         "entity_handle",
         "evidence_handles",
     ]
+    assert semantic_question["handle_field_domains"]["entity_handle"] == (
+        ["self", "current_user"]
+    )
+    assert semantic_question["handle_field_domains"][
+        "subject_handle"
+    ] == ["ce1"]
 
     goal_text = _fit_goal_prompt_payload(
         {
@@ -443,6 +456,7 @@ def test_semantic_repair_projects_existing_contract_values() -> None:
         "question": {
             "handle_field_domains": {
                 "subject_handle": ["ce1"],
+                "entity_handle": ["current_user"],
                 "evidence_handles": ["e1"],
             },
             "candidate_origin_evidence": {"ce1": "e1"},
@@ -494,6 +508,9 @@ def test_semantic_repair_projects_existing_contract_values() -> None:
     assert repair_payload["allowed_values"][
         "permitted_delta_path_domains"
     ][0]["delta_limit"] == 40
+    assert repair_payload["allowed_values"]["handle_field_domains"][
+        "entity_handle"
+    ] == ["current_user"]
     assert "唯一失败规则" in repair_payload["repair_instruction"]
     assert "role_assignments 是必填字段，证据不支持任何角色时写 []" in (
         repair_payload["repair_instruction"]

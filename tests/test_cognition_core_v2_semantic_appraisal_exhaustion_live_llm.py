@@ -391,6 +391,7 @@ def _build_appraisal_context(
         character_operational_context=payload.get(
             'character_operational_context',
         ),
+        scene_context=payload.get('scene_context'),
         evidence=payload['evidence'],
     )
     questions = plan_semantic_questions(

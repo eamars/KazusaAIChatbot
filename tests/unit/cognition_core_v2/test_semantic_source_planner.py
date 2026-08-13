@@ -264,10 +264,17 @@ def test_goal_outcome_keeps_eligible_handles_and_candidates() -> None:
 
     question = _goal_outcome_question()
     handles = set(question["permitted_role_handles"])
+    assignment_handles = set(
+        question["permitted_role_assignment_handles"]
+    )
     paths = set(question["permitted_delta_paths"])
 
     assert {"g1", "g2", "t1", "ev1", "k1", "k2"} <= handles
     assert {"ce1", "ct1", "ck1"} <= handles
+    assert {"g1", "g2", "self", "current_user"} <= assignment_handles
+    assert {"ce1", "ct1", "ck1", "t1", "ev1", "k1"}.isdisjoint(
+        assignment_handles
+    )
     assert any(path.startswith("goals.g1.") for path in paths)
     assert any(path.startswith("goals.g2.") for path in paths)
     assert any(path.startswith("threats.t1.") for path in paths)
@@ -307,3 +314,67 @@ def test_semantic_source_planner_exposes_owned_contract() -> None:
     """Keep the public planner entrypoint attached to this source owner."""
 
     assert callable(plan_semantic_questions)
+
+
+def test_group_questions_separate_causal_and_role_assignment_handles() -> None:
+    """Scene participants are assignment-only and never causal targets."""
+
+    evidence, state, projection = _projection()
+    state["goals"] = [_goal(1, "pursuing")]
+    projection = project_state_for_prompt(
+        state,
+        character_constraints=_constraints(),
+        character_identity_context=canonical_identity_context(),
+        scene_context={
+            "participant_bindings": [
+                {
+                    "handle": f"p{index}",
+                    "display_name": f"participant {index}",
+                }
+                for index in range(1, 6)
+            ],
+        },
+        evidence=evidence,
+    )
+    questions = plan_semantic_questions(
+        evidence,
+        state,
+        projection.handle_to_ref,
+    )
+    by_kind = {question["question_kind"]: question for question in questions}
+    participant_handles = {f"p{index}" for index in range(1, 6)}
+    causal_handles = {"ce1", "ct1", "ck1", "ev1", "t1", "k1", "d1", "m1"}
+
+    for question in questions:
+        role_handles = set(question["permitted_role_handles"])
+        assignment_handles = set(
+            question["permitted_role_assignment_handles"]
+        )
+        assert {"self", "current_user"} <= assignment_handles
+        assert participant_handles <= assignment_handles
+        assert causal_handles.isdisjoint(assignment_handles)
+        assert participant_handles.isdisjoint(role_handles)
+
+    relationship_assignments = set(
+        by_kind["relationship_social"][
+            "permitted_role_assignment_handles"
+        ]
+    )
+    assert "r1" in relationship_assignments
+    goal_assignments = set(
+        by_kind["goal_threat_outcome"][
+            "permitted_role_assignment_handles"
+        ]
+    )
+    assert "g1" in goal_assignments
+    for family in (
+        "event_agency",
+        "moral_identity",
+        "epistemic_comparison_memory",
+        "existential_drive",
+    ):
+        family_assignments = set(
+            by_kind[family]["permitted_role_assignment_handles"]
+        )
+        assert "g1" not in family_assignments
+        assert "r1" not in family_assignments

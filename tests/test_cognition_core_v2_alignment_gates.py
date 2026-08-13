@@ -163,6 +163,15 @@ def test_each_question_receives_only_family_local_handles_and_state() -> None:
     assert "ct1" not in by_kind["epistemic_comparison_memory"][
         "permitted_role_handles"
     ]
+    for question in questions:
+        assignment_handles = set(
+            question["permitted_role_assignment_handles"]
+        )
+        assert {"self", "current_user"} <= assignment_handles
+        assert not any(
+            handle.startswith(("ce", "ct", "ck", "ev"))
+            for handle in assignment_handles
+        )
 
     event_state = _project_question_state(
         projection,
@@ -256,6 +265,14 @@ def test_candidate_handles_share_the_projection_authority() -> None:
         projection.handle_to_ref
     )
     assert "ce1" in event_question["permitted_role_handles"]
+    assignment_handles = set(
+        event_question["permitted_role_assignment_handles"]
+    )
+    assert "ce1" not in assignment_handles
+    assert {"self", "current_user"} <= assignment_handles
+    assert set(assignment_handles) <= set(
+        projection.handle_to_ref
+    )
     assert "active_events.ce1.intentionality" in event_question[
         "permitted_delta_paths"
     ]

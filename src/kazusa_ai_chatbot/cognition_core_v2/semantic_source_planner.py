@@ -8,6 +8,7 @@ from typing import Any
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionEvidenceV2,
     EVIDENCE_SOURCE_QUESTION_IDS,
+    ROLE_ENTITY_KINDS,
     SEMANTIC_QUESTION_KINDS,
     SemanticQuestionV2,
 )
@@ -146,6 +147,10 @@ def plan_semantic_questions(
             mutable_state,
             [row["evidence_handle"] for row in question_evidence],
         )
+        permitted_assignment_handles = _permitted_role_assignment_handles(
+            handle_to_ref,
+            permitted_handles,
+        )
         question = {
             "question_id": question_id,
             "question_kind": question_kind,
@@ -154,6 +159,9 @@ def plan_semantic_questions(
                 row["evidence_handle"] for row in question_evidence
             ],
             "permitted_role_handles": permitted_handles,
+            "permitted_role_assignment_handles": (
+                permitted_assignment_handles
+            ),
             "permitted_delta_paths": permitted_paths,
             "dependencies": [],
         }
@@ -461,6 +469,38 @@ def _permitted_role_handles(
             continue
         handles.append(handle)
     return sorted(set(handles))
+
+
+def _permitted_role_assignment_handles(
+    handle_to_ref: Mapping[str, Mapping[str, str]],
+    permitted_role_handles: Sequence[str],
+) -> list[str]:
+    """Return the family-local role-assignment handle domain.
+
+    Role assignments accept only role-bearing handles: family-owned handles
+    whose canonical reference kind is in ``ROLE_ENTITY_KINDS``, scene
+    third-party participant handles, and the explicit ``self`` and
+    ``current_user`` bindings. Causal candidates and lifecycle handles stay
+    in the subject/object domain and are never exposed as assignment targets.
+    """
+
+    assignment_handles = {
+        handle
+        for handle in permitted_role_handles
+        if handle in handle_to_ref
+        and handle_to_ref[handle].get("kind") in ROLE_ENTITY_KINDS
+    }
+    assignment_handles.update(
+        handle
+        for handle, ref in handle_to_ref.items()
+        if ref.get("kind") == "third_party"
+    )
+    assignment_handles.update(
+        handle
+        for handle in ("self", "current_user")
+        if handle in handle_to_ref
+    )
+    return sorted(assignment_handles)
 
 
 def _goal_outcome_eligible_entities(
