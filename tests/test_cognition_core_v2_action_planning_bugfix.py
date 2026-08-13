@@ -626,7 +626,6 @@ async def test_denied_required_action_closes_goal_without_progress() -> None:
         }],
         goal_resolution="requires_required_evidence",
     )
-    planner_response["resolver_goal_progress"] = _goal_progress()
     responses = [
         planner_response,
         {"decisions": {"c1": False}},
@@ -703,7 +702,6 @@ async def test_denied_required_resolver_closes_goal_without_progress() -> None:
         }],
         goal_resolution="requires_required_evidence",
     )
-    planner_response["resolver_goal_progress"] = _goal_progress()
     responses = [
         planner_response,
         {"decisions": {"c1": False}},
@@ -906,7 +904,6 @@ def test_action_plan_merges_semantic_goal_progress_delta() -> None:
         "start_in_background": False,
     }])
     response["resolver_goal_progress"] = {
-        "original_goal": "answer the user's breakfast question",
         "current_focus": "retrieve the relevant character memory",
     }
 

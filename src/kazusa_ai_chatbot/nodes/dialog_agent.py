@@ -393,7 +393,7 @@ content_plan 中实际呈现的事实选择直接相关来源；回应包含来�
 数量、时间、因果关系和其他可外部核查事实必须来自 content_plan 或 content_requirements，不添加
 权威 surface 未提供的新事实。
 
-新生成的对话使用简体中文；引文、专有名词、代码、URL 以及必要的 schema 或 enum token 保持原样。
+引文、专有名词、代码、URL 以及必要的 schema 或 enum token 保持原样。
 
 # 输出格式
 只返回一个 JSON 对象，字段必须恰好是 final_dialog。final_dialog 是由完整可见消息字符串组成的
@@ -430,7 +430,7 @@ missing 或 blocked 必须保留答案缺口、等待状态或 typed blocker，�
 存在 required_source_urls 时，不添加 text_surface_output_v2 未提供的产品规格、价格、库存、数量、
 时间、因果关系或其他可外部核查事实；角色创造性只用于表达方式和互动推进。
 
-新生成的对话使用简体中文；引文、专有名词、代码、URL 以及必要的 schema 或 enum token 保持原样。
+引文、专有名词、代码、URL 以及必要的 schema 或 enum token 保持原样。
 
 # 输出格式
 只返回一个 JSON 对象，字段必须恰好是 final_dialog。final_dialog 是由完整可见消息字符串组成的

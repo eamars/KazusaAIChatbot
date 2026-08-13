@@ -87,10 +87,8 @@ async def test_resolve_local_context_runs_standalone_public_io(
             ],
         },
         "artifacts": [{
-            "schema_version": LOCAL_CONTEXT_ARTIFACT_VERSION,
             "artifact_id": "artifact_1",
             "artifact_type": "memory_ref",
-            "producer_node_id": "task_1",
             "summary": "#napcat is a playful local command anchor.",
             "projection_payload": {
                 "memory_evidence": [
@@ -111,7 +109,6 @@ async def test_resolve_local_context_runs_standalone_public_io(
                 ],
             },
             "source_policy": "shared_memory",
-            "prompt_visible": True,
         }],
     }])
     collapse = _StageInvoker([{
@@ -179,6 +176,138 @@ async def test_resolve_local_context_runs_standalone_public_io(
     assert "scope_global_user_id" not in str(rag_result)
     assert "2026-07-04T09:30:00Z" not in str(rag_result)
     assert "task_resolution_request" not in str(packet["trace_summary"])
+
+
+@pytest.mark.asyncio
+async def test_traversal_separates_model_and_source_owned_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Normalize raw node artifacts separately from deterministic source rows."""
+
+    request = validate_local_context_resolver_request({
+        "schema_version": LOCAL_CONTEXT_RESOLVER_REQUEST_VERSION,
+        "objective": "Resolve one source-backed memory anchor.",
+        "source": "l2d",
+        "reason": "source artifact boundary test",
+        "priority": "normal",
+    })
+    context = validate_local_context_resolver_context({
+        "schema_version": LOCAL_CONTEXT_RESOLVER_CONTEXT_VERSION,
+        "character_name": "active character",
+        "platform": "debug",
+        "platform_channel_id": "group-1",
+        "global_user_id": "user-1",
+        "user_name": "operator",
+        "local_time_context": {"local_date": "2026-07-04"},
+        "prompt_message_context": {
+            "message_text": "resolve the source-backed anchor",
+            "addressed_to_active_character": True,
+        },
+        "chat_history_recent": [],
+        "chat_history_wide": [],
+        "conversation_progress": {},
+    })
+    planner = _StageInvoker([{
+        "tasks": [{
+            "objective": "Retrieve one source-backed memory anchor.",
+            "node_kind": "memory_evidence",
+        }],
+    }])
+    node_resolver = _StageInvoker([{
+        "node_update": {
+            "status": "resolved",
+            "knowledge_still_lacking": [],
+        },
+        "artifacts": [{
+            "artifact_id": "model_artifact",
+            "artifact_type": "memory_ref",
+            "summary": "model-owned semantic evidence",
+            "projection_payload": {
+                "memory_evidence": [{
+                    "summary": "model-owned semantic evidence",
+                }],
+            },
+            "source_policy": "model-selected semantic projection",
+        }],
+    }])
+    collapse = _StageInvoker([{
+        "collapse_decision": {
+            "should_collapse": False,
+            "target_candidate_ref": "",
+            "reason": "no duplicate",
+        },
+    }])
+    synthesizer = _StageInvoker([{
+        "investigation_summary": [],
+        "knowledge_we_know_so_far": [],
+        "knowledge_still_lacking": [],
+        "recommended_next_iteration": [],
+        "evidence_boundary_notes": [],
+    }])
+    source_artifact = {
+        "schema_version": LOCAL_CONTEXT_ARTIFACT_VERSION,
+        "artifact_id": "source_artifact",
+        "artifact_type": "memory_ref",
+        "producer_node_id": "task_1",
+        "summary": "source-owned deterministic evidence",
+        "projection_payload": {
+            "memory_evidence": [{
+                "summary": "source-owned deterministic evidence",
+            }],
+        },
+        "source_policy": "deterministic source handler",
+        "prompt_visible": True,
+    }
+
+    async def dispatch_source_artifact(**kwargs: object) -> dict[str, object]:
+        """Return one complete public artifact from the source boundary."""
+
+        del kwargs
+        return {
+            "result": {
+                "source_records": [],
+                "artifacts": [source_artifact],
+                "node_update": {},
+            },
+        }
+
+    monkeypatch.setattr(
+        resolver_service,
+        "dispatch_subagent_for_node",
+        dispatch_source_artifact,
+    )
+    monkeypatch.setattr(resolver_service, "_planner_stage_handler", planner)
+    monkeypatch.setattr(resolver_service, "_node_stage_handler", node_resolver)
+    monkeypatch.setattr(
+        resolver_service,
+        "_collapse_stage_handler",
+        collapse,
+    )
+    monkeypatch.setattr(
+        resolver_service,
+        "_synthesizer_stage_handler",
+        synthesizer,
+    )
+    options = {
+        "schema_version": LOCAL_CONTEXT_RESOLVER_OPTIONS_VERSION,
+        "max_iterations": 2,
+        "max_nodes": 8,
+        "max_depth": 3,
+        "max_node_attempts": 2,
+        "max_subagent_attempts": 1,
+    }
+
+    packet = await resolve_local_context(request, context, options)
+    rag_result = project_local_context_packet(packet)
+
+    assert packet["graph"]["nodes"]["task_1"]["status"] == "resolved"
+    assert packet["trace_summary"]["subagent_calls"] == 1
+    assert {
+        row["summary"] for row in rag_result["memory_evidence"]
+    } == {
+        "model-owned semantic evidence",
+        "source-owned deterministic evidence",
+    }
 
 
 @pytest.mark.asyncio
@@ -509,6 +638,9 @@ def test_stage_prompts_keep_source_field_and_time_boundaries() -> None:
     assert "Do not use recall_ref for exact quoted phrases" in node_prompt
     assert "confirmation, provenance, quote, URL" in node_prompt
     assert "named-person profile or impression objectives" in node_prompt
+    assert '"schema_version"' not in node_prompt
+    assert '"producer_node_id"' not in node_prompt
+    assert '"prompt_visible"' not in node_prompt
     assert "Do not infer\n  current time" in synthesizer_prompt
     assert "leave knowledge_still_lacking empty" in synthesizer_prompt
     assert "profile/impression evidence is enough" in synthesizer_prompt
@@ -715,6 +847,50 @@ def test_rag_result_keeps_recall_artifact_recall_only() -> None:
     assert rag_result["conversation_evidence"] == []
 
 
+def test_node_artifact_binds_code_owned_metadata() -> None:
+    """Bind artifact protocol fields from the active node and policy."""
+
+    artifact = resolver_service._validated_artifact_for_node(
+        {
+            "artifact_id": "person_profile_binding",
+            "artifact_type": "third_party_profiles",
+            "summary": "A source-backed person profile.",
+            "projection_payload": {
+                "third_party_profiles": [{
+                    "name": "a participant",
+                    "impression": "reliable",
+                }],
+            },
+            "source_policy": "user_profile",
+        },
+        "active_node",
+    )
+
+    assert artifact["schema_version"] == LOCAL_CONTEXT_ARTIFACT_VERSION
+    assert artifact["producer_node_id"] == "active_node"
+    assert artifact["prompt_visible"] is True
+
+
+def test_node_artifact_rejects_model_authored_metadata() -> None:
+    """Reject node metadata before binding the active-node public artifact."""
+
+    with pytest.raises(
+        LocalContextValidationError,
+        match="code-owned metadata",
+    ):
+        resolver_service._validated_artifact_for_node(
+            {
+                "schema_version": LOCAL_CONTEXT_ARTIFACT_VERSION,
+                "artifact_id": "model_metadata_artifact",
+                "artifact_type": "conversation_ref",
+                "summary": "A model-authored metadata candidate.",
+                "projection_payload": {},
+                "source_policy": "chat_history_recent",
+            },
+            "active_node",
+        )
+
+
 def test_artifact_type_accepts_stage_semantic_aliases() -> None:
     """Normalize source-artifact aliases without weakening final contracts."""
 
@@ -722,7 +898,6 @@ def test_artifact_type_accepts_stage_semantic_aliases() -> None:
         {
             "artifact_id": "person_profile_1",
             "artifact_type": "third_party_profiles",
-            "producer_node_id": "active_node",
             "summary": "小明 profile evidence.",
             "projection_payload": {
                 "third_party_profiles": [{
@@ -731,19 +906,19 @@ def test_artifact_type_accepts_stage_semantic_aliases() -> None:
                 }],
             },
             "source_policy": "user_profile",
-            "prompt_visible": True,
         },
         "task_1",
     )
 
     assert artifact["artifact_type"] == "person_ref"
     assert artifact["producer_node_id"] == "task_1"
+    assert artifact["schema_version"] == LOCAL_CONTEXT_ARTIFACT_VERSION
+    assert artifact["prompt_visible"] is True
 
     scoped_artifact = resolver_service._validated_artifact_for_node(
         {
             "artifact_id": "scoped_memory_1",
             "artifact_type": "user_memory_unit_recall",
-            "producer_node_id": "model_generated_node_name",
             "summary": "Scoped user-memory evidence.",
             "projection_payload": {
                 "user_memory_unit_candidates": [{
@@ -751,7 +926,6 @@ def test_artifact_type_accepts_stage_semantic_aliases() -> None:
                 }],
             },
             "source_policy": "user_memory_units",
-            "prompt_visible": True,
         },
         "task_2",
     )
@@ -770,7 +944,6 @@ def test_artifact_type_accepts_stage_semantic_aliases() -> None:
                 }],
             },
             "source_policy": "user memory units",
-            "prompt_visible": True,
         },
         "task_3",
     )

@@ -6,7 +6,6 @@ import asyncio
 import json
 import logging
 from collections.abc import Mapping
-from copy import deepcopy
 from dataclasses import dataclass
 
 import httpx
@@ -34,8 +33,8 @@ from kazusa_ai_chatbot.conversation_progress.models import (
     ConversationLogicalTurnV1,
     ConversationProgressEventUpdateV2,
     ConversationProgressEventV2,
-    ConversationProgressRecordInput,
     ConversationProgressRecorderDeltaV2,
+    ConversationProgressRecordInput,
     ConversationProgressSceneUpdateV2,
 )
 from kazusa_ai_chatbot.conversation_progress.policy import (
@@ -97,7 +96,6 @@ _SCENE_RECORDER_PROMPT = '''\
 # 输出格式
 只返回一个严格 JSON 对象，不要代码围栏、解释、注释或额外字段：
 {
-  "schema_version": "conversation_progress_scene_observation.v2",
   "scene_relation": "same",
   "episode_change": "none",
   "episode_narrative": "",
@@ -170,6 +168,16 @@ async def _record_scene(
         parsed = parse_llm_json_output(
             response.content,
             deterministic_only=True,
+        )
+        if not isinstance(parsed, Mapping):
+            raise TypeError('scene semantic output must be an object')
+        parsed = dict(parsed)
+        if 'schema_version' in parsed:
+            raise ValueError(
+                'scene observation schema_version is code-owned'
+            )
+        parsed['schema_version'] = (
+            'conversation_progress_scene_observation.v2'
         )
         parsed, normalizations = normalize_scene_observation_bounds(parsed)
         scene = validate_scene_observation(
@@ -258,7 +266,7 @@ _EVENT_RECORDER_PROMPT = '''\
     `YYYY-MM-DD HH:MM`。无法唯一换算时不建立该时间依赖事件，不保留相对时间表达。
 
 # 输出格式
-顶层对象必须完整包含且仅包含 `schema_version`、`existing_events` 和 `new_events` 三个字段。
+顶层对象必须完整包含且仅包含 `existing_events` 和 `new_events` 两个字段。
 两个数组即使为空也必须显式输出；没有新事件时必须原样输出 `"new_events": []`。
 只返回一个严格 JSON 对象，不要代码围栏、解释、注释或额外字段。
 既有事件的 `observation` 只能是 `unchanged` 或 `changed`；它不是生命周期值。
@@ -310,13 +318,12 @@ _EVENT_RECORDER_PROMPT = '''\
 }
 顶层严格为：
 {
-  "schema_version": "conversation_progress_event_observation_batch.v2",
   "existing_events": [],
   "new_events": []
 }
 
 # 返回前检查
-1. 顶层恰好包含 `schema_version`、`existing_events` 和 `new_events`。
+1. 顶层恰好包含 `existing_events` 和 `new_events`。
 2. `existing_events` 和 `new_events` 每次都输出为数组；没有项目也输出 `[]`。
 3. `observation="unchanged"` 行恰好包含 `event_handle` 和 `observation`。
 4. 两个数组和顶层对象全部闭合后才结束输出。
@@ -393,6 +400,16 @@ async def _record_events(
         parsed = parse_llm_json_output(
             response.content,
             deterministic_only=True,
+        )
+        if not isinstance(parsed, Mapping):
+            raise TypeError('event semantic output must be an object')
+        parsed = dict(parsed)
+        if 'schema_version' in parsed:
+            raise ValueError(
+                'event observation schema_version is code-owned'
+            )
+        parsed['schema_version'] = (
+            'conversation_progress_event_observation_batch.v2'
         )
         parsed, normalizations = normalize_event_observation_bounds(parsed)
         updates = validate_event_observation_batch(

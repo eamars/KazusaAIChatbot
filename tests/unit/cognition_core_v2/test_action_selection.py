@@ -8,6 +8,7 @@ import pytest
 
 from kazusa_ai_chatbot.cognition_core_v2.action_selection import (
     ACTION_PLANNING_PROMPT,
+    _validate_goal_progress_choice,
     plan_actions,
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
@@ -16,6 +17,9 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
 from kazusa_ai_chatbot.cognition_episode import (
     CURRENT_CHARACTER_ROLE,
     CURRENT_USER_ROLE,
+)
+from kazusa_ai_chatbot.cognition_resolver.contracts import (
+    RESOLVER_GOAL_PROGRESS_VERSION,
 )
 from tests.cognition_core_v2_test_helpers import canonical_episode
 
@@ -79,6 +83,60 @@ def _evidence() -> list[dict[str, object]]:
         "visible_to": list(EVIDENCE_SOURCE_QUESTION_IDS["episode"]),
         "authority": "current_event",
     }]
+
+
+def _goal_progress() -> dict[str, object]:
+    """Build one non-empty public resolver progress state."""
+
+    return {
+        "schema_version": RESOLVER_GOAL_PROGRESS_VERSION,
+        "original_goal": "answer the current user request",
+        "current_focus": "collect the required evidence",
+        "deliverables": [{
+            "description": "collect the required evidence",
+            "status": "partial",
+            "note": "one source remains unresolved",
+        }],
+        "missing_user_inputs": [],
+        "evidence_dependencies": ["the unresolved source"],
+        "attempted_paths": ["checked the current context"],
+        "source_backed_facts": ["the request is still active"],
+        "assumptions_or_inferences": [],
+        "blockers": [],
+        "final_response_requirements": ["state the evidence boundary"],
+    }
+
+
+def test_goal_progress_model_output_omits_protocol_metadata() -> None:
+    """The action prompt exposes semantic progress fields only."""
+
+    assert "schema_version" not in ACTION_PLANNING_PROMPT
+    assert "original_goal" not in ACTION_PLANNING_PROMPT
+
+
+def test_goal_progress_binds_protocol_metadata_from_current_state() -> None:
+    """Merge semantic deltas into the code-owned public progress state."""
+
+    current = _goal_progress()
+    updated = _validate_goal_progress_choice(
+        {
+            "current_focus": "state the evidence boundary",
+            "blockers": ["the unresolved source"],
+        },
+        current_goal_progress=current,
+    )
+
+    assert updated is not None
+    assert updated["schema_version"] == RESOLVER_GOAL_PROGRESS_VERSION
+    assert updated["original_goal"] == current["original_goal"]
+    assert updated["current_focus"] == "state the evidence boundary"
+    assert updated["deliverables"] == current["deliverables"]
+
+    with pytest.raises(ValueError, match="protocol fields are code-owned"):
+        _validate_goal_progress_choice(
+            {"schema_version": RESOLVER_GOAL_PROGRESS_VERSION},
+            current_goal_progress=current,
+        )
 
 
 @pytest.mark.asyncio

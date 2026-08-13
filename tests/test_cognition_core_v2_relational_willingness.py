@@ -186,6 +186,8 @@ class _GoalLLM:
     ) -> SimpleNamespace:
         del config
         self.messages.append(messages)
+        model_decision = deepcopy(self.decision)
+        model_decision.pop('schema_version', None)
         payload = {
             'intention': '保持当前回合的清晰边界',
             'desired_outcome': '让可见回应符合当前关系判断',
@@ -196,7 +198,7 @@ class _GoalLLM:
             'evidence_handles': ['e1'],
             'expected_consequences': ['保留当前回合连续性'],
             'confidence': 'high',
-            'relational_willingness': deepcopy(self.decision),
+            'relational_willingness': model_decision,
         }
         return SimpleNamespace(
             content=json.dumps(payload, ensure_ascii=False),
@@ -555,7 +557,8 @@ async def test_ordinary_goal_draft_carries_current_episode_decision() -> None:
     assert 'current_episode' in rendered_prompt
     assert 'character_or_world_context_only' in rendered_prompt
     assert 'current_user_relationship_state' in system_prompt
-    assert 'relational_willingness.v2' in system_prompt
+    assert 'schema_version' not in system_prompt
+    assert 'relational_willingness.v2' not in system_prompt
     assert '当前用户提出了需要关系判断的请求' in rendered_prompt
 
 
@@ -700,6 +703,8 @@ async def test_ordinary_goal_regenerates_invalid_non_sensitive_stance() -> None:
                 )
             else:
                 decision = _decision(stance='reject')
+            model_decision = deepcopy(decision)
+            model_decision.pop('schema_version', None)
             payload = {
                 'intention': '保持当前回合的清晰边界',
                 'desired_outcome': '让可见回应符合当前关系判断',
@@ -710,7 +715,7 @@ async def test_ordinary_goal_regenerates_invalid_non_sensitive_stance() -> None:
                 'evidence_handles': ['e1'],
                 'expected_consequences': ['保留当前回合连续性'],
                 'confidence': 'high',
-                'relational_willingness': deepcopy(decision),
+                'relational_willingness': model_decision,
             }
             return SimpleNamespace(
                 content=json.dumps(payload, ensure_ascii=False),
@@ -747,7 +752,8 @@ async def test_ordinary_goal_regenerates_invalid_non_sensitive_stance() -> None:
     feedback = repair_payload['repair_feedback']
     assert 'relational willingness' in feedback['validation_error']
     contract = feedback['relational_willingness_contract']
-    assert contract['schema_version'] == 'relational_willingness.v2'
+    assert 'schema_version' not in contract
+    assert 'schema_version' not in contract['required_fields']
     assert 'relationship_state_rule' in contract
     assert bid['relational_willingness']['stance'] == 'reject'
     assert (

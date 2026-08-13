@@ -305,17 +305,19 @@ def test_active_selection_prompt_keeps_nonordinary_output_contract() -> None:
             "embedded_actor_role",
             "embedded_target_role",
             "selection_required",
-            "当前角色",
-            "当前用户",
-            "其他参与者",
-            "无",
-            "JSON 布尔值",
             "current_user",
             "self",
             "pN",
             "operation",
         ):
             assert required_text in role_prompt
+    for role_prompt in (
+        _ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT,
+        ORDINARY_RECURRENCE_SELECTION_GOAL_COGNITION_PROMPT,
+        " ".join(SELECTION_GOAL_REPAIR_INSTRUCTIONS),
+    ):
+        for role_value in ("当前角色", "当前用户", "其他参与者", "无"):
+            assert role_value in role_prompt
 
 
 def test_prompt_payloads_preserve_contract_order() -> None:
@@ -574,9 +576,12 @@ def test_goal_repair_feedback_preserves_cross_namespace_authority() -> None:
     assert feedback["allowed_role_handles"] == ["r1"]
     assert feedback["role_handles_forbidden_in_evidence_handles"] == ["r1"]
     assert feedback["invalid_draft"] == '{"evidence_handles": ["r1"]}'
-    assert feedback["relational_willingness_contract"]["schema_version"] == (
-        "relational_willingness.v2"
-    )
+    assert "schema_version" not in feedback[
+        "relational_willingness_contract"
+    ]
+    assert "schema_version" not in feedback[
+        "relational_willingness_contract"
+    ]["required_fields"]
     assert "required_evidence_handles" in " ".join(
         SELECTION_GOAL_REPAIR_INSTRUCTIONS
     )
@@ -661,11 +666,6 @@ async def test_active_selection_route_uses_rewritten_prompt_and_repair() -> None
         "selection": "The character chooses the grounded next step.",
         "selected_response_operation": {
             "operation": "the user gives the selected next step to the character",
-            "response_owner_role": CURRENT_CHARACTER_ROLE,
-            "selection_owner_role": CURRENT_CHARACTER_ROLE,
-            "selection_required": True,
-            "embedded_actor_role": CURRENT_USER_ROLE,
-            "embedded_target_role": CURRENT_CHARACTER_ROLE,
         },
         "reason": "The current operation requires a concrete choice.",
         "private_monologue": "I should choose from the current evidence.",

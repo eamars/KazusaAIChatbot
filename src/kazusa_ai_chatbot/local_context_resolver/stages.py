@@ -343,10 +343,8 @@ prompt-safe local evidence. Do not write final character dialog.
   },
   "artifacts": [
     {
-      "schema_version": "local_context_artifact.v1",
       "artifact_id": "short semantic artifact id",
       "artifact_type": "memory_ref|conversation_ref|person_ref|recall_ref|live_context_ref|external_ref|media_ref|semantic_packet",
-      "producer_node_id": "active_node",
       "summary": "prompt-safe evidence summary",
       "projection_payload": {
         "memory_evidence": [],
@@ -357,8 +355,7 @@ prompt-safe local evidence. Do not write final character dialog.
         "third_party_profiles": [],
         "user_memory_unit_candidates": []
       },
-      "source_policy": "short source policy",
-      "prompt_visible": true
+      "source_policy": "short source policy"
     }
   ]
 }

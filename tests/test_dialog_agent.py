@@ -492,6 +492,7 @@ def test_v2_prompt_describes_surface_renderer_boundary() -> None:
     assert "final_dialog" in prompt
     assert "relational_willingness" in prompt
     assert "action_directives" not in prompt
+    assert "新生成的对话使用简体中文" not in prompt
 
 
 def test_dialog_generator_repairs_unresolved_context_once() -> None:
@@ -508,6 +509,7 @@ def test_dialog_generator_repairs_unresolved_context_once() -> None:
     )
     assert "runtime_capability_limits" in repair_prompt
     assert "可信的能力边界、等待状态和下一步条件" in repair_prompt
+    assert "新生成的对话使用简体中文" not in repair_prompt
 
 
 def test_dialog_prompts_map_pending_results_to_queue_only_truth() -> None:

@@ -11,6 +11,7 @@
     "src/kazusa_ai_chatbot/conversation_progress/history.py",
     "src/kazusa_ai_chatbot/conversation_progress/models.py",
     "src/kazusa_ai_chatbot/conversation_progress/projection.py",
+    "src/kazusa_ai_chatbot/conversation_progress/recorder.py",
     "src/kazusa_ai_chatbot/conversation_progress/runtime.py",
     "src/kazusa_ai_chatbot/db/__init__.py",
     "src/kazusa_ai_chatbot/db/internal_monologue_residue.py",
@@ -37,6 +38,8 @@
     "src/kazusa_ai_chatbot/nodes/dialog_agent.py",
     "src/kazusa_ai_chatbot/nodes/persona_supervisor2_schema.py",
     "src/kazusa_ai_chatbot/brain_service/post_turn.py",
+    "src/kazusa_ai_chatbot/local_context_resolver/service.py",
+    "src/kazusa_ai_chatbot/local_context_resolver/stages.py",
     "src/kazusa_ai_chatbot/service.py",
     "src/scripts/export_trace_correlation_manifest.py"
   ],
@@ -277,6 +280,7 @@
       "contract": "facade public contract",
       "required_unit_tests": [
         "tests/unit/cognition_core_v2/test_facade.py::test_facade_exposes_owned_contract",
+        "tests/unit/cognition_core_v2/test_facade.py::test_branch_handler_carries_input_episode_into_recurrence_context",
         "tests/unit/cognition_core_v2/test_facade.py::test_reduction_rejects_over_cap_candidate_during_full_finalization",
         "tests/unit/cognition_core_v2/test_facade.py::test_reduction_rejects_affect_protected_terminal_during_finalization",
         "tests/unit/cognition_core_v2/test_facade.py::test_reduction_accepts_candidate_when_terminal_row_is_removable",
@@ -292,7 +296,10 @@
         "tests/test_cognition_core_v2_trace_failure_mode_matrix.py::test_captured_trace_8d0d4295_stays_within_active_event_cap",
         "tests/test_cognition_core_v2_trace_failure_mode_matrix.py::test_captured_trace_9164e957_stays_within_active_event_cap",
         "tests/test_cognition_core_v2_trace_failure_modes_live_llm.py::test_captured_trace_8d0d4295_capacity_path_live_llm",
-        "tests/test_cognition_core_v2_trace_failure_modes_live_llm.py::test_captured_trace_9164e957_capacity_path_live_llm"
+        "tests/test_cognition_core_v2_trace_failure_modes_live_llm.py::test_captured_trace_9164e957_capacity_path_live_llm",
+        "tests/test_cognition_core_v2_quoted_message_post_fix.py::test_post_fix_goal_branch_recurrence_live_llm",
+        "tests/test_cognition_core_v2_relational_carrier_failure_live_llm.py::test_live_f408_carrier_failure_without_episode_binding",
+        "tests/test_cognition_core_v2_relational_carrier_failure_live_llm.py::test_live_fdd_carrier_failure_without_episode_binding"
       ]
     },
     {
@@ -305,9 +312,16 @@
         "tests/unit/cognition_core_v2/test_goal_cognition.py::test_required_selection_rejects_fixed_role_conflict",
         "tests/unit/cognition_core_v2/test_goal_cognition.py::test_goal_prompt_labels_confidence_as_descriptor",
         "tests/unit/cognition_core_v2/test_goal_cognition.py::test_conversation_progress_evidence_preserves_temporal_provenance",
-        "tests/unit/cognition_core_v2/test_goal_cognition.py::test_goal_prompt_declares_one_primary_current_scene_objective"
+        "tests/unit/cognition_core_v2/test_goal_cognition.py::test_goal_prompt_declares_one_primary_current_scene_objective",
+        "tests/unit/cognition_core_v2/test_goal_cognition.py::test_goal_cognition_rejects_recurrence_without_episode_binding",
+        "tests/unit/cognition_core_v2/test_goal_cognition.py::test_goal_cognition_rejects_recurrence_without_current_episode_evidence",
+        "tests/unit/cognition_core_v2/test_goal_cognition.py::test_relational_carrier_replay_fixture_is_deidentified_and_complete"
       ],
-      "supplemental_tests": []
+      "supplemental_tests": [
+        "tests/test_cognition_core_v2_quoted_message_post_fix.py::test_post_fix_goal_branch_recurrence_live_llm",
+        "tests/test_cognition_core_v2_relational_carrier_failure_live_llm.py::test_live_f408_carrier_failure_without_episode_binding",
+        "tests/test_cognition_core_v2_relational_carrier_failure_live_llm.py::test_live_fdd_carrier_failure_without_episode_binding"
+      ]
     },
     {
       "source": "src/kazusa_ai_chatbot/cognition_core_v2/model_attempt_policy.py",
@@ -315,6 +329,40 @@
       "contract": "model_attempt_policy public contract",
       "required_unit_tests": [
         "tests/unit/cognition_core_v2/test_model_attempt_policy.py::test_model_attempt_policy_exposes_owned_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/conversation_progress/recorder.py",
+      "owner": "conversation-progress recorder owner",
+      "contract": "semantic recorder output with code-owned packet metadata",
+      "required_unit_tests": [
+        "tests/test_conversation_progress_recorder.py::test_recorder_prompts_keep_protocol_metadata_code_owned",
+        "tests/test_conversation_progress_recorder.py::test_recorder_attaches_schema_versions_before_validation",
+        "tests/test_conversation_progress_recorder.py::test_scene_recorder_rejects_model_authored_schema_version",
+        "tests/test_conversation_progress_recorder.py::test_event_recorder_rejects_model_authored_schema_version"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/local_context_resolver/service.py",
+      "owner": "local-context resolver service owner",
+      "contract": "node artifact metadata is bound by the active runtime boundary",
+      "required_unit_tests": [
+        "tests/test_local_context_resolver_standalone.py::test_node_artifact_binds_code_owned_metadata",
+        "tests/test_local_context_resolver_standalone.py::test_node_artifact_rejects_model_authored_metadata",
+        "tests/test_local_context_resolver_standalone.py::test_traversal_separates_model_and_source_owned_artifacts",
+        "tests/test_local_context_resolver_contracts.py::test_node_and_artifact_contracts_validate_source_owned_evidence"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/local_context_resolver/stages.py",
+      "owner": "local-context semantic node owner",
+      "contract": "node model output contains semantic artifacts without runtime metadata",
+      "required_unit_tests": [
+        "tests/test_local_context_resolver_standalone.py::test_stage_prompts_keep_source_field_and_time_boundaries",
+        "tests/test_local_context_resolver_standalone.py::test_node_artifact_binds_code_owned_metadata"
       ],
       "supplemental_tests": []
     },

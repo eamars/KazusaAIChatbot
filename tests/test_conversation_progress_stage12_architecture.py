@@ -223,14 +223,16 @@ def test_scene_and_event_prompts_have_disjoint_authority() -> None:
     scene_prompt = recorder.render_scene_recorder_prompt()
     event_prompt = recorder.render_event_recorder_prompt()
 
-    assert 'conversation_progress_scene_observation.v2' in scene_prompt
+    assert 'schema_version' not in scene_prompt
+    assert 'conversation_progress_scene_observation.v2' not in scene_prompt
     assert 'existing_events' not in scene_prompt
     assert 'new_events' not in scene_prompt
     assert 'lifecycle_change' not in scene_prompt
 
+    assert 'schema_version' not in event_prompt
     assert (
         'conversation_progress_event_observation_batch.v2'
-        in event_prompt
+        not in event_prompt
     )
     assert 'existing_events' in event_prompt
     assert 'new_events' in event_prompt
@@ -358,7 +360,6 @@ def _selection_goal_draft() -> dict[str, object]:
     """Build one authoritative selection-goal producer result."""
 
     selected_operation = {
-        **_selection_response_operation(),
         'operation': 'the current character chooses the current palm',
     }
     return {
@@ -373,7 +374,6 @@ def _selection_goal_draft() -> dict[str, object]:
         ],
         'confidence': 'high',
         'relational_willingness': {
-            'schema_version': 'relational_willingness.v2',
             'applicability': 'not_relationship_sensitive',
             'stance': 'not_applicable',
             'current_user_relationship_state': 'not_applicable',

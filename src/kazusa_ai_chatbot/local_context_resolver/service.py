@@ -448,6 +448,9 @@ async def _resolve_active_node(
         trace_summary["subagent_calls"] = int(trace_summary["subagent_calls"]) + 1
     prompt_context = dict(compact_context)
     subagent_payload = subagent_result["result"]
+    source_artifacts = subagent_payload.get("artifacts")
+    if not isinstance(source_artifacts, list):
+        source_artifacts = []
     source_records = subagent_payload.get("source_records")
     if isinstance(source_records, list) and source_records:
         prompt_context["source_context"] = _sanitized_prompt_payload(
@@ -469,6 +472,7 @@ async def _resolve_active_node(
     cacheable_response = _cacheable_active_node_response(
         response,
         active_node_id,
+        source_artifacts=source_artifacts,
     )
     trace_summary["active_node_calls"] = int(
         trace_summary["active_node_calls"]
@@ -498,12 +502,9 @@ def _merge_subagent_response(
     """Merge deterministic source evidence into an active-node response."""
 
     source_update = subagent_payload.get("node_update")
-    source_artifacts = subagent_payload.get("artifacts")
     if not isinstance(source_update, dict):
         source_update = {}
-    if not isinstance(source_artifacts, list):
-        source_artifacts = []
-    if not source_update and not source_artifacts:
+    if not source_update:
         return response
 
     merged_response = dict(response)
@@ -515,13 +516,6 @@ def _merge_subagent_response(
     _merge_source_node_update(node_update, source_update)
     merged_response["node_update"] = node_update
 
-    raw_artifacts = response.get("artifacts")
-    if isinstance(raw_artifacts, list):
-        artifacts = list(raw_artifacts)
-    else:
-        artifacts = []
-    artifacts.extend(source_artifacts)
-    merged_response["artifacts"] = artifacts
     return merged_response
 
 
@@ -595,7 +589,7 @@ def _apply_active_node_response(
     if not isinstance(raw_artifacts, list):
         raise LocalContextValidationError("artifacts: expected list")
     for raw_artifact in raw_artifacts:
-        artifact = _validated_artifact_for_node(raw_artifact, active_node_id)
+        artifact = validate_local_context_artifact(raw_artifact)
         artifacts.append(artifact)
     _refresh_trace_counts(graph, trace_summary)
 
@@ -603,6 +597,8 @@ def _apply_active_node_response(
 def _cacheable_active_node_response(
     response: dict[str, object],
     active_node_id: str,
+    *,
+    source_artifacts: list[object],
 ) -> dict[str, object]:
     """Return the normalized active-node response safe to store in Cache2."""
 
@@ -624,6 +620,9 @@ def _cacheable_active_node_response(
     normalized_artifacts: list[LocalContextArtifactV1] = []
     for raw_artifact in raw_artifacts:
         artifact = _validated_artifact_for_node(raw_artifact, active_node_id)
+        normalized_artifacts.append(artifact)
+    for source_artifact in source_artifacts:
+        artifact = validate_local_context_artifact(source_artifact)
         normalized_artifacts.append(artifact)
 
     cacheable_response = {
@@ -706,9 +705,18 @@ def _validated_artifact_for_node(
     if not isinstance(raw_artifact, dict):
         raise LocalContextValidationError("artifact: expected object")
     artifact_data = dict(raw_artifact)
+    code_owned_fields = {
+        "schema_version",
+        "producer_node_id",
+        "prompt_visible",
+    }
+    if code_owned_fields.intersection(artifact_data):
+        raise LocalContextValidationError(
+            "artifact code-owned metadata must be omitted from model output"
+        )
     artifact_data["producer_node_id"] = active_node_id
-    if "schema_version" not in artifact_data:
-        artifact_data["schema_version"] = LOCAL_CONTEXT_ARTIFACT_VERSION
+    artifact_data["schema_version"] = LOCAL_CONTEXT_ARTIFACT_VERSION
+    artifact_data["prompt_visible"] = True
     artifact_type = artifact_data.get("artifact_type")
     if isinstance(artifact_type, str):
         artifact_data["artifact_type"] = _artifact_type_from_semantic_text(

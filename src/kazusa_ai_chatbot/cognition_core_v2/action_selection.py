@@ -46,7 +46,6 @@ from kazusa_ai_chatbot.cognition_core_v2.resolver_authorization import (
 )
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     ALLOWED_PENDING_DECISIONS,
-    RESOLVER_GOAL_PROGRESS_VERSION,
     RequiredResolverEvidenceDependencyV1,
     ResolverValidationError,
     validate_required_resolver_evidence_dependency,
@@ -199,18 +198,18 @@ semantic_goal 描述具体语义目标，不写执行参数或最终措辞；rea
 只有 resolver 上下文存在活跃 pending item 且当前证据支持决定时，
 resolver_pending_resolution 才不是 null；此时恰好返回 decision 和 reason，活跃项由确定性代码绑定。
 不需要目标进度时 resolver_goal_progress 为 null；如果 current_resolver_goal_progress 为空，
-本轮必须返回 null，不要为了当前回复创建清单。如果已有目标进度，只返回发生变化的局部语义更新。
-若必须创建新的目标进度对象，必须返回完整的 schema_version、original_goal、current_focus、
-deliverables、missing_user_inputs、evidence_dependencies、attempted_paths、source_backed_facts、
-assumptions_or_inferences、blockers 和 final_response_requirements；每个 deliverables 对象必须
+本轮必须返回 null，不要为了当前回复创建清单。如果已有目标进度，只返回发生变化的局部语义更新，
+更新的字段只能是 current_focus、deliverables、
+missing_user_inputs、evidence_dependencies、attempted_paths、source_backed_facts、
+assumptions_or_inferences、blockers 或 final_response_requirements；每个 deliverables 对象必须
 包含非空 description、status 和 note，status 只能是 pending、partial、satisfied 或 blocked。
 其中 deliverables 是对象数组；missing_user_inputs、evidence_dependencies、attempted_paths、
 source_backed_facts、assumptions_or_inferences、blockers 和 final_response_requirements 都是
 字符串数组，每一项是一条简体中文语义短句。没有内容的字段返回空数组；每个数组元素直接写
 字符串，字段内部不再嵌套对象。所有新生成的语义内容使用简体中文，schema key、enum token
 和 capability name 保持协议原样。
-协议代码绑定 schema_version 和 original_goal，确定性代码从 current_resolver_goal_progress
-保留省略的已知 checklist 字段。当 current_resolver_goal_progress 是空壳（current_focus、
+协议代码从 current_resolver_goal_progress 绑定既有清单元数据，并保留省略的已知 checklist 字段。
+当 current_resolver_goal_progress 是空壳（current_focus、
 deliverables、evidence_dependencies 及其他清单字段均为空）时，resolver_goal_progress 必须
 为 null；不要仅因为选择了 resolver 就新建目标清单。已有非空进度只允许返回与当前用户请求效果
 一致的局部更新；普通检索请求不能把能力、权限或可行性核验写成 deliverable、current_focus
@@ -769,8 +768,9 @@ def _action_planning_repair_message(
                 "不能是字符串、数字或 null，其他 resolver 行不加该字段。"
             ),
             "resolver_goal_progress": (
-                "current_resolver_goal_progress 为空时必须为 null；已有目标进度时只能更新其字段，"
-                "空壳进度不得新建清单；新建时必须返回完整对象。"
+                "current_resolver_goal_progress 为空或不存在时必须为 null；"
+                "已有目标进度时只能返回语义更新字段，空壳进度不得新建清单；"
+                "协议元数据由确定性代码绑定。"
             ),
             "deliverable_fields": [
                 "description",
@@ -1230,35 +1230,25 @@ def _validate_goal_progress_choice(
     if not isinstance(value, Mapping):
         raise ValueError("resolver goal progress must be an object or null")
     if current_goal_progress is None:
-        raw_progress = dict(value)
-        raw_progress.setdefault(
-            "schema_version",
-            RESOLVER_GOAL_PROGRESS_VERSION,
+        raise ValueError(
+            "resolver goal progress requires existing current state"
         )
-        validated = validate_resolver_goal_progress(raw_progress)
-        return_value = dict(validated)
-        return return_value
 
     current = dict(validate_resolver_goal_progress(current_goal_progress))
     if _is_empty_goal_progress_shell(current):
         raise ValueError(
             "resolver goal progress cannot update an empty shell"
         )
-    allowed_fields = set(current)
+    protocol_fields = {"schema_version", "original_goal"}
+    if protocol_fields.intersection(value):
+        raise ValueError(
+            "resolver goal progress protocol fields are code-owned"
+        )
+    allowed_fields = set(current) - protocol_fields
     if not set(value).issubset(allowed_fields):
         raise ValueError("resolver goal progress update fields are invalid")
-    supplied_version = value.get("schema_version")
-    if supplied_version not in {None, RESOLVER_GOAL_PROGRESS_VERSION}:
-        raise ValueError("resolver goal progress schema_version is invalid")
-    supplied_goal = value.get("original_goal")
-    if supplied_goal not in {None, current["original_goal"]}:
-        raise ValueError("resolver goal progress cannot replace original_goal")
     raw_progress = dict(current)
-    raw_progress.update({
-        key: item
-        for key, item in value.items()
-        if key not in {"schema_version", "original_goal"}
-    })
+    raw_progress.update(value)
     validated = validate_resolver_goal_progress(raw_progress)
     return_value = dict(validated)
     return return_value

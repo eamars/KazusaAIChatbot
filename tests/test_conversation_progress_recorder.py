@@ -100,20 +100,38 @@ def _validate_event_batch(
     )
 
 
-def test_recorder_prompts_keep_scene_and_event_authority_disjoint() -> None:
-    """Keep each producer limited to one semantic responsibility."""
+def _model_scene_observation(**kwargs) -> dict:
+    """Build a scene candidate in the reduced model-facing shape."""
+
+    payload = scene_observation(**kwargs)
+    payload.pop('schema_version')
+    return payload
+
+
+def _model_event_observation_batch(**kwargs) -> dict:
+    """Build an event candidate in the reduced model-facing shape."""
+
+    payload = event_observation_batch(**kwargs)
+    payload.pop('schema_version')
+    return payload
+
+
+def test_recorder_prompts_keep_protocol_metadata_code_owned() -> None:
+    """Keep packet metadata outside the model-owned recorder output."""
 
     scene_prompt = recorder.render_scene_recorder_prompt()
     event_prompt = recorder.render_event_recorder_prompt()
 
-    assert 'conversation_progress_scene_observation.v2' in scene_prompt
+    assert 'schema_version' not in scene_prompt
+    assert 'conversation_progress_scene_observation.v2' not in scene_prompt
     assert 'event_handle' not in scene_prompt
     assert 'lifecycle_change' not in scene_prompt
     assert 'source_turn_handles' not in scene_prompt
 
+    assert 'schema_version' not in event_prompt
     assert (
         'conversation_progress_event_observation_batch.v2'
-        in event_prompt
+        not in event_prompt
     )
     assert '"observation": "unchanged"' in event_prompt
     assert '"object": ""' in event_prompt
@@ -257,22 +275,26 @@ def test_both_recorder_owners_use_the_consolidation_route_budget() -> None:
 
 
 @pytest.mark.asyncio
-async def test_scene_and_event_calls_are_dispatched_concurrently(
+async def test_recorder_attaches_schema_versions_before_validation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Prove both owners start without either waiting for the other."""
+    """Bind public packet versions after semantic recorder output."""
 
     scene_started = asyncio.Event()
     event_started = asyncio.Event()
+    scene_payload = scene_observation()
+    scene_payload.pop('schema_version')
+    event_payload = event_observation_batch(
+        new_events=[new_event_observation()],
+    )
+    event_payload.pop('schema_version')
     scene_llm = _BarrierLLM(
-        scene_observation(),
+        scene_payload,
         started=scene_started,
         peer_started=event_started,
     )
     event_llm = _BarrierLLM(
-        event_observation_batch(
-            new_events=[new_event_observation()],
-        ),
+        event_payload,
         started=event_started,
         peer_started=scene_started,
     )
@@ -291,7 +313,48 @@ async def test_scene_and_event_calls_are_dispatched_concurrently(
     assert result.event_attempt_count == 1
     assert result.scene_disposition == 'accepted'
     assert result.event_disposition == 'accepted'
+    assert result.delta['schema_version'] == (
+        'conversation_progress_recorder_delta.v2'
+    )
     assert len(result.delta['event_updates']) == 1
+
+
+@pytest.mark.asyncio
+async def test_scene_recorder_rejects_model_authored_schema_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reject scene protocol metadata before binding the public version."""
+
+    monkeypatch.setattr(
+        recorder,
+        '_scene_recorder_llm',
+        _OneResponseLLM(scene_observation()),
+    )
+
+    with pytest.raises(
+        recorder.ConversationProgressSceneOutputError,
+        match='schema_version is code-owned',
+    ):
+        await recorder._record_scene(record_input())
+
+
+@pytest.mark.asyncio
+async def test_event_recorder_rejects_model_authored_schema_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reject event protocol metadata before binding the public version."""
+
+    monkeypatch.setattr(
+        recorder,
+        '_event_recorder_llm',
+        _OneResponseLLM(event_observation_batch()),
+    )
+
+    with pytest.raises(
+        recorder.ConversationProgressEventOutputError,
+        match='schema_version is code-owned',
+    ):
+        await recorder._record_events(record_input())
 
 
 @pytest.mark.asyncio
@@ -305,8 +368,8 @@ async def test_invalid_event_output_fails_closed_after_both_calls(
             event(event_id='prior-event'),
         ]),
     )
-    scene_llm = _OneResponseLLM(scene_observation())
-    event_llm = _OneResponseLLM(event_observation_batch())
+    scene_llm = _OneResponseLLM(_model_scene_observation())
+    event_llm = _OneResponseLLM(_model_event_observation_batch())
     monkeypatch.setattr(recorder, '_scene_recorder_llm', scene_llm)
     monkeypatch.setattr(recorder, '_event_recorder_llm', event_llm)
 
@@ -335,7 +398,7 @@ async def test_invalid_scene_preserves_prior_scene_and_writes_valid_events(
     prior = packet(events=[event(event_id='prior-event')])
     submitted = record_input(prior_packet=prior)
     scene_llm = _OneResponseLLM({'invalid': True})
-    event_llm = _OneResponseLLM(event_observation_batch(
+    event_llm = _OneResponseLLM(_model_event_observation_batch(
         existing_events=[unchanged_event_observation()],
     ))
     monkeypatch.setattr(recorder, '_scene_recorder_llm', scene_llm)
@@ -362,7 +425,7 @@ async def test_scene_context_limit_counts_only_the_event_provider_call(
         'MAX_SCENE_RECORDER_HUMAN_PAYLOAD_CHARS',
         1,
     )
-    event_llm = _OneResponseLLM(event_observation_batch(
+    event_llm = _OneResponseLLM(_model_event_observation_batch(
         new_events=[new_event_observation()],
     ))
     monkeypatch.setattr(recorder, '_event_recorder_llm', event_llm)
@@ -387,7 +450,7 @@ async def test_event_context_limit_retains_concurrent_scene_telemetry(
         'MAX_RECORDER_HUMAN_PAYLOAD_CHARS',
         1,
     )
-    scene_llm = _OneResponseLLM(scene_observation())
+    scene_llm = _OneResponseLLM(_model_scene_observation())
     monkeypatch.setattr(recorder, '_scene_recorder_llm', scene_llm)
 
     with pytest.raises(
@@ -411,7 +474,7 @@ async def test_event_provider_failure_has_no_semantic_repair_call(
 ) -> None:
     """Translate one provider failure into one fail-closed disposition."""
 
-    scene_llm = _OneResponseLLM(scene_observation())
+    scene_llm = _OneResponseLLM(_model_scene_observation())
     event_llm = _OneResponseLLM(RuntimeError('provider unavailable'))
     monkeypatch.setattr(recorder, '_scene_recorder_llm', scene_llm)
     monkeypatch.setattr(recorder, '_event_recorder_llm', event_llm)
@@ -432,9 +495,12 @@ async def test_canonical_transport_cleanup_does_not_add_model_calls(
 ) -> None:
     """Accept fenced JSON through deterministic canonical parsing."""
 
-    scene_payload = json.dumps(scene_observation(), ensure_ascii=False)
+    scene_payload = json.dumps(
+        _model_scene_observation(),
+        ensure_ascii=False,
+    )
     event_payload = json.dumps(
-        event_observation_batch(
+        _model_event_observation_batch(
             new_events=[new_event_observation()],
         ),
         ensure_ascii=False,
@@ -459,8 +525,8 @@ async def test_recoverable_event_bound_is_clamped_and_reported(
 
     candidate = new_event_observation()
     candidate['outcome'] = 'x' * (MAX_EVENT_OUTCOME_CHARS + 25)
-    scene_llm = _OneResponseLLM(scene_observation())
-    event_llm = _OneResponseLLM(event_observation_batch(
+    scene_llm = _OneResponseLLM(_model_scene_observation())
+    event_llm = _OneResponseLLM(_model_event_observation_batch(
         new_events=[candidate],
     ))
     monkeypatch.setattr(recorder, '_scene_recorder_llm', scene_llm)

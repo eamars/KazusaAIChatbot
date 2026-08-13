@@ -159,13 +159,30 @@ async def test_live_dialog_generator_deepseek_returns_final_dialog_schema() -> N
             'vibe_check': '平稳务实',
             'relational_dynamic': '没有边界冲突的普通对话',
         },
+        {
+            'case_id': 'upstream_english_surface',
+            'rhetorical_strategy': 'Answer the practical question directly.',
+            'linguistic_style': 'concise, natural English with a calm tone.',
+            'content_plan': {
+                'visible_goal': 'Acknowledge the proposed sorting method.',
+                'semantic_content': (
+                    'Sort the chargers, video outputs, and undecided uses '
+                    'into separate groups first.'
+                ),
+                'rendering': '20-40 words in natural English.',
+            },
+            'emotional_intensity': 'low',
+            'vibe_check': 'practical and calm',
+            'relational_dynamic': 'ordinary cooperative conversation',
+        },
     ]
     observations = []
 
     for case in cases:
         human_message, recent_messages = _dialog_payload(character_profile, case)
         response = await dialog_module._dialog_generator_llm.ainvoke(
-            [system_prompt, human_message] + recent_messages
+            [system_prompt, human_message] + recent_messages,
+            config=dialog_module._dialog_generator_llm_config,
         )
         parsed = parse_llm_json_output(response.content)
         final_dialog = parsed.get('final_dialog')

@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import json
 from importlib import import_module
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    BranchDefinition,
+    CognitionExecutionError,
+)
 from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
     CONTINUITY_AUTHORITY_INSTRUCTIONS,
     GOAL_COGNITION_PROMPT,
@@ -14,6 +21,9 @@ from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
     ORDINARY_RECURRENCE_SELECTION_GOAL_COGNITION_PROMPT,
     _build_goal_output_contract,
     _conversation_progress_evidence,
+    _materialize_recurrence_relational_willingness,
+    run_goal_cognition,
+    validate_goal_bid_draft,
     validate_selection_goal_draft,
 )
 from kazusa_ai_chatbot.cognition_episode import (
@@ -24,6 +34,72 @@ from kazusa_ai_chatbot.cognition_episode import (
 
 MODULE_PATH = "kazusa_ai_chatbot.cognition_core_v2.goal_cognition"
 EXPECTED_SYMBOLS = ["run_goal_cognition"]
+_REPLAY_FIXTURE_PATH = (
+    Path(__file__).resolve().parents[3]
+    / "tests"
+    / "fixtures"
+    / "cognition_core_v2_relational_carrier_failure_cases.json"
+)
+
+
+def _recurrence_carrier() -> dict[str, object]:
+    """Build one valid carrier for deterministic recurrence boundary tests."""
+
+    return {
+        "schema_version": "current_turn_relational_willingness.v2",
+        "episode_id": "unit-recurrence-episode",
+        "branch_id": "ordinary_response",
+        "decision": {
+            "schema_version": "relational_willingness.v2",
+            "applicability": "not_relationship_sensitive",
+            "stance": "not_applicable",
+            "current_user_relationship_state": "not_applicable",
+            "reason": "The current episode is not relationship sensitive.",
+            "evidence_handles": ["e1"],
+        },
+    }
+
+
+def _current_episode_evidence() -> dict[str, object]:
+    """Build one minimal current-episode row for recurrence validation."""
+
+    return {
+        "evidence_handle": "e1",
+        "evidence_ref": {
+            "source_kind": "episode",
+            "source_id": "episode:unit-recurrence-episode",
+            "occurred_at": "2026-08-13T00:00:00Z",
+            "semantic_summary": "Current episode evidence.",
+        },
+        "semantic_text": "Current episode evidence.",
+        "visible_to": ["q:event_agency"],
+        "authority": "current_event",
+    }
+
+
+class _UnexpectedLLM:
+    """Fail if a deterministic recurrence precondition reaches the model."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def ainvoke(self, *args: object, **kwargs: object) -> object:
+        """Record an unexpected call and fail the owning unit test."""
+
+        del args, kwargs
+        self.calls += 1
+        raise AssertionError("recurrence precondition reached the LLM")
+
+
+def _goal_services(llm: object) -> SimpleNamespace:
+    """Build the minimal service surface used before the model boundary."""
+
+    config = SimpleNamespace(route_name="unit.goal_cognition")
+    return SimpleNamespace(
+        llm=llm,
+        goal_ordinary_response_config=config,
+        goal_active_branch_config=config,
+    )
 
 
 def _input_operation() -> dict[str, object]:
@@ -75,7 +151,6 @@ def test_required_selection_emits_selected_response_operation() -> None:
     """Selection validation returns the operation chosen by cognition."""
 
     selected_operation = {
-        **_input_operation(),
         "operation": "the user gives the selected reward to the character",
         "embedded_actor_role": CURRENT_USER_ROLE,
         "embedded_target_role": CURRENT_CHARACTER_ROLE,
@@ -92,7 +167,10 @@ def test_required_selection_emits_selected_response_operation() -> None:
         maximum_evidence_handles=4,
     )
 
-    assert validated["selected_response_operation"] == selected_operation
+    assert validated["selected_response_operation"] == {
+        **_input_operation(),
+        **selected_operation,
+    }
 
 
 def test_required_selection_rejects_fixed_role_conflict() -> None:
@@ -252,6 +330,15 @@ def test_goal_output_contract_keeps_existing_schema() -> None:
         require_relational_willingness=False,
         maximum_evidence_handles=9,
     )
+    relational_contract = _build_goal_output_contract(
+        evidence_handles={'e1'},
+        episode_evidence_handles={'e1'},
+        required_evidence_handles=set(),
+        role_bindings={},
+        selection_required=False,
+        require_relational_willingness=True,
+        maximum_evidence_handles=9,
+    )
 
     expected_fields = (
         {
@@ -287,3 +374,156 @@ def test_goal_output_contract_keeps_existing_schema() -> None:
             'maximum_items': 8,
             'item_maximum_chars': 240,
         }
+    relational_output_contract = relational_contract[
+        'relational_willingness_contract'
+    ]
+    assert 'schema_version' not in relational_output_contract
+    assert 'schema_version' not in relational_output_contract['required_fields']
+
+
+@pytest.mark.asyncio
+async def test_goal_cognition_rejects_recurrence_without_episode_binding() -> None:
+    """Reject a carrier before the recurrence model boundary."""
+
+    llm = _UnexpectedLLM()
+    with pytest.raises(CognitionExecutionError) as error_info:
+        await run_goal_cognition(
+            BranchDefinition(
+                branch_id='ordinary_response',
+                dependencies=(),
+                action_tendencies=('speak',),
+                goal_kind='ordinary_response',
+            ),
+            {
+                'scope': 'user',
+                'kind': 'goal',
+                'entity_id': 'goal:unit-recurrence',
+            },
+            {},
+            [_current_episode_evidence()],
+            _goal_services(llm),
+            current_turn_relational_willingness=_recurrence_carrier(),
+        )
+
+    failure = error_info.value
+    assert failure.error_code == 'current_turn_relational_carrier_invalid'
+    assert failure.branch_id == 'ordinary_response'
+    assert failure.stage == 'goal_cognition'
+    assert failure.attempt_count == 0
+    assert failure.safe_checkpoint == 'pre_state_commit'
+    assert failure.retryable is False
+    assert llm.calls == 0
+
+
+def test_selection_goal_rejects_model_authored_relational_schema() -> None:
+    """Reject protocol metadata before binding the public relational shape."""
+
+    draft = _selection_draft({
+        "operation": "the user gives the selected reward to the character",
+    })
+    draft["relational_willingness"] = {
+        "schema_version": "relational_willingness.v2",
+        "applicability": "not_relationship_sensitive",
+        "stance": "not_applicable",
+        "current_user_relationship_state": "not_applicable",
+        "reason": "the request is not relationship sensitive",
+        "evidence_handles": ["e1"],
+    }
+
+    with pytest.raises(ValueError, match="schema_version is code-owned"):
+        validate_selection_goal_draft(
+            draft,
+            evidence_handles={"e1"},
+            role_handles=set(),
+            required_evidence_handles={"e1"},
+            required_operations=[{
+                "evidence_handle": "e1",
+                "response_operation": _input_operation(),
+            }],
+            episode_handles={"e1"},
+            require_relational_willingness=True,
+            maximum_evidence_handles=4,
+        )
+
+
+def test_goal_bid_rejects_model_authored_relational_schema() -> None:
+    """Reject protocol metadata on the ordinary goal path as well."""
+
+    draft = {
+        "intention": "answer the current request",
+        "desired_outcome": "the user receives a grounded answer",
+        "concrete_detail": "use the current evidence",
+        "reason": "the request is answerable",
+        "private_monologue": "answer from the current context",
+        "target_role_handles": [],
+        "evidence_handles": ["e1"],
+        "expected_consequences": ["the answer addresses the request"],
+        "confidence": "high",
+        "relational_willingness": {
+            "schema_version": "relational_willingness.v2",
+            "applicability": "not_relationship_sensitive",
+            "stance": "not_applicable",
+            "current_user_relationship_state": "not_applicable",
+            "reason": "the request is not relationship sensitive",
+            "evidence_handles": ["e1"],
+        },
+    }
+
+    with pytest.raises(ValueError, match="schema_version is code-owned"):
+        validate_goal_bid_draft(
+            draft,
+            evidence_handles={"e1"},
+            role_handles=set(),
+            require_relational_willingness=True,
+            episode_handles={"e1"},
+        )
+
+
+def test_goal_cognition_rejects_recurrence_without_current_episode_evidence(
+) -> None:
+    """Reject a valid carrier when no current-episode handle is available."""
+
+    with pytest.raises(CognitionExecutionError) as error_info:
+        _materialize_recurrence_relational_willingness(
+            _recurrence_carrier(),
+            set(),
+        )
+
+    failure = error_info.value
+    assert failure.error_code == 'current_turn_relational_carrier_invalid'
+    assert failure.branch_id == 'ordinary_response'
+    assert failure.stage == 'goal_cognition'
+    assert failure.attempt_count == 0
+    assert failure.safe_checkpoint == 'pre_state_commit'
+    assert failure.retryable is False
+
+
+def test_relational_carrier_replay_fixture_is_deidentified_and_complete() -> None:
+    """Keep the checked-in carrier replay independent of protected identities."""
+
+    fixture = json.loads(
+        _REPLAY_FIXTURE_PATH.read_text(encoding='utf-8')
+    )
+    assert fixture['fixture_kind'] == 'deidentified_contract_replay'
+    assert fixture['observed_failure'] == {
+        'error_code': 'current_turn_relational_carrier_invalid',
+        'stage_name': 'goal_cognition',
+        'branch_id': 'ordinary_response',
+        'phase': 'preliminary',
+        'ordinary_goal_model_calls_during_failure': 0,
+        'current_episode_evidence_handle': 'e1',
+    }
+    cases = fixture['cases']
+    assert len(cases) == 2
+    for case in cases:
+        assert case['source_trace_label'].startswith('trace_case_')
+        assert 'source_trace_id' not in case
+        assert case['resolver_cycle_index'] == 1
+        assert case['evidence'] == [{
+            'evidence_handle': 'e1',
+            'source_kind': 'episode',
+        }]
+        assert case['failure_variant'] == 'missing_episode_binding'
+        assert case['carrier']['episode_id'] == case['episode_id']
+        assert case['carrier']['branch_id'] == 'ordinary_response'
+        assert case['carrier']['decision']['evidence_handles'] == ['e1']

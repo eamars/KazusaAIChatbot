@@ -20,6 +20,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     RELATIONAL_CURRENT_USER_RELATIONSHIP_STATE_VALUES,
     RELATIONAL_STANCE_VALUES,
     RELATIONAL_WILLINGNESS_MAX_REASON_CHARS,
+    RELATIONAL_WILLINGNESS_SCHEMA_VERSION,
     ActionBidV2,
     BranchDefinition,
     CognitionCoreServicesV2,
@@ -120,7 +121,7 @@ GOAL_COGNITION_PROMPT = '''你是一个独立的目标认知分支。请为当�
 本阶段只作目标判断，不选择执行路由或能力，也不写最终对话。自由文本使用简体中文；普通叙述使用“当前角色”和“当前用户”，用户引文、专有名词、代码、URL、schema 或 enum token 保持原样。private_monologue 使用当前角色第一人称，reason 解释候选依据；内部句柄、结构术语和运行元数据不得进入自由文本或当前回合发言。
 
 # 输出与最后检查
-只返回一个 JSON 对象，字段恰好是 intention、desired_outcome、concrete_detail、reason、private_monologue、target_role_handles、evidence_handles、expected_consequences 和 confidence；当 `branch.goal_kind` 为 `ordinary_response` 时还含 `relational_willingness`。其字段恰好是 schema_version（`relational_willingness.v2`）、applicability（`relationship_sensitive` 或 `not_relationship_sensitive`）、stance（reject、deflect、negotiate、conditional_accept、accept 或 not_applicable）、current_user_relationship_state（not_applicable、unestablished、developing_or_uncertain 或 established）、reason（简体中文，≤300字）和 evidence_handles（一到四个已提供 handle，至少一个来自当前 episode）。
+只返回一个 JSON 对象，字段恰好是 intention、desired_outcome、concrete_detail、reason、private_monologue、target_role_handles、evidence_handles、expected_consequences 和 confidence；当 `branch.goal_kind` 为 `ordinary_response` 时还含 `relational_willingness`。其字段恰好是 applicability（`relationship_sensitive` 或 `not_relationship_sensitive`）、stance（reject、deflect、negotiate、conditional_accept、accept 或 not_applicable）、current_user_relationship_state（not_applicable、unestablished、developing_or_uncertain 或 established）、reason（简体中文，≤300字）和 evidence_handles（一到四个已提供 handle，至少一个来自当前 episode）。
 叙述字段与 confidence 为字符串；confidence 是有界的置信度描述，仅作提示语境使用，不是 score，不能用于排序、阈值、授权或发言门控。handle 字段为字符串数组，expected_consequences 是非空字符串数组；`evidence_handles` 最多九项，`target_role_handles` 最多八项。每个元素必须逐个等于一个已提供的 handle，不得使用范围、通配符、组合写法或 source ID。确认角色、行动者、对象和受益者方向没有反转；确认缺失证据时保留“取得所需证据后回应”；确认请求只形成言语立场，不写执行细节，不输出 target_roles、role_handles、semantic_text、数值 confidence、route、action/resolver handle 或其他字段。
 '''
 
@@ -139,9 +140,9 @@ ORDINARY_RECURRENCE_SELECTION_GOAL_COGNITION_PROMPT = '''你是普通回应的�
 
 保持 required_selection_operations 的行动者、对象、受益者和选择拥有者方向。当前 episode 比旧关系、共享记忆和角色习惯更权威，缺失事实时不得假装完成。
 
-`selected_response_operation` 是必填的完整对象；它的 operation 必须具体写出 selection 对应的动作和对象，不得只复述外层选择包装。四个角色字段是 `response_owner_role`、`selection_owner_role`、`embedded_actor_role` 和 `embedded_target_role`，值只能使用中文角色枚举 `当前角色`、`当前用户`、`其他参与者` 或 `无`；`selection_required` 必须是 JSON 布尔值并与输入保持一致；`current_user`、`self` 和 `pN` 只属于 role handle。已知角色不得被改写；输入为“无”的行动者或对象才可由本次选择补全；无嵌套动作时两个端点都使用“无”。
+`selected_response_operation` 只包含 operation 和可选补全的未决端点字段；它的 operation 必须具体写出 selection 对应的动作和对象，不得只复述外层选择包装。`response_owner_role`、`selection_owner_role`、`selection_required` 和已知的行动者/对象角色由确定性代码从 required operation 绑定，模型不得输出这些字段；只有输入行动者或对象端点为“无”且本次选择补全该端点时，才输出对应的 `embedded_actor_role` 或 `embedded_target_role`，值只能使用中文角色枚举 `当前角色`、`当前用户`、`其他参与者` 或 `无`；`current_user`、`self` 和 `pN` 只属于 role handle。
 
-只返回一个严格 JSON 对象，字段必须恰好是 selection、selected_response_operation、reason、private_monologue、target_role_handles、evidence_handles、expected_consequences 和 confidence。selection 必须直接写出当前角色的具体选择、拒绝、协商结果或条件；selected_response_operation 必须完整描述本次具体选择，复制 required operation 中已知的回应所有者、选择所有者、selection_required、行动者和对象角色；输入为“无”的行动者或对象才可由本次选择补全，无嵌套动作时两个端点都使用“无”。叙述字段和 confidence 为字符串；confidence 是有界的置信度描述，仅作提示语境使用，不是 score，不能用于排序或阈值。handle 字段为字符串数组，expected_consequences 是非空字符串数组；每个 handle 必须逐个等于输入中提供的值，不得使用 source ID、范围、通配符或其他字段。自由文本使用简体中文。
+只返回一个严格 JSON 对象，字段必须恰好是 selection、selected_response_operation、reason、private_monologue、target_role_handles、evidence_handles、expected_consequences 和 confidence。selection 必须直接写出当前角色的具体选择、拒绝、协商结果或条件；selected_response_operation 只输出 operation 和本次补全的未决端点字段，已知角色、选择所有权和 selection_required 由确定性代码从 required operation 绑定；输入为“无”的行动者或对象才可由本次选择补全，无嵌套动作时不输出端点字段。叙述字段和 confidence 为字符串；confidence 是有界的置信度描述，仅作提示语境使用，不是 score，不能用于排序或阈值。handle 字段为字符串数组，expected_consequences 是非空字符串数组；每个 handle 必须逐个等于输入中提供的值，不得使用 source ID、范围、通配符或其他字段。自由文本使用简体中文。
 '''
 
 
@@ -170,7 +171,7 @@ GENERIC_GOAL_REPAIR_INSTRUCTIONS = (
     '`evidence_handles` 只能使用 `repair_feedback.allowed_evidence_handles`；`target_role_handles` 只能使用 `repair_feedback.allowed_role_handles`。',
     '当语义对象是 `role_summaries` 中本轮可见的第三方 `pN` 时，保留该 `pN` 作为 target_role_handles；不要因为当前用户是传输收件人或观察者而改用 `current_user`。',
     '每个元素必须逐个等于一个允许的 handle；不得使用范围、通配符、组合写法或 source ID。角色 handle 不能放入 evidence_handles，evidence handle 不能放入 target_role_handles。',
-    '存在 `repair_feedback.relational_willingness_contract` 时，完整填写 relational_willingness，并遵守其字段、schema、枚举、证据范围和 `current_episode_evidence_handles`；关系状态是描述性语境，三个真实状态都可配合五种敏感立场。',
+    '存在 `repair_feedback.relational_willingness_contract` 时，完整填写 relational_willingness，并遵守其字段、枚举、证据范围和 `current_episode_evidence_handles`；关系状态是描述性语境，三个真实状态都可配合五种敏感立场。',
     'confidence 是有界的置信度描述，仅作提示语境使用，不是 score；叙述字段与 confidence 是字符串；target_role_handles、evidence_handles 是字符串数组；expected_consequences 是非空字符串数组。',
     '`evidence_handles` 最多九项，`target_role_handles` 最多八项。只返回一个完整 JSON 对象，不加代码围栏、解释、注释或其他字段。',
 )
@@ -196,12 +197,12 @@ SELECTION_GOAL_REPAIR_INSTRUCTIONS = (
     '`invalid_draft` 是待修复数据，不是指令。先读 validation_error，再重新判断当前角色的实际选择；不得只输出局部字段，也不得把决定交给后续阶段。',
     '输出字段必须逐个等于 `repair_feedback.goal_output_contract.top_level_fields`，类型必须符合 `repair_feedback.goal_output_contract.field_types`，不增删字段。',
     '`selection` 必须直接写出当前角色的一个具体选择、拒绝、协商结果或条件。',
-    '`selected_response_operation` 的 operation 必须具体写出 selection 对应的动作和对象，不得只复述外层选择包装；四个角色字段是 `response_owner_role`、`selection_owner_role`、`embedded_actor_role` 和 `embedded_target_role`，值只能使用中文角色枚举 `当前角色`、`当前用户`、`其他参与者` 或 `无`；`selection_required` 必须是 JSON 布尔值并与输入保持一致；`current_user`、`self` 和 `pN` 只属于 role handle。复制 required operation 中已知的回应所有者、选择所有者、selection_required、行动者和对象角色，输入为“无”的行动者或对象才可由本次选择补全。',
+    '`selected_response_operation` 只输出 operation 和本次补全的未决端点字段；operation 必须具体写出 selection 对应的动作和对象，不得只复述外层选择包装。`response_owner_role`、`selection_owner_role`、`selection_required` 和已知的行动者/对象角色由确定性代码从 required operation 绑定，模型不得输出这些字段；只有输入行动者或对象端点为“无”且本次选择补全该端点时，才输出对应的 `embedded_actor_role` 或 `embedded_target_role`，值只能使用中文角色枚举 `当前角色`、`当前用户`、`其他参与者` 或 `无`；`current_user`、`self` 和 `pN` 只属于 role handle。',
     '`evidence_handles` 只能使用 `repair_feedback.allowed_evidence_handles`，并覆盖 `repair_feedback.required_evidence_handles`；`target_role_handles` 只能使用 `repair_feedback.allowed_role_handles`。',
     '当语义对象是 `role_summaries` 中本轮可见的第三方 `pN` 时，保留该 `pN` 作为 target_role_handles；不要因为当前用户是传输收件人或观察者而改用 `current_user`。',
     '角色 handle 不能放入 evidence_handles，evidence handle 不能放入 target_role_handles；不得使用范围、通配符、组合写法或 source ID。',
     '`repair_feedback.role_handles_forbidden_in_evidence_handles` 中的 handle 绝不能写入 `evidence_handles`。',
-    '存在 `repair_feedback.relational_willingness_contract` 时，完整遵守其字段、schema、枚举、证据范围和 `repair_feedback.current_episode_evidence_handles`；关系状态是描述性语境，三个真实状态都可配合五种敏感立场。',
+    '存在 `repair_feedback.relational_willingness_contract` 时，完整遵守其字段、枚举、证据范围和 `repair_feedback.current_episode_evidence_handles`；关系状态是描述性语境，三个真实状态都可配合五种敏感立场。',
     'confidence 是有界的置信度描述，仅作提示语境使用，不是 score；叙述字段和 confidence 是字符串；target_role_handles、evidence_handles 是字符串数组；expected_consequences 是非空字符串数组。',
     '只返回一个严格 JSON 对象，不加代码围栏、解释、注释或其他字段；关系判断只在反馈提供 relational_willingness_contract 时输出。',
 )
@@ -218,13 +219,13 @@ REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在选择权属于当前角色时�
 5. 每次都输出完整的 `relational_willingness`。先判断请求是否 `relationship_sensitive`；敏感时把 `unestablished`、`developing_or_uncertain` 或 `established` 作为描述性关系语境，并结合 episode、历史、身份、情绪和动机选择立场。三种真实关系状态均可配合 `reject`、`deflect`、`negotiate`、`conditional_accept` 或 `accept`；不涉及关系敏感性的请求配 `not_relationship_sensitive/not_applicable`。`provenance_role` 中，`current_episode` 是当前事实，`current_user_history_only` 只解释当前用户历史，`character_or_world_context_only` 只提供角色相容性与世界知识，`contextual_fact_only` 只是一般语境。保持角色对证据的自主权衡。
 
 # 输出与最后检查
-只返回一个严格 JSON 对象，字段恰好是 `selection`、`selected_response_operation`、`reason`、`private_monologue`、`target_role_handles`、`evidence_handles`、`expected_consequences`、`confidence` 和 `relational_willingness`。`selection` 直接写出当前角色的具体选择、拒绝、协商结果或条件；`selected_response_operation.operation` 具体写出该选择的动作和对象，不复述外层包装，并复制 required operation 的已知方向。四个角色字段（`response_owner_role`、`selection_owner_role`、`embedded_actor_role`、`embedded_target_role`）只能取 `当前角色`、`当前用户`、`其他参与者`、`无`；`selection_required` 是与输入相同的 JSON 布尔值；`current_user`、`self`、`pN` 只能作 handle。输入为“无”的端点才可补全；其余字段按上述类型输出。
-`relational_willingness` 的字段恰好是 schema_version（`relational_willingness.v2`）、applicability、stance、current_user_relationship_state、reason 和 evidence_handles；reason 使用简体中文且不超过 300 字，evidence_handles 是一到四个已提供 handle，至少一个来自当前 episode。输出前逐项检查：selection 和每个 expected consequence 都不包含排除清单中的事项或其同义表达；evidence_handles 引用直接说明这些事项已经完成、拒绝或被替代的终态行。确认角色、行动者和对象方向正确，完整引用每个 required operation，只保留与选择有关的证据。confidence 是有界的置信度描述，仅作提示语境使用，不是 score，不能用于排序、阈值、授权或发言门控。
+只返回一个严格 JSON 对象，字段恰好是 `selection`、`selected_response_operation`、`reason`、`private_monologue`、`target_role_handles`、`evidence_handles`、`expected_consequences`、`confidence` 和 `relational_willingness`。`selection` 直接写出当前角色的具体选择、拒绝、协商结果或条件；`selected_response_operation` 只输出 `operation` 和本次补全的未决端点字段；`response_owner_role`、`selection_owner_role`、`selection_required` 和已知行动者/对象角色由确定性代码从 required operation 绑定，模型不得输出这些字段。输入为“无”的端点才可由本次选择补全并输出对应的 `embedded_actor_role` 或 `embedded_target_role`；其余字段按上述类型输出。
+`relational_willingness` 的字段恰好是 applicability、stance、current_user_relationship_state、reason 和 evidence_handles；reason 使用简体中文且不超过 300 字，evidence_handles 是一到四个已提供 handle，至少一个来自当前 episode。输出前逐项检查：selection 和每个 expected consequence 都不包含排除清单中的事项或其同义表达；evidence_handles 引用直接说明这些事项已经完成、拒绝或被替代的终态行。确认角色、行动者和对象方向正确，完整引用每个 required operation，只保留与选择有关的证据。confidence 是有界的置信度描述，仅作提示语境使用，不是 score，不能用于排序、阈值、授权或发言门控。
 '''
 
 _ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在选择权属于当前角色时，直接产出角色的一个具体选择、拒绝、协商结果或条件。这是目标认知，不是候选检查；本阶段不选择执行能力或路由，也不写最终对话。
 
-`selected_response_operation` 是必填的完整对象；它的 operation 必须具体写出 selection 对应的动作和对象，不得只复述外层选择包装。四个角色字段是 `response_owner_role`、`selection_owner_role`、`embedded_actor_role` 和 `embedded_target_role`，值只能使用中文角色枚举 `当前角色`、`当前用户`、`其他参与者` 或 `无`；`selection_required` 必须是 JSON 布尔值并与输入保持一致；`current_user`、`self` 和 `pN` 只属于 role handle。已知角色不得被改写；输入为“无”的行动者或对象才可由本次选择补全；无嵌套动作时两个端点都使用“无”。
+`selected_response_operation` 只包含 operation 和可选补全的未决端点字段；它的 operation 必须具体写出 selection 对应的动作和对象，不得只复述外层选择包装。`response_owner_role`、`selection_owner_role`、`selection_required` 和已知的行动者/对象角色由确定性代码从 required operation 绑定，模型不得输出这些字段；只有输入行动者或对象端点为“无”且本次选择补全该端点时，才输出对应的 `embedded_actor_role` 或 `embedded_target_role`，值只能使用中文角色枚举 `当前角色`、`当前用户`、`其他参与者` 或 `无`；`current_user`、`self` 和 `pN` 只属于 role handle。已知角色不得被改写；输入为“无”的行动者或对象才可由本次选择补全；无嵌套动作时不输出端点字段。
 
 # 判断顺序
 1. `required_selection_operations` 是权威选择权事实。保持行动者、对象、受益者、选择拥有者和回应拥有者方向，并在 `evidence_handles` 引用其中每个 `evidence_handle`。
@@ -235,7 +236,7 @@ _ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在选择权属于当前角
 5. 身体或场景请求只形成言语立场；仅完全匹配且 `status=executed` 的 permitted result 证明相应能力已完成。`selection` 必须直接写出一个具体选择，不把决定交给其他角色或后续阶段；`selection`、`reason` 和 `private_monologue` 使用简体中文，输入引文、专有名词、代码和 URL 保持原样。
 
 # 输出与最后检查
-只返回一个严格 JSON 对象，字段恰好是 `selection`、`selected_response_operation`、`reason`、`private_monologue`、`target_role_handles`、`evidence_handles`、`expected_consequences` 和 `confidence`。`selection` 必须直接写出当前角色的一个选择、拒绝、协商结果或条件；`selected_response_operation` 的 operation 必须具体写出 selection 对应的动作和对象，不得只复述外层选择包装；复制 required operation 中已知的回应所有者、选择所有者、selection_required、行动者和对象角色。四个角色字段是 `response_owner_role`、`selection_owner_role`、`embedded_actor_role` 和 `embedded_target_role`，值只能使用中文角色枚举 `当前角色`、`当前用户`、`其他参与者` 或 `无`；`selection_required` 必须是 JSON 布尔值并与输入保持一致；`current_user`、`self` 和 `pN` 只属于 role handle。已知角色不得被改写；输入为“无”的行动者或对象才可由本次选择补全，无嵌套动作时两个端点都使用“无”。叙述字段和 confidence 是字符串，target_role_handles、evidence_handles 是字符串数组，expected_consequences 是非空字符串数组。confidence 是有界的置信度描述，仅作提示语境使用，不是 score，不能用于排序、阈值、授权或发言门控。输出前逐项检查：selection 和每个 expected consequence 都不包含排除清单中的事项或其同义表达；evidence_handles 引用直接说明这些事项已经完成、拒绝或被替代的终态行。每个 handle 必须逐个等于已提供的值；只返回 JSON，不加代码围栏、解释、注释或额外字段。
+只返回一个严格 JSON 对象，字段恰好是 `selection`、`selected_response_operation`、`reason`、`private_monologue`、`target_role_handles`、`evidence_handles`、`expected_consequences` 和 `confidence`。`selection` 必须直接写出当前角色的一个选择、拒绝、协商结果或条件；`selected_response_operation` 只输出 `operation` 和本次补全的未决端点字段；`response_owner_role`、`selection_owner_role`、`selection_required` 和已知行动者/对象角色由确定性代码从 required operation 绑定，模型不得输出这些字段。输入为“无”的端点才可由本次选择补全并输出对应的 `embedded_actor_role` 或 `embedded_target_role`，值只能使用中文角色枚举 `当前角色`、`当前用户`、`其他参与者` 或 `无`；`current_user`、`self` 和 `pN` 只属于 role handle。叙述字段和 confidence 是字符串，target_role_handles、evidence_handles 是字符串数组，expected_consequences 是非空字符串数组。confidence 是有界的置信度描述，仅作提示语境使用，不是 score，不能用于排序、阈值、授权或发言门控。输出前逐项检查：selection 和每个 expected consequence 都不包含排除清单中的事项或其同义表达；evidence_handles 引用直接说明这些事项已经完成、拒绝或被替代的终态行。每个 handle 必须逐个等于已提供的值；只返回 JSON，不加代码围栏、解释、注释或额外字段。
 '''
 
 
@@ -356,9 +357,10 @@ def _build_goal_output_contract(
     if selection_required:
         contract["selected_response_operation_fields"] = [
             "operation",
-            "response_owner_role",
-            "selection_owner_role",
-            "selection_required",
+            "embedded_actor_role",
+            "embedded_target_role",
+        ]
+        contract["selected_response_operation_optional_fields"] = [
             "embedded_actor_role",
             "embedded_target_role",
         ]
@@ -366,9 +368,6 @@ def _build_goal_output_contract(
             "operation": (
                 f"non_empty_string_max_{MAX_RESPONSE_OPERATION_CHARS}"
             ),
-            "response_owner_role": "one_of_response_operation_roles",
-            "selection_owner_role": "one_of_response_operation_roles",
-            "selection_required": "boolean",
             "embedded_actor_role": "one_of_response_operation_roles",
             "embedded_target_role": "one_of_response_operation_roles",
         }
@@ -381,7 +380,12 @@ def _build_goal_output_contract(
         contract["selection_required"] = True
         contract["selected_response_operation_rule"] = (
             "emit one concrete operation for the selected response; do not "
-            "repeat the outer selection wrapper"
+            "repeat the outer selection wrapper; response_owner_role, "
+            "selection_owner_role, selection_required, and known embedded "
+            "roles are bound by deterministic code from the required "
+            "operation; emit embedded_actor_role or embedded_target_role "
+            "only when the required operation leaves that endpoint as 无 "
+            "and this selection resolves it"
         )
     if require_relational_willingness or recurrence_relational_willingness:
         sensitive_stance_order = [
@@ -402,14 +406,12 @@ def _build_goal_output_contract(
                 else "validated_carry_forward"
             ),
             "required_fields": [
-                "schema_version",
                 "applicability",
                 "stance",
                 "current_user_relationship_state",
                 "reason",
                 "evidence_handles",
             ],
-            "schema_version": "relational_willingness.v2",
             "applicability_values": sorted(RELATIONAL_APPLICABILITY_VALUES),
             "stance_values": sorted(RELATIONAL_STANCE_VALUES),
             "current_user_relationship_state_values": sorted(
@@ -446,7 +448,6 @@ def _build_goal_output_contract(
         contract["recurrence_relational_willingness"] = {
             "mode": "validated_carry_forward",
             "source": "current_turn_relational_willingness",
-            "schema_version": "relational_willingness.v2",
             "current_episode_evidence_handles": sorted(
                 episode_evidence_handles
             ),
@@ -1393,23 +1394,25 @@ def validate_selection_goal_draft(
         raise ValueError(
             "selection goal requires input response operations"
         )
+    raw_selected_operation = parsed["selected_response_operation"]
+    if not isinstance(raw_selected_operation, Mapping):
+        raise ValueError("selected response operation must be an object")
     selected_operation = None
     for operation_row in required_operations:
         if not isinstance(operation_row, Mapping):
             raise ValueError("selection goal response operation row is invalid")
         input_operation = operation_row.get("response_operation")
-        if selected_operation is None:
-            selected_operation = validate_selected_response_operation(
-                parsed["selected_response_operation"],
-                input_operation,
-            )
-        else:
-            validate_selected_response_operation(
-                selected_operation,
-                input_operation,
-            )
         authoritative_operation = validate_dialog_response_operation(
             input_operation
+        )
+        if selected_operation is None:
+            selected_operation = _bind_selected_response_operation(
+                raw_selected_operation,
+                authoritative_operation,
+            )
+        validate_selected_response_operation(
+            selected_operation,
+            input_operation,
         )
         if (
             selected_operation["operation"]
@@ -1430,13 +1433,72 @@ def validate_selection_goal_draft(
     result["evidence_handles"] = cited_evidence
     result["expected_consequences"] = list(consequences)
     if require_relational_willingness:
+        relational_candidate = parsed["relational_willingness"]
+        if not isinstance(relational_candidate, Mapping):
+            raise ValueError("relational willingness must be an object")
+        if "schema_version" in relational_candidate:
+            raise ValueError(
+                "relational willingness schema_version is code-owned"
+            )
+        relational_candidate = dict(relational_candidate)
+        relational_candidate["schema_version"] = (
+            RELATIONAL_WILLINGNESS_SCHEMA_VERSION
+        )
         relational_decision = validate_relational_willingness(
-            parsed["relational_willingness"],
+            relational_candidate,
             evidence_handles=evidence_handles,
             episode_handles=episode_handles,
         )
         result["relational_willingness"] = relational_decision
     return result
+
+
+def _bind_selected_response_operation(
+    candidate: Mapping[str, Any],
+    authoritative_operation: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Bind caller-known carrier fields before public operation validation.
+
+    The model owns the concrete operation text and may resolve an input
+    endpoint that the authoritative operation left as 无.  Response and
+    selection ownership, the selection flag, and every known embedded role
+    are copied from the authoritative input operation so the validated
+    selected operation always carries the complete public shape.
+    """
+
+    allowed_model_fields = {"operation"}
+    if authoritative_operation["embedded_actor_role"] == NO_ROLE:
+        allowed_model_fields.add("embedded_actor_role")
+    if authoritative_operation["embedded_target_role"] == NO_ROLE:
+        allowed_model_fields.add("embedded_target_role")
+    if not set(candidate).issubset(allowed_model_fields):
+        raise ValueError(
+            "selected response operation includes known input role "
+            "fields that are code-owned"
+        )
+    if "operation" not in candidate:
+        raise ValueError("selected response operation lacks operation text")
+    bound_operation = {
+        "operation": candidate["operation"],
+        "response_owner_role": authoritative_operation[
+            "response_owner_role"
+        ],
+        "selection_owner_role": authoritative_operation[
+            "selection_owner_role"
+        ],
+        "selection_required": authoritative_operation["selection_required"],
+        "embedded_actor_role": (
+            candidate.get("embedded_actor_role", NO_ROLE)
+            if authoritative_operation["embedded_actor_role"] == NO_ROLE
+            else authoritative_operation["embedded_actor_role"]
+        ),
+        "embedded_target_role": (
+            candidate.get("embedded_target_role", NO_ROLE)
+            if authoritative_operation["embedded_target_role"] == NO_ROLE
+            else authoritative_operation["embedded_target_role"]
+        ),
+    }
+    return bound_operation
 
 
 def _selection_goal_draft_to_goal_bid(
@@ -1572,8 +1634,19 @@ def validate_goal_bid_draft(
     for consequence in consequences:
         _bounded_text(consequence, "consequence", 240)
     if require_relational_willingness:
+        relational_candidate = parsed["relational_willingness"]
+        if not isinstance(relational_candidate, Mapping):
+            raise ValueError("relational willingness must be an object")
+        if "schema_version" in relational_candidate:
+            raise ValueError(
+                "relational willingness schema_version is code-owned"
+            )
+        relational_candidate = dict(relational_candidate)
+        relational_candidate["schema_version"] = (
+            RELATIONAL_WILLINGNESS_SCHEMA_VERSION
+        )
         relational_decision = validate_relational_willingness(
-            parsed["relational_willingness"],
+            relational_candidate,
             evidence_handles=evidence_handles,
             episode_handles=episode_handles,
         )

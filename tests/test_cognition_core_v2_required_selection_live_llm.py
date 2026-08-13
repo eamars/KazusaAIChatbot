@@ -46,9 +46,6 @@ _TRACE_SUITE = 'cognition_core_v2_required_selection_live_llm'
 
 _SELECTED_RESPONSE_OPERATION_FIELDS = {
     'operation',
-    'response_owner_role',
-    'selection_owner_role',
-    'selection_required',
     'embedded_actor_role',
     'embedded_target_role',
 }
@@ -223,7 +220,18 @@ def _inspect_goal_output_contract(
     ):
         diagnostics['errors'].append(
             'selected response operation contract does not expose exactly '
-            f'the six canonical fields: observed={operation_fields!r}'
+            f'the model-owned fields: observed={operation_fields!r}'
+        )
+    optional_operation_fields = contract.get(
+        'selected_response_operation_optional_fields'
+    )
+    if not isinstance(optional_operation_fields, list) or set(
+        optional_operation_fields
+    ) != {'embedded_actor_role', 'embedded_target_role'}:
+        diagnostics['errors'].append(
+            'selected response operation optional fields are not the '
+            f'unresolved endpoint fields: '
+            f'observed={optional_operation_fields!r}'
         )
     if contract.get('selection_required') is not True:
         diagnostics['errors'].append(
