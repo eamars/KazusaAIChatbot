@@ -154,6 +154,28 @@ async def test_dialog_role_direction_rejects_selected_actor_target_reversal() ->
         )
 
 
+def test_role_direction_prompt_allows_compatible_nested_request_actions() -> None:
+    """Role direction compares the role tuple to the corresponding action."""
+
+    prompt = dialog_module._V2_DIALOG_ROLE_DIRECTION_PROMPT
+
+    assert "required_role_operations" in prompt
+    assert "权威角色字段" in prompt
+    assert "不含 operation 文本" in prompt
+    assert "用于在候选措辞中识别与角色元组对应的所选动作" in prompt
+    assert "authoritative_surface_semantics" in prompt
+    assert "不逐句核对每个语法动词" in prompt
+    assert "同一个选定嵌入动作" in prompt
+    assert "包装层主语可以与嵌入动作的行动者不同" in prompt
+    assert "不得因此报告为 role reversal" in prompt
+    assert "多种合理读法按高分处理" in prompt
+    assert "唯一明确" in prompt
+    assert "selection_owner_transfer" in prompt
+    assert "typed_operation_role_reversal" in prompt
+    assert "只有要求用户决定选择哪项动作才是转移选择权" in prompt
+    assert "每个元组的 operation" not in prompt
+
+
 def test_dialog_agent_exposes_owned_contract() -> None:
     """Keep terminal dialog generation attached to this source owner."""
 

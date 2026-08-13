@@ -14,11 +14,14 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionExecutionError,
 )
 from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
+    _ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT,
     CONTINUITY_AUTHORITY_INSTRUCTIONS,
     GOAL_COGNITION_PROMPT,
     NON_ORDINARY_GOAL_COGNITION_PROMPT,
     ORDINARY_RECURRENCE_GOAL_COGNITION_PROMPT,
     ORDINARY_RECURRENCE_SELECTION_GOAL_COGNITION_PROMPT,
+    REQUIRED_SELECTION_GOAL_PROMPT,
+    SELECTION_GOAL_REPAIR_INSTRUCTIONS,
     _build_goal_output_contract,
     _conversation_progress_evidence,
     _materialize_recurrence_relational_willingness,
@@ -198,6 +201,37 @@ def test_required_selection_rejects_fixed_role_conflict() -> None:
             }],
             maximum_evidence_handles=4,
         )
+
+
+def test_required_selection_prompt_separates_wrapper_and_embedded_action_roles() -> None:
+    """Required-selection contracts type the nested action, not its wrappers."""
+
+    governing_instructions = (
+        ORDINARY_RECURRENCE_SELECTION_GOAL_COGNITION_PROMPT,
+        " ".join(SELECTION_GOAL_REPAIR_INSTRUCTIONS),
+        REQUIRED_SELECTION_GOAL_PROMPT,
+        _ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT,
+    )
+    for instruction in governing_instructions:
+        assert "外层选择包装" in instruction
+        assert "决策性嵌套动作" in instruction
+        assert "当前用户是 X 的行动者" in instruction
+        assert "当前角色是 X 的对象" in instruction
+        assert "多分句" in instruction or "多个分句" in instruction
+
+    selection_contract = _build_goal_output_contract(
+        evidence_handles={"e1"},
+        episode_evidence_handles={"e1"},
+        required_evidence_handles={"e1"},
+        role_bindings={},
+        selection_required=True,
+        require_relational_willingness=False,
+        maximum_evidence_handles=9,
+    )
+    operation_rule = selection_contract["selected_response_operation_rule"]
+    assert "wrappers" in operation_rule
+    assert "nested action" in operation_rule
+    assert "multiple clauses" in operation_rule
 
 
 def test_goal_prompt_labels_confidence_as_descriptor() -> None:

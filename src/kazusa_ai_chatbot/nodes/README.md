@@ -364,11 +364,17 @@ results and candidate dialog; it checks false claims of character-brain action
 execution. Source percepts and generated character speech use separate typed
 pronoun frames before actor/action/target comparison. Semantic fidelity owns
 non-selection role direction. The selection-only role verifier receives the
-five authoritative fields from `selected_response_operation` and owns
-selection transfer plus embedded actor/target reversal. The input-level
-`response_operation` remains provenance; the selected-operation fields are
-removed from the semantic-fidelity projection while the raw current-input
-meaning remains.
+five authoritative fields from `selected_response_operation` and compares
+them to the same selected embedded action in the candidate, not to every
+grammatical verb. It owns strict selection-owner transfer plus unambiguous
+actor/target reversal of that same embedded action. Character-owned agreement,
+desire, request, imperative, negotiation, deflection, condition, consequence,
+or secondary compatible action may keep a wrapper actor distinct from the
+nested action without becoming a reversal; ambiguous or multi-action readings
+remain high score unless the candidate unambiguously assigns the same selected
+action to the opposite actor/target. The input-level `response_operation`
+remains provenance; the selected-operation fields are removed from the
+semantic-fidelity projection while the raw current-input meaning remains.
 Deterministic code merges the three numeric verdicts and the literal
 expression-continuity verdict without rewriting dialog semantics. The aggregate
 is the equal-weight geometric mean of available focused scores; clean lexical
@@ -422,12 +428,13 @@ its own relevance judgment. Structural retries reuse that same goal owner; no
 semantic evaluator or replacement owner is added. Dialog's corresponding
 focused check reads the canonical `selected_response_operation` carrier from
 `TextSurfaceInputV2` and owns only explicit selection-owner transfer and
-actor/target reversal. The episode-level `response_operation` remains input
-provenance. Semantic completeness, brevity, and specificity remain with
-semantic fidelity and the L3 surface owner. A
-character-owned desire, request, or imperative can name the selected action,
-and speaking or sending content counts as an action when the typed operation
-requires it. Turns without the structural flag use the generic goal producer.
+unambiguous reversal of the same selected embedded action. The episode-level
+`response_operation` remains input provenance. Semantic completeness, brevity,
+and specificity remain with semantic fidelity and the L3 surface owner. A
+character-owned desire, request, or imperative can name the selected action
+with a wrapper actor distinct from the nested actor, and speaking or sending
+content counts as an action when the typed operation requires it. Turns without
+the structural flag use the generic goal producer.
 
 Dialog does not receive raw V2 mutable state, private branch payloads,
 suppressed bids, persistent handles, relationship scalars, or obsolete

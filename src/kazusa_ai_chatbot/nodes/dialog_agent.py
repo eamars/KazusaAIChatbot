@@ -1130,20 +1130,21 @@ async def _verify_dialog_semantic_fidelity(
 
 
 _V2_DIALOG_ROLE_DIRECTION_PROMPT = '''只核对一份角色回应的选择所有者、行动者和对象方向，并给出连续排序分数。
-candidate_role_frame 定义代词归属；required_role_operations 只含本次检查所需的结构化角色元组；authoritative_surface_semantics 提供当前角色已选的回应意图、内容和立场。
+candidate_role_frame 定义代词归属；required_role_operations 只含本次检查所需的结构化角色元组，携带所选嵌入动作的权威角色字段（不含 operation 文本）；authoritative_surface_semantics 提供当前角色已选的回应意图和内容，用于在候选措辞中识别与角色元组对应的所选动作。
 
 # 判定边界
+required_role_operations 只与候选中的对应所选动作比较，该动作由 authoritative_surface_semantics 的已选意图和内容识别；不逐句核对每个语法动词。当前角色拥有的同意、愿望、请求、祈使、协商、拒绝或 deflection、条件、后果和相容的次要动作，其包装层主语可以与嵌入动作的行动者不同，不得因此报告为 role reversal。例如角色对当前用户说出“我希望/请你对我做 X”：角色仍是回应与选择所有者，X 的行动者是当前用户，X 的对象是当前角色；若候选明确保持这个同一动作方向，即使包装层主语是角色，也按高分处理。
 只有两类明确错误可显著降低 score 并写入 violations：
 1. 候选要求 selection_owner_role 之外的角色决定“选择哪项动作”，转移选择所有者；
-2. 在唯一明确的角色读法下颠倒 embedded_actor_role 与 embedded_target_role。
-除此不得报告遗漏、未完成、不充分、不具体、过短、语气、文风或 operation fidelity 问题；authoritative_surface_semantics 不能把内容或表达质量变成 typed_operation_role_reversal。
+2. 候选把同一个选定嵌入动作明确指派给与 required operation 相反的行动者/对象（例如 required 是“当前用户对当前角色做 X”，候选却唯一明确是“当前角色对当前用户做 X”）。
+除此不得报告遗漏、未完成、不充分、不具体、过短、语气、文风或 operation fidelity 问题；含糊、省略、多分句、多动作和多种合理读法按高分处理，除非候选文本唯一明确地反转同一个选定嵌入动作。authoritative_surface_semantics 不能把内容或表达质量变成 typed_operation_role_reversal。
 
 当前角色可以拒绝、协商、附加条件或不执行动作而保持方向；拥有回应和选择所有者时，也可在拒绝或 deflection 中要求当前用户执行动作，不能报告为 role reversal。笑话、双关、省略或多种合理读法按高分处理。
 typed_addressee_plan 中 wording_policy 为 named_or_third_person_required 的 pN 行，其明确对象若被唯一写成当前用户第二人称，属于 typed_operation_role_reversal；使用 display_name 或明确第三人称则保持高分。
-当 selection_owner_role 是当前角色且 embedded_actor_role 是当前用户时，角色用明确的愿望、请求或祈使句说出希望用户做的动作，就已完成选择；说出、回答、选择或发送等语言动作也算 required operation，不因请求语气或缺少执行细节降分。selection_owner_role 决定选择哪项动作，embedded_actor_role 执行已选动作；只有要求用户决定选择哪项动作才是转移选择权。解析当前角色希望或要求当前用户做 X 时，用户是 X 的行动者，角色是要求和选择的所有者。
+当 selection_owner_role 是当前角色且嵌入动作的行动者是当前用户时，角色用明确的愿望、请求或祈使句说出希望用户做的动作，就已完成选择；说出、回答、选择或发送等语言动作也算 required operation，不因请求语气或缺少执行细节降分。selection_owner_role 决定选择哪项动作，嵌入动作的 actor 执行已选动作；只有要求用户决定选择哪项动作才是转移选择权。解析当前角色希望或要求当前用户做 X 时，用户是 X 的行动者，角色是要求和选择的所有者，X 的对象按 required operation 绑定。
 
-score 是连续序数排序信号，不是概率或五档枚举。锚点：1.0 方向清晰；0.75 基本清晰但有轻微不确定；0.5 证据混合；0.25 有重要方向风险；0.0 明确转移选择所有者或颠倒行动者/对象。允许任意有限小数。
-violations 只能报告明确的选择所有者转移或行动者/对象颠倒；祈使句已命名动作时不因缺少细节而拒绝。
+score 是连续序数排序信号，不是概率或五档枚举。锚点：1.0 方向清晰；0.75 基本清晰但有轻微不确定；0.5 证据混合；0.25 有重要方向风险；0.0 明确转移选择所有者或反转同一个选定嵌入动作。允许任意有限小数。
+violations 只能报告明确的选择所有者转移或同一个选定嵌入动作的行动者/对象反转；祈使句已命名动作时不因缺少细节而拒绝。
 
 # 输出格式
 只返回字段恰好为 score 和 violations 的 JSON 对象。score 是位于 [0.0, 1.0] 的有限 JSON number；violations 是零到四个互不重复的对象，每个恰好含 kind、evidence、explanation。kind 只能是 selection_owner_transfer 或 typed_operation_role_reversal；evidence 逐字复制候选中的非空文字，explanation 用一句话说明方向冲突。'''

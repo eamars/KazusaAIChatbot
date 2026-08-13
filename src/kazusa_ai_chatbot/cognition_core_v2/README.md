@@ -58,6 +58,17 @@ fixed by the current input. Required-selection goal cognition emits a separate
 `selected_response_operation` after the character chooses the concrete action.
 Both use the canonical `DialogResponseOperation` shape.
 
+`response_owner_role` and `selection_owner_role` own the agreement, selection,
+telling, request, and confirmation wrappers; they do not by themselves fix the
+actor or target of the nested action. The `selected_response_operation.operation`
+text and its embedded endpoints type one concrete selected nested action after
+those wrappers are removed. For a character-owned request such as "I want/ask
+you to do X to me", the character remains the response and selection owner while
+the current user is the actor of X and the character is the target of X. When
+the input contains multiple clauses, goal cognition types the decisive selected
+embedded action that candidate wording must preserve; compatible wrapper,
+condition, or secondary clauses do not replace its endpoints.
+
 The selected operation is carried through the admitted bid, selected
 intention, and `TextSurfaceInputV2`. Deterministic validators preserve every
 known non-`无` response-owner, selection-owner, actor, and target role. The
