@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import logging
 from time import perf_counter
@@ -14,10 +14,15 @@ import pytest
 from kazusa_ai_chatbot import llm_tracing
 from kazusa_ai_chatbot import service as brain_service
 from kazusa_ai_chatbot.cognition_core_v2 import facade as cognition_facade
-from kazusa_ai_chatbot.db import build_memory_doc, save_memory
+from kazusa_ai_chatbot.db import (
+    build_memory_doc,
+    get_character_cognition_state,
+    save_memory,
+)
 from kazusa_ai_chatbot.db._client import get_db
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as connector
 from kazusa_ai_chatbot.self_cognition import models, projection, runner
+from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
 from tests.llm_trace import write_llm_trace
 from tests.test_e2e_live_llm import (
     _BOT_ID,
@@ -401,6 +406,7 @@ async def test_live_reply_residual_reaches_goal_only(
         semantic_context: dict[str, object],
         evidence: object,
         services: object,
+        current_turn_relational_willingness: object | None = None,
     ) -> dict[str, object]:
         goal_contexts.append(dict(semantic_context))
         return await original_goal_cognition(
@@ -409,6 +415,9 @@ async def test_live_reply_residual_reaches_goal_only(
             semantic_context,
             evidence,  # type: ignore[arg-type]
             services,  # type: ignore[arg-type]
+            current_turn_relational_willingness=(
+                current_turn_relational_willingness
+            ),
         )
 
     monkeypatch.setattr(
@@ -514,7 +523,12 @@ async def test_live_group_self_cognition_uses_one_advisory_projection(
         "contribution light."
     )
     character_profile = await _refresh_character_profile()
-    now = datetime.now(timezone.utc).isoformat()
+    persisted_state = await get_character_cognition_state()
+    persisted_updated_at = str(persisted_state["updated_at"])
+    now = (
+        parse_storage_utc_datetime(persisted_updated_at)
+        + timedelta(seconds=1)
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
     case = {
         "case_name": models.CASE_GROUP_CHAT_REVIEW,
         "case_id": f"group_activity_window:p0:{suffix}",
@@ -604,6 +618,7 @@ async def test_live_group_self_cognition_uses_one_advisory_projection(
         semantic_context: dict[str, object],
         evidence: object,
         services: object,
+        current_turn_relational_willingness: object | None = None,
     ) -> dict[str, object]:
         captured_group_goal_contexts.append(dict(semantic_context))
         return await original_group_goal(
@@ -612,6 +627,9 @@ async def test_live_group_self_cognition_uses_one_advisory_projection(
             semantic_context,
             evidence,  # type: ignore[arg-type]
             services,  # type: ignore[arg-type]
+            current_turn_relational_willingness=(
+                current_turn_relational_willingness
+            ),
         )
 
     monkeypatch.setattr(
@@ -678,10 +696,16 @@ async def test_live_group_self_cognition_uses_one_advisory_projection(
         global_user_id="",
         started_at=now,
     )
+    control_now = (
+        parse_storage_utc_datetime(now)
+        + timedelta(seconds=1)
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    control_case = dict(case)
+    control_case["idle_timestamp_utc"] = control_now
     control_state = runner._build_cognition_state(
-        case,
+        control_case,
         rendered_packet,
-        public_group_scene=runner._build_public_group_scene(case),
+        public_group_scene=runner._build_public_group_scene(control_case),
         interaction_style_context=control_snapshot,
     )
     control_state["llm_trace_id"] = control_trace_id

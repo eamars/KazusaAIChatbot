@@ -46,6 +46,9 @@ class GroupSceneTurnV1(TypedDict):
         'trigger',
         'after_trigger',
     ]
+    anchor_kind: NotRequired[
+        Literal['none', 'current_user', 'explicit_assistant']
+    ]
 
 
 class GroupSceneContextV1(TypedDict):
@@ -55,6 +58,13 @@ class GroupSceneContextV1(TypedDict):
     turns: list[GroupSceneTurnV1]
     visible_participants: list[str]
     omitted_turn_count: int
+
+
+class GroupSceneProjectionFailure(TypedDict):
+    """Typed degraded result for an unfit protected public scene."""
+
+    code: Literal['protected_minimum_unfit', 'trigger_empty']
+    protected_anchor_count: int
 
 
 class ConversationProgressSourceRefV2(TypedDict):
@@ -337,6 +347,12 @@ class ConversationProgressLoadDiagnosticsV2(TypedDict):
     event_disposition: str
     scene_disposition: str
     write_disposition: str
+    protected_anchor_count: int
+    packet_age: str
+    source_age: str
+    cache_disposition: str
+    barrier_disposition: str
+    reconciliation_status: str
 
 
 class ConversationProgressLoadResult(TypedDict):
@@ -377,6 +393,7 @@ class ConversationProgressRecordResult(TypedDict):
     status: str
     cache_updated: bool
     diagnostics: ConversationProgressLoadDiagnosticsV2
+    reconciliation_status: str
 
 
 class ConversationProgressBlockSearchResultV1(TypedDict):

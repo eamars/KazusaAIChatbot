@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Literal, TypeAlias
 from kazusa_ai_chatbot.action_spec.registry import (
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
 )
+from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.action_spec.models import ActionSpecV1
 from kazusa_ai_chatbot.action_spec.results import (
     ActionResultV1,
@@ -34,6 +35,9 @@ from kazusa_ai_chatbot.db.schemas import PostTurnLifecycleRecordV1
 from kazusa_ai_chatbot.logging_retention import expiry_from_storage_iso
 from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
 from kazusa_ai_chatbot.utils import log_preview
+
+
+_module_logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from kazusa_ai_chatbot.cognition_episode import CognitiveEpisodeV1
@@ -857,8 +861,41 @@ async def run_conversation_progress_record_background(
         logger.exception(
             f"Background conversation progress recording failed: {exc}"
         )
+        await _record_post_turn_continuity_event(
+            component="brain_service.post_turn",
+            boundary="post_turn",
+            status="persistence_failed",
+            scope_kind=_post_turn_scope_kind(state),
+            write_disposition="write_failed",
+            trace_ref=llm_trace_id,
+            operation_ref=f"progress-post-turn:{llm_trace_id}",
+        )
         return
 
+    diagnostics = result.get("diagnostics", {})
+    write_disposition = "written" if result.get("written") else "write_failed"
+    if isinstance(diagnostics, Mapping):
+        raw_disposition = diagnostics.get("write_disposition")
+        if raw_disposition == "lost_guarded_write":
+            write_disposition = "lost_guarded_write"
+        elif raw_disposition == "interrupted":
+            write_disposition = "interrupted"
+    await _record_post_turn_continuity_event(
+        component="brain_service.post_turn",
+        boundary="post_turn",
+        status=(
+            "succeeded" if result.get("written") else "persistence_failed"
+        ),
+        scope_kind=_post_turn_scope_kind(state),
+        selected_count=len(record_input["interaction_logical_turns"]),
+        packet_turn_count=_bounded_event_count(result.get("turn_count")),
+        write_disposition=write_disposition,
+        cache_disposition=(
+            "published" if result.get("cache_updated") else "not_published"
+        ),
+        trace_ref=llm_trace_id,
+        operation_ref=f"progress-post-turn:{llm_trace_id}",
+    )
     logger.debug(
         f"Conversation progress recorded: platform={scope.platform} "
         f'channel={scope.platform_channel_id or "<dm>"} '
@@ -930,11 +967,63 @@ async def run_internal_monologue_residue_record_background(
         logger.exception(
             f"Background internal monologue residue recording failed: {exc}"
         )
+        await _record_post_turn_continuity_event(
+            component="brain_service.post_turn",
+            boundary="post_turn",
+            status="persistence_failed",
+            scope_kind=_post_turn_scope_kind(state),
+            write_disposition="write_failed",
+            operation_ref="residue-post-turn",
+        )
         return
 
     result_status = result.get("status", "")
     result_written = result.get("written", False)
     result_retry_count = result.get("retry_count", 0)
+    record_status = str(result_status)
+    if record_status in {"written", "duplicate_same_payload"}:
+        continuity_status = "succeeded"
+    elif record_status in {"provider_failed"}:
+        continuity_status = "provider_failed"
+    elif record_status in {"skipped_invalid", "skipped_missing_episode_id"}:
+        continuity_status = "contract_failed"
+    elif record_status in {"write_failed", "write_conflict"}:
+        continuity_status = "persistence_failed"
+    else:
+        continuity_status = "skipped"
+    idempotency_result = result.get("idempotency_result", "not_attempted")
+    if idempotency_result not in {
+        "not_attempted",
+        "written",
+        "duplicate_same_payload",
+        "conflict",
+    }:
+        idempotency_result = "not_attempted"
+    await _record_post_turn_continuity_event(
+        component="brain_service.post_turn",
+        boundary="post_turn",
+        status=continuity_status,
+        scope_kind=_post_turn_scope_kind(state),
+        recorder_disposition=(
+            result.get("disposition", "unknown")
+            if result.get("disposition", "unknown") in {
+                "append",
+                "replace_scope",
+                "clear_scope",
+            }
+            else "unknown"
+        ),
+        write_disposition=(
+            idempotency_result
+            if idempotency_result in {
+                "written",
+                "duplicate_same_payload",
+                "conflict",
+            }
+            else "not_attempted"
+        ),
+        operation_ref=str(result.get("operation_id", "")),
+    )
     logger.debug(
         f"Internal monologue residue recorded: "
         f"platform={state['platform']} "
@@ -942,3 +1031,29 @@ async def run_internal_monologue_residue_record_background(
         f'user={state["global_user_id"]} status={result_status} '
         f'written={result_written} retry_count={result_retry_count}'
     )
+
+
+def _post_turn_scope_kind(state: Mapping[str, object]) -> str:
+    """Project post-turn channel scope into the closed event vocabulary."""
+
+    return "group_scene" if state.get("channel_type") == "group" else "private"
+
+
+def _bounded_event_count(value: object) -> int:
+    """Project a result count into the continuity metric bounds."""
+
+    if not isinstance(value, int) or isinstance(value, bool):
+        return 0
+    return max(0, min(value, 1000))
+
+
+async def _record_post_turn_continuity_event(**fields: object) -> None:
+    """Keep diagnostic persistence failures outside the background result."""
+
+    try:
+        await event_logging.record_continuity_boundary_event(**fields)
+    except Exception as exc:
+        _module_logger.warning(
+            "Post-turn continuity telemetry failed: %s",
+            type(exc).__name__,
+        )

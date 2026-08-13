@@ -49,6 +49,13 @@ _EXPECTED_ERROR = (
 )
 _CAPTURED_OCCURRED_AT = '2026-08-11T04:17:02Z'
 
+_AUTHORITY_BY_PROVENANCE_ROLE = {
+    'current_episode': 'current_event',
+    'current_user_history_only': 'participant_continuity',
+    'character_or_world_context_only': 'character_world_context',
+    'contextual_fact_only': 'contextual_fact_only',
+}
+
 
 class _CapturingLLM:
     """Capture current goal-model calls without changing their behavior."""
@@ -146,9 +153,16 @@ def _replay_evidence_rows(
         handle = str(row.get('handle', ''))
         source_kind = str(row.get('source_kind', ''))
         semantic_text = str(row.get('semantic_text', ''))
+        provenance_role = str(row.get('provenance_role', ''))
+        authority = _AUTHORITY_BY_PROVENANCE_ROLE.get(provenance_role)
         if source_kind not in EVIDENCE_SOURCE_QUESTION_IDS:
             raise AssertionError(
                 f'captured evidence source kind is unsupported: {source_kind}'
+            )
+        if authority is None:
+            raise AssertionError(
+                'captured evidence provenance role is unsupported: '
+                f'{provenance_role}'
             )
         evidence.append({
             'evidence_handle': handle,
@@ -160,6 +174,7 @@ def _replay_evidence_rows(
             },
             'semantic_text': semantic_text,
             'visible_to': list(EVIDENCE_SOURCE_QUESTION_IDS[source_kind]),
+            'authority': authority,
         })
     return evidence
 

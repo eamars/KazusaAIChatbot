@@ -167,6 +167,11 @@ def _evidence_row(
         },
         "semantic_text": semantic_text,
         "visible_to": list(EVIDENCE_SOURCE_QUESTION_IDS[source_kind]),
+        "authority": (
+            "current_event"
+            if source_kind == "episode"
+            else "contextual_fact_only"
+        ),
     }
 
 

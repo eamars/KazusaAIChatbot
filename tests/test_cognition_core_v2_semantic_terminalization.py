@@ -64,6 +64,7 @@ def _evidence() -> dict[str, Any]:
         },
         "semantic_text": "The observed outcome is available.",
         "visible_to": ["q:goal_threat_outcome"],
+        "authority": "current_event",
     }
 
 
@@ -809,6 +810,7 @@ def test_relationship_reduction_pins_all_current_batch_evidence() -> None:
             },
             "semantic_text": f"Current evidence {source_id}.",
             "visible_to": ["q:relationship_social"],
+            "authority": "current_event",
         }
         for handle, source_id in source_ids.items()
     ]

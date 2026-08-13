@@ -239,6 +239,77 @@ def test_projection_digests_change_when_native_state_changes() -> None:
     assert first["view_digest"] != second["view_digest"]
 
 
+def test_committed_durable_event_projects_as_operational_pressure() -> None:
+    """A committed active event above the retention floor stays observable."""
+
+    state = build_character_production_state(updated_at=NOW)
+    event = _event("event:committed")
+    event["salience"] = 35
+    event["harm"] = 20
+    event["intentionality"] = 30
+    event["norm_violation"] = 35
+    event["role_refs"] = [
+        {
+            "role": "actor",
+            "entity_kind": "third_party",
+            "entity_id": "operational:unspecified_other",
+        },
+        {
+            "role": "experiencer",
+            "entity_kind": "character",
+            "entity_id": "character:global",
+        },
+    ]
+    state["active_events"] = [event]
+
+    view = project_character_operational_state(state, effective_at=LATER)
+    context = select_character_operational_context(
+        view,
+        consumer_role="goal",
+    )
+
+    assert view["pressures"]
+    pressure = view["pressures"][0]
+    assert pressure["kind"] == "event"
+    assert pressure["lifecycle"] == "active"
+    assert pressure["salience"] == "低"
+    assert context["pressures"]
+    assert "operational:unspecified_other" not in repr(view)
+    assert "episode-redacted" not in repr(view)
+
+
+def test_low_salience_active_entity_stays_out_of_pressure_context() -> None:
+    """The durable floor still excludes sub-25 salience from pressures."""
+
+    state = build_character_production_state(updated_at=NOW)
+    event = _event("event:low")
+    event["salience"] = 24
+    for axis in (
+        "outcome_impact",
+        "responsibility",
+        "intentionality",
+        "harm",
+        "unfairness",
+        "exposure",
+        "repair_need",
+        "reparability",
+        "expectation_mismatch",
+        "norm_violation",
+        "contamination_risk",
+        "identity_threat",
+        "comparison_gap",
+        "vastness",
+        "memory_warmth",
+        "temporal_loss",
+    ):
+        event[axis] = 0
+    state["active_events"] = [event]
+
+    view = project_character_operational_state(state, effective_at=NOW)
+
+    assert view["pressures"] == []
+
+
 def test_relationship_axis_prompt_projection_is_domain_specific() -> None:
     """Zero trust and zero boundary history retain different meanings."""
 

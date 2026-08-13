@@ -6,11 +6,25 @@
     "src/kazusa_ai_chatbot/cognition_core_v2",
     "src/kazusa_ai_chatbot/cognition_resolver",
     "src/kazusa_ai_chatbot/cognition_resolver/guardrail.py",
+    "src/kazusa_ai_chatbot/config.py",
+    "src/kazusa_ai_chatbot/conversation_progress/__init__.py",
+    "src/kazusa_ai_chatbot/conversation_progress/history.py",
+    "src/kazusa_ai_chatbot/conversation_progress/models.py",
+    "src/kazusa_ai_chatbot/conversation_progress/projection.py",
+    "src/kazusa_ai_chatbot/conversation_progress/runtime.py",
+    "src/kazusa_ai_chatbot/db/__init__.py",
+    "src/kazusa_ai_chatbot/db/internal_monologue_residue.py",
+    "src/kazusa_ai_chatbot/db/schemas.py",
     "src/kazusa_ai_chatbot/llm_tracing",
     "src/kazusa_ai_chatbot/db/self_cognition.py",
     "src/kazusa_ai_chatbot/event_logging/__init__.py",
     "src/kazusa_ai_chatbot/event_logging/models.py",
     "src/kazusa_ai_chatbot/event_logging/recording.py",
+    "src/kazusa_ai_chatbot/internal_monologue_residue/__init__.py",
+    "src/kazusa_ai_chatbot/internal_monologue_residue/loader.py",
+    "src/kazusa_ai_chatbot/internal_monologue_residue/models.py",
+    "src/kazusa_ai_chatbot/internal_monologue_residue/recorder.py",
+    "src/kazusa_ai_chatbot/internal_monologue_residue/runtime.py",
     "src/kazusa_ai_chatbot/self_cognition/models.py",
     "src/kazusa_ai_chatbot/self_cognition/runner.py",
     "src/kazusa_ai_chatbot/self_cognition/tracking.py",
@@ -22,6 +36,7 @@
     "src/kazusa_ai_chatbot/nodes/persona_supervisor2_msg_decontextualizer.py",
     "src/kazusa_ai_chatbot/nodes/dialog_agent.py",
     "src/kazusa_ai_chatbot/nodes/persona_supervisor2_schema.py",
+    "src/kazusa_ai_chatbot/brain_service/post_turn.py",
     "src/kazusa_ai_chatbot/service.py",
     "src/scripts/export_trace_correlation_manifest.py"
   ],
@@ -61,10 +76,12 @@
       "owner": "event logging contract owner",
       "contract": "bounded self-cognition telemetry exports",
       "required_unit_tests": [
-        "tests/test_self_cognition_group_visible_reply_boundary.py::test_self_cognition_event_contract_rejects_raw_response_content"
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_self_cognition_event_contract_rejects_raw_response_content",
+        "tests/test_event_logging_interface.py::test_continuity_boundary_recorder_is_keyword_only_and_exported"
       ],
       "supplemental_tests": [
-        "tests/test_event_logging_interface.py::test_public_module_does_not_export_generic_record_event"
+        "tests/test_event_logging_interface.py::test_public_module_does_not_export_generic_record_event",
+        "tests/test_event_logging_interface.py::test_continuity_boundary_event_documentation_matches_contract"
       ]
     },
     {
@@ -72,7 +89,8 @@
       "owner": "event logging contract owner",
       "contract": "closed self-cognition outcome telemetry values",
       "required_unit_tests": [
-        "tests/test_self_cognition_group_visible_reply_boundary.py::test_response_outcome_values_are_closed"
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_response_outcome_values_are_closed",
+        "tests/test_event_logging_interface.py::test_continuity_boundary_unknown_status_is_not_success"
       ],
       "supplemental_tests": []
     },
@@ -81,7 +99,8 @@
       "owner": "event logging recording owner",
       "contract": "sanitized self-cognition event payload",
       "required_unit_tests": [
-        "tests/test_self_cognition_group_visible_reply_boundary.py::test_self_cognition_event_contract_rejects_raw_response_content"
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_self_cognition_event_contract_rejects_raw_response_content",
+        "tests/test_event_logging_interface.py::test_continuity_boundary_payload_is_bounded_and_text_free"
       ],
       "supplemental_tests": [
         "tests/test_self_cognition_event_logging.py::test_self_cognition_event_logger_sanitizes_consolidation_outcome"
@@ -210,7 +229,9 @@
         "tests/unit/cognition_core_v2/test_contracts.py::test_selected_response_operation_rejects_missing_required_fields",
         "tests/unit/cognition_core_v2/test_contracts.py::test_contracts_exposes_owned_contract",
         "tests/unit/cognition_core_v2/test_contracts.py::test_goal_and_action_confidence_reject_numeric_values",
-        "tests/unit/cognition_core_v2/test_contracts.py::test_group_confidence_rejects_numeric_values"
+        "tests/unit/cognition_core_v2/test_contracts.py::test_group_confidence_rejects_numeric_values",
+        "tests/unit/cognition_core_v2/test_contracts.py::test_cognition_evidence_requires_closed_typed_authority",
+        "tests/unit/cognition_core_v2/test_contracts.py::test_promoted_reflection_projects_conditional_guidance_authority"
       ],
       "supplemental_tests": []
     },
@@ -282,7 +303,9 @@
         "tests/unit/cognition_core_v2/test_goal_cognition.py::test_goal_cognition_exposes_owned_contract",
         "tests/unit/cognition_core_v2/test_goal_cognition.py::test_required_selection_emits_selected_response_operation",
         "tests/unit/cognition_core_v2/test_goal_cognition.py::test_required_selection_rejects_fixed_role_conflict",
-        "tests/unit/cognition_core_v2/test_goal_cognition.py::test_goal_prompt_labels_confidence_as_descriptor"
+        "tests/unit/cognition_core_v2/test_goal_cognition.py::test_goal_prompt_labels_confidence_as_descriptor",
+        "tests/unit/cognition_core_v2/test_goal_cognition.py::test_conversation_progress_evidence_preserves_temporal_provenance",
+        "tests/unit/cognition_core_v2/test_goal_cognition.py::test_goal_prompt_declares_one_primary_current_scene_objective"
       ],
       "supplemental_tests": []
     },
@@ -447,6 +470,161 @@
       "supplemental_tests": []
     },
     {
+      "source": "src/kazusa_ai_chatbot/config.py",
+      "owner": "residue retention configuration owner",
+      "contract": "bounded canonical residue retention setting",
+      "required_unit_tests": [
+        "tests/test_internal_monologue_residue_database.py::test_residue_retention_config_is_bounded_and_documented"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/conversation_progress/__init__.py",
+      "owner": "conversation-progress public facade owner",
+      "contract": "public conversation-progress exports",
+      "required_unit_tests": [
+        "tests/test_conversation_progress_v2_contract.py::test_group_scene_anchor_contract_is_prompt_safe"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/conversation_progress/history.py",
+      "owner": "conversation-progress history owner",
+      "contract": "participant-aware group scene anchor selection",
+      "required_unit_tests": [
+        "tests/test_conversation_progress_history_policy.py::test_group_scene_selection_preserves_current_user_anchors_before_recent_cap"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/conversation_progress/models.py",
+      "owner": "conversation-progress contract owner",
+      "contract": "prompt-safe anchor and diagnostic types",
+      "required_unit_tests": [
+        "tests/test_conversation_progress_v2_contract.py::test_group_scene_anchor_contract_is_prompt_safe"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/conversation_progress/projection.py",
+      "owner": "public group-scene projection owner",
+      "contract": "protected participant anchors and hard render minima",
+      "required_unit_tests": [
+        "tests/test_conversation_progress_group_scene.py::test_group_scene_reserves_current_user_causal_anchors_under_newer_noise",
+        "tests/test_conversation_progress_group_scene.py::test_group_scene_anchor_requires_explicit_assistant_address",
+        "tests/test_conversation_progress_group_scene.py::test_group_scene_final_fit_keeps_protected_anchors_within_render_cap"
+      ],
+      "supplemental_tests": [
+        "tests/test_conversation_progress_v2_regression.py::test_captured_group_topic_continuity_fixture_preserves_public_continuity_anchors"
+      ]
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/conversation_progress/runtime.py",
+      "owner": "conversation-progress runtime owner",
+      "contract": "group anchor propagation and bounded reconciliation diagnostics",
+      "required_unit_tests": [
+        "tests/test_conversation_progress_runtime.py::test_load_group_scene_preserves_current_user_anchors_before_ambient_cap",
+        "tests/test_conversation_progress_runtime.py::test_progress_diagnostics_expose_packet_age_and_anchor_counts",
+        "tests/test_conversation_progress_runtime.py::test_progress_diagnostics_classify_guarded_write_outcomes",
+        "tests/test_conversation_progress_runtime.py::test_interrupted_record_does_not_publish_uncommitted_cache_state",
+        "tests/test_conversation_progress_runtime.py::test_lost_guarded_write_does_not_publish_packet_to_cache"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/db/__init__.py",
+      "owner": "database public schema facade owner",
+      "contract": "canonical residue schema export",
+      "required_unit_tests": [
+        "tests/test_internal_monologue_residue_database.py::test_v2_residue_schema_requires_disposition_operation_and_retention"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/db/internal_monologue_residue.py",
+      "owner": "residue persistence owner",
+      "contract": "canonical v2 residue idempotency and TTL/index persistence",
+      "required_unit_tests": [
+        "tests/test_internal_monologue_residue_database.py::test_residue_operation_is_transition_idempotent_and_conflict_safe",
+        "tests/test_internal_monologue_residue_database.py::test_residue_indexes_include_operation_uniqueness_and_purge_ttl"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/db/schemas.py",
+      "owner": "residue persistence contract owner",
+      "contract": "required canonical residue document and source-reference fields",
+      "required_unit_tests": [
+        "tests/test_internal_monologue_residue_database.py::test_v2_residue_schema_requires_disposition_operation_and_retention",
+        "tests/test_internal_monologue_residue_loader.py::test_noncanonical_rows_are_excluded_from_the_residue_window"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/internal_monologue_residue/__init__.py",
+      "owner": "residue public facade owner",
+      "contract": "canonical residue runtime exports",
+      "required_unit_tests": [
+        "tests/test_internal_monologue_residue_recorder.py::test_empty_residue_result_has_cleared_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/internal_monologue_residue/loader.py",
+      "owner": "residue loader owner",
+      "contract": "canonical exact-scope barrier selection",
+      "required_unit_tests": [
+        "tests/test_internal_monologue_residue_loader.py::test_select_residue_window_stops_at_scoped_empty_clear_barrier",
+        "tests/test_internal_monologue_residue_loader.py::test_clear_barrier_keeps_other_user_residue_isolated",
+        "tests/test_internal_monologue_residue_loader.py::test_noncanonical_rows_are_excluded_from_the_residue_window"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/internal_monologue_residue/models.py",
+      "owner": "residue contract owner",
+      "contract": "typed residue load and record status fields",
+      "required_unit_tests": [
+        "tests/test_internal_monologue_residue_recorder.py::test_empty_residue_result_has_cleared_contract",
+        "tests/test_internal_monologue_residue_loader.py::test_clear_barrier_load_reports_cleared_status"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/internal_monologue_residue/recorder.py",
+      "owner": "residue recorder owner",
+      "contract": "LLM-owned disposition and fail-closed write result",
+      "required_unit_tests": [
+        "tests/test_internal_monologue_residue_recorder.py::test_record_completed_episode_writes_scoped_clear_barrier_for_empty_output",
+        "tests/test_internal_monologue_residue_recorder.py::test_empty_residue_write_failure_is_not_reported_as_cleared",
+        "tests/test_internal_monologue_residue_recorder.py::test_recorder_requires_typed_disposition",
+        "tests/test_internal_monologue_residue_recorder.py::test_recorder_disposition_text_invariants_are_fail_closed",
+        "tests/test_internal_monologue_residue_recorder.py::test_record_completed_episode_operation_id_is_stable",
+        "tests/test_internal_monologue_residue_recorder.py::test_empty_residue_result_has_cleared_contract"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/internal_monologue_residue/runtime.py",
+      "owner": "residue runtime facade owner",
+      "contract": "post-turn residue runtime boundary",
+      "required_unit_tests": [
+        "tests/test_internal_monologue_residue_integration.py::test_post_turn_records_internal_monologue_residue_in_background"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/brain_service/post_turn.py",
+      "owner": "post-turn continuity owner",
+      "contract": "trace-linked best-effort continuity disposition telemetry",
+      "required_unit_tests": [
+        "tests/test_conversation_progress_v2_service.py::test_post_turn_emits_trace_linked_progress_disposition",
+        "tests/test_conversation_progress_v2_service.py::test_post_turn_preserves_trace_link_when_diagnostic_event_write_fails",
+        "tests/test_service_event_logging.py::test_progress_disposition_telemetry_is_trace_linked_and_sanitized"
+      ],
+      "supplemental_tests": []
+    },
+    {
       "source": "src/kazusa_ai_chatbot/cognition_resolver/guardrail.py",
       "owner": "parent cognition guardrail owner",
       "contract": "one invocation-wide replay token and bounded parent recovery",
@@ -468,7 +646,8 @@
       "owner": "cognition_resolver owner",
       "contract": "capabilities public contract",
       "required_unit_tests": [
-        "tests/unit/cognition_resolver/test_capabilities.py::test_capabilities_exposes_owned_contract"
+        "tests/unit/cognition_resolver/test_capabilities.py::test_capabilities_exposes_owned_contract",
+        "tests/unit/cognition_resolver/test_capabilities.py::test_resolver_observation_evidence_has_typed_authority"
       ],
       "supplemental_tests": []
     },
@@ -525,7 +704,19 @@
       "owner": "protected trace correlation owner",
       "contract": "typed trace correlation resolution",
       "required_unit_tests": [
-        "tests/test_trace_correlation_manifest.py::test_strict_resolver_fixture_cases"
+        "tests/test_trace_correlation_manifest.py::test_strict_resolver_fixture_cases[web trace exact match]",
+        "tests/test_trace_correlation_manifest.py::test_strict_resolver_fixture_cases[unknown opaque value]",
+        "tests/test_trace_correlation_manifest.py::test_strict_resolver_fixture_cases[ambiguous exact source]",
+        "tests/test_trace_correlation_manifest.py::test_strict_resolver_fixture_cases[exact source not found]",
+        "tests/test_trace_correlation_manifest.py::test_strict_resolver_fixture_cases[historical action attempt without source trace]",
+        "tests/test_trace_correlation_manifest.py::test_strict_resolver_fixture_cases[historical background job without source trace]",
+        "tests/test_trace_correlation_manifest.py::test_strict_resolver_fixture_cases[historical accepted task without source trace]",
+        "tests/test_trace_correlation_manifest.py::test_strict_resolver_fixture_cases[historical calendar schedule without source trace]",
+        "tests/test_trace_correlation_manifest.py::test_strict_resolver_fixture_cases[historical calendar run without source trace]",
+        "tests/test_trace_correlation_manifest.py::test_strict_resolver_fixture_cases[capture mode unavailable]",
+        "tests/test_trace_correlation_manifest.py::test_strict_resolver_fixture_cases[direct future cognition run]",
+        "tests/test_trace_correlation_manifest.py::test_strict_resolver_fixture_cases[background future job]",
+        "tests/test_trace_correlation_manifest.py::test_strict_resolver_fixture_cases[recorded source conflict]"
       ],
       "supplemental_tests": []
     },
@@ -561,7 +752,9 @@
         "tests/unit/nodes/test_persona_supervisor2_cognition.py::test_group_self_cognition_proposal_materializes_existing_speak_surface",
         "tests/unit/nodes/test_persona_supervisor2_cognition.py::test_persona_supervisor2_cognition_exposes_owned_contract",
         "tests/test_persona_supervisor2_cognition_prewarm.py::test_parent_retry_does_not_repeat_shared_memory_prewarm",
-        "tests/test_persona_supervisor2_cognition_prewarm.py::test_omitted_coordinator_does_not_use_ambient_guardrail"
+        "tests/test_persona_supervisor2_cognition_prewarm.py::test_omitted_coordinator_does_not_use_ambient_guardrail",
+        "tests/unit/nodes/test_persona_supervisor2_cognition.py::test_promoted_reflection_preserves_source_updated_at",
+        "tests/unit/nodes/test_persona_supervisor2_cognition.py::test_promoted_self_guidance_is_goal_only_conditional_context"
       ],
       "supplemental_tests": [
         "tests/test_persona_supervisor2_cognition_prewarm.py::test_parent_retry_does_not_repeat_shared_memory_prewarm",
@@ -574,7 +767,8 @@
       "contract": "live stage coordinator propagation and one final commit",
       "required_unit_tests": [
         "tests/test_persona_supervisor2.py::test_persona_stage_uses_canonical_resolver_loop",
-        "tests/test_persona_supervisor2.py::test_persona_stage_passes_bound_parent_coordinator"
+        "tests/test_persona_supervisor2.py::test_persona_stage_passes_bound_parent_coordinator",
+        "tests/test_persona_supervisor2.py::test_persona_supervisor_passes_current_user_to_group_scene"
       ],
       "supplemental_tests": [
         "tests/integration/cognition_core_v2/test_parent_checkpoint_guardrail.py::test_parent_retry_does_not_repeat_capability_or_commit"
@@ -604,7 +798,12 @@
         "tests/unit/nodes/test_dialog_agent.py::test_dialog_agent_exposes_owned_contract",
         "tests/unit/nodes/test_dialog_agent.py::test_dialog_score_is_numeric_quality_signal",
         "tests/unit/nodes/test_dialog_agent.py::test_numeric_score_rejects_boolean_and_out_of_range_values",
-        "tests/test_dialog_agent.py::test_dialog_score_validation_rejects_non_finite_or_out_of_range",
+        "tests/test_dialog_agent.py::test_dialog_score_validation_rejects_non_finite_or_out_of_range[True]",
+        "tests/test_dialog_agent.py::test_dialog_score_validation_rejects_non_finite_or_out_of_range[-0.01]",
+        "tests/test_dialog_agent.py::test_dialog_score_validation_rejects_non_finite_or_out_of_range[1.01]",
+        "tests/test_dialog_agent.py::test_dialog_score_validation_rejects_non_finite_or_out_of_range[10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000]",
+        "tests/test_dialog_agent.py::test_dialog_score_validation_rejects_non_finite_or_out_of_range[nan]",
+        "tests/test_dialog_agent.py::test_dialog_score_validation_rejects_non_finite_or_out_of_range[inf]",
         "tests/test_dialog_agent.py::test_dialog_score_aggregate_uses_available_dimensions",
         "tests/test_dialog_agent.py::test_dialog_exhaustion_selects_highest_score_not_latest",
         "tests/test_dialog_agent.py::test_dialog_exhaustion_ties_select_latest_attempt",
@@ -641,7 +840,8 @@
         "tests/test_service_input_queue.py::test_precommit_cognition_failure_retries_once_then_succeeds",
         "tests/test_service_input_queue.py::test_service_graph_retry_reuses_goal_attempt_ledger",
         "tests/test_service_input_queue.py::test_goal_cognition_exhaustion_skips_service_retry",
-        "tests/test_service_input_queue.py::test_parent_guardrail_failure_does_not_start_outer_graph_retry"
+        "tests/test_service_input_queue.py::test_parent_guardrail_failure_does_not_start_outer_graph_retry",
+        "tests/test_conversation_progress_v2_service.py::test_service_load_passes_group_anchor_mode_and_keeps_user_scope"
       ],
       "supplemental_tests": [
         "tests/integration/cognition_core_v2/test_parent_checkpoint_guardrail.py::test_parent_first_blocks_later_service_retry",

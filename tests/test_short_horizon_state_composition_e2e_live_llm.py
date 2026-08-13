@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import pytest
 from fastapi import BackgroundTasks
+from starlette.requests import Request
 
 from kazusa_ai_chatbot import chat_input_queue
 from kazusa_ai_chatbot import service as brain_service
@@ -221,7 +222,17 @@ async def _run_chat(
             "broadcast": False,
         },
     )
-    response = await brain_service.chat(request, BackgroundTasks())
+    http_request = Request({
+        "type": "http",
+        "method": "POST",
+        "path": "/chat",
+        "headers": [],
+    })
+    response = await brain_service.chat(
+        request,
+        BackgroundTasks(),
+        http_request,
+    )
     if not response.delivery_tracking_id:
         raise AssertionError("natural turn produced no visible delivery")
     lifecycle = await _wait_for_lifecycle(

@@ -781,3 +781,33 @@ cases run one case at a time with their trace artifact inspected.
 
 This package does not access adapters, raw database clients, final dialog
 wording, platform wire syntax, or untyped relationship scalars.
+
+## Evidence Authority
+
+Every `CognitionEvidenceV2` row carries one closed `authority` value:
+`current_event`, `public_scene`, `participant_continuity`,
+`private_motive_only`, `character_world_context`,
+`conditional_character_guidance`, or `contextual_fact_only`. The validator
+rejects unknown values and scopes promoted self-guidance to
+`conditional_character_guidance`; it cannot become a current fact or a goal
+without current-event support. Conversation-progress evidence preserves the
+event's own source timestamp and carries a bounded `temporal_provenance` age
+descriptor. Promoted reflection rows preserve valid source timestamps and
+invalid timestamp rows fail closed at the projection boundary.
+
+Goal cognition receives the authority label as metadata and keeps the existing
+goal output schema, route selection, call count, retry ledger, and 36,000
+character aggregate cap. Authority labels guide source weighting; they are not
+automatic stance or response decisions.
+
+## One-Objective Goal Arbitration
+
+Goal cognition establishes one primary objective from the current episode,
+typed response operation, and observable public scene. A progress item may
+continue only when it concerns the same concrete matter; otherwise it remains
+supplemental context. Private residue supplies motive, tone, or hesitation and
+cannot establish an external fact. Conditional self-guidance supplies tactics
+only after the objective is fixed. `selection`, `intention`, `reason`,
+`desired_outcome`, `concrete_detail`, and `expected_consequences` stay causally
+attached to that objective, and ordered sub-actions are allowed only when they
+serve it.

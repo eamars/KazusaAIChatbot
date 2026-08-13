@@ -464,6 +464,7 @@ async def test_goal_bid_gets_one_bounded_schema_repair(
             },
             "semantic_text": "the participant greeted the character",
             "visible_to": ["q:event_agency"],
+            "authority": "current_event",
         }],
         SimpleNamespace(
             llm=llm,
@@ -591,6 +592,7 @@ async def test_nonordinary_goal_repair_uses_branch_specific_schema() -> None:
             },
             "semantic_text": "The active goal needs review.",
             "visible_to": ["q:goal_threat_outcome"],
+            "authority": "current_event",
         }],
         SimpleNamespace(
             llm=llm,
@@ -601,7 +603,10 @@ async def test_nonordinary_goal_repair_uses_branch_specific_schema() -> None:
     assert len(llm.messages) == 2
     assert all(
         message_set[0].content
-        == goal_module.NON_ORDINARY_GOAL_COGNITION_PROMPT
+        == (
+            goal_module.NON_ORDINARY_GOAL_COGNITION_PROMPT
+            + goal_module.CONTINUITY_AUTHORITY_INSTRUCTIONS
+        )
         for message_set in llm.messages
     )
     repair_payload = json.loads(str(llm.messages[1][1].content))
@@ -672,6 +677,7 @@ async def test_nonordinary_goal_repair_keeps_candidate_context_for_handle_error(
             },
             "semantic_text": "The active goal needs review.",
             "visible_to": ["q:goal_threat_outcome"],
+            "authority": "current_event",
         }],
         SimpleNamespace(
             llm=llm,
@@ -682,7 +688,10 @@ async def test_nonordinary_goal_repair_keeps_candidate_context_for_handle_error(
     assert len(llm.messages) == 2
     assert all(
         message_set[0].content
-        == goal_module.NON_ORDINARY_GOAL_COGNITION_PROMPT
+        == (
+            goal_module.NON_ORDINARY_GOAL_COGNITION_PROMPT
+            + goal_module.CONTINUITY_AUTHORITY_INSTRUCTIONS
+        )
         for message_set in llm.messages
     )
     repair_payload = json.loads(str(llm.messages[1][1].content))
@@ -790,6 +799,7 @@ async def test_goal_bid_repair_replays_grounding_after_handle_failures() -> None
             },
             "semantic_text": "the current user made a direct request",
             "visible_to": ["q:event_agency"],
+            "authority": "current_event",
         }, {
             "evidence_handle": "e5",
             "evidence_ref": {
@@ -800,6 +810,7 @@ async def test_goal_bid_repair_replays_grounding_after_handle_failures() -> None
             },
             "semantic_text": "earlier relationship context",
             "visible_to": ["q:event_agency"],
+            "authority": "participant_continuity",
         }],
         SimpleNamespace(
             llm=llm,
@@ -828,11 +839,13 @@ async def test_goal_bid_repair_replays_grounding_after_handle_failures() -> None
             "handle": "e1",
             "semantic_text": "the current user made a direct request",
             "source_kind": "episode",
+            "authority": "current_event",
             "provenance_role": "current_episode",
         }, {
             "handle": "e5",
             "semantic_text": "earlier relationship context",
             "source_kind": "conversation_evidence",
+            "authority": "participant_continuity",
             "provenance_role": "contextual_fact_only",
         }]
         feedback = repair_payload["repair_feedback"]
@@ -950,6 +963,7 @@ async def test_goal_bid_repair_projects_tool_result_as_current_episode(
                 "The task needs additional user-provided information."
             ),
             "visible_to": ["q:event_agency"],
+            "authority": "current_event",
         }, {
             "evidence_handle": "e5",
             "evidence_ref": {
@@ -960,6 +974,7 @@ async def test_goal_bid_repair_projects_tool_result_as_current_episode(
             },
             "semantic_text": "earlier relationship context",
             "visible_to": ["q:event_agency"],
+            "authority": "participant_continuity",
         }],
         SimpleNamespace(
             llm=llm,
@@ -973,11 +988,13 @@ async def test_goal_bid_repair_projects_tool_result_as_current_episode(
             "The task needs additional user-provided information."
         ),
         "source_kind": "tool_result",
+        "authority": "current_event",
         "provenance_role": "current_episode",
     }, {
         "handle": "e5",
         "semantic_text": "earlier relationship context",
         "source_kind": "conversation_evidence",
+        "authority": "participant_continuity",
         "provenance_role": "contextual_fact_only",
     }]
     assert bid["relational_willingness"]["evidence_handles"] == [
@@ -1067,6 +1084,7 @@ async def test_goal_bid_schema_exhaustion_is_typed_after_three_attempts() -> Non
                 },
                 "semantic_text": "direct greeting",
                 "visible_to": ["q:event_agency"],
+                "authority": "current_event",
             }],
             SimpleNamespace(
                 llm=llm,
@@ -1149,6 +1167,7 @@ async def test_required_selection_regenerates_with_the_same_producer() -> None:
         },
         "semantic_text": semantic_text,
         "visible_to": ["q:event_agency"],
+        "authority": "current_event",
     }, {
         "evidence_handle": "e2",
         "evidence_ref": {
@@ -1159,6 +1178,11 @@ async def test_required_selection_regenerates_with_the_same_producer() -> None:
         },
         "semantic_text": "此前选择已经完成。",
         "visible_to": ["q:event_agency"],
+        "authority": "participant_continuity",
+        "temporal_provenance": {
+            "occurred_at": "2026-07-15T00:00:00Z",
+            "age_descriptor": "recent",
+        },
     }]
 
     bid = await run_goal_cognition(
@@ -1175,7 +1199,10 @@ async def test_required_selection_regenerates_with_the_same_producer() -> None:
     assert len(llm.messages) == 3
     assert (
         llm.messages[0][0].content
-        == goal_module.REQUIRED_SELECTION_GOAL_PROMPT
+        == (
+            goal_module.REQUIRED_SELECTION_GOAL_PROMPT
+            + goal_module.CONTINUITY_AUTHORITY_INSTRUCTIONS
+        )
     )
     assert all(
         message_set[0].content
@@ -1274,6 +1301,7 @@ async def test_required_selection_regeneration_excludes_optional_conversation(
         },
         'semantic_text': semantic_text,
         'visible_to': ['q:event_agency'],
+        'authority': 'current_event',
     }, {
         'evidence_handle': 'e2',
         'evidence_ref': {
@@ -1284,6 +1312,7 @@ async def test_required_selection_regeneration_excludes_optional_conversation(
         },
         'semantic_text': '此前聊过昨晚发生的事情。',
         'visible_to': ['q:event_agency'],
+        'authority': 'participant_continuity',
     }]
 
     bid = await run_goal_cognition(
@@ -1408,6 +1437,7 @@ async def test_required_selection_repair_replays_grounding_after_handle_failures
         },
         'semantic_text': semantic_text,
         'visible_to': ['q:event_agency'],
+        'authority': 'current_event',
     }, {
         'evidence_handle': 'e5',
         'evidence_ref': {
@@ -1418,6 +1448,7 @@ async def test_required_selection_repair_replays_grounding_after_handle_failures
         },
         'semantic_text': 'Earlier relationship context.',
         'visible_to': ['q:event_agency'],
+        'authority': 'participant_continuity',
     }]
 
     bid = await run_goal_cognition(
@@ -1554,6 +1585,7 @@ async def test_active_selection_repair_uses_the_same_grounding_contract(
             },
             'semantic_text': semantic_text,
             'visible_to': ['q:event_agency'],
+            'authority': 'current_event',
         }],
         SimpleNamespace(
             llm=llm,
@@ -1615,6 +1647,7 @@ async def test_required_selection_structure_exhaustion_is_typed() -> None:
                 },
                 "semantic_text": semantic_text,
                 "visible_to": ["q:event_agency"],
+                "authority": "current_event",
             }],
             SimpleNamespace(
                 llm=llm,
@@ -1713,6 +1746,7 @@ async def test_required_selection_invalid_evidence_fails_after_exhaustion(
                 },
                 "semantic_text": semantic_text,
                 "visible_to": ["q:event_agency"],
+                "authority": "current_event",
             }],
             SimpleNamespace(
                 llm=llm,

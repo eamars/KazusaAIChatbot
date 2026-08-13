@@ -60,6 +60,7 @@ def _evidence(source_kind: str = "episode") -> list[dict[str, object]]:
         },
         "semantic_text": "A bounded semantic observation is available.",
         "visible_to": list(EVIDENCE_SOURCE_QUESTION_IDS[source_kind]),
+        "authority": "current_event",
     }]
 
 

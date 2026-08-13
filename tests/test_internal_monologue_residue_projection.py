@@ -13,6 +13,7 @@ def _row(
     residue_text: str,
     created_at: str,
     scope_kind: str = "group_scene",
+    disposition: str | None = None,
 ) -> dict:
     """Build a residue row fixture.
 
@@ -42,6 +43,8 @@ def _row(
         "adapter_message_id": "adapter-message-id",
         "created_at": created_at,
     }
+    if disposition is not None:
+        return_value['disposition'] = disposition
     return return_value
 
 
@@ -103,3 +106,29 @@ def test_project_residue_window_prefers_newer_rows_when_budget_is_tight() -> Non
 
     assert '我记得新的期待。' in projected
     assert '我记得旧的低落。' not in projected
+
+
+def test_project_residue_window_ignores_clear_barrier_rows() -> None:
+    """A clear marker changes lifecycle state without becoming prompt text."""
+
+    projected = project_residue_window(
+        rows=[
+            _row(
+                residue_id='clear-marker',
+                residue_text='',
+                created_at='2026-05-20T00:09:00+00:00',
+                disposition='clear_scope',
+            ),
+            _row(
+                residue_id='later-append',
+                residue_text='我还记得新的期待。',
+                created_at='2026-05-20T00:08:00+00:00',
+                disposition='append',
+            ),
+        ],
+        current_timestamp_utc='2026-05-20T00:10:00+00:00',
+        context_char_limit=3000,
+    )
+
+    assert '我还记得新的期待。' in projected
+    assert 'clear-marker' not in projected

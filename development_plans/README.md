@@ -49,12 +49,13 @@ recorded evidence.
 
 ### Active Bugfix Plans
 
-No active bugfix plans are currently registered.
+No active bugfix plan is currently registered.
 
 ### Completed Bugfix Plans
 
 | Document | Type | Status |
 |---|---|---|
+| [group_topic_continuity_authority_fix_plan.md](archive/completed/group_topic_continuity_authority_fix_plan.md) | Group multi-user topic-continuity authority and weak-local-model quality fix | completed |
 | [cognition_v2_parent_checkpoint_guardrail_plan.md](archive/completed/cognition_v2_parent_checkpoint_guardrail_plan.md) | Cognition V2 parent-checkpoint guardrail and bounded recovery epoch | completed |
 
 ## Working-Tree Policy

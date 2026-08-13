@@ -54,6 +54,11 @@ The MongoDB collection is `internal_monologue_residue_state`. Rows contain:
 - `source_kind`: `chat` or `self_cognition`
 - `source_refs`: sanitized episode/conversation references only
 - `created_at`
+- `schema_version`: `internal_monologue_residue.v2`
+- deterministic `operation_id` derived from the completed episode and exact
+  scope
+- `disposition`: `append`, `replace_scope`, or `clear_scope`
+- BSON `purge_at` used by the bounded TTL index
 
 Rows do not store raw message bodies, prompts, delivery ids, action packets,
 semantic memory packets, broad summaries, or full prior monologues.
@@ -93,16 +98,19 @@ expressed, a thought intentionally retained by a boundary, and a private
 reason that still has short-term continuity value.
 
 The system prompt carries runtime `character_name` and `ambient_condition`.
-It asks for strict JSON with only:
+It asks for strict JSON with exactly:
 
 ```json
-{"residue_text": ""}
+{"disposition": "clear_scope", "residue_text": ""}
 ```
 
-Empty `residue_text` is a valid no-write. Non-empty text must fit the configured
-row character limit and must not leak prompt, model, schema, field, or process
-framing. Third-person self-reference using `角色` is rejected. Vague relation
-words such as `对方`, `那个人`, `某人`, `他`, and `她` are allowed.
+`append` and `replace_scope` require non-empty text; `clear_scope` requires an
+empty text and persists an exact-scope barrier. A completed episode id is
+required before the recorder calls the model or writes a v2 row. Non-empty
+text must fit the configured row character limit and must not leak prompt,
+model, schema, field, or process framing. Third-person self-reference using
+`角色` is rejected. Vague relation words such as `对方`, `那个人`, `某人`, `他`,
+and `她` are allowed.
 
 For self-cognition group review, the recorder input may include
 `source_reliability_notes = ["group review contained ambiguous second-person side-thread rows"]`
@@ -113,8 +121,11 @@ preserve ambiguous second-person side-thread content as a current fact about
 the active character; it is not a response gate, delivery rule, scheduler
 input, durable memory write, or residue suppression rule.
 
-Invalid non-empty output receives one deterministic repair retry. Invalid output
-after retry is skipped without writing residue text to logs.
+Invalid output receives one bounded regeneration retry through the canonical
+JSON parser. Invalid output after retry fails closed without a write. Repeating
+the same operation is idempotent; a conflicting payload for the same operation
+id fails closed. Rows without the canonical v2 contract are excluded from reads
+and writes, so a replacement or clear marker cannot affect another scope.
 
 ## Lifecycle
 
@@ -135,6 +146,8 @@ residue rows or the projected private continuity string.
   max `3000`
 - `INTERNAL_MONOLOGUE_RESIDUE_ROW_CHAR_LIMIT`: default `220`, min `80`,
   max `500`
+- `INTERNAL_MONOLOGUE_RESIDUE_RETENTION_HOURS`: default `48`, min `1`, max
+  `720`; the collection owns a bounded TTL index
 
 ## Telemetry
 

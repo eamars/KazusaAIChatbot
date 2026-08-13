@@ -279,6 +279,7 @@ def _evidence() -> dict[str, object]:
         },
         "semantic_text": "the user made a current request",
         "visible_to": ["q:event_agency"],
+        "authority": "current_event",
     }
 
 
@@ -504,6 +505,7 @@ async def test_selection_producer_retry_reuses_goal_route_and_trace(
             },
         }),
         "visible_to": ["q:event_agency"],
+        "authority": "current_event",
     }]
 
     result = await goal_cognition.run_goal_cognition(
@@ -518,10 +520,16 @@ async def test_selection_producer_retry_reuses_goal_route_and_trace(
     assert llm.configs == [expected_config, expected_config]
     assert (
         llm.messages[0][0].content
-        == goal_cognition._ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT
+        == (
+            goal_cognition._ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT
+            + goal_cognition.CONTINUITY_AUTHORITY_INSTRUCTIONS
+        )
     )
     assert llm.messages[1][0].content.startswith(
-        goal_cognition._ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT
+        (
+            goal_cognition._ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT
+            + goal_cognition.CONTINUITY_AUTHORITY_INSTRUCTIONS
+        )
     )
     assert [
         call.kwargs["route_name"]

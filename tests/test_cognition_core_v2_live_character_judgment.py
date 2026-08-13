@@ -360,6 +360,7 @@ async def _run_live_goal_case(
         },
         "semantic_text": semantic_text,
         "visible_to": ["q:event_agency"],
+        "authority": "current_event",
     }]
     role_bindings: dict[str, dict[str, str]] = {}
     role_summaries: dict[str, str] = {}

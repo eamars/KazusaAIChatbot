@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal, NotRequired, TypedDict
 
 ResidueScopeKind = Literal[
@@ -9,6 +10,17 @@ ResidueScopeKind = Literal[
     "user_thread",
 ]
 ResidueSourceKind = Literal["chat", "self_cognition"]
+ResidueDisposition = Literal[
+    "append",
+    "replace_scope",
+    "clear_scope",
+]
+ResidueDispositionResult = ResidueDisposition | Literal["none"]
+RESIDUE_DISPOSITION_VALUES = frozenset({
+    "append",
+    "replace_scope",
+    "clear_scope",
+})
 
 
 class ResidueTriggerScope(TypedDict):
@@ -29,15 +41,15 @@ class ResidueScopeCandidate(TypedDict):
     rank: int
 
 
-class InternalMonologueResidueSourceRef(TypedDict, total=False):
+class InternalMonologueResidueSourceRef(TypedDict):
     """Sanitized source reference stored with a residue row."""
 
     ref_kind: str
     ref_id: str
 
 
-class InternalMonologueResidueRow(TypedDict, total=False):
-    """Stored private residue row without MongoDB storage internals."""
+class InternalMonologueResidueRow(TypedDict):
+    """Canonical stored private residue row."""
 
     residue_id: str
     character_id: str
@@ -51,6 +63,10 @@ class InternalMonologueResidueRow(TypedDict, total=False):
     source_kind: ResidueSourceKind
     source_refs: list[InternalMonologueResidueSourceRef]
     created_at: str
+    schema_version: Literal["internal_monologue_residue.v2"]
+    operation_id: str
+    disposition: ResidueDisposition
+    purge_at: datetime
 
 
 class ResidueLoadResult(TypedDict):
@@ -61,6 +77,7 @@ class ResidueLoadResult(TypedDict):
     candidate_count: int
     scope_order: list[ResidueScopeKind]
     status: str
+    barrier_disposition: ResidueDispositionResult
 
 
 class ResidueRecordResult(TypedDict):
@@ -72,7 +89,26 @@ class ResidueRecordResult(TypedDict):
     written: bool
     retry_count: int
     validation_errors: list[str]
+    disposition: ResidueDispositionResult
+    operation_id: str
+    idempotency_result: Literal[
+        "not_attempted",
+        "written",
+        "duplicate_same_payload",
+        "conflict",
+    ]
     residue_id: NotRequired[str]
+
+
+class ResidueWriteResult(TypedDict):
+    """Idempotent database disposition for one v2 residue operation."""
+
+    status: Literal[
+        "written",
+        "duplicate_same_payload",
+        "conflict",
+    ]
+    residue_id: str
 
 
 class RecorderInput(TypedDict):
@@ -98,3 +134,4 @@ class RecorderValidationResult(TypedDict):
     accepted: bool
     status: str
     failure_reason: str
+    disposition: NotRequired[ResidueDisposition]

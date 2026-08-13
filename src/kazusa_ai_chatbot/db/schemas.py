@@ -1,13 +1,14 @@
 """TypedDict document schemas for every MongoDB collection.
 
 Each TypedDict mirrors exactly one document shape and is referenced by
-function signatures across the ``db.*`` submodules. Schemas use
-``total=False`` so optional fields don't trip type checkers.
+function signatures across the ``db.*`` submodules. Optional fields are
+declared explicitly only on document contracts that actually permit them.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
+from collections.abc import Mapping
 from typing import Literal, TypedDict
 
 from kazusa_ai_chatbot.character_identity_growth.models import (
@@ -203,15 +204,15 @@ class ConversationEpisodeBlockDoc(TypedDict):
     purge_after: datetime
 
 
-class InternalMonologueResidueSourceRefDoc(TypedDict, total=False):
+class InternalMonologueResidueSourceRefDoc(TypedDict):
     """Sanitized source identifier for an internal residue row."""
 
     ref_kind: str
     ref_id: str
 
 
-class InternalMonologueResidueDoc(TypedDict, total=False):
-    """Compact private residue row in ``internal_monologue_residue_state``."""
+class InternalMonologueResidueV2Doc(TypedDict):
+    """Canonical private residue row in ``internal_monologue_residue_state``."""
 
     residue_id: str
     character_id: str
@@ -225,6 +226,92 @@ class InternalMonologueResidueDoc(TypedDict, total=False):
     source_kind: str
     source_refs: list[InternalMonologueResidueSourceRefDoc]
     created_at: str
+    schema_version: Literal["internal_monologue_residue.v2"]
+    operation_id: str
+    disposition: Literal["append", "replace_scope", "clear_scope"]
+    purge_at: datetime
+
+
+INTERNAL_MONOLOGUE_RESIDUE_V2_REQUIRED_FIELDS = frozenset({
+    "residue_id",
+    "character_id",
+    "scope_key",
+    "scope_kind",
+    "platform",
+    "platform_channel_id",
+    "channel_type",
+    "global_user_id",
+    "residue_text",
+    "source_kind",
+    "source_refs",
+    "created_at",
+    "schema_version",
+    "operation_id",
+    "disposition",
+    "purge_at",
+})
+
+
+def validate_internal_monologue_residue_v2_doc(
+    value: Mapping[str, object],
+) -> None:
+    """Validate required v2 fields before a residue row reaches MongoDB."""
+
+    missing = INTERNAL_MONOLOGUE_RESIDUE_V2_REQUIRED_FIELDS - set(value)
+    if missing:
+        raise ValueError("v2 residue document is missing required fields")
+    if value["schema_version"] != "internal_monologue_residue.v2":
+        raise ValueError("v2 residue document schema_version is invalid")
+    if value["disposition"] not in {
+        "append",
+        "replace_scope",
+        "clear_scope",
+    }:
+        raise ValueError("v2 residue document disposition is invalid")
+    for field_name in (
+        "residue_id",
+        "character_id",
+        "scope_key",
+        "scope_kind",
+        "platform",
+        "platform_channel_id",
+        "channel_type",
+        "created_at",
+        "operation_id",
+    ):
+        if not isinstance(value[field_name], str):
+            raise ValueError(
+                f"v2 residue document {field_name} is invalid"
+            )
+        if field_name != "global_user_id" and not value[field_name]:
+            raise ValueError(
+                f"v2 residue document {field_name} is empty"
+            )
+    if value["scope_kind"] == "user_thread" and not value["global_user_id"]:
+        raise ValueError(
+            "v2 user-thread residue document global_user_id is empty"
+        )
+    if not isinstance(value["global_user_id"], str):
+        raise ValueError(
+            "v2 residue document global_user_id is invalid"
+        )
+    if not isinstance(value["residue_text"], str):
+        raise ValueError("v2 residue document residue_text is invalid")
+    source_refs = value["source_refs"]
+    if not isinstance(source_refs, list):
+        raise ValueError("v2 residue document source_refs is invalid")
+    for source_ref in source_refs:
+        if not isinstance(source_ref, Mapping):
+            raise ValueError("v2 residue document source_ref is invalid")
+        if not isinstance(source_ref.get("ref_kind"), str):
+            raise ValueError("v2 residue document source_ref kind is invalid")
+        if not isinstance(source_ref.get("ref_id"), str):
+            raise ValueError("v2 residue document source_ref id is invalid")
+        if not source_ref["ref_kind"] or not source_ref["ref_id"]:
+            raise ValueError("v2 residue document source_ref is empty")
+    purge_at = value["purge_at"]
+    if not isinstance(purge_at, datetime) or purge_at.tzinfo is None:
+        raise ValueError("v2 residue document purge_at is invalid")
 
 
 class PlatformAccountDoc(TypedDict, total=False):

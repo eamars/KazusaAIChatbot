@@ -80,6 +80,8 @@ def test_residue_row_uses_configured_character_id_fallback() -> None:
         residue_text='我还记得 Tobacco 用提拉米苏逗我。',
         current_timestamp_utc="2026-05-20T00:10:00+00:00",
         source_kind="chat",
+        disposition="append",
+        episode_id="episode-1",
     )
 
     assert row["character_id"] == CHARACTER_GLOBAL_USER_ID

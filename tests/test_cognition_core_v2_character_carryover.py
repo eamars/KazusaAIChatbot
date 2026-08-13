@@ -17,6 +17,7 @@ from kazusa_ai_chatbot.cognition_core_v2.character_carryover import (
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     CognitionStateError,
     build_character_production_state,
+    validate_cognition_state,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
     apply_semantic_appraisals,
@@ -27,6 +28,8 @@ from kazusa_ai_chatbot.llm_interface.contracts import LLMCallConfig
 
 
 NOW = "2026-08-02T00:00:00Z"
+OFFSET_OCCURRED_AT = "2026-08-12T23:28:57.048343+00:00"
+OFFSET_EFFECTIVE_AT = "2026-08-12T23:30:01.676468+00:00"
 
 
 def _evidence(source_id: str, *, text: str = "closed operational event") -> dict[str, str]:
@@ -64,6 +67,19 @@ def _normalized_evidence(
             "semantic_summary": "closed operational event",
         },
         "semantic_text": "closed operational event",
+    }
+
+
+def _offset_evidence(source_key: str, *, text: str) -> dict[str, str]:
+    """Build one router-shaped evidence row with an offset UTC timestamp."""
+
+    return {
+        "source_kind": "episode",
+        "source_id": "episode-offset",
+        "occurred_at": OFFSET_OCCURRED_AT,
+        "semantic_summary": "character operational event",
+        "semantic_text": text,
+        "evidence_handle": f"evidence:{source_key}",
     }
 
 
@@ -635,3 +651,83 @@ async def test_state_rejected_exhaustion_has_no_state_update(
     assert result.error_code == "state_rejected"
     assert result.attempts == 3
     assert result.state_update is None
+
+
+@pytest.mark.asyncio
+async def test_offset_utc_timestamps_normalize_before_native_reduction() -> None:
+    """Storage offset timestamps commit as native UTC-Z without rejection."""
+
+    evidence = [
+        _offset_evidence(
+            "current_turn_user_message",
+            text="I am humiliating you publicly on purpose.",
+        ),
+        _offset_evidence(
+            "assistant_final_dialog",
+            text="That is a deliberate boundary violation.",
+        ),
+    ]
+    output = json.dumps({
+        "action": "apply",
+        "reason_code": "lingering_character_effect",
+        "question_id": "character_carryover",
+        "propositions": [{
+            "kind": "event",
+            "semantic_value": "deliberate public boundary violation",
+            "evidence_handles": [
+                "evidence:current_turn_user_message",
+                "evidence:assistant_final_dialog",
+            ],
+            "role_assignments": [
+                {"role": "actor", "entity_handle": "unspecified_other"},
+                {"role": "experiencer", "entity_handle": "self"},
+            ],
+            "deltas": {
+                "harm": 30,
+                "intentionality": 30,
+                "norm_violation": 25,
+            },
+        }],
+    })
+    result = await run_character_carryover_cognition(
+        source_episode_id="episode-offset",
+        evidence=evidence,
+        base_state=build_character_production_state(
+            updated_at="2026-08-12T23:28:56.351488Z",
+        ),
+        effective_at=OFFSET_EFFECTIVE_AT,
+        services=_services(_SequenceLLM([output])),
+    )
+
+    assert result.disposition == "apply"
+    assert result.state_update is not None
+    replacement = result.state_update["replacement_state"]
+    assert replacement["updated_at"].endswith("Z")
+    validate_cognition_state(replacement)
+    assert result.state_update["changed_paths"]
+    event = replacement["active_events"][0]
+    assert event["evidence_refs"][0]["occurred_at"].endswith("Z")
+
+
+@pytest.mark.asyncio
+async def test_no_change_decision_stays_no_change_without_state_update() -> None:
+    """A valid no-change decision still returns no state update."""
+
+    output = json.dumps({
+        "action": "no_change",
+        "reason_code": "no_lingering_effect",
+        "question_id": "character_carryover",
+        "propositions": [],
+    })
+    result = await run_character_carryover_cognition(
+        source_episode_id="episode-no-change",
+        evidence=[_offset_evidence("episode-no-change", text="ordinary chat")],
+        base_state=build_character_production_state(updated_at=NOW),
+        effective_at=OFFSET_EFFECTIVE_AT,
+        services=_services(_SequenceLLM([output])),
+    )
+
+    assert result.disposition == "no_change"
+    assert result.state_update is None
+    assert result.decision.action == "no_change"
+    assert result.error_code is None

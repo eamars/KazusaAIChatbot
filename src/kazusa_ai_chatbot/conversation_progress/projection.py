@@ -13,6 +13,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
 )
 from kazusa_ai_chatbot.conversation_progress.models import (
     GroupSceneContextV1,
+    GroupSceneProjectionFailure,
     GroupSceneTurnV1,
     ConversationLogicalTurnV1,
     ConversationProgressEventV2,
@@ -40,6 +41,24 @@ from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
 
 
 logger = logging.getLogger(__name__)
+
+
+class GroupSceneProjectionError(ValueError):
+    """Raised when a protected public-scene minimum cannot be represented."""
+
+    def __init__(self, code: str, *, protected_anchor_count: int = 0) -> None:
+        super().__init__(code)
+        self.code = code
+        self.protected_anchor_count = protected_anchor_count
+
+    def as_failure(self) -> GroupSceneProjectionFailure:
+        """Return the typed degraded result without exposing scene content."""
+
+        failure: GroupSceneProjectionFailure = {
+            'code': self.code,
+            'protected_anchor_count': self.protected_anchor_count,
+        }
+        return failure
 
 
 def filter_group_scene_ambient_turns(
@@ -113,6 +132,7 @@ def build_group_scene_context(
     trigger_addressed_global_user_ids: Sequence[str],
     trigger_reply_to_display_name: str,
     scope_users: Sequence[Mapping[str, object]],
+    current_global_user_id: str = '',
 ) -> GroupSceneContextV1:
     """Build one bounded chronological public scene without persistence."""
 
@@ -123,8 +143,49 @@ def build_group_scene_context(
         ambient_logical_turns=ambient_logical_turns,
         trigger_occurred_at=trigger_occurred_at,
     )
+    current_user_anchor_id = ''
+    addressed_assistant_anchor_id = ''
+    if current_global_user_id:
+        for turn in reversed(filtered_ambient_logical_turns):
+            if (
+                turn['role'] == 'user'
+                and turn['global_user_id'] == current_global_user_id
+            ):
+                current_user_anchor_id = turn['turn_id']
+                break
+        if current_user_anchor_id:
+            current_user_anchor = next(
+                turn for turn in filtered_ambient_logical_turns
+                if turn['turn_id'] == current_user_anchor_id
+            )
+            current_user_time = parse_storage_utc_datetime(
+                current_user_anchor['occurred_at']
+            )
+            for turn in reversed(filtered_ambient_logical_turns):
+                if (
+                    turn['role'] != 'assistant'
+                    or turn['broadcast'] is True
+                    or turn['addressed_to_global_user_ids'] != [
+                        current_global_user_id
+                    ]
+                    or parse_storage_utc_datetime(turn['occurred_at'])
+                    < current_user_time
+                    or _reply_targets_other_user(
+                        turn['reply_context'],
+                        current_global_user_id,
+                    )
+                ):
+                    continue
+                addressed_assistant_anchor_id = turn['turn_id']
+                break
+
     for index, turn in enumerate(filtered_ambient_logical_turns):
         occurred_time = parse_storage_utc_datetime(turn['occurred_at'])
+        anchor_kind = 'none'
+        if turn['turn_id'] == current_user_anchor_id:
+            anchor_kind = 'current_user'
+        elif turn['turn_id'] == addressed_assistant_anchor_id:
+            anchor_kind = 'explicit_assistant'
         ambient.append((
             occurred_time,
             index,
@@ -139,9 +200,23 @@ def build_group_scene_context(
                     turn['reply_context']
                 ),
                 roster=roster,
+                anchor_kind=anchor_kind,
             ),
         ))
     ambient.sort(key=lambda item: (item[0], item[1]))
+    protected_anchor_count = sum(
+        1
+        for _, _, turn in ambient
+        if turn.get('anchor_kind') != 'none'
+    )
+    if any(
+        turn.get('anchor_kind') != 'none' and not turn['text']
+        for _, _, turn in ambient
+    ):
+        raise GroupSceneProjectionError(
+            'protected_minimum_unfit',
+            protected_anchor_count=protected_anchor_count,
+        )
 
     trigger = _normalize_group_scene_turn(
         role='user',
@@ -150,7 +225,10 @@ def build_group_scene_context(
         addressed_global_user_ids=trigger_addressed_global_user_ids,
         reply_to_display_name=trigger_reply_to_display_name,
         roster=roster,
+        anchor_kind='none',
     )
+    if not trigger['text']:
+        raise GroupSceneProjectionError('trigger_empty')
     merged: list[tuple[object, int, GroupSceneTurnV1]] = [
         (occurred_time, 0, turn) for occurred_time, _, turn in ambient
     ]
@@ -168,9 +246,21 @@ def build_group_scene_context(
         else:
             turn['scene_position'] = 'after_trigger'
 
-    selected_ambient = [item for item in merged if item[1] == 0][
-        -max(GROUP_SCENE_MAX_TURNS - 1, 0):
+    ambient_items = [item for item in merged if item[1] == 0]
+    protected_items = [
+        item for item in ambient_items
+        if item[2].get('anchor_kind') in {
+            'current_user',
+            'explicit_assistant',
+        }
     ]
+    protected_ids = {id(item[2]) for item in protected_items}
+    remaining_items = [
+        item for item in ambient_items if id(item[2]) not in protected_ids
+    ]
+    fill_count = max(GROUP_SCENE_MAX_TURNS - 1 - len(protected_items), 0)
+    ambient_fill = remaining_items[-fill_count:] if fill_count else []
+    selected_ambient = [*protected_items, *ambient_fill]
     selected = [item[2] for item in selected_ambient]
     selected.append(trigger)
     selected.sort(key=lambda turn: _group_scene_turn_order(turn, merged))
@@ -193,12 +283,35 @@ def project_group_scene_prompt(context: GroupSceneContextV1) -> str:
     turns = [
         _bounded_group_scene_turn(turn) for turn in context['turns']
     ]
-    if not any(
-        turn['scene_position'] == 'trigger'
+    visible_participants: list[str] = []
+    for name in context['visible_participants']:
+        bounded_name = _bounded_name(name)
+        if bounded_name and bounded_name not in visible_participants:
+            visible_participants.append(bounded_name)
+        if len(visible_participants) >= GROUP_SCENE_MAX_VISIBLE_PARTICIPANTS:
+            break
+    bounded_context: GroupSceneContextV1 = {
+        'schema_version': 'group_scene_context.v1',
+        'turns': turns,
+        'visible_participants': visible_participants,
+        'omitted_turn_count': max(0, int(context['omitted_turn_count'])),
+    }
+    if not any(turn['scene_position'] == 'trigger' for turn in turns):
+        raise GroupSceneProjectionError('trigger_empty')
+    if any(
+        turn['scene_position'] == 'trigger' and not turn['text']
         for turn in turns
     ):
-        rendered = ''
-        return rendered
+        raise GroupSceneProjectionError('trigger_empty')
+    protected_anchor_count = _protected_anchor_count(bounded_context)
+    if any(
+        turn.get('anchor_kind', 'none') != 'none' and not turn['text']
+        for turn in turns
+    ):
+        raise GroupSceneProjectionError(
+            'protected_minimum_unfit',
+            protected_anchor_count=protected_anchor_count,
+        )
     ambient_turn_count = sum(
         1 for turn in turns if turn['scene_position'] != 'trigger'
     )
@@ -206,9 +319,13 @@ def project_group_scene_prompt(context: GroupSceneContextV1) -> str:
         turns,
         total_ambient_count=ambient_turn_count,
     )
+    fitted_context['visible_participants'] = visible_participants
     rendered = _render_group_scene(fitted_context)
     if len(rendered) > GROUP_SCENE_MAX_RENDERED_CHARS:
-        rendered = rendered[:GROUP_SCENE_MAX_RENDERED_CHARS].rstrip()
+        raise GroupSceneProjectionError(
+            'protected_minimum_unfit',
+            protected_anchor_count=_protected_anchor_count(fitted_context),
+        )
     return rendered
 
 
@@ -245,6 +362,7 @@ def _normalize_group_scene_turn(
     addressed_global_user_ids: object,
     reply_to_display_name: object,
     roster: Mapping[str, str],
+    anchor_kind: str = 'none',
 ) -> GroupSceneTurnV1:
     """Strip and cap one ambient or trigger turn into visible fields."""
 
@@ -277,6 +395,11 @@ def _normalize_group_scene_turn(
         if isinstance(reply_to_display_name, str)
         else ''
     )
+    normalized_anchor_kind = (
+        anchor_kind
+        if anchor_kind in {'none', 'current_user', 'explicit_assistant'}
+        else 'none'
+    )
     return {
         'role': semantic_role,  # type: ignore[typeddict-item]
         'speaker_name': bounded_speaker,
@@ -284,6 +407,7 @@ def _normalize_group_scene_turn(
         'addressed_names': addressed_names,
         'reply_to_name': reply_name,
         'scene_position': 'trigger',
+        'anchor_kind': normalized_anchor_kind,
     }
 
 
@@ -294,6 +418,22 @@ def _reply_display_name(value: object) -> object:
         return ''
     reply_name = value.get('reply_to_display_name', '')
     return reply_name
+
+
+def _reply_targets_other_user(
+    value: object,
+    current_global_user_id: str,
+) -> bool:
+    """Reject a reply context that explicitly names another participant."""
+
+    if not isinstance(value, Mapping):
+        return False
+    reply_target = value.get('reply_to_global_user_id')
+    return (
+        isinstance(reply_target, str)
+        and bool(reply_target)
+        and reply_target != current_global_user_id
+    )
 
 
 def _bounded_name(value: str) -> str:
@@ -325,6 +465,7 @@ def _bounded_group_scene_turn(turn: GroupSceneTurnV1) -> GroupSceneTurnV1:
         'addressed_names': addressed_names,
         'reply_to_name': _bounded_name(turn['reply_to_name']),
         'scene_position': turn['scene_position'],
+        'anchor_kind': turn.get('anchor_kind', 'none'),
     }
 
 
@@ -333,7 +474,7 @@ def _fit_group_scene_turns(
     *,
     total_ambient_count: int,
 ) -> GroupSceneContextV1:
-    """Fit retained turns to the render cap while keeping the trigger."""
+    """Fit retained turns while preserving every protected semantic minimum."""
 
     selected: list[GroupSceneTurnV1] = []
     trigger_seen = False
@@ -349,16 +490,48 @@ def _fit_group_scene_turns(
             total_ambient_count=total_ambient_count,
         )
         return empty_context
+    protected_turns = [
+        turn for turn in selected
+        if (
+            turn['scene_position'] == 'trigger'
+            or turn.get('anchor_kind', 'none') != 'none'
+        )
+    ]
+    if any(not turn['text'] for turn in protected_turns):
+        trigger_is_empty = any(
+            turn['scene_position'] == 'trigger' and not turn['text']
+            for turn in protected_turns
+        )
+        raise GroupSceneProjectionError(
+            'trigger_empty' if trigger_is_empty else 'protected_minimum_unfit',
+            protected_anchor_count=_protected_anchor_count(
+                _group_scene_context(
+                    selected,
+                    total_ambient_count=total_ambient_count,
+                )
+            ),
+        )
     maximum_ambient_turns = max(GROUP_SCENE_MAX_TURNS - 1, 0)
     ambient_turns = [
         turn for turn in selected if turn['scene_position'] != 'trigger'
     ]
     if len(ambient_turns) > maximum_ambient_turns:
-        retained_ambient = (
-            ambient_turns[-maximum_ambient_turns:]
-            if maximum_ambient_turns
-            else []
+        protected_ambient = [
+            turn for turn in ambient_turns
+            if turn.get('anchor_kind', 'none') != 'none'
+        ]
+        unprotected_ambient = [
+            turn for turn in ambient_turns
+            if turn.get('anchor_kind', 'none') == 'none'
+        ]
+        fill_count = max(
+            maximum_ambient_turns - len(protected_ambient),
+            0,
         )
+        retained_ambient = [
+            *protected_ambient,
+            *unprotected_ambient[-fill_count:],
+        ]
         retained_ids = {id(turn) for turn in retained_ambient}
         selected = [
             turn for turn in selected
@@ -377,9 +550,17 @@ def _fit_group_scene_turns(
         ):
             return candidate_context
         drop_index = next(
-            index for index, turn in enumerate(selected)
-            if turn['scene_position'] != 'trigger'
+            (
+                index for index, turn in enumerate(selected)
+                if (
+                    turn['scene_position'] != 'trigger'
+                    and turn.get('anchor_kind', 'none') == 'none'
+                )
+            ),
+            None,
         )
+        if drop_index is None:
+            break
         selected.pop(drop_index)
         if len(selected) == 1 and selected[0]['scene_position'] == 'trigger':
             break
@@ -390,27 +571,33 @@ def _fit_group_scene_turns(
     )
     rendered = _render_group_scene(candidate_context)
     if len(rendered) > GROUP_SCENE_MAX_RENDERED_CHARS:
-        trigger_turn = next(
+        protected_turns = [
             turn for turn in candidate_context['turns']
-            if turn['scene_position'] == 'trigger'
-        )
-        original_text = trigger_turn['text']
-        low, high = 0, len(original_text)
-        best = ''
-        while low <= high:
-            midpoint = (low + high) // 2
-            trigger_turn['text'] = original_text[:midpoint].rstrip()
-            if len(_render_group_scene(candidate_context)) <= (
-                GROUP_SCENE_MAX_RENDERED_CHARS
-            ):
-                best = trigger_turn['text']
-                low = midpoint + 1
-            else:
-                high = midpoint - 1
-        trigger_turn['text'] = best
-        rendered = _render_group_scene(candidate_context)
+            if (
+                turn['scene_position'] == 'trigger'
+                or turn.get('anchor_kind', 'none') != 'none'
+            )
+        ]
+        if not protected_turns:
+            raise GroupSceneProjectionError('trigger_empty')
+        for turn in sorted(
+            protected_turns,
+            key=lambda candidate: len(candidate['text']),
+            reverse=True,
+        ):
+            while len(rendered) > GROUP_SCENE_MAX_RENDERED_CHARS:
+                text_length = len(turn['text'])
+                if text_length <= 1:
+                    break
+                turn['text'] = turn['text'][:text_length - 1].rstrip()
+                rendered = _render_group_scene(candidate_context)
         if len(rendered) > GROUP_SCENE_MAX_RENDERED_CHARS:
-            trigger_turn['text'] = ''
+            raise GroupSceneProjectionError(
+                'protected_minimum_unfit',
+                protected_anchor_count=_protected_anchor_count(
+                    candidate_context
+                ),
+            )
     return candidate_context
 
 
@@ -492,6 +679,15 @@ def _render_group_scene(context: GroupSceneContextV1) -> str:
         lines.append(f"{label} " + ' | '.join(rendered_turns))
     rendered = '\n'.join(lines)
     return rendered
+
+
+def _protected_anchor_count(context: GroupSceneContextV1) -> int:
+    """Count protected anchor labels kept in a transient scene context."""
+
+    return sum(
+        turn.get('anchor_kind', 'none') != 'none'
+        for turn in context['turns']
+    )
 
 
 def empty_progress_prompt(
@@ -675,11 +871,35 @@ def project_conversation_progress_evidence(
             'visible_to': list(
                 EVIDENCE_SOURCE_QUESTION_IDS['conversation_evidence']
             ),
+            'authority': 'participant_continuity',
+            'temporal_provenance': {
+                'occurred_at': event_occurred_at,
+                'age_descriptor': _progress_age_descriptor(
+                    event_occurred_at,
+                    occurred_at,
+                ),
+            },
         })
     used_chars = sum(len(row['semantic_text']) for row in evidence)
     if used_chars > MAX_PROGRESS_EVIDENCE_CHARS:
         raise ValueError('conversation progress evidence exceeds its hard cap')
     return evidence
+
+
+def _progress_age_descriptor(
+    event_occurred_at: str,
+    reference_occurred_at: str,
+) -> str:
+    """Return a bounded age label without changing source timestamps."""
+
+    event_time = parse_storage_utc_datetime(event_occurred_at)
+    reference_time = parse_storage_utc_datetime(reference_occurred_at)
+    age_seconds = max((reference_time - event_time).total_seconds(), 0.0)
+    if age_seconds <= 120:
+        return 'fresh'
+    if age_seconds <= 1800:
+        return 'recent'
+    return 'stale'
 
 
 def continuation_projection_chars(

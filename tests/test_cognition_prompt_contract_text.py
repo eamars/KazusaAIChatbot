@@ -17,6 +17,7 @@ from kazusa_ai_chatbot.cognition_core_v2.character_carryover import (
     CHARACTER_CARRYOVER_PROMPT,
 )
 from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
+    CONTINUITY_AUTHORITY_INSTRUCTIONS,
     GENERIC_GOAL_REPAIR_INSTRUCTIONS,
     GOAL_COGNITION_PROMPT,
     MAX_GOAL_BID_EVIDENCE_HANDLES,
@@ -364,14 +365,80 @@ def test_goal_prompt_prioritizes_current_episode_over_stale_progress() -> None:
         assert required_text in prompt
 
 
+def test_goal_prompt_labels_private_residue_and_guidance_as_non_authoritative(
+) -> None:
+    """Keep private motive and conditional guidance below current facts."""
+
+    goal_contract = "\n".join((
+        GOAL_COGNITION_PROMPT,
+        CONTINUITY_AUTHORITY_INSTRUCTIONS,
+    ))
+
+    for current_scene_rule in (
+        "`current_event`、`public_scene` 记录当前可见的场景和参与者",
+        "先判断当前事件和公开参与者",
+    ):
+        assert current_scene_rule in goal_contract
+
+    assert "只表示它可以怎样参与判断，不是最终立场" in goal_contract
+
+    for non_authoritative_rule in (
+        "`private_motive_only` 只可解释角色私下动机",
+        "不能改变公开群场景的对象归属",
+        "不能代替当前用户或其他参与者的发言",
+        "`conditional_character_guidance` 只能作为有条件的角色指导",
+        "不能单独生成目标、事实或立场",
+        "不把证据标签直接当成目标",
+    ):
+        assert non_authoritative_rule in goal_contract
+
+    for source_attribution_rule in (
+        "归属于某位说话者的公开发言",
+        "包括角色先前的输出",
+        "只证明该说话者提出了该说法",
+        "不单独证明其声称的外部命题",
+        "最新的第一人称更正或状态更新具有更高的判断权重",
+        "冲突的其他说法保留为待核实的主张",
+        "共享公开事项仍未解决",
+        "单项核查、子问题、局部信号或从属步骤",
+        "不足以单独证明整个事项已经解决",
+        "把竞争事项提升为主要目标前",
+        "当前可观察证据",
+        "对整个事项具有判断权的参与者作出明确更正",
+        "只有满足这一条件，才可开始新的主要话题",
+        "否则保留原事项为唯一主要目标",
+        "竞争内容只能作为对原目标的直接支持、拒绝或推后处理",
+        "可以质疑或核实冲突主张",
+        "角色仍自主决定立场以及服务主要目标的从属行动方式和先后",
+    ):
+        assert source_attribution_rule in goal_contract
+
+
 def test_goal_prompt_treats_physical_requests_as_verbal_stance() -> None:
     """The character brain does not invent a physical actuator."""
 
-    prompt = GOAL_COGNITION_PROMPT
+    prompt = GOAL_COGNITION_PROMPT + CONTINUITY_AUTHORITY_INSTRUCTIONS
 
     assert "言语立场" in prompt
     assert "status=executed" in prompt
     assert "证明相应能力已完成" in prompt
+    assert "输入请求或模型设想的现实世界实体交互、感知或观察" in prompt
+    assert "提议或取得证据后再回应的目标" in prompt
+    assert "不能描述该行为已经发生" in prompt
+    assert "观察已经完成或相应结果已经确定" in prompt
+
+
+def test_goal_prompt_confines_internal_handles_to_typed_fields() -> None:
+    """Free-text goal fields use semantic referents instead of identifiers."""
+
+    prompt = GOAL_COGNITION_PROMPT + CONTINUITY_AUTHORITY_INSTRUCTIONS
+
+    assert "只允许原样出现在各自的类型化 handle 字段" in prompt
+    assert "所有自由文本字段" in prompt
+    assert "必须使用语义角色描述或自然指代" in prompt
+    assert "不得复写任何 handle token 或内部标识" in prompt
+    assert "`selected_response_operation.operation`" in prompt
+    assert "`expected_consequences`" in prompt
 
 
 def test_collapse_and_action_prompts_preserve_bid_ownership() -> None:

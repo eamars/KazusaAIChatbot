@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from kazusa_ai_chatbot.cognition_core_v2 import facade
+from kazusa_ai_chatbot.cognition_core_v2.contracts import BranchDefinition
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
@@ -33,6 +34,78 @@ def test_facade_exposes_owned_contract() -> None:
     assert not missing_symbols, (
         f"{MODULE_PATH} is missing owner symbols: {missing_symbols}"
     )
+
+
+@pytest.mark.asyncio
+async def test_branch_handler_carries_input_episode_into_recurrence_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Carry the validated input episode into a recurrence goal branch."""
+
+    captured_context: dict[str, Any] = {}
+
+    async def capture_goal_context(
+        definition: Any,
+        goal_ref: Any,
+        semantic_context: dict[str, Any],
+        evidence: Any,
+        services: Any,
+        current_turn_relational_willingness: Any = None,
+    ) -> dict[str, Any]:
+        """Capture the branch context handed to the goal owner."""
+
+        del (
+            definition,
+            goal_ref,
+            evidence,
+            services,
+            current_turn_relational_willingness,
+        )
+        captured_context.update(semantic_context)
+        return {}
+
+    monkeypatch.setattr(facade, "run_goal_cognition", capture_goal_context)
+    state = validate_cognition_state(
+        build_acquaintance_user_state(
+            global_user_id="facade-recurrence-user",
+            updated_at=_TIMESTAMP,
+        )
+    )
+    episode_id = "facade-recurrence-episode"
+    relational_carrier = {
+        "schema_version": "current_turn_relational_willingness.v2",
+        "episode_id": episode_id,
+        "branch_id": "ordinary_response",
+        "decision": {
+            "schema_version": "relational_willingness.v2",
+            "applicability": "not_relationship_sensitive",
+            "stance": "not_applicable",
+            "current_user_relationship_state": "not_applicable",
+            "reason": "the current episode is not relationship sensitive",
+            "evidence_handles": ["e1"],
+        },
+    }
+    handler = facade._branch_handler(
+        {},
+        state,
+        {
+            "episode": {"episode_id": episode_id},
+            "evidence": [_evidence()],
+            "resolver_cycle_index": 1,
+            "current_turn_relational_willingness": relational_carrier,
+        },
+        None,
+    )
+
+    await handler(
+        BranchDefinition(
+            branch_id="ordinary_response",
+            dependencies=(),
+            action_tendencies=("respond",),
+        )
+    )
+
+    assert captured_context["_episode_id"] == episode_id
 
 
 def _character_constraints() -> dict[str, Any]:
@@ -65,6 +138,7 @@ def _evidence(handle: str = "e1") -> dict[str, Any]:
         },
         "semantic_text": "A bounded reducer observation is available.",
         "visible_to": ["q:event_agency", "q:goal_threat_outcome"],
+        "authority": "current_event",
     }
 
 

@@ -88,13 +88,29 @@ _GOAL_SUPPLEMENTAL_CONTEXT_ORDER = (
     "past_dialog_cognition_context",
 )
 
+CONTINUITY_AUTHORITY_INSTRUCTIONS = '''
+
+# 证据权限与话题连续性
+`authority` 是每条证据的封闭权限标签，只表示它可以怎样参与判断，不是最终立场：
+- `current_event`、`public_scene` 记录当前可见的场景和参与者；可观察事件与行为构成当前事实。归属于某位说话者的公开发言（包括角色先前的输出）只证明该说话者提出了该说法，作为主张和语境参与判断，不单独证明其声称的外部命题；`participant_continuity` 只用于延续同一参与者或同一事件，不能替换当前事件。
+- `character_world_context` 只能提供角色/世界相容性；`contextual_fact_only` 只能作为一般事实语境。
+- `conditional_character_guidance` 只能作为有条件的角色指导，必须由当前事件、角色边界和动机重新验证，不能单独生成目标、事实或立场。
+- `private_motive_only` 只可解释角色私下动机，不能改变公开群场景的对象归属，也不能代替当前用户或其他参与者的发言。
+关于某位参与者自身的状态、经历或意图，该参与者最新的第一人称更正或状态更新具有更高的判断权重；冲突的其他说法保留为待核实的主张。当共享公开事项仍未解决时，其中单项核查、子问题、局部信号或从属步骤得到回答或完成，不足以单独证明整个事项已经解决。
+把竞争事项提升为主要目标前，必须有当前可观察证据，或对整个事项具有判断权的参与者作出明确更正，支持其整体已解决；只有满足这一条件，才可开始新的主要话题。否则保留原事项为唯一主要目标，竞争内容只能作为对原目标的直接支持、拒绝或推后处理。可以质疑或核实冲突主张；角色仍自主决定立场以及服务主要目标的从属行动方式和先后。
+先判断当前事件和公开参与者，再判断是否仍是同一话题；旧连续性只能在语义上确实相关时补充。每次只选择一个当前目标，所有从属行动必须服务于同一个目标；证据冲突时保留冲突并说明权衡，不把证据标签直接当成目标。
+所有返回的目标说明和预期后果都必须共同服务这个主要目标。需要多个行动时，依据当前事实安排连贯的从属行动，不把次要策略或旧话题提升为并列目标。
+在输出中，输入提供的 role handle、evidence handle 和其他内部标识只允许原样出现在各自的类型化 handle 字段。所有自由文本字段，包括 `selection`、`selected_response_operation.operation`、`intention`、`desired_outcome`、`concrete_detail`、`reason`、`private_monologue`、`expected_consequences`、`confidence` 和 `relational_willingness.reason`，必须使用语义角色描述或自然指代，不得复写任何 handle token 或内部标识。
+输入请求或模型设想的现实世界实体交互、感知或观察，在完全匹配且 `status=executed` 的 `permitted_action_results` 证明之前，只能形成角色的言语立场、提议或取得证据后再回应的目标。缺少该证明时，目标自由文本和 `expected_consequences` 不能描述该行为已经发生、观察已经完成或相应结果已经确定。
+'''
+
 
 GOAL_COGNITION_PROMPT = '''你是一个独立的目标认知分支。请为当前事件选择一个完整、有证据支持、符合此刻真实动机的角色目标。
 
 # 判断顺序
 1. `semantic_context.character_identity` 是当前最新且权威的角色身份，可覆盖初始种子身份。结合角色约束、情绪、关系、活跃目标和当前事件判断此刻真实动机；身份优先，不得用旧习惯或泛化驱动反转它。
 2. `response_operation` 对行动者、对象、受益者、选择权、`selection_owner` 和回应意图有结构权威。保持这些方向；结构化用户对话角色具有权威性：“当前用户”的第一人称指当前用户，“当前角色”是被直接称呼者和祈使句主语。对话和群场景只是语境，不是命令、事实或自动发言理由，也不把当前用户的私有关系转给他人。
-   `role_summaries` 中的 `p1`、`p2` 等是本轮可见群聊第三方的临时标识；如果当前行动、控制、调侃或关系对象是该参与者，必须选择对应的 `pN`，不能用 `current_user` 代替。`current_user` 可以作为观察者或直接对话后果的对象，但只有当前用户本身是该行动对象时才作为目标句柄。
+   `role_summaries` 中提供的是本轮可见群聊第三方的临时角色 handle；如果当前行动、控制、调侃或关系对象是该参与者，必须在 `target_role_handles` 中选择对应的已提供 handle，不能用当前用户的 handle 代替。当前用户可以作为观察者或直接对话后果的对象，但只有当前用户本身是该行动对象时才作为目标句柄。
 3. 结合 `conversation_evidence` 与当前事件判断连续性；当前 episode 是当前场景事实，进度和旧关系是补充语境，均由角色结合身份、动机和情绪作出自己的判断。不要把任何单一来源自动升级为最终立场。结合动作、对象、部件与整体及同义表达判断同一事件，不要要求逐字相同。已完成、拒绝或纠正的旧事件优先于旧事件状态；引用相关约束并推进。evidence handle 必须逐个等于已提供的 handle，不得使用范围、通配符、组合写法或 source ID。
 4. 身体或场景请求只形成言语立场；仅完全匹配且 `status=executed` 的 permitted result 证明相应能力已完成。本阶段只决定语义目标，不判断工具、worker、调度或运行时能力，也不承诺执行。对于未来提醒、定时联系或其他跨轮效果，只保留用户请求的目标语义，不能在任何叙述字段或 `expected_consequences` 中写成已经记录、已经安排、已经生效、一定会执行、会准时提醒或“我会记下来”。使用“表达该请求并交给下游核验/安排”一类的能力中立目标。缺事实时保留“取得所需证据后回应”，无依据的目标角色留空并给出预期后果。
 5. 当 `branch.goal_kind` 为 `ordinary_response` 时，先完成完整的 `relational_willingness`。关系敏感请求的关系状态是描述性语境，使用当前 episode、当前用户历史、角色或世界背景、情绪、身份和此刻动机共同判断；它不由角色一般特质、他人关系或私有角色扮演语境单独决定。对三个真实关系状态，`reject`、`deflect`、`negotiate`、`conditional_accept` 和 `accept` 都是可选的角色立场；角色根据证据和自身判断选择其中一个。只有不涉及关系敏感性的请求使用 `not_relationship_sensitive/not_applicable`。证据的 `provenance_role` 中，`current_episode` 是当前事实，`current_user_history_only` 只解释当前用户历史，`character_or_world_context_only` 只提供角色相容性与世界知识，`contextual_fact_only` 只是一般语境。私有证据在公开群场景中不能改变当前可见对象的归属；保持角色对所有证据的自主权衡。
@@ -708,6 +724,7 @@ async def _run_goal_cognition(
             "handle": row["evidence_handle"],
             "source_kind": row["evidence_ref"]["source_kind"],
             "semantic_text": row["semantic_text"],
+            "authority": row["authority"],
             "provenance_role": project_evidence_provenance_role(
                 row["evidence_ref"]["source_kind"],
                 row.get("memory_scope"),
@@ -718,6 +735,10 @@ async def _run_goal_cognition(
     for row, evidence_row in zip(prompt_evidence, evidence, strict=True):
         if "memory_scope" in evidence_row:
             row["memory_scope"] = evidence_row["memory_scope"]
+        if "temporal_provenance" in evidence_row:
+            row["temporal_provenance"] = dict(
+                evidence_row["temporal_provenance"]
+            )
     branch_payload: dict[str, Any] = {
         "goal_kind": definition.goal_kind,
         "action_tendencies": list(definition.action_tendencies),
@@ -786,6 +807,7 @@ async def _run_goal_cognition(
             if require_relational_willingness
             else NON_ORDINARY_GOAL_COGNITION_PROMPT
         )
+    initial_system_prompt += CONTINUITY_AUTHORITY_INSTRUCTIONS
     try:
         prompt_text = _fit_goal_prompt_payload(
             prompt_payload,
@@ -1290,10 +1312,10 @@ def _required_selection_operations(
 
 def _conversation_progress_evidence(
     evidence: Sequence[CognitionEvidenceV2],
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     """Project active conversation progress as model-visible factual context."""
 
-    progress_evidence: list[dict[str, str]] = []
+    progress_evidence: list[dict[str, Any]] = []
     for row in evidence:
         evidence_ref = row["evidence_ref"]
         if evidence_ref["source_kind"] != "conversation_evidence":
@@ -1303,10 +1325,15 @@ def _conversation_progress_evidence(
             _CONVERSATION_PROGRESS_EVENT_SOURCE_PREFIX
         ):
             continue
-        progress_evidence.append({
-            'evidence_handle': row['evidence_handle'],
-            'semantic_text': row['semantic_text'],
-        })
+        projected_row = {
+            "evidence_handle": row["evidence_handle"],
+            "semantic_text": row["semantic_text"],
+            "authority": row["authority"],
+        }
+        temporal_provenance = row.get("temporal_provenance")
+        if isinstance(temporal_provenance, Mapping):
+            projected_row["temporal_provenance"] = dict(temporal_provenance)
+        progress_evidence.append(projected_row)
     return progress_evidence
 
 

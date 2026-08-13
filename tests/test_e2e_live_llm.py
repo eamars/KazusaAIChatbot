@@ -13,6 +13,7 @@ import httpx
 import pytest
 import pytest_asyncio
 from fastapi import BackgroundTasks
+from starlette.requests import Request
 
 from kazusa_ai_chatbot import service as brain_service
 from kazusa_ai_chatbot.cognition_core_v2 import build_character_production_state
@@ -257,6 +258,12 @@ async def _make_initial_state(
     storage_timestamp_utc = turn_clock["storage_timestamp_utc"]
     channel_type = "private" if channel_name == "dm" else "group"
     platform_message_id = f"live-state-{uuid4().hex[:10]}"
+    style_snapshot = await brain_service.build_interaction_style_context(
+        global_user_id=identity["global_user_id"],
+        channel_type=channel_type,
+        platform=identity["platform"],
+        platform_channel_id=identity["platform_channel_id"],
+    )
     episode = canonical_user_message_episode(
         episode_id=f"e2e-{label}-{uuid4().hex[:10]}",
         percept_id=f"percept-{uuid4().hex[:10]}",
@@ -307,6 +314,10 @@ async def _make_initial_state(
         "chat_history_wide": chat_history_wide,
         "chat_history_recent": chat_history_recent,
         "reply_context": reply_context or {},
+        "response_action": "proceed",
+        "should_respond": True,
+        "cognition_claimed": True,
+        "interaction_style_context": style_snapshot,
         "indirect_speech_context": "",
         "debug_modes": {
             "listen_only": False,
@@ -431,9 +442,20 @@ async def _run_chat(
         platform_bot_id=_BOT_ID,
         display_name=display_name,
         channel_name=channel_name,
+        channel_type=("private" if channel_name == "dm" else "group"),
         message_envelope=message_envelope,
     )
-    response = await brain_service.chat(request, background_tasks)
+    http_request = Request({
+        'type': 'http',
+        'method': 'POST',
+        'path': '/chat',
+        'headers': [],
+    })
+    response = await brain_service.chat(
+        request,
+        background_tasks,
+        http_request,
+    )
     for task in background_tasks.tasks:
         await task()
     write_llm_trace(

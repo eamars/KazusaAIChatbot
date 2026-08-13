@@ -55,6 +55,7 @@ def _projection() -> tuple[list[dict[str, Any]], dict[str, Any], Any]:
         },
         "semantic_text": "A bounded semantic observation is available.",
         "visible_to": list(EVIDENCE_SOURCE_QUESTION_IDS["episode"]),
+        "authority": "current_event",
     }]
     state = build_acquaintance_user_state(
         global_user_id="user-unit",
@@ -216,6 +217,7 @@ def _goal_threat_evidence() -> list[dict[str, Any]]:
         },
         "semantic_text": "A current outcome observation is available.",
         "visible_to": ["q:goal_threat_outcome"],
+        "authority": "current_event",
     }]
 
 

@@ -163,6 +163,7 @@ def project_resolver_observation_for_cognition(
         visible_to=list(
             EVIDENCE_SOURCE_QUESTION_IDS["resolver_observation"]
         ),
+        authority="contextual_fact_only",
     )
     direct_facts: list[DirectFactV2] = []
     return_value = (evidence, direct_facts)

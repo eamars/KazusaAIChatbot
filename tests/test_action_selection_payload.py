@@ -117,6 +117,7 @@ async def test_action_planning_payload_projects_provenance_roles_only() -> None:
                 },
                 "semantic_text": "the user asked to retrieve chat history",
                 "visible_to": ["q:event_agency"],
+                "authority": "current_event",
             },
             {
                 "evidence_handle": "e2",
@@ -128,6 +129,7 @@ async def test_action_planning_payload_projects_provenance_roles_only() -> None:
                 },
                 "semantic_text": "a recent conversation row",
                 "visible_to": ["q:event_agency"],
+                "authority": "participant_continuity",
             },
         ],
         available_actions=[],

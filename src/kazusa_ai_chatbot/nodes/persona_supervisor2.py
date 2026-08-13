@@ -26,6 +26,7 @@ from kazusa_ai_chatbot.config import (
     COGNITION_RESOLVER_MAX_CYCLES,
 )
 from kazusa_ai_chatbot.conversation_progress import (
+    GroupSceneProjectionError,
     build_group_scene_context,
     filter_group_scene_ambient_turns,
     logical_turns_as_history_rows,
@@ -829,10 +830,19 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
                     '',
                 ),
                 scope_users=scope_users,
+                current_global_user_id=state['global_user_id'],
             )
             public_group_scene = project_group_scene_prompt(
                 group_scene_context
             )
+        except GroupSceneProjectionError as exc:
+            failure = exc.as_failure()
+            logger.warning(
+                f'Group public-scene projection degraded: '
+                f'code={failure["code"]} '
+                f'protected_anchor_count={failure["protected_anchor_count"]}'
+            )
+            public_group_scene = ''
         except Exception as exc:
             logger.exception(
                 f'Group public-scene projection failed; Cognition continues '

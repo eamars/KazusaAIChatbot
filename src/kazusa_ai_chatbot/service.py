@@ -733,6 +733,14 @@ async def load_conversation_episode_state(state: IMProcessState) -> dict:
         active_turn_conversation_row_ids=list(
             state.get("active_turn_conversation_row_ids", [])
         ),
+        group_scene_mode=(
+            "group" if state["channel_type"] == "group" else "private"
+        ),
+        group_scene_current_user_id=(
+            state["global_user_id"]
+            if state["channel_type"] == "group"
+            else ""
+        ),
     )
     progress = load_result["conversation_progress"]
     logger.info(

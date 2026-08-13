@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
@@ -104,6 +105,240 @@ async def test_load_empty_state_uses_independent_history_lanes(monkeypatch):
         excluded_row_ids=['current-row'],
         limit=128,
     )
+
+
+@pytest.mark.asyncio
+async def test_load_group_scene_preserves_current_user_anchors_before_ambient_cap(
+    monkeypatch,
+):
+    """Group mode reserves the current branch before newer public noise."""
+
+    assistant_row = _row(
+        'assistant-anchor',
+        '2026-07-28T09:02:00+00:00',
+    )
+    assistant_row.update({
+        'role': 'assistant',
+        'body_text': 'I will stay with you while you recover.',
+        'display_name': 'Asuna',
+        'global_user_id': 'character-1',
+        'platform_user_id': 'bot',
+        'addressed_to_global_user_ids': ['user_test'],
+        'reply_context': {
+            'reply_to_global_user_id': 'user_test',
+            'reply_to_display_name': 'Test User',
+        },
+        'broadcast': False,
+        'llm_trace_id': 'trace-assistant-anchor',
+    })
+    ambient_rows = [
+        _row('current-user', '2026-07-28T09:01:00+00:00'),
+        assistant_row,
+    ]
+    for index in range(10):
+        noise_row = _row(
+            f'noise-{index}',
+            f'2026-07-28T09:{3 + index:02d}:00+00:00',
+        )
+        noise_row['global_user_id'] = f'noise-user-{index}'
+        noise_row['platform_user_id'] = f'noise-platform-{index}'
+        ambient_rows.append(noise_row)
+    monkeypatch.setattr(
+        runtime,
+        'load_active_packet',
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        runtime,
+        'get_ambient_conversation_history',
+        AsyncMock(return_value=ambient_rows),
+    )
+    monkeypatch.setattr(
+        runtime,
+        'get_participant_conversation_history',
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        runtime.event_logging,
+        'record_continuity_boundary_event',
+        AsyncMock(),
+    )
+
+    result = await runtime.ConversationProgressRuntime().load(
+        scope=SCOPE,
+        current_timestamp_utc='2026-07-28T09:30:00+00:00',
+        platform_bot_id='platform-bot',
+        active_turn_conversation_row_ids=[],
+        group_scene_mode='group',
+        group_scene_current_user_id='user_test',
+    )
+
+    selected_ids = [
+        row_id
+        for turn in result['ambient_logical_turns']
+        for row_id in turn['conversation_row_ids']
+    ]
+    assert 'current-user' in selected_ids
+    assert 'assistant-anchor' in selected_ids
+    assert result['diagnostics']['protected_anchor_count'] == 2
+
+
+@pytest.mark.asyncio
+async def test_progress_diagnostics_expose_packet_age_and_anchor_counts(
+    monkeypatch,
+):
+    """Load diagnostics expose bounded age labels and exact anchor counts."""
+
+    diagnostic_packet = packet(
+        events=[event(source_refs=[{
+            'ref_kind': 'conversation_row',
+            'ref_id': 'old-source',
+            'occurred_at': '2026-07-28T08:59:00+00:00',
+        }])],
+    )
+    diagnostic_packet['updated_at'] = '2026-07-28T09:20:00+00:00'
+    monkeypatch.setattr(
+        runtime,
+        'load_active_packet',
+        AsyncMock(return_value=diagnostic_packet),
+    )
+    monkeypatch.setattr(
+        runtime,
+        'get_ambient_conversation_history',
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        runtime,
+        'get_participant_conversation_history',
+        AsyncMock(return_value=[]),
+    )
+    event_recorder = AsyncMock()
+    monkeypatch.setattr(
+        runtime.event_logging,
+        'record_continuity_boundary_event',
+        event_recorder,
+    )
+
+    result = await runtime.ConversationProgressRuntime().load(
+        scope=SCOPE,
+        current_timestamp_utc='2026-07-28T09:30:00+00:00',
+        platform_bot_id='platform-bot',
+        active_turn_conversation_row_ids=[],
+        group_scene_mode='private',
+    )
+
+    assert result['diagnostics']['packet_age'] == 'recent'
+    assert result['diagnostics']['source_age'] == 'stale'
+    assert result['diagnostics']['protected_anchor_count'] == 0
+    event_recorder.assert_awaited_once()
+    assert event_recorder.await_args.kwargs['packet_age'] == 'recent'
+    assert event_recorder.await_args.kwargs['source_age'] == 'stale'
+
+
+@pytest.mark.asyncio
+async def test_progress_diagnostics_classify_guarded_write_outcomes(
+    monkeypatch,
+):
+    """A guarded-write ambiguity is reconciled and labelled explicitly."""
+
+    invocation = RecorderInvocationResult(
+        delta=recorder_delta(event_updates=[event_update()]),
+        recorder_call_count=2,
+        event_attempt_count=1,
+        scene_attempt_count=1,
+        event_disposition='accepted',
+        scene_disposition='accepted',
+        event_human_payload_chars=800,
+        scene_human_payload_chars=400,
+        provider_usage={},
+    )
+    monkeypatch.setattr(
+        runtime,
+        'load_referenced_blocks',
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        runtime,
+        'record_with_llm',
+        AsyncMock(return_value=invocation),
+    )
+    monkeypatch.setattr(
+        runtime,
+        'persist_progress_write',
+        AsyncMock(return_value=ProgressWriteResult(
+            written=False,
+            block_inserted=False,
+            disposition='lost_guarded_write',
+        )),
+    )
+    monkeypatch.setattr(
+        runtime,
+        '_reconcile_progress_operation',
+        AsyncMock(return_value='reconciled_absent'),
+    )
+    event_recorder = AsyncMock()
+    monkeypatch.setattr(
+        runtime.event_logging,
+        'record_continuity_boundary_event',
+        event_recorder,
+    )
+
+    result = await runtime.ConversationProgressRuntime().record(
+        record_input=record_input(),
+    )
+
+    assert result['diagnostics']['write_disposition'] == (
+        'lost_guarded_write'
+    )
+    assert result['reconciliation_status'] == 'reconciled_absent'
+    event_recorder.assert_awaited_once()
+    assert event_recorder.await_args.kwargs['status'] == 'reconciled'
+    assert event_recorder.await_args.kwargs['write_disposition'] == (
+        'reconciled_absent'
+    )
+
+
+@pytest.mark.asyncio
+async def test_interrupted_record_does_not_publish_uncommitted_cache_state(
+    monkeypatch,
+):
+    """Cancellation keeps the previous cache state unpublished."""
+
+    monkeypatch.setattr(
+        runtime,
+        'load_referenced_blocks',
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        runtime,
+        'record_with_llm',
+        AsyncMock(side_effect=asyncio.CancelledError()),
+    )
+    monkeypatch.setattr(
+        runtime,
+        '_reconcile_after_interruption',
+        AsyncMock(return_value='reconciled_absent'),
+    )
+    event_recorder = AsyncMock()
+    monkeypatch.setattr(
+        runtime.event_logging,
+        'record_continuity_boundary_event',
+        event_recorder,
+    )
+
+    result = await runtime.ConversationProgressRuntime().record(
+        record_input=record_input(),
+    )
+
+    assert result['written'] is False
+    assert result['cache_updated'] is False
+    assert result['reconciliation_status'] == 'reconciled_absent'
+    assert cache.get_cached_packet(
+        scope=SCOPE,
+        current_timestamp_utc='2026-07-28T09:30:00+00:00',
+    ) is None
+    event_recorder.assert_awaited_once()
+    assert event_recorder.await_args.kwargs['status'] == 'reconciled'
 
 
 def test_database_wins_equal_turn_count_and_cache_wins_only_when_newer():

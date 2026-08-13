@@ -46,7 +46,10 @@ async def load_residue_context(
     scope_candidates = build_scope_candidates(trigger_scope)
     scope_keys = [candidate["scope_key"] for candidate in scope_candidates]
     if not scope_keys:
-        result = _empty_load_result(status="empty_scope")
+        result = _empty_load_result(
+            status="empty_scope",
+            barrier_disposition="none",
+        )
         return result
 
     try:
@@ -61,8 +64,13 @@ async def load_residue_context(
                 status="failed",
                 selected_count=0,
                 candidate_count=0,
+                scope_kind="targetless",
+                barrier_disposition="unknown",
             )
-        result = _empty_load_result(status="load_failed")
+        result = _empty_load_result(
+            status="load_failed",
+            barrier_disposition="unknown",
+        )
         return result
 
     selected_rows = select_residue_rows(
@@ -75,12 +83,23 @@ async def load_residue_context(
         current_timestamp_utc=current_timestamp_utc,
         context_char_limit=INTERNAL_MONOLOGUE_RESIDUE_CONTEXT_CHAR_LIMIT,
     )
-    status = "loaded" if context else "empty"
+    barrier_disposition = _barrier_disposition(
+        rows=rows,
+        scope_candidates=scope_candidates,
+    )
+    if context:
+        status = "loaded"
+    elif barrier_disposition == "clear_scope":
+        status = "cleared"
+    else:
+        status = "empty"
     if record_telemetry:
         await _record_load_event(
             status=status,
             selected_count=len(selected_rows),
             candidate_count=len(rows),
+            scope_kind=scope_candidates[0]["scope_kind"],
+            barrier_disposition=barrier_disposition,
         )
     result: ResidueLoadResult = {
         "internal_monologue_residue_context": context,
@@ -91,6 +110,7 @@ async def load_residue_context(
             for candidate in scope_candidates
         ],
         "status": status,
+        "barrier_disposition": barrier_disposition,
     }
     return result
 
@@ -178,6 +198,7 @@ def select_residue_window(
             rank_by_scope_kind=rank_by_scope_kind,
         )
     ]
+    eligible_rows = _apply_scope_barriers(eligible_rows)
     newest_first = sorted(
         eligible_rows,
         key=lambda row: str(row.get("created_at") or ""),
@@ -198,6 +219,8 @@ def _row_matches_trigger_scope(
 ) -> bool:
     """Return whether a row is eligible for the trigger scope."""
 
+    if not _is_canonical_residue_row(row):
+        return False
     row_scope_kind = row.get("scope_kind")
     if row_scope_kind not in rank_by_scope_kind:
         return_value = False
@@ -242,8 +265,10 @@ def select_residue_rows(
     eligible_rows = [
         row
         for row in rows
-        if str(row.get("scope_key") or "") in rank_by_scope
+        if _is_canonical_residue_row(row)
+        and str(row.get("scope_key") or "") in rank_by_scope
     ]
+    eligible_rows = _apply_scope_barriers(eligible_rows)
     newest_first = sorted(
         eligible_rows,
         key=lambda row: str(row.get("created_at") or ""),
@@ -257,7 +282,104 @@ def select_residue_rows(
     return window_rows
 
 
-def _empty_load_result(*, status: str) -> ResidueLoadResult:
+def _apply_scope_barriers(
+    rows: list[InternalMonologueResidueRow],
+) -> list[InternalMonologueResidueRow]:
+    """Drop rows superseded by the newest exact-scope replacement or clear."""
+
+    rows_by_scope: dict[str, list[InternalMonologueResidueRow]] = {}
+    for row in rows:
+        scope_key = str(row.get("scope_key") or "")
+        if scope_key:
+            rows_by_scope.setdefault(scope_key, []).append(row)
+
+    eligible: list[InternalMonologueResidueRow] = []
+    for scope_rows in rows_by_scope.values():
+        ordered = sorted(
+            scope_rows,
+            key=_residue_order_key,
+            reverse=True,
+        )
+        barrier_index = next(
+            (
+                index
+                for index, row in enumerate(ordered)
+                if row.get("disposition") in {"replace_scope", "clear_scope"}
+            ),
+            None,
+        )
+        if barrier_index is None:
+            eligible.extend(ordered)
+        else:
+            eligible.extend(ordered[:barrier_index + 1])
+    return eligible
+
+
+def _is_canonical_residue_row(row: InternalMonologueResidueRow) -> bool:
+    """Accept only rows written with the canonical v2 storage contract."""
+
+    return (
+        row.get("schema_version") == "internal_monologue_residue.v2"
+        and bool(str(row.get("operation_id") or ""))
+        and row.get("disposition") in {
+            "append",
+            "replace_scope",
+            "clear_scope",
+        }
+        and "purge_at" in row
+    )
+
+
+def _barrier_disposition(
+    *,
+    rows: list[InternalMonologueResidueRow],
+    scope_candidates: list[ResidueScopeCandidate],
+) -> str:
+    """Classify the newest barrier in the highest-priority eligible scope."""
+
+    rank_by_scope = {
+        candidate["scope_key"]: candidate["rank"]
+        for candidate in scope_candidates
+    }
+    barriers = [
+        row
+        for row in rows
+        if str(row.get("scope_key") or "") in rank_by_scope
+        and row.get("disposition") in {"replace_scope", "clear_scope"}
+    ]
+    if not barriers:
+        return "none"
+    selected = sorted(
+        barriers,
+        key=lambda row: (
+            rank_by_scope[str(row.get("scope_key") or "")],
+            str(row.get("created_at") or ""),
+            str(row.get("operation_id") or ""),
+        ),
+    )[0]
+    disposition = selected.get("disposition")
+    if disposition in {"replace_scope", "clear_scope"}:
+        return disposition
+    return "unknown"
+
+
+def _residue_order_key(
+    row: InternalMonologueResidueRow,
+) -> tuple[str, str, str]:
+    """Provide deterministic newest-first ordering for canonical rows."""
+
+    return (
+        str(row.get("created_at") or ""),
+        str(row.get("operation_id") or ""),
+        str(row.get("residue_id") or ""),
+    )
+
+
+def _empty_load_result(
+    *,
+    status: str,
+    barrier_disposition: str,
+) -> ResidueLoadResult:
     """Return an empty sanitized load result."""
 
     result: ResidueLoadResult = {
@@ -266,6 +388,7 @@ def _empty_load_result(*, status: str) -> ResidueLoadResult:
         "candidate_count": 0,
         "scope_order": [],
         "status": status,
+        "barrier_disposition": barrier_disposition,
     }
     return result
 
@@ -275,16 +398,35 @@ async def _record_load_event(
     status: str,
     selected_count: int,
     candidate_count: int,
+    scope_kind: str,
+    barrier_disposition: str,
 ) -> None:
     """Record sanitized residue load telemetry."""
 
-    await event_logging.record_database_operation_event(
+    await event_logging.record_continuity_boundary_event(
         component=RESIDUE_COMPONENT,
-        collection=db.INTERNAL_MONOLOGUE_RESIDUE_COLLECTION,
-        operation_kind="load_residue_context",
-        status=status,
-        idempotency_result=(
-            f"selected:{selected_count};candidates:{candidate_count}"
+        boundary="residue_load",
+        status=(
+            "succeeded"
+            if status == "loaded"
+            else "empty"
+            if status in {"empty", "cleared"}
+            else "persistence_failed"
         ),
-        latency_ms=0,
+        scope_kind=(
+            scope_kind
+            if scope_kind in {"user_thread", "group_scene"}
+            else "targetless"
+        ),
+        candidate_count=candidate_count,
+        selected_count=selected_count,
+        barrier_disposition=(
+            barrier_disposition
+            if barrier_disposition in {
+                "none",
+                "replace_scope",
+                "clear_scope",
+            }
+            else "unknown"
+        ),
     )

@@ -53,3 +53,18 @@ def test_internal_monologue_residue_experiments_are_removed() -> None:
         matches.extend(sorted(pycache_dir.glob('internal_monologue_residue*')))
 
     assert matches == []
+
+
+def test_internal_monologue_residue_documents_clear_barrier_and_goal_only_scope() -> None:
+    """The residue ICD preserves exact-scope barriers and goal-only ownership."""
+
+    readme = (
+        _ROOT / "src" / "kazusa_ai_chatbot" / "internal_monologue_residue"
+        / "README.md"
+    ).read_text(encoding="utf-8")
+
+    assert "clear_scope" in readme
+    assert "exact-scope barrier" in readme
+    assert "Rows without the canonical v2 contract are excluded" in readme
+    assert "Only V2 goal-cognition branches may consume" in readme
+    assert "must not receive raw prior\nresidue rows" in readme

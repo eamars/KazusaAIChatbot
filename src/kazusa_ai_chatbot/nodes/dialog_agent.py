@@ -350,11 +350,10 @@ def _candidate_role_frame(
 _V2_DIALOG_GENERATOR_PROMPT = '''你是当前角色的最终文字渲染器。把 text_surface_output_v2 转化为
 自然、鲜活、有角色辨识度，并且切合当前场景的聊天内容。上游认知负责角色判断；surface planning
 提供语义内容、称呼安排、delivery profile、lexical_avoidances 和 permitted action results。
-resolver_result 提供来源自有的 resolver capability 执行结果。
-task_resolution_request 的 resolver_result 还提供 source-owned evidence_state、evidence_excerpts、
-evidence_handles、prompt_safe_observation_handle 和 remaining_needs。evidence_state=complete 时，
-最终文字只能依据 supplied evidence_excerpts 回答并保留其限定；partial、pending、missing 或
-blocked 时，明确表达答案缺口、等待状态或 typed blocker，不把 generic semantic_result 当作答案事实。
+resolver_result 提供来源自有的执行结果；其中的 source-owned evidence_state、evidence_excerpts、
+evidence_handles、prompt_safe_observation_handle 和 remaining_needs 属权威边界。
+evidence_state=complete 时，只能依据 supplied evidence_excerpts；partial、pending、missing 或
+blocked 时，表达答案缺口、等待状态或 typed blocker，不把 generic semantic_result 当事实。
 
 # 渲染步骤
 1. selected_surface_intent 是本轮语义锚点；content_plan 和 content_requirements 展开所需事实、
@@ -377,8 +376,8 @@ pending 表达已记录、已排队或等待对应 worker；failed 与 unavailab
 请求、意图或 content plan 表达角色的言语立场。
 resolver_result.status=succeeded 且 semantic_result 明确任务已接纳并继续工作时，可以表达已接纳、
 继续处理和等待后续结果，但不能声称最终结果已经完成。
-task_resolution_request 的 evidence_state=complete 只能依据 evidence_excerpts；不完整状态必须保留
-remaining_needs 所表达的事实缺口，不能补写缺失的用户引文或最终答案。
+task_resolution_request 的 evidence_state=complete 只能依据 evidence_excerpts；不完整状态保留
+remaining_needs 的缺口，不补写缺失引文或答案。
 5. 按 runtime_capability_limits 表达可信的能力边界、等待状态和下一步条件。
 6. 存在 repair_context 时，以已替换并验证的 text_surface_output_v2 生成完整新回应，并逐项解决
 verified_hard_issues，同时保持角色声音和相容的创造性内容。
@@ -833,7 +832,7 @@ _V2_DIALOG_SEMANTIC_FIDELITY_PROMPT = '''检查角色回应语义忠实度，并
 
 # 判定语境
 current_visible_percepts 提供当前用户输入和结构化角色；candidate_role_frame 定义候选代词归属；role_explicit_content 提供上游行动者、动作、对象方向和原文证据；selection-required 的 role_explicit_content 和 response_operation 已经从本阶段输入中移除，选择方向只作权威证据。authoritative_surface_semantics 提供 selected_surface_intent、content_plan、content_requirements、visible_boundaries、addressee_plan、lexical_avoidances、relational_willingness；保持关系立场。
-含 task_resolution_request 的 resolver_result 中，evidence_state、evidence_excerpts、evidence_handles、prompt_safe_observation_handle 和 remaining_needs 属于同一来源边界；complete 只据 supplied excerpts，其余状态不得把缺失事实或用户引文当成已确认答案。
+task_resolution_request 的 resolver_result 中，evidence_state、evidence_excerpts、evidence_handles、prompt_safe_observation_handle 和 remaining_needs 同属来源边界；complete 只据 supplied excerpts，其余状态不得把缺失事实或用户引文当已确认答案。
 
 依次阅读当前输入、权威语义和候选中的全部消息，不论位于同一消息或多条消息，判断每句话回应的对象以及前后句如何承接。先判断候选是否构成一条与 selected_surface_intent 一致的完整语义弧线，再判断具体作用。分别提取开场与收尾的主体、行动或关系对象、肯定或否定极性。针对提问时机、直接程度、标签或情绪的反应，按其真实对象判断。惊讶、羞赧、防御、调侃、嘴硬、表面勉强、间接表达以及其他角色化情绪可以先于决定；当这些表达的对象是时机、直接程度、标签或情绪，且行动或关系极性与收尾一致时，给出高分。
 
@@ -847,7 +846,7 @@ selected_surface_intent、content_plan、content_requirements 是必须保留的
 4. 候选用权威语义未提供的新动机、条件或约束削弱、推迟或改变立场；
 5. 不完整 evidence_state 下把 remaining_needs 写成已确认答案，或添加权威语义未提供的外部核查事实。
 
-并列动作覆盖度属于内容完整性检查；hard_errors 必须引用候选原文，说明具体冲突及相反权威语义。角色自己的拒绝、协商或附加条件与权威语义一致时保持高分；合理虚构、创造性语言、玩笑、双关、省略或多种合理角色读法若保持权威语义（aligned true）也保持高分。tool_result 的产品规格、价格、库存、数量、时间、因果关系等外部事实必须有权威来源，不属于合理虚构。
+并列动作覆盖度属于内容完整性检查；hard_errors 必须引用候选原文，说明具体冲突及相反权威语义。角色的拒绝、协商或附加条件与权威语义一致时保持高分；合理虚构、创造性语言、玩笑、双关、省略或多种合理角色读法保持权威语义（aligned true）时也保持高分。tool_result 外部事实必须有权威来源，不属于合理虚构。
 
 # 输出格式
 只返回字段恰好为 score 和 hard_errors 的 JSON 对象。score 必须是有限 JSON number，且位于 [0.0, 1.0]；hard_errors 是零到四条不重复、每条≤300字符的证据字符串。字段名必须为小写 ASCII token hard_errors。'''

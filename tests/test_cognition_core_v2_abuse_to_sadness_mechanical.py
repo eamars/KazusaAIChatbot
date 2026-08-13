@@ -181,6 +181,7 @@ def test_negative_abuse_outcome_reaches_sadness_mechanically() -> None:
             "semantic_summary": str(event_spec["description"]),
         },
         "visible_to": ["q:goal_threat_outcome"],
+        "authority": "current_event",
     }]
     handle_to_ref = {
         "ev1": {

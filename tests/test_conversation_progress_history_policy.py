@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from kazusa_ai_chatbot.conversation_progress.history import (
     project_logical_turns_for_prompt,
+    select_group_scene_logical_turns,
     select_recent_logical_turns,
 )
 from kazusa_ai_chatbot.conversation_progress.policy import (
@@ -87,3 +88,38 @@ def test_zero_turn_limit_returns_empty_without_partial_turns():
         [_turn(1)],
         limit=0,
     ) == []
+
+
+def test_group_scene_selection_preserves_current_user_anchors_before_recent_cap():
+    """Participant anchors survive newer unrelated group turns."""
+
+    current_user_id = "user-current"
+    current_user_turn = _turn(0, "current user event")
+    current_user_turn["global_user_id"] = current_user_id
+    current_user_turn["occurred_at"] = "2026-07-28T09:00:00+00:00"
+
+    assistant_turn = _turn(1, "assistant reply to current user")
+    assistant_turn["role"] = "assistant"
+    assistant_turn["global_user_id"] = "character-global"
+    assistant_turn["addressed_to_global_user_ids"] = [current_user_id]
+    assistant_turn["broadcast"] = False
+    assistant_turn["occurred_at"] = "2026-07-28T09:01:00+00:00"
+
+    noise = [_turn(index, f"noise {index}") for index in range(2, 12)]
+    for index, turn in enumerate(noise, start=2):
+        turn["global_user_id"] = f"user-noise-{index}"
+        turn["occurred_at"] = f"2026-07-28T09:{index:02d}:00+00:00"
+
+    selected = select_group_scene_logical_turns(
+        [current_user_turn, assistant_turn, *noise],
+        current_global_user_id=current_user_id,
+        limit=6,
+    )
+
+    selected_ids = [turn["turn_id"] for turn in selected]
+    assert current_user_turn["turn_id"] in selected_ids
+    assert assistant_turn["turn_id"] in selected_ids
+    assert len(selected) == 6
+    assert [turn["occurred_at"] for turn in selected] == sorted(
+        turn["occurred_at"] for turn in selected
+    )

@@ -33,6 +33,10 @@ from kazusa_ai_chatbot.conversation_progress.policy import (
 from kazusa_ai_chatbot.conversation_progress.repository import (
     validate_active_packet,
 )
+from tests.test_conversation_progress_group_scene import (
+    _anchor_fixture,
+    _build_from_fixture,
+)
 from tests.conversation_progress_v2_helpers import (
     EPISODE_ID,
     changed_event_observation,
@@ -391,3 +395,25 @@ def test_new_event_requires_actor_action_and_object() -> None:
             supplied_event_handles=set(event_handle_map(submitted)),
             supplied_source_handles=set(source_handle_map(submitted)),
         )
+
+
+def test_group_scene_anchor_contract_is_prompt_safe() -> None:
+    """Protection metadata remains deterministic and out of the prompt."""
+
+    from kazusa_ai_chatbot.conversation_progress.projection import (
+        project_group_scene_prompt,
+    )
+
+    context = _build_from_fixture(
+        _anchor_fixture(),
+        current_global_user_id='user-a',
+    )
+    rendered = project_group_scene_prompt(context)
+
+    assert any(
+        turn.get('anchor_kind') == 'current_user'
+        for turn in context['turns']
+    )
+    assert 'anchor_kind' not in rendered
+    assert 'global_user_id' not in rendered
+    assert 'user-a' not in rendered

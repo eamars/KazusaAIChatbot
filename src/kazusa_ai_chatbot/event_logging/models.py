@@ -10,6 +10,158 @@ EVENT_SEVERITIES: frozenset[str] = frozenset(
     {"debug", "info", "warning", "error", "critical"}
 )
 
+ContinuityBoundary = Literal[
+    "progress_load",
+    "progress_record",
+    "residue_load",
+    "residue_record",
+    "reflection_projection",
+    "post_turn",
+]
+ContinuityBoundaryStatus = Literal[
+    "started",
+    "succeeded",
+    "empty",
+    "skipped",
+    "contract_failed",
+    "provider_failed",
+    "persistence_failed",
+    "interrupted",
+    "guarded_write_lost",
+    "cache_not_published",
+    "reconciled",
+    "unknown",
+]
+ContinuityScopeKind = Literal[
+    "user_thread",
+    "group_scene",
+    "private",
+    "targetless",
+]
+ContinuityAgeLabel = Literal["unknown", "fresh", "recent", "stale"]
+ContinuityRecorderDisposition = Literal[
+    "unknown",
+    "not_called",
+    "append",
+    "replace_scope",
+    "clear_scope",
+]
+ContinuityWriteDisposition = Literal[
+    "unknown",
+    "not_attempted",
+    "written",
+    "duplicate_same_payload",
+    "conflict",
+    "write_failed",
+    "lost_guarded_write",
+    "interrupted",
+    "reconciled_written",
+    "reconciled_absent",
+]
+ContinuityCacheDisposition = Literal[
+    "unknown",
+    "not_attempted",
+    "cache_hit",
+    "published",
+    "invalidated",
+    "not_published",
+]
+ContinuityBarrierDisposition = Literal[
+    "unknown",
+    "none",
+    "append",
+    "replace_scope",
+    "clear_scope",
+]
+
+CONTINUITY_BOUNDARY_VALUES = frozenset({
+    "progress_load",
+    "progress_record",
+    "residue_load",
+    "residue_record",
+    "reflection_projection",
+    "post_turn",
+})
+CONTINUITY_BOUNDARY_STATUS_VALUES = frozenset({
+    "started",
+    "succeeded",
+    "empty",
+    "skipped",
+    "contract_failed",
+    "provider_failed",
+    "persistence_failed",
+    "interrupted",
+    "guarded_write_lost",
+    "cache_not_published",
+    "reconciled",
+    "unknown",
+})
+CONTINUITY_SCOPE_KIND_VALUES = frozenset({
+    "user_thread",
+    "group_scene",
+    "private",
+    "targetless",
+})
+CONTINUITY_AGE_LABEL_VALUES = frozenset({
+    "unknown",
+    "fresh",
+    "recent",
+    "stale",
+})
+CONTINUITY_RECORDER_DISPOSITION_VALUES = frozenset({
+    "unknown",
+    "not_called",
+    "append",
+    "replace_scope",
+    "clear_scope",
+})
+CONTINUITY_WRITE_DISPOSITION_VALUES = frozenset({
+    "unknown",
+    "not_attempted",
+    "written",
+    "duplicate_same_payload",
+    "conflict",
+    "write_failed",
+    "lost_guarded_write",
+    "interrupted",
+    "reconciled_written",
+    "reconciled_absent",
+})
+CONTINUITY_CACHE_DISPOSITION_VALUES = frozenset({
+    "unknown",
+    "not_attempted",
+    "cache_hit",
+    "published",
+    "invalidated",
+    "not_published",
+})
+CONTINUITY_BARRIER_DISPOSITION_VALUES = frozenset({
+    "unknown",
+    "none",
+    "append",
+    "replace_scope",
+    "clear_scope",
+})
+
+
+class ContinuityBoundaryEventFields(TypedDict):
+    """Text-free bounded metrics for one continuity boundary."""
+
+    boundary: ContinuityBoundary
+    status: ContinuityBoundaryStatus
+    scope_kind: ContinuityScopeKind
+    candidate_count: int
+    selected_count: int
+    packet_turn_count: int
+    protected_anchor_count: int
+    rendered_chars: int
+    packet_age: ContinuityAgeLabel
+    source_age: ContinuityAgeLabel
+    recorder_disposition: ContinuityRecorderDisposition
+    write_disposition: ContinuityWriteDisposition
+    cache_disposition: ContinuityCacheDisposition
+    barrier_disposition: ContinuityBarrierDisposition
+
 
 class EventScopeInput(TypedDict, total=False):
     """Caller-supplied runtime scope before private channel ref projection."""

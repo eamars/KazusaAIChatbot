@@ -254,6 +254,25 @@ MEMORY_SCOPE_VALUES = frozenset({
     "shared_character_or_world",
 })
 
+CognitionEvidenceAuthority = Literal[
+    "current_event",
+    "public_scene",
+    "participant_continuity",
+    "private_motive_only",
+    "character_world_context",
+    "conditional_character_guidance",
+    "contextual_fact_only",
+]
+COGNITION_EVIDENCE_AUTHORITY_VALUES = frozenset({
+    "current_event",
+    "public_scene",
+    "participant_continuity",
+    "private_motive_only",
+    "character_world_context",
+    "conditional_character_guidance",
+    "contextual_fact_only",
+})
+
 EVIDENCE_SOURCE_QUESTION_IDS = {
     "episode": tuple(f"q:{kind}" for kind in SEMANTIC_QUESTION_KINDS),
     "promoted_memory": tuple(f"q:{kind}" for kind in SEMANTIC_QUESTION_KINDS),
@@ -367,6 +386,8 @@ class CognitionEvidenceV2(TypedDict):
     evidence_ref: EvidenceRefV2
     semantic_text: str
     visible_to: list[str]
+    authority: CognitionEvidenceAuthority
+    temporal_provenance: NotRequired[dict[str, str]]
     memory_scope: NotRequired[
         Literal[
             "current_user_continuity",
@@ -2148,9 +2169,12 @@ def _validate_evidence_rows(rows: Any) -> None:
             "evidence_ref",
             "semantic_text",
             "visible_to",
+            "authority",
         }
         if "memory_scope" in row:
             required_row_fields.add("memory_scope")
+        if "temporal_provenance" in row:
+            required_row_fields.add("temporal_provenance")
         _require_exact_keys(
             row,
             required_row_fields,
@@ -2167,6 +2191,8 @@ def _validate_evidence_rows(rows: Any) -> None:
             raise CognitionContractError("evidence handle is invalid")
         seen.add(handle)
         _validate_evidence_ref(row["evidence_ref"])
+        if row["authority"] not in COGNITION_EVIDENCE_AUTHORITY_VALUES:
+            raise CognitionContractError("evidence authority is invalid")
         _require_text(row["semantic_text"], "semantic_text", maximum=1000)
         if (
             not isinstance(row["visible_to"], list)
@@ -2180,6 +2206,37 @@ def _validate_evidence_rows(rows: Any) -> None:
         if len(row["visible_to"]) != len(set(row["visible_to"])):
             raise CognitionContractError("evidence visibility is duplicated")
         source_kind = row["evidence_ref"]["source_kind"]
+        source_id = row["evidence_ref"]["source_id"]
+        authority = row["authority"]
+        if authority == "conditional_character_guidance" and (
+            source_kind != "promoted_reflection"
+            or ":self_guidance:" not in source_id
+        ):
+            raise CognitionContractError(
+                "conditional character guidance authority is not scoped"
+            )
+        if source_kind == "promoted_reflection":
+            if ":self_guidance:" in source_id:
+                if authority != "conditional_character_guidance":
+                    raise CognitionContractError(
+                        "self guidance must be conditional character guidance"
+                    )
+            elif authority != "character_world_context":
+                raise CognitionContractError(
+                    "promoted reflection lore must be character-world context"
+                )
+        if source_kind == "conversation_evidence" and source_id.startswith(
+            "conversation-progress-event:"
+        ):
+            if "temporal_provenance" not in row:
+                raise CognitionContractError(
+                    "conversation progress evidence requires temporal provenance"
+                )
+            _validate_temporal_provenance(row["temporal_provenance"])
+        elif "temporal_provenance" in row:
+            raise CognitionContractError(
+                "temporal provenance is only valid for progress evidence"
+            )
         if source_kind == "promoted_memory" and "memory_scope" not in row:
             raise CognitionContractError(
                 "promoted memory evidence requires memory scope"
@@ -2933,6 +2990,22 @@ def _validate_evidence_ref(value: Any) -> None:
     _require_text(value["source_id"], "evidence_ref.source_id")
     _require_utc_timestamp(value["occurred_at"], "evidence_ref.occurred_at")
     _require_text(value["semantic_summary"], "evidence_ref.semantic_summary")
+
+
+def _validate_temporal_provenance(value: Any) -> None:
+    """Validate source time and its bounded deterministic age descriptor."""
+
+    required = {"occurred_at", "age_descriptor"}
+    if not isinstance(value, Mapping) or set(value) != required:
+        raise CognitionContractError(
+            "temporal provenance fields are not exact"
+        )
+    _require_utc_timestamp(value["occurred_at"], "temporal_provenance.occurred_at")
+    _require_text(
+        value["age_descriptor"],
+        "temporal_provenance.age_descriptor",
+        maximum=40,
+    )
 
 
 def _validate_entity_ref(value: Any, label: str) -> None:

@@ -528,6 +528,7 @@ async def test_unauthorized_task_resolution_never_accepts_background_work() -> N
             },
             "semantic_text": "the user asked for bounded research",
             "visible_to": ["q:event_agency"],
+            "authority": "current_event",
         }],
         available_actions=[],
         available_resolvers=[_resolver("task_resolution_request")],

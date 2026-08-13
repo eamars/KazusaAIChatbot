@@ -62,7 +62,7 @@ def _evidence(
 ) -> dict[str, Any]:
     """Build one prompt-safe evidence row."""
 
-    return {
+    row: dict[str, Any] = {
         "evidence_handle": evidence_handle,
         "evidence_ref": {
             "source_kind": source_kind,
@@ -72,7 +72,15 @@ def _evidence(
         },
         "semantic_text": "The current group scene contains one recent message.",
         "visible_to": ["q:event_agency"],
+        "authority": (
+            "current_event"
+            if source_kind == "episode"
+            else "character_world_context"
+        ),
     }
+    if source_kind == "promoted_memory":
+        row["memory_scope"] = "shared_character_or_world"
+    return row
 
 
 def _primary_bid() -> dict[str, Any]:

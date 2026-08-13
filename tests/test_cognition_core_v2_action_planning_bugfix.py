@@ -176,6 +176,7 @@ async def test_speech_composes_with_three_private_actions() -> None:
             },
             "semantic_text": "the user made a grounded request",
             "visible_to": ["q:event_agency"],
+            "authority": "current_event",
         }],
         available_actions=[
             _action("background_work_request"),
@@ -251,6 +252,7 @@ async def test_answerable_now_drops_optional_resolver_request() -> None:
             },
             "semantic_text": "the user asked a general question",
             "visible_to": ["q:relationship_social"],
+            "authority": "current_event",
         }],
         available_actions=[],
         available_resolvers=[_resolver("task_resolution_request")],
@@ -664,6 +666,7 @@ async def test_denied_required_action_closes_goal_without_progress() -> None:
             },
             "semantic_text": "当前用户要求读取指定仓库",
             "visible_to": ["q:event_agency"],
+            "authority": "current_event",
         }],
         available_actions=[_action("accepted_coding_task_request")],
         available_resolvers=[],
@@ -740,6 +743,7 @@ async def test_denied_required_resolver_closes_goal_without_progress() -> None:
             },
             "semantic_text": "当前用户要求读取指定仓库",
             "visible_to": ["q:event_agency"],
+            "authority": "current_event",
         }],
         available_actions=[],
         available_resolvers=[_resolver("task_resolution_request")],
@@ -1319,6 +1323,26 @@ def _evidence(
 ) -> dict[str, object]:
     """Build one prompt-safe evidence row for a deterministic planner test."""
 
+    authority_by_source_kind = {
+        "episode": "current_event",
+        "scheduler_event": "current_event",
+        "tool_result": "current_event",
+        "conversation_evidence": "participant_continuity",
+        "promoted_reflection": "character_world_context",
+        "recall_evidence": "contextual_fact_only",
+        "resolver_observation": "contextual_fact_only",
+    }
+    if source_kind == "promoted_memory":
+        if memory_scope == "current_user_continuity":
+            authority = "participant_continuity"
+        elif memory_scope == "shared_character_or_world":
+            authority = "character_world_context"
+        else:
+            raise ValueError(
+                "promoted memory fixtures require a canonical memory scope"
+            )
+    else:
+        authority = authority_by_source_kind[source_kind]
     row: dict[str, object] = {
         "evidence_handle": handle,
         "evidence_ref": {
@@ -1329,6 +1353,7 @@ def _evidence(
         },
         "semantic_text": semantic_text,
         "visible_to": ["q:event_agency"],
+        "authority": authority,
     }
     if memory_scope is not None:
         row["memory_scope"] = memory_scope
@@ -1433,6 +1458,7 @@ async def test_task_resolution_boolean_survives_authorization_and_materializatio
             },
             "semantic_text": "the user asked for bounded research",
             "visible_to": ["q:event_agency"],
+            "authority": "current_event",
         }],
         available_actions=[],
         available_resolvers=[_resolver("task_resolution_request")],

@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
 
 from kazusa_ai_chatbot import chat_input_queue as queue_module
 from kazusa_ai_chatbot import service as service_module
+from kazusa_ai_chatbot.brain_service import post_turn as post_turn_module
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 from tests.cognition_core_v2_test_helpers import (
@@ -149,6 +151,49 @@ async def test_enqueue_suppresses_routine_accepted_queue_event(
     assert response.messages == []
     await service_module._stop_chat_input_worker()
     service_module._chat_input_queue.reset_for_test()
+
+
+@pytest.mark.asyncio
+async def test_progress_disposition_telemetry_is_trace_linked_and_sanitized(
+    monkeypatch,
+) -> None:
+    """Post-turn progress telemetry carries only bounded opaque references."""
+
+    record_event = AsyncMock()
+    monkeypatch.setattr(
+        post_turn_module.event_logging,
+        "record_continuity_boundary_event",
+        record_event,
+    )
+
+    await post_turn_module._record_post_turn_continuity_event(
+        component="brain_service.post_turn",
+        boundary="post_turn",
+        status="persistence_failed",
+        scope_kind="group_scene",
+        write_disposition="write_failed",
+        trace_ref="trace-opaque-1",
+        operation_ref="progress-post-turn:opaque-1",
+    )
+
+    record_event.assert_awaited_once()
+    fields = record_event.await_args.kwargs
+    assert fields["trace_ref"] == "trace-opaque-1"
+    assert fields["operation_ref"] == "progress-post-turn:opaque-1"
+    serialized = json.dumps(fields, sort_keys=True)
+    assert "private body" not in serialized
+    assert "prompt_text" not in serialized
+    assert "residue_text" not in serialized
+
+
+def test_post_turn_continuity_ownership_is_documented() -> None:
+    """Brain-service ICD keeps post-turn telemetry text-free and best effort."""
+
+    readme = Path("src/kazusa_ai_chatbot/brain_service/README.md")
+    text = readme.read_text(encoding="utf-8")
+    assert "Post-turn continuity instrumentation is text-free" in text
+    assert "record_continuity_boundary_event" in text
+    assert "cannot interrupt post-turn persistence" in text
 
 
 @pytest.mark.asyncio

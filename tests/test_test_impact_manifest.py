@@ -38,6 +38,37 @@ def test_manifest_accepts_an_explicit_package_init_source_root() -> None:
     assert validate_manifest(manifest, REPOSITORY_ROOT) == []
 
 
+def test_manifest_contains_group_topic_continuity_owner_rows() -> None:
+    """Every changed continuity owner has an exact required gate."""
+
+    manifest = load_manifest(REPOSITORY_ROOT)
+    entries = {
+        entry["source"]: entry
+        for entry in manifest["entries"]
+    }
+
+    required_rows = {
+        "src/kazusa_ai_chatbot/conversation_progress/history.py":
+            "tests/test_conversation_progress_history_policy.py::test_group_scene_selection_preserves_current_user_anchors_before_recent_cap",
+        "src/kazusa_ai_chatbot/conversation_progress/projection.py":
+            "tests/test_conversation_progress_group_scene.py::test_group_scene_final_fit_keeps_protected_anchors_within_render_cap",
+        "src/kazusa_ai_chatbot/internal_monologue_residue/loader.py":
+            "tests/test_internal_monologue_residue_loader.py::test_noncanonical_rows_are_excluded_from_the_residue_window",
+        "src/kazusa_ai_chatbot/db/schemas.py":
+            "tests/test_internal_monologue_residue_database.py::test_v2_residue_schema_requires_disposition_operation_and_retention",
+        "src/kazusa_ai_chatbot/event_logging/recording.py":
+            "tests/test_event_logging_interface.py::test_continuity_boundary_payload_is_bounded_and_text_free",
+        "src/kazusa_ai_chatbot/brain_service/post_turn.py":
+            "tests/test_service_event_logging.py::test_progress_disposition_telemetry_is_trace_linked_and_sanitized",
+    }
+
+    for source, node in required_rows.items():
+        assert source in entries
+        assert node in entries[source]["required_unit_tests"]
+
+    assert validate_manifest(manifest, REPOSITORY_ROOT) == []
+
+
 def test_manifest_rejects_empty_unit_mapping() -> None:
     """A semantic source cannot be mapped without a deterministic unit node."""
 

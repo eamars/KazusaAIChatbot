@@ -100,6 +100,26 @@ def _evidence_row(
 ) -> dict[str, object]:
     """Build a prompt-safe evidence row for focused stage tests."""
 
+    authority_by_source_kind = {
+        'episode': 'current_event',
+        'scheduler_event': 'current_event',
+        'tool_result': 'current_event',
+        'conversation_evidence': 'participant_continuity',
+        'promoted_reflection': 'character_world_context',
+        'recall_evidence': 'contextual_fact_only',
+        'resolver_observation': 'contextual_fact_only',
+    }
+    if source_kind == 'promoted_memory':
+        if memory_scope == 'current_user_continuity':
+            authority = 'participant_continuity'
+        elif memory_scope == 'shared_character_or_world':
+            authority = 'character_world_context'
+        else:
+            raise ValueError(
+                'promoted memory fixtures require a canonical memory scope'
+            )
+    else:
+        authority = authority_by_source_kind[source_kind]
     row: dict[str, object] = {
         'evidence_handle': handle,
         'evidence_ref': {
@@ -110,6 +130,7 @@ def _evidence_row(
         },
         'semantic_text': semantic_text,
         'visible_to': list(EVIDENCE_SOURCE_QUESTION_IDS[source_kind]),
+        'authority': authority,
     }
     if memory_scope is not None:
         row['memory_scope'] = memory_scope

@@ -7,9 +7,11 @@ from kazusa_ai_chatbot.internal_monologue_residue.loader import (
 )
 from kazusa_ai_chatbot.internal_monologue_residue.models import (
     InternalMonologueResidueRow,
+    ResidueDisposition,
     ResidueLoadResult,
     ResidueRecordResult,
     ResidueTriggerScope,
+    ResidueWriteResult,
 )
 from kazusa_ai_chatbot.internal_monologue_residue.projection import (
     project_residue_window,
@@ -20,9 +22,11 @@ from kazusa_ai_chatbot.internal_monologue_residue.recorder import (
 
 __all__ = [
     "InternalMonologueResidueRow",
+    "ResidueDisposition",
     "ResidueLoadResult",
     "ResidueRecordResult",
     "ResidueTriggerScope",
+    "ResidueWriteResult",
     "load_residue_context",
     "project_residue_window",
     "record_completed_episode_residue",

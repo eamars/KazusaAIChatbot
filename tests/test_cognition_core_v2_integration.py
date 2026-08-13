@@ -244,6 +244,7 @@ def _input(
             },
             "semantic_text": "the user supplied a direct bounded episode",
             "visible_to": list(EVIDENCE_SOURCE_QUESTION_IDS["episode"]),
+            "authority": "current_event",
         }],
         "direct_facts": [],
         "available_actions": [],
@@ -428,7 +429,9 @@ async def test_v2_facade_commits_before_surface_and_preserves_complete_bid() -> 
     """The core returns one committed state update and complete admitted bid."""
 
     llm = _ScriptedLLM()
-    output = await run_cognition(_input(), _core_services(llm))
+    input_payload = _input()
+    assert input_payload["evidence"][0]["authority"] == "current_event"
+    output = await run_cognition(input_payload, _core_services(llm))
 
     assert output["state_update"]["state_scope"] == "user"
     assert output["intention"]["route"] == "speech"

@@ -72,6 +72,7 @@ def _evidence(index: int) -> dict[str, object]:
         },
         "semantic_text": f"semantic evidence {index}",
         "visible_to": ["q:event_agency"],
+        "authority": "current_event",
     }
 
 

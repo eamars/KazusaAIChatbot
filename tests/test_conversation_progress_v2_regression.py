@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from copy import deepcopy
 from pathlib import Path
@@ -123,6 +124,56 @@ def _load_full_fixture() -> dict[str, Any]:
     if not isinstance(payload["messages"], list):
         raise AssertionError("long-thread fixture messages are invalid")
     return payload
+
+
+def test_captured_group_topic_continuity_fixture_preserves_public_continuity_anchors() -> None:
+    """The captured failure matrix keeps all required semantic lanes explicit."""
+
+    fixture_path = (
+        Path(__file__).parent
+        / "fixtures"
+        / "qq_group_topic_continuity_regression.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+
+    assert fixture["source_kind"] == "captured_production_trace_summary"
+    assert fixture["platform_channel_id"] == "54369546"
+    assert fixture["character_identity_ref"] == "runtime_active_character"
+    for artifact_field in (
+        "source_artifact",
+        "trace_scope_artifact",
+        "residue_artifact",
+    ):
+        relative_path = fixture[artifact_field]
+        evidence_path = Path(__file__).parents[1] / relative_path
+        assert evidence_path.is_file()
+        digest = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+        assert digest == fixture["source_sha256"][artifact_field]
+    assert [case["case_id"] for case in fixture["cases"]] == [
+        "S1",
+        "S2",
+        "S4",
+        "S6",
+        "S7",
+        "S8",
+    ]
+
+    required_lanes = {
+        "current_event",
+        "public_scene",
+        "participant_progress",
+        "residue",
+        "promoted_guidance",
+        "hard_gates",
+    }
+    for case in fixture["cases"]:
+        assert required_lanes <= set(case)
+        assert case["trace_ids"]
+        assert case["hard_gates"]
+
+    s8 = next(case for case in fixture["cases"] if case["case_id"] == "S8")
+    assert s8["mode"] == "fix_required"
+    assert "injury or recovery remains foreground" in s8["hard_gates"]
 
 
 class _FixtureCursor:
@@ -541,6 +592,11 @@ async def test_source_faithful_regression_projects_key_details_to_cognition(
     ] == [{
         "evidence_handle": progress_handle,
         "semantic_text": projected_text,
+        "authority": "participant_continuity",
+        "temporal_provenance": {
+            "occurred_at": projected_event["evidence_ref"]["occurred_at"],
+            "age_descriptor": "fresh",
+        },
     }]
     assert "evidence" not in goal_capture.payload
     prompt_event = goal_capture.payload[

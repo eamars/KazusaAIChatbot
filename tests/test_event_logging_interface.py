@@ -20,6 +20,7 @@ from kazusa_ai_chatbot.event_logging.sanitization import (
 
 
 _RECORDER_NAMES = [
+    "record_continuity_boundary_event",
     "record_cognition_v2_event",
     "record_character_identity_growth_event",
     "record_process_event",
@@ -154,6 +155,128 @@ def test_public_recorders_are_async_keyword_only() -> None:
         assert "payload" not in signature.parameters
         for parameter in signature.parameters.values():
             assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+
+
+def test_continuity_boundary_recorder_is_keyword_only_and_exported() -> None:
+    """Continuity telemetry has one explicit public keyword-only contract."""
+
+    recorder = event_logging.record_continuity_boundary_event
+    signature = inspect.signature(recorder)
+
+    assert inspect.iscoroutinefunction(recorder)
+    assert "record_continuity_boundary_event" in event_logging.__all__
+    assert all(
+        parameter.kind is inspect.Parameter.KEYWORD_ONLY
+        for parameter in signature.parameters.values()
+    )
+
+
+@pytest.mark.asyncio
+async def test_continuity_boundary_payload_is_bounded_and_text_free(
+    monkeypatch,
+) -> None:
+    """Continuity telemetry stores counts and opaque refs, never content."""
+
+    captured: dict[str, object] = {}
+
+    async def write_event(document):
+        captured.update(document)
+        return str(document["event_id"])
+
+    monkeypatch.setattr(recording_module.repository, "write_event", write_event)
+
+    result = await event_logging.record_continuity_boundary_event(
+        component="conversation_progress.runtime",
+        boundary="progress_record",
+        status="succeeded",
+        scope_kind="group_scene",
+        candidate_count=1000,
+        selected_count=1000,
+        packet_turn_count=1000,
+        protected_anchor_count=1000,
+        rendered_chars=100000,
+        packet_age="recent",
+        source_age="fresh",
+        recorder_disposition="append",
+        write_disposition="written",
+        cache_disposition="published",
+        barrier_disposition="none",
+        trace_ref="opaque-trace-ref",
+        correlation_ref="opaque-correlation-ref",
+        operation_ref="opaque-operation-ref",
+    )
+
+    assert result["accepted"] is True
+    assert captured["event_family"] == "continuity_boundary"
+    assert captured["payload"] == {
+        "candidate_count": 1000,
+        "selected_count": 1000,
+        "packet_turn_count": 1000,
+        "protected_anchor_count": 1000,
+        "rendered_chars": 100000,
+    }
+    assert captured["labels"] == {
+        "packet_age": "recent",
+        "source_age": "fresh",
+        "recorder_disposition": "append",
+        "write_disposition": "written",
+        "cache_disposition": "published",
+        "barrier_disposition": "none",
+    }
+    serialized = json.dumps(captured, ensure_ascii=False, sort_keys=True)
+    assert "prompt_text" not in serialized
+    assert "residue_text" not in serialized
+    assert "raw_model_output" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_continuity_boundary_unknown_status_is_not_success(
+    monkeypatch,
+) -> None:
+    """Unknown continuity state remains unknown in the persisted event."""
+
+    captured: dict[str, object] = {}
+
+    async def write_event(document):
+        captured.update(document)
+        return str(document["event_id"])
+
+    monkeypatch.setattr(recording_module.repository, "write_event", write_event)
+
+    result = await event_logging.record_continuity_boundary_event(
+        component="brain_service.post_turn",
+        boundary="post_turn",
+        status="unknown",
+        scope_kind="targetless",
+    )
+
+    assert result["accepted"] is True
+    assert captured["status"] == "unknown"
+    assert captured["status"] != "succeeded"
+
+    invalid = await event_logging.record_continuity_boundary_event(
+        component="brain_service.post_turn",
+        boundary="post_turn",
+        status="success",
+        scope_kind="targetless",
+    )
+    assert invalid["accepted"] is False
+    assert invalid["status"] == "rejected"
+
+
+def test_continuity_boundary_event_documentation_matches_contract() -> None:
+    """The event ICD states the bounded and text-free continuity contract."""
+
+    readme = (
+        _REPO_ROOT / "src/kazusa_ai_chatbot/event_logging/README.md"
+    ).read_text(encoding="utf-8")
+
+    assert "record_continuity_boundary_event" in readme
+    assert "progress_load" in readme
+    assert "guarded_write_lost" in readme
+    assert "reconciled_written" in readme
+    assert "protected anchors" in readme
+    assert "No\nmessage body, residue text, prompt" in readme
 
 
 def test_public_module_does_not_export_generic_record_event() -> None:

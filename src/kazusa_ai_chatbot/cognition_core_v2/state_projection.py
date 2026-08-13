@@ -70,6 +70,10 @@ _SIGNED_RELATIONSHIP_AXES = frozenset({
 MAX_CHARACTER_OPERATIONAL_AFFECT_ROWS = 21
 MAX_CHARACTER_OPERATIONAL_PRESSURE_ROWS = 8
 OPERATIONAL_PRESSURE_THRESHOLD = 40
+# New causal entities are retained natively at salience >= 25, so any committed
+# active entity above that floor is a durable operational pressure and must
+# stay observable even when it is not yet significant enough for a typed class.
+OPERATIONAL_ENTITY_PRESSURE_SALIENCE_FLOOR = 25
 MINUTES_PER_DAY = 24 * 60
 
 CHARACTER_SLEEP_PHASE_OUTSIDE = "清醒时段"
@@ -743,7 +747,7 @@ def _project_character_pressure_rows(
                 entity["status"] not in statuses
                 or isinstance(salience, bool)
                 or not isinstance(salience, int)
-                or salience < OPERATIONAL_PRESSURE_THRESHOLD
+                or salience < OPERATIONAL_ENTITY_PRESSURE_SALIENCE_FLOOR
             ):
                 continue
             row = {

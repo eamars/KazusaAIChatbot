@@ -21,6 +21,7 @@ from kazusa_ai_chatbot.cognition_core_v2.action_selection import (
 )
 from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
     _ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT,
+    CONTINUITY_AUTHORITY_INSTRUCTIONS,
     GENERIC_GOAL_REPAIR_INSTRUCTIONS,
     GOAL_COGNITION_PROMPT,
     NON_ORDINARY_GENERIC_GOAL_REPAIR_INSTRUCTIONS,
@@ -93,6 +94,25 @@ def test_selected_response_operation_contract_is_documented() -> None:
     assert "input-level `response_operation`" in nodes_readme
     assert "does not rewrite it" in nodes_readme
     assert "percept.content.response_operation" not in nodes_readme
+
+
+def test_goal_prompt_documents_one_objective_evidence_authority() -> None:
+    """The cognition ICD documents one objective and each lane's authority."""
+
+    repository_root = Path(__file__).resolve().parents[1]
+    cognition_readme = (
+        repository_root
+        / "src"
+        / "kazusa_ai_chatbot"
+        / "cognition_core_v2"
+        / "README.md"
+    ).read_text(encoding="utf-8")
+
+    assert "one primary objective" in cognition_readme
+    assert "same concrete matter" in cognition_readme
+    assert "private residue" in cognition_readme
+    assert "Conditional self-guidance" in cognition_readme
+    assert "ordered sub-actions" in cognition_readme
 
 
 def test_static_prompt_policy_audit_removes_application_owned_policy() -> None:
@@ -635,6 +655,7 @@ async def test_active_selection_route_uses_rewritten_prompt_and_repair() -> None
         },
         "semantic_text": semantic_text,
         "visible_to": ["q:event_agency"],
+        "authority": "current_event",
     }]
     valid = {
         "selection": "The character chooses the grounded next step.",
@@ -694,7 +715,11 @@ async def test_active_selection_route_uses_rewritten_prompt_and_repair() -> None
 
     assert len(llm.messages) == 2
     assert all(
-        message_list[0].content == _ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT
+        message_list[0].content
+        == (
+            _ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT
+            + CONTINUITY_AUTHORITY_INSTRUCTIONS
+        )
         for message_list in llm.messages
     )
     repair_payload = json.loads(str(llm.messages[1][1].content))

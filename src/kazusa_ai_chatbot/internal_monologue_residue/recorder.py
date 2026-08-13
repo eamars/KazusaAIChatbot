@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import time
 from collections.abc import Mapping
+from datetime import datetime, timedelta
 from uuid import uuid4
 
-from json_repair import repair_json
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot import db, event_logging
@@ -20,6 +21,7 @@ from kazusa_ai_chatbot.config import (
     INTERNAL_MONOLOGUE_RESIDUE_ROW_CHAR_LIMIT,
     COGNITION_LLM_MAX_COMPLETION_TOKENS,
     COGNITION_LLM_THINKING_ENABLED,
+    INTERNAL_MONOLOGUE_RESIDUE_RETENTION_HOURS,
 )
 from kazusa_ai_chatbot.db import DatabaseOperationError
 from kazusa_ai_chatbot.internal_monologue_residue.loader import (
@@ -32,6 +34,7 @@ from kazusa_ai_chatbot.internal_monologue_residue.models import (
     RecorderInput,
     RecorderValidationResult,
     ResidueRecordResult,
+    ResidueDisposition,
     ResidueScopeKind,
     ResidueSourceKind,
 )
@@ -40,6 +43,8 @@ from kazusa_ai_chatbot.llm_interface import (
     LLMCallConfig,
     LLMThinkingConfig,
 )
+from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
+from kazusa_ai_chatbot.utils import parse_llm_json_output
 logger = logging.getLogger(__name__)
 
 MILLISECONDS_PER_SECOND = 1000
@@ -111,8 +116,12 @@ _RECORDER_PROMPT = '''\
 # 输出格式
 请务必返回合法的 JSON 字符串，仅包含以下字段：
 {{
+  "disposition": "append | replace_scope | clear_scope",
   "residue_text": "第一人称简体中文短句；没有值得保留的内容时为空字符串"
 }}
+`append` 表示在当前作用域继续增加一条短期余波，`replace_scope` 表示旧作用域余波已
+失效并由这一条替代；`clear_scope` 表示清除该作用域的旧余波，此时
+`residue_text` 必须为空字符串。不要输出其他字段，不要依据关键词猜测 disposition。
 '''
 _llm_interface = LLInterface()
 _recorder_llm = LLInterface()
@@ -161,10 +170,36 @@ async def record_completed_episode_residue(
         await _record_write_event(result)
         return result
 
-    first_payload, first_latency_ms = await _call_recorder(
-        recorder_input,
-        repair_reason="",
-    )
+    episode_id = _completed_episode_id(completed_state)
+    if not episode_id:
+        result = _record_result(
+            status="skipped_missing_episode_id",
+            source_kind=recorder_input["source_kind"],
+            scope_kind="",
+            written=False,
+            retry_count=0,
+            validation_errors=["completed episode id is required"],
+        )
+        await _record_write_event(result)
+        return result
+
+    try:
+        first_payload, first_latency_ms = await _call_recorder(
+            recorder_input,
+            repair_reason="",
+        )
+    except Exception as exc:
+        logger.warning(f"Internal monologue residue recorder failed: {exc}")
+        result = _record_result(
+            status="provider_failed",
+            source_kind=recorder_input["source_kind"],
+            scope_kind="",
+            written=False,
+            retry_count=0,
+            validation_errors=["recorder provider failed"],
+        )
+        await _record_write_event(result)
+        return result
     first_validation = validate_recorder_output(
         first_payload,
         row_char_limit=INTERNAL_MONOLOGUE_RESIDUE_ROW_CHAR_LIMIT,
@@ -174,34 +209,32 @@ async def record_completed_episode_residue(
         first_output = raw_first_output.strip()
     else:
         first_output = ""
-    if first_validation["status"] == "empty":
-        result = _record_result(
-            status="empty_no_write",
-            source_kind=recorder_input["source_kind"],
-            scope_kind="",
-            written=False,
-            retry_count=0,
-            validation_errors=[],
-        )
-        await _record_llm_event(
-            status="empty",
-            output_chars=0,
-            retry_count=0,
-            latency_ms=first_latency_ms,
-        )
-        await _record_write_event(result)
-        return result
-
     retry_count = 0
     residue_text = first_output
     validation = first_validation
+    retry_latency_ms = first_latency_ms
     if not validation["accepted"]:
         retry_count = 1
         repair_reason = validation["failure_reason"]
-        retry_payload, retry_latency_ms = await _call_recorder(
-            recorder_input,
-            repair_reason=repair_reason,
-        )
+        try:
+            retry_payload, retry_latency_ms = await _call_recorder(
+                recorder_input,
+                repair_reason=repair_reason,
+            )
+        except Exception as exc:
+            logger.warning(
+                f"Internal monologue residue recorder retry failed: {exc}"
+            )
+            result = _record_result(
+                status="provider_failed",
+                source_kind=recorder_input["source_kind"],
+                scope_kind="",
+                written=False,
+                retry_count=retry_count,
+                validation_errors=["recorder retry failed"],
+            )
+            await _record_write_event(result)
+            return result
         raw_retry_output = retry_payload.get("residue_text")
         if isinstance(raw_retry_output, str):
             residue_text = raw_retry_output.strip()
@@ -218,18 +251,6 @@ async def record_completed_episode_residue(
             latency_ms=retry_latency_ms,
         )
 
-    if validation["status"] == "empty":
-        result = _record_result(
-            status="empty_no_write",
-            source_kind=recorder_input["source_kind"],
-            scope_kind="",
-            written=False,
-            retry_count=retry_count,
-            validation_errors=[],
-        )
-        await _record_write_event(result)
-        return result
-
     if not validation["accepted"]:
         result = _record_result(
             status="skipped_invalid",
@@ -242,12 +263,30 @@ async def record_completed_episode_residue(
         await _record_write_event(result)
         return result
 
-    row = _build_residue_row(
-        completed_state=completed_state,
-        residue_text=residue_text,
-        current_timestamp_utc=current_timestamp_utc,
-        source_kind=recorder_input["source_kind"],
-    )
+    disposition = validation.get("disposition")
+    if disposition not in {"append", "replace_scope", "clear_scope"}:
+        result = _record_result(
+            status="skipped_invalid",
+            source_kind=recorder_input["source_kind"],
+            scope_kind="",
+            written=False,
+            retry_count=retry_count,
+            validation_errors=["missing disposition"],
+        )
+        await _record_write_event(result)
+        return result
+
+    try:
+        row = _build_residue_row(
+            completed_state=completed_state,
+            residue_text=residue_text,
+            current_timestamp_utc=current_timestamp_utc,
+            source_kind=recorder_input["source_kind"],
+            disposition=disposition,
+            episode_id=episode_id,
+        )
+    except (TypeError, ValueError):
+        row = None
     if row is None:
         result = _record_result(
             status="unresolvable_scope",
@@ -255,12 +294,14 @@ async def record_completed_episode_residue(
             scope_kind="",
             written=False,
             retry_count=retry_count,
-            validation_errors=["scope could not be resolved"],
+            validation_errors=[
+                "scope or storage timestamp could not be resolved"
+            ],
         )
         await _record_write_event(result)
         return result
     try:
-        await db.insert_internal_monologue_residue_row(row)
+        write_result = await db.insert_internal_monologue_residue_row(row)
     except DatabaseOperationError as exc:
         logger.warning(f"Internal monologue residue write failed: {exc}")
         result = _record_result(
@@ -270,18 +311,39 @@ async def record_completed_episode_residue(
             written=False,
             retry_count=retry_count,
             validation_errors=[],
+            disposition=disposition,
+            operation_id=row["operation_id"],
+        )
+        await _record_write_event(result)
+        return result
+
+    write_status = write_result["status"]
+    if write_status == "conflict":
+        result = _record_result(
+            status="write_conflict",
+            source_kind=recorder_input["source_kind"],
+            scope_kind=row["scope_kind"],
+            written=False,
+            retry_count=retry_count,
+            validation_errors=["operation payload conflict"],
+            disposition=disposition,
+            operation_id=row["operation_id"],
+            idempotency_result="conflict",
         )
         await _record_write_event(result)
         return result
 
     result = _record_result(
-        status="written",
+        status=write_status,
         source_kind=recorder_input["source_kind"],
         scope_kind=row["scope_kind"],
         written=True,
         retry_count=retry_count,
         validation_errors=[],
-        residue_id=row["residue_id"],
+        residue_id=write_result["residue_id"],
+        disposition=disposition,
+        operation_id=row["operation_id"],
+        idempotency_result=write_status,
     )
     await _record_llm_event(
         status="succeeded",
@@ -300,9 +362,26 @@ def validate_recorder_output(
 ) -> RecorderValidationResult:
     """Validate one recorder payload without inspecting semantic content."""
 
+    if set(payload) != {"disposition", "residue_text"}:
+        result: RecorderValidationResult = {
+            "accepted": False,
+            "status": "invalid",
+            "failure_reason": "exact_output_fields_required",
+        }
+        return result
+
+    raw_disposition = payload.get("disposition")
+    if raw_disposition not in {"append", "replace_scope", "clear_scope"}:
+        result = {
+            "accepted": False,
+            "status": "invalid",
+            "failure_reason": "invalid_disposition",
+        }
+        return result
+
     raw_residue_text = payload.get("residue_text")
     if not isinstance(raw_residue_text, str):
-        result: RecorderValidationResult = {
+        result = {
             "accepted": False,
             "status": "invalid",
             "failure_reason": "missing_residue_text",
@@ -311,10 +390,28 @@ def validate_recorder_output(
 
     text = raw_residue_text.strip()
     if not text:
+        if raw_disposition != "clear_scope":
+            result = {
+                "accepted": False,
+                "status": "invalid",
+                "failure_reason": "nonempty_text_required",
+                "disposition": raw_disposition,
+            }
+            return result
         result = {
             "accepted": True,
             "status": "empty",
             "failure_reason": "",
+            "disposition": raw_disposition,
+        }
+        return result
+
+    if raw_disposition == "clear_scope":
+        result = {
+            "accepted": False,
+            "status": "invalid",
+            "failure_reason": "clear_scope_requires_empty_text",
+            "disposition": raw_disposition,
         }
         return result
 
@@ -323,6 +420,7 @@ def validate_recorder_output(
             "accepted": False,
             "status": "invalid",
             "failure_reason": "row_char_limit",
+            "disposition": raw_disposition,
         }
         return result
 
@@ -333,6 +431,7 @@ def validate_recorder_output(
                 "accepted": False,
                 "status": "invalid",
                 "failure_reason": "prompt_process_leakage",
+                "disposition": raw_disposition,
             }
             return result
 
@@ -342,6 +441,7 @@ def validate_recorder_output(
                 "accepted": False,
                 "status": "invalid",
                 "failure_reason": "third_person_self_reference",
+                "disposition": raw_disposition,
             }
             return result
 
@@ -349,6 +449,7 @@ def validate_recorder_output(
         "accepted": True,
         "status": "accepted",
         "failure_reason": "",
+        "disposition": raw_disposition,
     }
     return result
 
@@ -413,12 +514,10 @@ async def _call_recorder(
 def _parse_recorder_json(raw_output: str) -> dict[str, object]:
     """Parse recorder JSON without logging raw model text."""
 
-    stripped = raw_output.strip().strip("```").strip("json")
-    try:
-        parsed = repair_json(stripped, return_objects=True)
-    except ValueError as exc:
-        logger.warning(f"Recorder JSON parse failed: {exc}")
-        parsed = {}
+    parsed = parse_llm_json_output(
+        raw_output,
+        deterministic_only=True,
+    )
     if not isinstance(parsed, dict):
         parsed = {}
     return parsed
@@ -523,6 +622,8 @@ def _build_residue_row(
     residue_text: str,
     current_timestamp_utc: str,
     source_kind: ResidueSourceKind,
+    disposition: ResidueDisposition,
+    episode_id: str,
 ) -> InternalMonologueResidueRow | None:
     """Build the storage row for one accepted residue string.
 
@@ -557,6 +658,11 @@ def _build_residue_row(
         platform_channel_id=platform_channel_id,
         global_user_id=global_user_id,
     )
+    operation_id = _operation_id(
+        episode_id=episode_id,
+        scope_key=scope_key,
+    )
+    created_at = _canonical_timestamp(current_timestamp_utc)
     row: InternalMonologueResidueRow = {
         "residue_id": uuid4().hex,
         "character_id": character_id,
@@ -569,9 +675,47 @@ def _build_residue_row(
         "residue_text": residue_text,
         "source_kind": source_kind,
         "source_refs": _source_refs(completed_state),
-        "created_at": current_timestamp_utc,
+        "created_at": created_at,
+        "schema_version": "internal_monologue_residue.v2",
+        "operation_id": operation_id,
+        "disposition": disposition,
+        "purge_at": _purge_at(created_at),
     }
     return row
+
+
+def _completed_episode_id(completed_state: Mapping[str, object]) -> str:
+    """Return the completed episode identity required for durable writes."""
+
+    episode = completed_state.get("cognitive_episode")
+    if not isinstance(episode, Mapping):
+        return ""
+    return _string_field(episode, "episode_id")
+
+
+def _operation_id(*, episode_id: str, scope_key: str) -> str:
+    """Derive a stable operation key from the completed episode and scope."""
+
+    identity = "|".join(("internal_monologue_residue.v2", episode_id, scope_key))
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    return f"residue-v2:{digest}"
+
+
+def _canonical_timestamp(value: str) -> str:
+    """Normalize a caller timestamp before persisting it."""
+
+    try:
+        parsed = parse_storage_utc_datetime(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("residue timestamp is invalid") from exc
+    return parsed.isoformat()
+
+
+def _purge_at(created_at: str) -> datetime:
+    """Return the TTL deadline for a canonical storage timestamp."""
+
+    parsed = parse_storage_utc_datetime(created_at)
+    return parsed + timedelta(hours=INTERNAL_MONOLOGUE_RESIDUE_RETENTION_HOURS)
 
 
 def _source_kind(
@@ -750,6 +894,9 @@ def _record_result(
     retry_count: int,
     validation_errors: list[str],
     residue_id: str = "",
+    disposition: ResidueDisposition | None = None,
+    operation_id: str = "",
+    idempotency_result: str = "not_attempted",
 ) -> ResidueRecordResult:
     """Build a sanitized recorder result."""
 
@@ -760,6 +907,9 @@ def _record_result(
         "written": written,
         "retry_count": retry_count,
         "validation_errors": validation_errors,
+        "disposition": disposition or "none",
+        "operation_id": operation_id,
+        "idempotency_result": idempotency_result,
     }
     if residue_id:
         result["residue_id"] = residue_id
@@ -794,15 +944,28 @@ async def _record_write_event(result: ResidueRecordResult) -> None:
     """Record sanitized write, skip, or retry outcome telemetry."""
 
     document_ref = result.get("residue_id", "") if result["written"] else ""
-    await event_logging.record_database_operation_event(
+    continuity_status = _continuity_record_status(result["status"])
+    await event_logging.record_continuity_boundary_event(
         component=RESIDUE_COMPONENT,
-        collection=db.INTERNAL_MONOLOGUE_RESIDUE_COLLECTION,
-        operation_kind="record_completed_episode_residue",
-        status=result["status"],
-        idempotency_result=(
-            f"source:{result['source_kind']};scope:{result['scope_kind']};"
-            f"retry:{result['retry_count']}"
-        ),
-        latency_ms=0,
-        document_ref=document_ref,
+        boundary="residue_record",
+        status=continuity_status,
+        scope_kind=result["scope_kind"] or "targetless",
+        recorder_disposition=result["disposition"],
+        write_disposition=result["idempotency_result"],
+        operation_ref=result.get("operation_id", ""),
+        correlation_ref=document_ref,
     )
+
+
+def _continuity_record_status(status: str) -> str:
+    """Map recorder detail statuses to the closed continuity event set."""
+
+    if status in {"written", "duplicate_same_payload"}:
+        return "succeeded"
+    if status == "provider_failed":
+        return "provider_failed"
+    if status in {"write_failed", "write_conflict"}:
+        return "persistence_failed"
+    if status in {"skipped_invalid", "skipped_missing_episode_id"}:
+        return "contract_failed"
+    return "skipped"

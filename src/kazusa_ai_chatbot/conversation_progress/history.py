@@ -118,6 +118,87 @@ def select_recent_logical_turns(
     return [dict(turn) for turn in turns[-limit:]]
 
 
+def select_group_scene_logical_turns(
+    turns: Sequence[ConversationLogicalTurnV1],
+    *,
+    current_global_user_id: str,
+    limit: int,
+) -> list[ConversationLogicalTurnV1]:
+    """Reserve participant anchors before filling the public scene window.
+
+    The current user's newest preceding turn and the newest assistant turn
+    addressed solely to that user are selected before ambient recency is
+    applied. The returned rows remain chronological and contain no private
+    participant lane beyond the selected public rows.
+    """
+
+    if limit < 0:
+        raise ValueError('group scene logical turn limit must be non-negative')
+    if limit == 0:
+        return []
+    if not current_global_user_id:
+        return select_recent_logical_turns(turns, limit=limit)
+
+    current_user_anchor: ConversationLogicalTurnV1 | None = None
+    assistant_anchor: ConversationLogicalTurnV1 | None = None
+    for turn in reversed(turns):
+        if (
+            current_user_anchor is None
+            and turn['role'] == 'user'
+            and turn['global_user_id'] == current_global_user_id
+        ):
+            current_user_anchor = turn
+
+    if current_user_anchor is not None:
+        current_user_time = parse_storage_utc_datetime(
+            current_user_anchor['occurred_at']
+        )
+        for turn in reversed(turns):
+            if (
+                turn['role'] != 'assistant'
+                or turn['broadcast'] is True
+                or turn['addressed_to_global_user_ids'] != [
+                    current_global_user_id
+                ]
+            ):
+                continue
+            if parse_storage_utc_datetime(turn['occurred_at']) < current_user_time:
+                continue
+            if _reply_targets_other_user(
+                turn['reply_context'],
+                current_global_user_id,
+            ):
+                continue
+            assistant_anchor = turn
+            break
+
+    reserved = [
+        turn for turn in (current_user_anchor, assistant_anchor)
+        if turn is not None
+    ]
+    reserved_ids = {turn['turn_id'] for turn in reserved}
+    remaining = [turn for turn in turns if turn['turn_id'] not in reserved_ids]
+    fill_count = max(limit - len(reserved), 0)
+    ambient_fill = remaining[-fill_count:] if fill_count else []
+    selected = [*reserved, *ambient_fill]
+    selected.sort(key=lambda turn: turn['occurred_at'])
+    return [dict(turn) for turn in selected]
+
+
+def _reply_targets_other_user(
+    reply_context: Mapping[str, object],
+    current_global_user_id: str,
+) -> bool:
+    """Reject an explicit assistant anchor replying to another participant."""
+
+    reply_target = reply_context.get('reply_to_global_user_id')
+    return (
+        isinstance(reply_target, str)
+        and bool(reply_target)
+        and reply_target != current_global_user_id
+    )
+
+
 def project_logical_turns_for_prompt(
     turns: Sequence[ConversationLogicalTurnV1],
     *,

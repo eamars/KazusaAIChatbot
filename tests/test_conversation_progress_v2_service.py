@@ -250,10 +250,23 @@ async def test_service_load_passes_v2_scope_bot_and_current_row_ids(
         current_timestamp_utc='2026-07-28T09:30:00+00:00',
         platform_bot_id='bot-platform-id',
         active_turn_conversation_row_ids=['mongo-row-a'],
+        group_scene_mode='group',
+        group_scene_current_user_id='user_test',
     )
     assert result['conversation_episode_state'] is None
     assert result['ambient_logical_turns'] == []
     assert result['interaction_logical_turns'] == []
+
+
+@pytest.mark.asyncio
+async def test_service_load_passes_group_anchor_mode_and_keeps_user_scope(
+    monkeypatch,
+):
+    """The approved group mode test retains the existing per-user scope."""
+
+    await test_service_load_passes_v2_scope_bot_and_current_row_ids(
+        monkeypatch,
+    )
 
 
 @pytest.mark.asyncio
@@ -398,3 +411,69 @@ async def test_ordinary_response_path_adds_no_llm_call(monkeypatch):
     assert 'compaction_request' not in submitted
     assert result['written'] is True
     assert result['diagnostics']['recorder_call_count'] == 2
+
+
+@pytest.mark.asyncio
+async def test_post_turn_emits_trace_linked_progress_disposition(monkeypatch):
+    """Post-turn telemetry carries the settled progress trace reference."""
+
+    recorder_call = AsyncMock(return_value={
+        'written': True,
+        'turn_count': 4,
+        'continuity': 'same_episode',
+        'status': 'active',
+        'cache_updated': True,
+        'diagnostics': {'write_disposition': 'written'},
+    })
+    event_recorder = AsyncMock()
+    monkeypatch.setattr(
+        post_turn.event_logging,
+        'record_continuity_boundary_event',
+        event_recorder,
+    )
+
+    await post_turn.run_conversation_progress_record_background(
+        _post_turn_state('visible_response'),
+        record_turn_progress_func=recorder_call,
+        logger=logging.getLogger(__name__),
+    )
+
+    event_recorder.assert_awaited_once()
+    fields = event_recorder.await_args.kwargs
+    assert fields['boundary'] == 'post_turn'
+    assert fields['status'] == 'succeeded'
+    assert fields['trace_ref'] == 'current-trace-a'
+    assert fields['write_disposition'] == 'written'
+    assert fields['cache_disposition'] == 'published'
+
+
+@pytest.mark.asyncio
+async def test_post_turn_preserves_trace_link_when_diagnostic_event_write_fails(
+    monkeypatch,
+):
+    """A diagnostic failure cannot interrupt background progress recording."""
+
+    recorder_call = AsyncMock(return_value={
+        'written': True,
+        'turn_count': 4,
+        'continuity': 'same_episode',
+        'status': 'active',
+        'cache_updated': False,
+        'diagnostics': {'write_disposition': 'written'},
+    })
+    event_recorder = AsyncMock(side_effect=RuntimeError('event sink down'))
+    monkeypatch.setattr(
+        post_turn.event_logging,
+        'record_continuity_boundary_event',
+        event_recorder,
+    )
+
+    await post_turn.run_conversation_progress_record_background(
+        _post_turn_state('visible_response'),
+        record_turn_progress_func=recorder_call,
+        logger=logging.getLogger(__name__),
+    )
+
+    recorder_call.assert_awaited_once()
+    event_recorder.assert_awaited_once()
+    assert event_recorder.await_args.kwargs['trace_ref'] == 'current-trace-a'

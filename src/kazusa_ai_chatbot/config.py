@@ -978,6 +978,12 @@ INTERNAL_MONOLOGUE_RESIDUE_ROW_CHAR_LIMIT = _bounded_int_from_env(
     minimum=80,
     maximum=500,
 )
+INTERNAL_MONOLOGUE_RESIDUE_RETENTION_HOURS = _bounded_int_from_env(
+    "INTERNAL_MONOLOGUE_RESIDUE_RETENTION_HOURS",
+    "48",
+    minimum=1,
+    maximum=720,
+)
 
 # MCP tool servers — JSON dict of {name: {url: ...}}
 # Read from MCP_SERVERS env var (JSON string)

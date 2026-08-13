@@ -847,9 +847,7 @@ def _branch_handler(
                 "entity_id": goal["entity_id"],
             }
         context = dict(semantic_context)
-        episode = state.get("cognitive_episode")
-        if isinstance(episode, Mapping):
-            context["_episode_id"] = episode["episode_id"]
+        context["_episode_id"] = payload["episode"]["episode_id"]
         context["goal_projection"] = _goal_projection(goal, definition.goal_kind)
         if isinstance(relational_carrier, Mapping):
             context["current_turn_relational_willingness"] = dict(

@@ -24,6 +24,9 @@ from kazusa_ai_chatbot.cognition_core_v2.diagnostics import (
     write_diagnostic_artifact,
 )
 from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
+    CONTINUITY_AUTHORITY_INSTRUCTIONS,
+    GOAL_COGNITION_PROMPT,
+    _fit_goal_prompt_payload,
     validate_goal_bid_draft,
 )
 from kazusa_ai_chatbot.cognition_core_v2.parallel_executor import (
@@ -40,6 +43,9 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
 from kazusa_ai_chatbot.cognition_core_v2.transition_guards import (
     transition_event,
     transition_knowledge_gap,
+)
+from kazusa_ai_chatbot.conversation_progress.projection import (
+    _progress_age_descriptor,
 )
 
 
@@ -165,6 +171,83 @@ _EXPECTED_NON_SUCCESS_EVENT_GROUPS = frozenset({
 })
 
 _WILLINGNESS_REASON = "\u597d\u7684"
+
+
+def test_captured_s8_group_noise_replay_keeps_injury_foreground() -> None:
+    """The all-lane S8 replay keeps crisis evidence above stale competition."""
+
+    fixture_path = (
+        _ROOT / "tests" / "fixtures" / "qq_group_topic_continuity_regression.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    s8 = next(case for case in fixture["cases"] if case["case_id"] == "S8")
+
+    evidence = [
+        {
+            "handle": "episode_current",
+            "semantic_text": s8["current_event"],
+            "authority": "current_event",
+        },
+        {
+            "handle": "public_scene",
+            "semantic_text": "；".join(s8["public_scene"]),
+            "authority": "public_scene",
+        },
+        {
+            "handle": "participant_progress",
+            "semantic_text": s8["participant_progress"],
+            "authority": "participant_continuity",
+        },
+        {
+            "handle": "private_residue",
+            "semantic_text": "；".join(s8["residue"]),
+            "authority": "private_motive_only",
+        },
+        {
+            "handle": "promoted_guidance",
+            "semantic_text": s8["promoted_guidance"],
+            "authority": "conditional_character_guidance",
+        },
+    ]
+    payload = {
+        "branch": {"goal_kind": "ordinary_response"},
+        "semantic_context": {
+            "scene_context": {
+                "semantic_scene": s8["current_event"],
+                "public_group_scene": "；".join(s8["public_scene"]),
+            },
+            "private_continuity_context": "；".join(s8["residue"]),
+        },
+        "evidence": evidence,
+    }
+    system_prompt = GOAL_COGNITION_PROMPT + CONTINUITY_AUTHORITY_INSTRUCTIONS
+    prompt_text = _fit_goal_prompt_payload(
+        payload,
+        system_prompt=system_prompt,
+    )
+
+    current_authority_handles = {
+        row["handle"]
+        for row in evidence
+        if row["authority"] in {"current_event", "public_scene"}
+    }
+    non_current_authority_handles = {
+        row["handle"]
+        for row in evidence
+        if row["authority"] in {
+            "participant_continuity",
+            "private_motive_only",
+            "conditional_character_guidance",
+        }
+    }
+    assert "injured participant" in prompt_text
+    assert "current-user injury" in prompt_text
+    assert "recovery" in prompt_text
+    assert "一个当前目标" in system_prompt
+    assert current_authority_handles == {"episode_current", "public_scene"}
+    assert non_current_authority_handles.isdisjoint(current_authority_handles)
+    assert "stale reward residue" in prompt_text
+    assert "conditional_character_guidance" in prompt_text
 
 
 def _semantic_question(
@@ -783,7 +866,76 @@ def _load_capacity_replay_input(
     )
     input_payload = capsule.get("input_payload")
     assert isinstance(input_payload, Mapping)
-    payload = validate_cognition_core_input(input_payload)
+    replay_input = deepcopy(dict(input_payload))
+    current_event_occurred_at = next(
+        evidence_row["evidence_ref"]["occurred_at"]
+        for evidence_row in replay_input["evidence"]
+        if evidence_row["evidence_ref"]["source_kind"] == "episode"
+    )
+    authority_by_source_kind = {
+        "episode": "current_event",
+        "media_observation": "current_event",
+        "action_result": "current_event",
+        "scheduler_event": "current_event",
+        "tool_result": "current_event",
+        "conversation_evidence": "participant_continuity",
+        "recall_evidence": "contextual_fact_only",
+        "resolver_observation": "contextual_fact_only",
+    }
+    for evidence_row in replay_input["evidence"]:
+        evidence_ref = evidence_row["evidence_ref"]
+        source_kind = evidence_ref["source_kind"]
+        if source_kind == "promoted_memory":
+            memory_scope = evidence_row["memory_scope"]
+            if memory_scope == "current_user_continuity":
+                authority = "participant_continuity"
+            elif memory_scope == "shared_character_or_world":
+                authority = "character_world_context"
+            else:
+                raise AssertionError(
+                    f"unsupported replay memory scope: {memory_scope}"
+                )
+        elif source_kind == "promoted_reflection":
+            authority = (
+                "conditional_character_guidance"
+                if ":self_guidance:" in evidence_ref["source_id"]
+                else "character_world_context"
+            )
+        else:
+            authority = authority_by_source_kind[source_kind]
+        evidence_row["authority"] = authority
+        if (
+            source_kind == "conversation_evidence"
+            and evidence_ref["source_id"].startswith(
+                "conversation-progress-event:"
+            )
+        ):
+            occurred_at = evidence_ref["occurred_at"]
+            evidence_row["temporal_provenance"] = {
+                "occurred_at": occurred_at,
+                "age_descriptor": _progress_age_descriptor(
+                    occurred_at,
+                    current_event_occurred_at,
+                ),
+            }
+    assert all(
+        "authority" in evidence_row
+        for evidence_row in replay_input["evidence"]
+    )
+    payload = validate_cognition_core_input(replay_input)
+    assert {
+        (
+            evidence_row["evidence_ref"]["source_kind"],
+            evidence_row["authority"],
+        )
+        for evidence_row in payload["evidence"]
+    } == {
+        ("episode", "current_event"),
+        ("conversation_evidence", "participant_continuity"),
+        ("promoted_memory", "character_world_context"),
+        ("promoted_reflection", "character_world_context"),
+        ("promoted_reflection", "conditional_character_guidance"),
+    }
     attempts = capsule.get("attempts")
     assert isinstance(attempts, list)
     candidate = next(

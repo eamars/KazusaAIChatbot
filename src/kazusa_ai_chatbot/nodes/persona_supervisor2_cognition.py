@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Mapping
-from datetime import timezone
+from datetime import datetime, timezone
 from typing import Any
 
 from kazusa_ai_chatbot import llm_tracing
@@ -174,7 +174,10 @@ from kazusa_ai_chatbot.llm_interface import (
     LLMCallConfig,
     LLMThinkingConfig,
 )
-from kazusa_ai_chatbot.event_logging import record_cognition_v2_event
+from kazusa_ai_chatbot.event_logging import (
+    record_cognition_v2_event,
+    record_continuity_boundary_event,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_actions import (
     materialize_semantic_action_requests,
 )
@@ -871,6 +874,20 @@ async def call_cognition_subgraph(
         state,
         mutable_state=mutable_state,
         character_state=character_state,
+    )
+    reflection_count = sum(
+        1
+        for row in cognition_input["evidence"]
+        if row["evidence_ref"]["source_kind"] == "promoted_reflection"
+    )
+    await record_continuity_boundary_event(
+        component="persona_supervisor2_cognition",
+        boundary="reflection_projection",
+        status="succeeded" if reflection_count else "empty",
+        scope_kind=_continuity_scope_kind(state),
+        selected_count=reflection_count,
+        source_age="unknown",
+        trace_ref=_text(state.get("llm_trace_id")),
     )
     trace_token = llm_tracing.bind_trace_id(
         str(state.get("llm_trace_id") or ""),
@@ -1753,6 +1770,7 @@ def _episode_evidence(
         },
         "semantic_text": semantic_text,
         "visible_to": list(EVIDENCE_SOURCE_QUESTION_IDS[source_kind]),
+        "authority": "current_event",
     }]
 
 
@@ -1802,6 +1820,11 @@ def _rag_evidence(value: object, occurred_at: str) -> list[dict[str, Any]]:
             source_id=str(row.get("id", f"memory:{index}")),
             occurred_at=occurred_at,
             memory_scope=memory_scope,
+            authority=(
+                "participant_continuity"
+                if memory_scope == "current_user_continuity"
+                else "character_world_context"
+            ),
         ))
 
     conversation_items = value.get("conversation_evidence")
@@ -1821,6 +1844,7 @@ def _rag_evidence(value: object, occurred_at: str) -> list[dict[str, Any]]:
             source_kind="conversation_evidence",
             source_id=f"rag-conversation:{index}",
             occurred_at=occurred_at,
+            authority="participant_continuity",
         ))
 
     recall_items = value.get("recall_evidence")
@@ -1838,6 +1862,7 @@ def _rag_evidence(value: object, occurred_at: str) -> list[dict[str, Any]]:
             source_kind="recall_evidence",
             source_id=f"rag-recall:{index}",
             occurred_at=occurred_at,
+            authority="contextual_fact_only",
         ))
     return evidence
 
@@ -1869,13 +1894,21 @@ def _promoted_reflection_evidence(
             )
             if not semantic_text:
                 continue
+            source_timestamp = _reflection_source_timestamp(row)
+            if source_timestamp is None:
+                continue
             evidence.append(_build_rag_evidence_row(
                 text=semantic_text,
                 source_kind="promoted_reflection",
                 source_id=(
                     f"promoted-reflection:{lane_name}:{index}"
                 ),
-                occurred_at=occurred_at,
+                occurred_at=source_timestamp,
+                authority=(
+                    "conditional_character_guidance"
+                    if lane_name == "self_guidance"
+                    else "character_world_context"
+                ),
             ))
     return evidence
 
@@ -1890,12 +1923,29 @@ def _rag_text(value: Mapping[str, Any]) -> str:
     return ""
 
 
+def _reflection_source_timestamp(row: Mapping[str, Any]) -> str | None:
+    """Preserve a valid promoted-reflection source timestamp."""
+
+    for field_name in ("updated_at", "effective_at", "created_at"):
+        value = row.get(field_name)
+        if isinstance(value, datetime):
+            value = value.isoformat()
+        if not isinstance(value, str) or not value.strip():
+            continue
+        try:
+            return _v2_timestamp(value)
+        except ValueError:
+            continue
+    return None
+
+
 def _build_rag_evidence_row(
     *,
     text: str,
     source_kind: str,
     source_id: str,
     occurred_at: str,
+    authority: str,
     memory_scope: str | None = None,
 ) -> dict[str, Any]:
     """Build one bounded RAG evidence row with registered provenance."""
@@ -1911,6 +1961,7 @@ def _build_rag_evidence_row(
         },
         "semantic_text": semantic_text,
         "visible_to": list(EVIDENCE_SOURCE_QUESTION_IDS[source_kind]),
+        "authority": authority,
     }
     if memory_scope is not None:
         row["memory_scope"] = memory_scope
@@ -1945,6 +1996,7 @@ def _media_evidence(
             "visible_to": list(
                 EVIDENCE_SOURCE_QUESTION_IDS["media_observation"]
             ),
+            "authority": "current_event",
         })
     return evidence
 
@@ -1972,6 +2024,7 @@ def _resolver_observation_evidence(
         except (ValueError, TypeError):
             continue
         projected["evidence_handle"] = f"e{index}"
+        projected["authority"] = "contextual_fact_only"
         evidence.append(projected)
     return evidence
 
@@ -2011,6 +2064,7 @@ def _action_result_evidence(
             "visible_to": list(
                 EVIDENCE_SOURCE_QUESTION_IDS["action_result"]
             ),
+            "authority": "current_event",
         })
     return evidence
 
@@ -2122,6 +2176,21 @@ def _v2_timestamp(value: str) -> str:
 
     parsed = parse_storage_utc_datetime(value).astimezone(timezone.utc)
     return parsed.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _continuity_scope_kind(state: Mapping[str, Any]) -> str:
+    """Map the canonical episode channel to the event-log scope enum."""
+
+    episode = state.get("cognitive_episode")
+    if isinstance(episode, Mapping):
+        target_scope = episode.get("target_scope")
+        if isinstance(target_scope, Mapping):
+            channel_type = target_scope.get("channel_type")
+            if channel_type == "group":
+                return "group_scene"
+            if channel_type == "private":
+                return "private"
+    return "targetless"
 
 
 def _semantic_temporal_context(

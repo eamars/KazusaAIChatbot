@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -289,6 +290,7 @@ def _selection_episode_evidence() -> dict[str, object]:
         },
         'semantic_text': semantic_text,
         'visible_to': ['q:event_agency'],
+        'authority': 'current_event',
     }
 
 
@@ -303,6 +305,21 @@ def _selection_response_operation() -> dict[str, object]:
         'embedded_actor_role': CURRENT_USER_ROLE,
         'embedded_target_role': CURRENT_CHARACTER_ROLE,
     }
+
+
+def test_conversation_progress_documentation_preserves_public_scene_boundary() -> None:
+    """The ICD keeps public group context transient and user progress scoped."""
+
+    readme = Path(
+        "src/kazusa_ai_chatbot/conversation_progress/README.md"
+    ).read_text(encoding="utf-8")
+
+    assert "transiently into one bounded public scene" in readme
+    assert "without adding" in readme
+    assert "storage or a group packet" in readme
+    assert "participant continuity is a separate lane" in readme
+    assert "Targetless group scenes use ordinary recency selection" in readme
+    assert "private channels\ndo not enter this group-scene selector" in readme
 
 
 def _selection_required_operations() -> list[dict[str, object]]:
@@ -329,6 +346,11 @@ def _terminal_conversation_evidence() -> dict[str, object]:
         },
         'semantic_text': semantic_text,
         'visible_to': ['q:event_agency'],
+        'authority': 'participant_continuity',
+        'temporal_provenance': {
+            'occurred_at': '2026-07-30T00:00:00Z',
+            'age_descriptor': 'recent',
+        },
     }
 
 
@@ -486,6 +508,11 @@ async def test_selection_goal_uses_one_producer_and_zero_semantic_verifiers(
     assert producer_payload['conversation_progress_evidence'] == [{
         'evidence_handle': 'e2',
         'semantic_text': _terminal_conversation_evidence()['semantic_text'],
+        'authority': 'participant_continuity',
+        'temporal_provenance': {
+            'occurred_at': '2026-07-30T00:00:00Z',
+            'age_descriptor': 'recent',
+        },
     }]
     assert producer_payload['supporting_evidence'] == []
     assert 'evidence' not in producer_payload

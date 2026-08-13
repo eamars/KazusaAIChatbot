@@ -65,6 +65,9 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
 from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
     project_state_for_prompt,
 )
+from kazusa_ai_chatbot.conversation_progress.projection import (
+    _progress_age_descriptor,
+)
 from tests.cognition_core_v2_test_helpers import (
     canonical_episode,
     canonical_identity_context,
@@ -286,7 +289,7 @@ def _production_evidence() -> list[dict[str, Any]]:
     for index, source_row in enumerate(rows, start=1):
         source_kind = source_row["source_kind"]
         semantic_text = source_row["semantic_text"]
-        evidence.append({
+        row: dict[str, Any] = {
             "evidence_handle": f"e{index}",
             "evidence_ref": {
                 "source_kind": source_kind,
@@ -298,7 +301,19 @@ def _production_evidence() -> list[dict[str, Any]]:
             "visible_to": list(
                 EVIDENCE_SOURCE_QUESTION_IDS[source_kind]
             ),
-        })
+        }
+        if source_kind == "episode":
+            row["authority"] = "current_event"
+        elif source_kind == "promoted_memory":
+            row["authority"] = "character_world_context"
+            row["memory_scope"] = "shared_character_or_world"
+        elif source_kind == "conversation_evidence":
+            row["authority"] = "participant_continuity"
+        else:
+            raise AssertionError(
+                f"unsupported prompt-budget evidence source: {source_kind}"
+            )
+        evidence.append(row)
     return evidence
 
 
@@ -433,7 +448,9 @@ def _captured_near_cap_appraisal_context(
 ]:
     """Rebuild deterministic pre-appraisal context from a captured input."""
 
-    payload = validate_cognition_core_input(input_payload)
+    payload = validate_cognition_core_input(
+        _canonicalize_captured_evidence_fixture(input_payload)
+    )
     previous_state = state_models_module.validate_cognition_state(
         payload["mutable_state"]
     )
@@ -485,6 +502,83 @@ def _captured_near_cap_appraisal_context(
     return payload, preliminary_state, projection, questions
 
 
+def _canonicalize_captured_evidence_fixture(
+    input_payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Apply the current evidence contract to protected legacy captures."""
+
+    replay_input = deepcopy(dict(input_payload))
+    evidence = replay_input.get("evidence")
+    if not isinstance(evidence, list):
+        raise AssertionError("captured evidence fixture is not a list")
+    current_event_occurred_at = next(
+        evidence_row["evidence_ref"]["occurred_at"]
+        for evidence_row in evidence
+        if evidence_row["evidence_ref"]["source_kind"] == "episode"
+    )
+    authority_by_source_kind = {
+        "episode": "current_event",
+        "media_observation": "current_event",
+        "action_result": "current_event",
+        "scheduler_event": "current_event",
+        "tool_result": "current_event",
+        "conversation_evidence": "participant_continuity",
+        "recall_evidence": "contextual_fact_only",
+        "resolver_observation": "contextual_fact_only",
+    }
+    for evidence_row in evidence:
+        if not isinstance(evidence_row, dict):
+            raise AssertionError("captured evidence row is not a mapping")
+        evidence_ref = evidence_row.get("evidence_ref")
+        if not isinstance(evidence_ref, dict):
+            raise AssertionError("captured evidence reference is not a mapping")
+        source_kind = evidence_ref.get("source_kind")
+        source_id = evidence_ref.get("source_id")
+        if not isinstance(source_kind, str) or not isinstance(source_id, str):
+            raise AssertionError("captured evidence source metadata is invalid")
+        if source_kind == "promoted_memory":
+            memory_scope = evidence_row.get("memory_scope")
+            if memory_scope == "current_user_continuity":
+                authority = "participant_continuity"
+            elif memory_scope == "shared_character_or_world":
+                authority = "character_world_context"
+            else:
+                raise AssertionError(
+                    f"unsupported captured memory scope: {memory_scope}"
+                )
+        elif source_kind == "promoted_reflection":
+            authority = (
+                "conditional_character_guidance"
+                if ":self_guidance:" in source_id
+                else "character_world_context"
+            )
+        else:
+            try:
+                authority = authority_by_source_kind[source_kind]
+            except KeyError as exc:
+                raise AssertionError(
+                    f"unsupported captured evidence source: {source_kind}"
+                ) from exc
+        evidence_row["authority"] = authority
+        if (
+            source_kind == "conversation_evidence"
+            and source_id.startswith("conversation-progress-event:")
+        ):
+            occurred_at = evidence_ref.get("occurred_at")
+            if not isinstance(occurred_at, str):
+                raise AssertionError(
+                    "captured progress evidence timestamp is invalid"
+                )
+            evidence_row["temporal_provenance"] = {
+                "occurred_at": occurred_at,
+                "age_descriptor": _progress_age_descriptor(
+                    occurred_at,
+                    current_event_occurred_at,
+                ),
+            }
+    return replay_input
+
+
 def _maximum_evidence(count: int = 32) -> list[dict[str, Any]]:
     """Build the maximum valid evidence cardinality with full-size text."""
 
@@ -504,6 +598,7 @@ def _maximum_evidence(count: int = 32) -> list[dict[str, Any]]:
             "visible_to": list(
                 EVIDENCE_SOURCE_QUESTION_IDS["promoted_memory"]
             ),
+            "authority": "character_world_context",
         })
     return evidence
 
@@ -1302,23 +1397,27 @@ def test_goal_exact_aggregate_cap_and_cap_plus_one_are_distinct() -> None:
         "role_summaries": {},
     }
     goal_cap = goal_cognition_module.GOAL_COGNITION_PROMPT_CAP
-    payload_cap = goal_cap - len(goal_cognition_module.GOAL_COGNITION_PROMPT)
+    system_prompt = (
+        goal_cognition_module.GOAL_COGNITION_PROMPT
+        + goal_cognition_module.CONTINUITY_AUTHORITY_INSTRUCTIONS
+    )
+    payload_cap = goal_cap - len(system_prompt)
     _pad_to_serialized_length(payload, semantic_context, payload_cap)
 
     fitted = goal_cognition_module._fit_goal_prompt_payload(
         payload,
-        system_prompt=goal_cognition_module.GOAL_COGNITION_PROMPT,
+        system_prompt=system_prompt,
     )
 
     assert (
-        len(goal_cognition_module.GOAL_COGNITION_PROMPT) + len(fitted)
+        len(system_prompt) + len(fitted)
         == goal_cap
     )
     semantic_context["padding"] += "x"
     with pytest.raises(PromptBudgetError):
         goal_cognition_module._fit_goal_prompt_payload(
             payload,
-            system_prompt=goal_cognition_module.GOAL_COGNITION_PROMPT,
+            system_prompt=system_prompt,
         )
 
 
@@ -1769,7 +1868,10 @@ async def test_goal_prompt_fits_maximum_evidence_without_duplication() -> None:
     assert len(llm.human_payloads) == 1
     human_payload = llm.human_payloads[0]
     assert (
-        len(goal_cognition_module.GOAL_COGNITION_PROMPT)
+        len(
+            goal_cognition_module.GOAL_COGNITION_PROMPT
+            + goal_cognition_module.CONTINUITY_AUTHORITY_INSTRUCTIONS
+        )
         + len(human_payload)
         <= goal_cognition_module.GOAL_COGNITION_PROMPT_CAP
     )
@@ -1832,6 +1934,7 @@ async def test_required_selection_producer_overflow_fails_before_call(
         },
         "semantic_text": selection_operation,
         "visible_to": ["q:event_agency"],
+        "authority": "current_event",
     }]
 
     with pytest.raises(CognitionExecutionError) as error_info:

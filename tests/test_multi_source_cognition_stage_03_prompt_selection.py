@@ -43,7 +43,18 @@ def _constraints() -> dict[str, object]:
 
 
 def _evidence(source_kind: str) -> list[dict[str, object]]:
-    return [{
+    authority_by_source_kind = {
+        "episode": "current_event",
+        "promoted_reflection": "character_world_context",
+        "media_observation": "current_event",
+        "conversation_evidence": "participant_continuity",
+        "recall_evidence": "contextual_fact_only",
+        "action_result": "current_event",
+        "resolver_observation": "contextual_fact_only",
+        "tool_result": "current_event",
+        "scheduler_event": "current_event",
+    }
+    row: dict[str, object] = {
         "evidence_handle": "e1",
         "evidence_ref": {
             "source_kind": source_kind,
@@ -53,7 +64,15 @@ def _evidence(source_kind: str) -> list[dict[str, object]]:
         },
         "semantic_text": "one bounded semantic source",
         "visible_to": list(EVIDENCE_SOURCE_QUESTION_IDS[source_kind]),
-    }]
+        "authority": (
+            "character_world_context"
+            if source_kind == "promoted_memory"
+            else authority_by_source_kind[source_kind]
+        ),
+    }
+    if source_kind == "promoted_memory":
+        row["memory_scope"] = "shared_character_or_world"
+    return [row]
 
 
 @pytest.mark.parametrize(

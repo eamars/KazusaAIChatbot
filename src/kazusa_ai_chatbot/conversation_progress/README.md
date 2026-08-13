@@ -271,6 +271,23 @@ Diagnostics contain counts, sizes, compaction level, exact recorder call and
 per-owner attempt counts, scene/event dispositions, and write disposition.
 They contain no conversation text.
 
+For a public group scene, the current participant's newest preceding user
+turn and the newest later assistant turn addressed solely to that participant
+are protected anchors when they satisfy the explicit-address and reply-target
+rules. They are reserved before ambient recency fills the six-turn scene cap.
+Targetless group scenes use ordinary recency selection, and private channels
+do not enter this group-scene selector. The current trigger is a separate
+protected minimum and must remain non-empty. If protected minima cannot fit,
+the projection raises `GroupSceneProjectionError` with its typed
+`GroupSceneProjectionFailure` result; protected text is never truncated to an
+empty string.
+
+Interrupted progress writes are reconciled by deterministic source references
+and an opaque scope/source operation key. Reconciliation performs only a
+bounded packet read after interruption or a guarded-write loss; it adds no
+foreground model call or retry and does not alter the guarded replacement
+write algorithm.
+
 ## Storage Lifecycle
 
 The active packet and immutable blocks are scoped by platform, channel, and

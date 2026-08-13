@@ -44,6 +44,7 @@ def _evidence(text: str) -> dict[str, object]:
         },
         "semantic_text": text,
         "visible_to": ["q:event_agency"],
+        "authority": "current_event",
     }
 
 

@@ -361,6 +361,7 @@ async def _run_live_required_selection_case(
         },
         'semantic_text': semantic_text,
         'visible_to': ['q:event_agency'],
+        'authority': 'current_event',
     }, *extra_evidence]
     semantic_context = {
         'current_event': '我要亲口听你说你想让我做的下一步',
@@ -796,6 +797,7 @@ async def test_live_required_selection_accepts_one_progress_event() -> None:
         },
         'semantic_text': '双方刚完成一起挑选晚餐的事件。',
         'visible_to': ['q:event_agency'],
+        'authority': 'participant_continuity',
     }
 
     bid, failure, _, trace_path = await _run_live_required_selection_case(
@@ -826,6 +828,7 @@ async def test_live_required_selection_separates_progress_and_optional_rows(
         },
         'semantic_text': '双方正在商量下一次共同出门的时间。',
         'visible_to': ['q:event_agency'],
+        'authority': 'participant_continuity',
     }
     optional_conversation_row = {
         'evidence_handle': 'e3',
@@ -837,6 +840,7 @@ async def test_live_required_selection_separates_progress_and_optional_rows(
         },
         'semantic_text': '更早之前聊过最近的天气。',
         'visible_to': ['q:event_agency'],
+        'authority': 'participant_continuity',
     }
 
     bid, failure, _, trace_path = await _run_live_required_selection_case(

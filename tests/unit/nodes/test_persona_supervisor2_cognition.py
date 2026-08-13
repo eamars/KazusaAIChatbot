@@ -66,3 +66,48 @@ def test_group_self_cognition_proposal_materializes_existing_speak_surface(
     assert action_specs == [{"kind": SPEAK_CAPABILITY}]
     assert captured[1][0]["capability"] == SPEAK_CAPABILITY
     assert captured[1][0]["evidence_handles"] == ["e1"]
+
+
+def test_promoted_reflection_preserves_source_updated_at() -> None:
+    """Promoted rows retain their valid source time and omit invalid rows."""
+
+    evidence = cognition_module._promoted_reflection_evidence(
+        {
+            'promoted_lore': [{
+                'memory_name': 'world context',
+                'content': 'the setting remains stable',
+                'updated_at': '2026-07-29T23:00:00Z',
+            }],
+            'promoted_self_guidance': [{
+                'memory_name': 'tactic hint',
+                'content': 'verify the current scene first',
+                'updated_at': 'not-a-timestamp',
+            }],
+        },
+        '2026-07-30T00:00:00Z',
+    )
+
+    assert len(evidence) == 1
+    assert evidence[0]['evidence_ref']['occurred_at'] == (
+        '2026-07-29T23:00:00Z'
+    )
+
+
+def test_promoted_self_guidance_is_goal_only_conditional_context() -> None:
+    """Self-guidance carries conditional authority and no current fact role."""
+
+    evidence = cognition_module._promoted_reflection_evidence(
+        {
+            'promoted_self_guidance': [{
+                'memory_name': 'tactic hint',
+                'content': 'verify the current scene first',
+                'updated_at': '2026-07-29T23:00:00Z',
+            }],
+        },
+        '2026-07-30T00:00:00Z',
+    )
+
+    assert evidence[0]['authority'] == 'conditional_character_guidance'
+    assert evidence[0]['evidence_ref']['source_id'] == (
+        'promoted-reflection:self_guidance:1'
+    )

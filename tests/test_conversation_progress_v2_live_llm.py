@@ -652,15 +652,23 @@ async def _semantic_handoff(
         }, ensure_ascii=True, indent=2))
         raise
 
+    selected_operation = selected_bid.get("selected_response_operation")
+    if not isinstance(selected_operation, dict):
+        selected_operation = response_operation
+
+    intention = {
+        "route": "speech",
+        "intention": selected_bid["intention"],
+        "target_roles": list(selected_bid["target_roles"]),
+        "reason": selected_bid["reason"],
+    }
+    if selected_operation is not None:
+        intention["selected_response_operation"] = dict(selected_operation)
+
     surface_input = {
         "schema_version": "text_surface_input.v2",
         "episode": episode,
-        "intention": {
-            "route": "speech",
-            "intention": selected_bid["intention"],
-            "target_roles": list(selected_bid["target_roles"]),
-            "reason": selected_bid["reason"],
-        },
+        "intention": intention,
         "goal_resolution": "answerable_now",
         "primary_bid": {
             "motive": selected_bid["branch_id"],
@@ -690,6 +698,8 @@ async def _semantic_handoff(
         },
         "visual_character_context": "engaged and attentive",
     }
+    if selected_operation is not None:
+        surface_input["selected_response_operation"] = dict(selected_operation)
     surface_services = _build_text_surface_services()
     surface_capture = _CapturingLLM(surface_services.llm)
     surface_services = replace(surface_services, llm=surface_capture)
@@ -1068,6 +1078,7 @@ async def test_live_original_failure_progress_semantic_handoff(
             "decontextualized_input": final_user_turn["fragments"][0],
             "conversation_episode_state": active_packet,
             "conversation_progress": progress_prompt,
+            "public_group_scene": "",
             "user_multimedia_input": [],
             "rag_result": {"memory_evidence": []},
             "character_profile": _character_profile(),

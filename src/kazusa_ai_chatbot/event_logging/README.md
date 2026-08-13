@@ -426,6 +426,33 @@ async def write_analysis_snapshot(
 
 The public module must not export `record_event`.
 
+## Continuity Boundary Family
+
+`record_continuity_boundary_event(...)` is the canonical text-free recorder
+for continuity and post-turn boundaries. Its closed `boundary` values are
+`progress_load`, `progress_record`, `residue_load`, `residue_record`,
+`reflection_projection`, and `post_turn`. Statuses, scope kinds, age labels,
+recorder dispositions, write dispositions, cache dispositions, and barrier
+dispositions are all allowlisted by `event_logging.models`.
+
+The status vocabulary includes `unknown`, `persistence_failed`,
+`guarded_write_lost`, and `reconciled`; write dispositions include
+`reconciled_written` and `reconciled_absent`. These labels describe the
+observed boundary state and never turn an unverified write into success.
+
+The payload contains bounded counts only: candidate rows, selected rows,
+packet turns, protected anchors, and rendered characters. Opaque trace,
+correlation, and operation references are capped and stored as refs. No
+message body, residue text, prompt, model output, evidence text, user id, or
+database document is accepted. The recorder keeps timeout, cancellation, and
+database failure best-effort behavior through the existing event boundary.
+
+Approved production instrumentation is limited to
+`conversation_progress.runtime`, the internal-residue loader and recorder,
+the persona reflection projection, and `brain_service.post_turn`. These
+callers use this public function and do not repurpose the
+`database_operation` family for continuity state.
+
 ## Event Families And Payloads
 
 Every event row has one event family. The payload for each family is generated

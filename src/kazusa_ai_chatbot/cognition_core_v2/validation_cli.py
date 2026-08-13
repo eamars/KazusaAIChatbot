@@ -258,6 +258,7 @@ def _build_benchmark_payload(case: dict[str, str]) -> dict[str, object]:
             },
             "semantic_text": semantic_text[:1000],
             "visible_to": list(EVIDENCE_SOURCE_QUESTION_IDS["episode"]),
+            "authority": "current_event",
         }],
         "direct_facts": [],
         "available_actions": [],

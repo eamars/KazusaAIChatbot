@@ -151,6 +151,7 @@ def _evidence(
         },
         "semantic_text": semantic_text,
         "visible_to": [],
+        "authority": "current_event",
     }]
 
 
@@ -388,6 +389,7 @@ def test_all_guidance_rows_fit_production_prompt_budget_and_evidence_floor() -> 
         },
         "semantic_text": "E" * 12000,
         "visible_to": [],
+        "authority": "current_event",
     } for i in range(3)]
     semantic_context = {
         "character_identity": {

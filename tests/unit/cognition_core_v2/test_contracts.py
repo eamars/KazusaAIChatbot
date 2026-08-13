@@ -152,3 +152,61 @@ def test_group_confidence_rejects_numeric_values() -> None:
                 "engagement_guidelines": ["scene guidance"],
                 "confidence": value,
             })
+
+
+def _evidence_row(
+    *,
+    authority: str = "contextual_fact_only",
+    source_id: str = "resolver-1",
+) -> dict[str, object]:
+    """Build one complete row for the closed authority contract."""
+
+    return {
+        "evidence_handle": "e1",
+        "evidence_ref": {
+            "source_kind": "resolver_observation",
+            "source_id": source_id,
+            "occurred_at": "2026-07-30T00:00:00Z",
+            "semantic_summary": "bounded resolver context",
+        },
+        "semantic_text": "bounded resolver context",
+        "visible_to": list(
+            contracts_module.EVIDENCE_SOURCE_QUESTION_IDS[
+                "resolver_observation"
+            ]
+        ),
+        "authority": authority,
+    }
+
+
+def test_cognition_evidence_requires_closed_typed_authority() -> None:
+    """Missing or unknown authority cannot cross the evidence boundary."""
+
+    missing = _evidence_row()
+    missing.pop("authority")
+    with pytest.raises(CognitionContractError, match="fields are not exact"):
+        contracts_module._validate_evidence_rows([missing])
+
+    invalid = _evidence_row(authority="free_text_authority")
+    with pytest.raises(CognitionContractError, match="authority is invalid"):
+        contracts_module._validate_evidence_rows([invalid])
+
+
+def test_promoted_reflection_projects_conditional_guidance_authority() -> None:
+    """Self-guidance is accepted only with its scoped promoted-reflection id."""
+
+    row = _evidence_row(
+        authority="conditional_character_guidance",
+        source_id="promoted-reflection:self_guidance:1",
+    )
+    row["evidence_ref"] = {
+        **row["evidence_ref"],
+        "source_kind": "promoted_reflection",
+    }
+    row["visible_to"] = list(
+        contracts_module.EVIDENCE_SOURCE_QUESTION_IDS[
+            "promoted_reflection"
+        ]
+    )
+
+    contracts_module._validate_evidence_rows([row])

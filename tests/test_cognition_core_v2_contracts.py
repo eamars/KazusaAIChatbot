@@ -610,9 +610,11 @@ def test_evidence_visibility_matches_its_source_question_ids() -> None:
         },
         "semantic_text": "a current grounded episode",
         "visible_to": list(EVIDENCE_SOURCE_QUESTION_IDS["episode"]),
+        "authority": "current_event",
     }]
 
     validate_cognition_core_input(payload)
+    assert payload["evidence"][0]["authority"] == "current_event"
     payload["evidence"][0]["visible_to"] = ["cognition", "surface"]
     with pytest.raises(CognitionContractError):
         validate_cognition_core_input(payload)

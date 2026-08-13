@@ -40,6 +40,8 @@ def _fixture() -> dict[str, Any]:
 
 def _build_from_fixture(
     fixture: dict[str, Any],
+    *,
+    current_global_user_id: str = '',
 ) -> dict[str, Any]:
     """Build one public scene using the fixed trigger and roster inputs."""
 
@@ -54,6 +56,7 @@ def _build_from_fixture(
         ),
         trigger_reply_to_display_name=trigger["reply_to_display_name"],
         scope_users=fixture["scope_users"],
+        current_global_user_id=current_global_user_id,
     )
     return context
 
@@ -358,3 +361,168 @@ def test_group_scene_omitted_turn_count_excludes_age_discarded_turns() -> None:
     context = _build_from_fixture(fixture)
 
     assert context['omitted_turn_count'] == 0
+
+
+def _anchor_turn(
+    *,
+    turn_id: str,
+    role: str,
+    occurred_at: str,
+    text: str,
+    addressed: list[str],
+    user_id: str,
+    broadcast: bool = False,
+    reply_to_global_user_id: str = '',
+) -> dict[str, Any]:
+    """Build one deterministic public-scene turn for anchor tests."""
+
+    return {
+        'turn_id': turn_id,
+        'role': role,
+        'occurred_at': occurred_at,
+        'display_name': 'Asuna' if role == 'assistant' else 'A',
+        'fragments': [text],
+        'conversation_row_ids': [turn_id],
+        'llm_trace_id': f'trace-{turn_id}' if role == 'assistant' else '',
+        'platform_user_id': 'bot' if role == 'assistant' else 'platform-a',
+        'global_user_id': 'character-1' if role == 'assistant' else user_id,
+        'addressed_to_global_user_ids': addressed,
+        'broadcast': broadcast,
+        'reply_context': (
+            {'reply_to_global_user_id': reply_to_global_user_id}
+            if reply_to_global_user_id
+            else {}
+        ),
+    }
+
+
+def _anchor_fixture() -> dict[str, Any]:
+    """Return a long public scene with one current-user branch."""
+
+    fixture = _fixture()
+    fixture['trigger']['occurred_at'] = '2026-07-14T00:00:20Z'
+    fixture['trigger']['body_text'] = 'The current injury still needs care.'
+    fixture['ambient_logical_turns'] = [
+        _anchor_turn(
+            turn_id='current-user',
+            role='user',
+            occurred_at='2026-07-14T00:00:01Z',
+            text='I am still hurt from the fall.',
+            addressed=['character-1'],
+            user_id='user-a',
+        ),
+        _anchor_turn(
+            turn_id='addressed-reply',
+            role='assistant',
+            occurred_at='2026-07-14T00:00:02Z',
+            text='I am staying with you while you recover.',
+            addressed=['user-a'],
+            user_id='user-a',
+            reply_to_global_user_id='user-a',
+        ),
+    ]
+    for index in range(10):
+        fixture['ambient_logical_turns'].append(
+            _anchor_turn(
+                turn_id=f'noise-{index}',
+                role='user',
+                occurred_at=f'2026-07-14T00:00:{3 + index:02d}Z',
+                text=f'Unrelated participant noise {index}.',
+                addressed=[],
+                user_id=f'user-noise-{index}',
+                broadcast=True,
+            )
+        )
+    fixture['scope_users'] = [
+        {'global_user_id': 'user-a', 'display_name': 'A'},
+        {'global_user_id': 'character-1', 'display_name': 'Asuna'},
+    ]
+    return fixture
+
+
+def test_group_scene_reserves_current_user_causal_anchors_under_newer_noise() -> None:
+    """Current-user continuity survives a newer multi-user ambient tail."""
+
+    context = _build_from_fixture(
+        _anchor_fixture(),
+        current_global_user_id='user-a',
+    )
+
+    anchor_kinds = {
+        turn['anchor_kind']
+        for turn in context['turns']
+        if turn.get('anchor_kind') != 'none'
+    }
+    assert anchor_kinds == {'current_user', 'explicit_assistant'}
+    assert any('still hurt' in turn['text'] for turn in context['turns'])
+    assert any('staying with you' in turn['text'] for turn in context['turns'])
+    anchor_indexes = [
+        index
+        for index, turn in enumerate(context['turns'])
+        if turn.get('anchor_kind') != 'none'
+    ]
+    assert anchor_indexes == sorted(anchor_indexes)
+    assert len(context['turns']) <= GROUP_SCENE_MAX_TURNS
+
+
+def test_group_scene_anchor_requires_explicit_assistant_address() -> None:
+    """Broadcast and multi-address replies remain ambient, not user anchors."""
+
+    fixture = _anchor_fixture()
+    fixture['ambient_logical_turns'][1]['broadcast'] = True
+    fixture['ambient_logical_turns'][1]['addressed_to_global_user_ids'] = []
+    fixture['ambient_logical_turns'][1]['reply_context'] = {}
+    context = _build_from_fixture(
+        fixture,
+        current_global_user_id='user-a',
+    )
+
+    assert [
+        turn.get('anchor_kind')
+        for turn in context['turns']
+        if turn.get('anchor_kind') != 'none'
+    ] == ['current_user']
+
+    fixture['ambient_logical_turns'][1]['broadcast'] = False
+    fixture['ambient_logical_turns'][1]['addressed_to_global_user_ids'] = [
+        'user-a',
+        'user-b',
+    ]
+    context = _build_from_fixture(
+        fixture,
+        current_global_user_id='user-a',
+    )
+    assert [
+        turn.get('anchor_kind')
+        for turn in context['turns']
+        if turn.get('anchor_kind') != 'none'
+    ] == ['current_user']
+
+
+def test_group_scene_final_fit_keeps_protected_anchors_within_render_cap() -> None:
+    """Final fitting may drop noise but keeps non-empty protected minima."""
+
+    fixture = _anchor_fixture()
+    for turn in fixture['ambient_logical_turns']:
+        turn['fragments'] = ['X' * (GROUP_SCENE_MAX_TURN_TEXT_CHARS + 40)]
+    fixture['trigger']['body_text'] = 'T' * (
+        GROUP_SCENE_MAX_TURN_TEXT_CHARS + 40
+    )
+    context = _build_from_fixture(
+        fixture,
+        current_global_user_id='user-a',
+    )
+    rendered = project_group_scene_prompt(context)
+
+    assert len(rendered) <= GROUP_SCENE_MAX_RENDERED_CHARS
+    for turn in context['turns']:
+        if turn.get('anchor_kind') in {
+            'current_user',
+            'explicit_assistant',
+        }:
+            assert turn['text']
+    trigger = next(
+        turn for turn in context['turns']
+        if turn['scene_position'] == 'trigger'
+    )
+    assert trigger['text']

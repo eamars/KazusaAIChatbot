@@ -7,6 +7,7 @@ import json
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import timezone
 from typing import Any, Literal
 
 import httpx
@@ -33,6 +34,7 @@ from kazusa_ai_chatbot.llm_interface import (
     LLMInvoker,
     LLMThinkingConfig,
 )
+from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
@@ -445,6 +447,10 @@ def _normalize_evidence(
             or not semantic_summary.strip()
         ):
             continue
+        try:
+            native_occurred_at = _native_utc_z(occurred_at)
+        except (TypeError, ValueError):
+            continue
         seen_handles.add(handle)
         text = row.get("semantic_text", semantic_summary)
         if not isinstance(text, str) or not text.strip():
@@ -454,7 +460,7 @@ def _normalize_evidence(
             "evidence_ref": {
                 "source_kind": "episode",
                 "source_id": source_episode_id,
-                "occurred_at": occurred_at,
+                "occurred_at": native_occurred_at,
                 "semantic_summary": "character operational event",
             },
             "semantic_text": text.strip(),
@@ -720,6 +726,7 @@ def _reduce_apply_decision(
         evidence=evidence,
     )
     try:
+        native_effective_at = _native_utc_z(effective_at)
         preliminary_state = apply_semantic_appraisals(
             base_state,
             [semantic_result],
@@ -729,7 +736,7 @@ def _reduce_apply_decision(
         replacement_state = apply_state_update(
             preliminary_state,
             elapsed_seconds=0,
-            updated_at=effective_at,
+            updated_at=native_effective_at,
         )
     except ValueError:
         return None
@@ -737,6 +744,16 @@ def _reduce_apply_decision(
     if not state_update["changed_paths"]:
         return None
     return state_update
+
+
+def _native_utc_z(value: str) -> str:
+    """Normalize storage UTC text to the native UTC-Z state format."""
+
+    parsed = parse_storage_utc_datetime(value)
+    native_timestamp = parsed.astimezone(timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ",
+    )
+    return native_timestamp
 
 
 def _build_native_appraisal(

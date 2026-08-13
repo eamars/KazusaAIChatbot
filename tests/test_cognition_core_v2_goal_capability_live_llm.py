@@ -102,6 +102,7 @@ def _captured_evidence(user_input: str) -> list[dict[str, object]]:
         },
         "semantic_text": semantic_text,
         "visible_to": ["q:event_agency"],
+        "authority": "current_event",
     }]
 
 

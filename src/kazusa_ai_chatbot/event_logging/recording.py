@@ -13,6 +13,14 @@ from kazusa_ai_chatbot.character_identity_growth import models as identity_model
 from kazusa_ai_chatbot.config import AUDIT_LOG_TTL_DAYS
 from kazusa_ai_chatbot.event_logging import repository
 from kazusa_ai_chatbot.event_logging.models import (
+    CONTINUITY_AGE_LABEL_VALUES,
+    CONTINUITY_BARRIER_DISPOSITION_VALUES,
+    CONTINUITY_BOUNDARY_STATUS_VALUES,
+    CONTINUITY_BOUNDARY_VALUES,
+    CONTINUITY_CACHE_DISPOSITION_VALUES,
+    CONTINUITY_RECORDER_DISPOSITION_VALUES,
+    CONTINUITY_SCOPE_KIND_VALUES,
+    CONTINUITY_WRITE_DISPOSITION_VALUES,
     EVENT_SEVERITIES,
     SELF_COGNITION_EXECUTION_DISPOSITION_VALUES,
     SELF_COGNITION_POLICY_DISPOSITION_VALUES,
@@ -242,6 +250,123 @@ async def _record_event(
         reason="",
     )
     return result
+
+
+async def record_continuity_boundary_event(
+    *,
+    component: str,
+    boundary: str,
+    status: str,
+    scope_kind: str,
+    candidate_count: int = 0,
+    selected_count: int = 0,
+    packet_turn_count: int = 0,
+    protected_anchor_count: int = 0,
+    rendered_chars: int = 0,
+    packet_age: str = "unknown",
+    source_age: str = "unknown",
+    recorder_disposition: str = "unknown",
+    write_disposition: str = "unknown",
+    cache_disposition: str = "unknown",
+    barrier_disposition: str = "unknown",
+    trace_ref: str = "",
+    correlation_ref: str = "",
+    operation_ref: str = "",
+    run_id: str = "",
+    correlation_id: str = "",
+    severity: EventSeverity = "info",
+    occurred_at: datetime | None = None,
+) -> EventLogWriteResult:
+    """Record text-free continuity metadata at an approved boundary."""
+
+    event_id = uuid4().hex
+    if boundary not in CONTINUITY_BOUNDARY_VALUES:
+        return _rejection_result(event_id, "invalid continuity boundary")
+    if status not in CONTINUITY_BOUNDARY_STATUS_VALUES:
+        return _rejection_result(event_id, "invalid continuity status")
+    if scope_kind not in CONTINUITY_SCOPE_KIND_VALUES:
+        return _rejection_result(event_id, "invalid continuity scope")
+    if packet_age not in CONTINUITY_AGE_LABEL_VALUES:
+        return _rejection_result(event_id, "invalid continuity packet age")
+    if source_age not in CONTINUITY_AGE_LABEL_VALUES:
+        return _rejection_result(event_id, "invalid continuity source age")
+    if recorder_disposition not in CONTINUITY_RECORDER_DISPOSITION_VALUES:
+        return _rejection_result(event_id, "invalid continuity recorder disposition")
+    if write_disposition not in CONTINUITY_WRITE_DISPOSITION_VALUES:
+        return _rejection_result(event_id, "invalid continuity write disposition")
+    if cache_disposition not in CONTINUITY_CACHE_DISPOSITION_VALUES:
+        return _rejection_result(event_id, "invalid continuity cache disposition")
+    if barrier_disposition not in CONTINUITY_BARRIER_DISPOSITION_VALUES:
+        return _rejection_result(event_id, "invalid continuity barrier disposition")
+
+    bounded_counts = {
+        "candidate_count": candidate_count,
+        "selected_count": selected_count,
+        "packet_turn_count": packet_turn_count,
+        "protected_anchor_count": protected_anchor_count,
+    }
+    for field_name, value in bounded_counts.items():
+        if not _valid_continuity_count(value, maximum=1000):
+            return _rejection_result(event_id, f"invalid {field_name}")
+    if not _valid_continuity_count(rendered_chars, maximum=100000):
+        return _rejection_result(event_id, "invalid rendered_chars")
+
+    refs: list[dict[str, str]] = []
+    for ref_type, ref_id in (
+        ("trace", trace_ref),
+        ("correlation", correlation_ref),
+        ("operation", operation_ref),
+    ):
+        sanitized_ref = sanitize_short_text(ref_id, limit=160)
+        if sanitized_ref:
+            refs.append({"ref_type": ref_type, "ref_id": sanitized_ref})
+
+    payload = {
+        "candidate_count": candidate_count,
+        "selected_count": selected_count,
+        "packet_turn_count": packet_turn_count,
+        "protected_anchor_count": protected_anchor_count,
+        "rendered_chars": rendered_chars,
+    }
+    labels = {
+        "packet_age": packet_age,
+        "source_age": source_age,
+        "recorder_disposition": recorder_disposition,
+        "write_disposition": write_disposition,
+        "cache_disposition": cache_disposition,
+        "barrier_disposition": barrier_disposition,
+    }
+    result = await _record_event(
+        event_family="continuity_boundary",
+        event_type=boundary,
+        component=component,
+        status=status,
+        severity=severity,
+        payload=payload,
+        run_id=run_id,
+        correlation_id=correlation_id,
+        refs=refs,
+        labels=labels,
+        metrics={
+            "candidate_count": candidate_count,
+            "selected_count": selected_count,
+            "packet_turn_count": packet_turn_count,
+            "protected_anchor_count": protected_anchor_count,
+            "rendered_chars": rendered_chars,
+        },
+        occurred_at=occurred_at,
+    )
+    return result
+
+
+def _valid_continuity_count(value: object, *, maximum: int) -> bool:
+    """Validate one non-negative bounded continuity metric."""
+
+    return (
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and 0 <= value <= maximum
+    )
 
 
 async def record_cognition_v2_event(

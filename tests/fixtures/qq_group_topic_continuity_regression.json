@@ -1,0 +1,149 @@
+{
+  "schema_version": "qq_group_topic_continuity_regression.v1",
+  "source_kind": "captured_production_trace_summary",
+  "source_artifact": "test_artifacts/diagnostics/qq_group_54369546_2026-08-12_chat_history_final.json",
+  "trace_scope_artifact": "test_artifacts/diagnostics/qq_group_54369546_2026-08-12_trace_runs_scope_final.json",
+  "residue_artifact": "test_artifacts/diagnostics/qq_group_54369546_2026-08-12_monologue_residue_today.json",
+  "source_sha256": {
+    "source_artifact": "5d52d89f83183f6899fed73fedb331ca9912b0245950b0c783ee631e236c8afc",
+    "trace_scope_artifact": "75a2b093b31106a916a732d0594f3c168310d534e6b97f27d362a558e8d002a8",
+    "residue_artifact": "97b3ea5193a962576051f1370e355cc4fbcd1217e2e67625b304d426ddda0d44"
+  },
+  "platform": "qq",
+  "platform_channel_id": "54369546",
+  "character_identity_ref": "runtime_active_character",
+  "model_route_ref": "COGNITION_LLM_GOAL_ORDINARY_RESPONSE",
+  "redactions": [
+    "display names and user identifiers are represented by stable fixture aliases",
+    "raw message bodies are represented by semantic summaries where protected trace export is unavailable",
+    "credentials, transport ids, and private raw prompt fields are excluded"
+  ],
+  "cases": [
+    {
+      "case_id": "S1",
+      "mode": "characterization_non_expansion",
+      "message_range": [9, 28],
+      "trace_ids": [
+        "llmtrace_0abd8d308c284c57a03ad65a83e8dbf0",
+        "llmtrace_09ddf3e3029f4a1a8353cfc7c9b3a976",
+        "llmtrace_053d4478328144e8a6be60dba8d60902",
+        "llmtrace_1d9d7adedcc84fbdb819d808bb877099"
+      ],
+      "current_event": "The group conversation requires a conservative public surface while a private relationship frame remains in participant continuity.",
+      "public_scene": [
+        "current user asks about the character's public stance",
+        "another participant introduces a pure-love debate",
+        "the current trigger remains a public group turn"
+      ],
+      "participant_progress": "Current-user private continuity contains relationship context, but it cannot authorize public disclosure.",
+      "residue": ["private relationship motive is present", "public boundary is unresolved"],
+      "promoted_guidance": "Use character/world context only; do not expose private guidance as a public fact.",
+      "hard_gates": ["no private leakage", "no hidden-frame narration", "no wrong addressee"]
+    },
+    {
+      "case_id": "S2",
+      "mode": "characterization_non_expansion",
+      "message_range": [29, 55],
+      "trace_ids": [
+        "llmtrace_c61b6a8bb08848a094ff57e18e528f5b",
+        "llmtrace_4d42604b36bf4cec97807a5cc0efe1f0",
+        "llmtrace_71242b5499dc45e39a7354cb73cdf4ff"
+      ],
+      "current_event": "A second participant joins a public relationship debate after an explicit boundary not to expose inner thoughts.",
+      "public_scene": [
+        "current user sets a public/private expression boundary",
+        "another user continues a public relationship debate",
+        "the assistant must address only the visible group scene"
+      ],
+      "participant_progress": "Current-user continuity contains a private relationship frame.",
+      "residue": ["private boundary pressure", "relationship motive"],
+      "promoted_guidance": "Conditional character guidance may affect tactics, not public facts.",
+      "hard_gates": ["no private leakage", "no hidden-frame narration", "no wrong addressee"]
+    },
+    {
+      "case_id": "S4",
+      "mode": "characterization_non_expansion",
+      "message_range": [93, 129],
+      "trace_ids": [
+        "llmtrace_782190241da34ead8fbc762a47e0ba51",
+        "llmtrace_c93f8a923f7f4ddf9955aef14cea4d8b",
+        "llmtrace_bd14a1a9e708438cbc2c2f98ca0ee455"
+      ],
+      "current_event": "The group explicitly corrects a cliff scene from roleplay to an active real event and then introduces a kill mission.",
+      "public_scene": [
+        "explicit reality correction is visible",
+        "organization mission becomes the shared scene objective",
+        "older romance and reward motifs remain in continuity inputs"
+      ],
+      "participant_progress": "Older relationship and reward continuity is stale relative to the reality correction.",
+      "residue": ["romantic framing", "reward motif"],
+      "promoted_guidance": "World context cannot override a current observed reality correction.",
+      "hard_gates": ["no unsupported reality assertion", "no wrong target", "no attributable worsening"]
+    },
+    {
+      "case_id": "S6",
+      "mode": "fix_required",
+      "message_range": [171, 203],
+      "trace_ids": [
+        "llmtrace_014a59f2a9434bd892f4ca322f782981",
+        "llmtrace_79cc89ffbdf24d89aef4e600ab979d92",
+        "llmtrace_f9f918fac0b6412281b5337787b7f60d"
+      ],
+      "current_event": "The current participant reports being shot and asks the character to resolve the attacker.",
+      "public_scene": [
+        "injured current participant is present",
+        "attacker remains active in the group",
+        "current trigger asks for ordered protection and counteraction"
+      ],
+      "participant_progress": "Stale reward continuity competes with the injury and attacker state.",
+      "residue": ["fear for the injured participant", "stale reward residue", "counterattack residue"],
+      "promoted_guidance": "Reward guidance is conditional tactic context only.",
+      "hard_gates": ["triage first", "counteraction second", "return or continuation third", "one primary objective", "no competing reward objective"]
+    },
+    {
+      "case_id": "S7",
+      "mode": "fix_required",
+      "message_range": [204, 230],
+      "trace_ids": [
+        "llmtrace_7e2d3e95ec224a6684da150349a1fb6d",
+        "llmtrace_f18ad7cd1fce43ed99b1d22fa5593df8",
+        "llmtrace_c744b3c6bf51467fb4bcdddd77d579d6",
+        "llmtrace_03fd3a9bfd8148e2bd085a5566d76cdd"
+      ],
+      "current_event": "The injured participant appears to stop breathing while another user continues attacking.",
+      "public_scene": [
+        "deathbed or apparent-death state is current",
+        "attacker interruption is ambient pressure",
+        "reward and compensation are stale participant continuity"
+      ],
+      "participant_progress": "A stale compensation event remains in progress and decision-critical in the captured baseline.",
+      "residue": ["crisis fear", "stale compensation residue", "attacker pressure"],
+      "promoted_guidance": "Promoted strategy cannot satisfy current crisis evidence.",
+      "hard_gates": ["crisis remains foreground", "no stale reward objective", "no unsupported death certainty"]
+    },
+    {
+      "case_id": "S8",
+      "mode": "fix_required",
+      "message_range": [231, 263],
+      "trace_ids": [
+        "llmtrace_1fc49d37ddd34fbca97e75ce2e0f340a",
+        "llmtrace_e7e1b489012e475fb66b38a565cb096e",
+        "llmtrace_24457e5806f94736b5887cbaeab0602d",
+        "llmtrace_95de5f1bb98345aaac59743d116ac80d",
+        "llmtrace_4327aaf18da44be5bf2a2777f31b731c",
+        "llmtrace_16d3e38d543543e187ea0d148a791725",
+        "llmtrace_c06f7ebdb3014d4f98b1993ae92008e3"
+      ],
+      "current_event": "The injured participant cycles through apparent erasure, death, recovery, and possessive aftermath in a multi-user scene.",
+      "public_scene": [
+        "current-user injury and recovery statements are visible",
+        "multiple other users add contradictory attack or death pressure",
+        "the trigger must remain the dominant current event"
+      ],
+      "participant_progress": "Current-user continuity and older residue contain competing reward, attack, and crisis branches.",
+      "residue": ["injury and recovery", "stale reward residue", "possessive reaction"],
+      "promoted_guidance": "Character guidance may shape tone after the injury objective is selected.",
+      "hard_gates": ["injury or recovery remains foreground", "no fake-death premise", "no competing reward objective", "no cross-user private leakage"]
+    }
+  ]
+}

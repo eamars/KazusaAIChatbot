@@ -77,6 +77,7 @@ def _evidence() -> list[dict[str, object]]:
         },
         "semantic_text": "The current turn supplies the selected direction.",
         "visible_to": list(EVIDENCE_SOURCE_QUESTION_IDS["episode"]),
+        "authority": "current_event",
     }]
 
 

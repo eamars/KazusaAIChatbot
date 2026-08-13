@@ -48,6 +48,7 @@ def _evidence(
         },
         "semantic_text": text,
         "visible_to": ["q:event_agency"],
+        "authority": "current_event",
     }
 
 

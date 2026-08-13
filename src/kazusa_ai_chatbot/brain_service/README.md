@@ -793,3 +793,10 @@ Trace persistence is best effort and capture-mode governed. A missing retained
 run produces an empty Console value and the manifest reports the corresponding
 availability status. Protected source fields are identifier-only and never
 enter the prompt-facing state, dialog graph, or adapter payload.
+
+Post-turn continuity instrumentation is text-free and best effort. The
+conversation-progress and residue background boundaries report only bounded
+counts, closed dispositions, and opaque trace/operation references through
+`event_logging.record_continuity_boundary_event`; event-log timeout,
+cancellation, and database failure cannot interrupt post-turn persistence or
+delivery behavior.

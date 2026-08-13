@@ -174,6 +174,7 @@ def _chain_input(case: dict[str, str]) -> dict[str, object]:
             },
             "semantic_text": semantic_text,
             "visible_to": list(EVIDENCE_SOURCE_QUESTION_IDS["episode"]),
+            "authority": "current_event",
         }],
         "direct_facts": [],
         "available_actions": [],
@@ -204,6 +205,7 @@ def test_validation_cli_builds_v2_only_benchmark_payload() -> None:
 
     validate_cognition_core_input(payload)
     assert payload["schema_version"] == "cognition_core_input.v2"
+    assert payload["evidence"][0]["authority"] == "current_event"
     assert "cognition_core_input.v1" not in json.dumps(payload).lower()
 
 

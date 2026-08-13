@@ -1022,6 +1022,42 @@ async def test_persona_supervisor_projects_group_scene_alongside_user_history(
 
 
 @pytest.mark.asyncio
+async def test_persona_supervisor_passes_current_user_to_group_scene(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The group-scene boundary receives the typed current participant."""
+
+    state = _persona_state()
+    state['channel_type'] = 'group'
+    captured: dict[str, object] = {}
+
+    def capture_group_context(**kwargs: object) -> dict[str, object]:
+        captured.update(kwargs)
+        return {
+            'schema_version': 'group_scene_context.v1',
+            'turns': [],
+            'visible_participants': [],
+            'omitted_turn_count': 0,
+        }
+
+    monkeypatch.setattr(
+        persona_module,
+        'build_group_scene_context',
+        capture_group_context,
+    )
+    monkeypatch.setattr(
+        persona_module,
+        'project_group_scene_prompt',
+        lambda _context: 'bounded public scene',
+    )
+    _patch_persona_graph_stages(monkeypatch, route='silence')
+
+    await persona_module.persona_supervisor2(state)
+
+    assert captured['current_global_user_id'] == 'user-1'
+
+
+@pytest.mark.asyncio
 async def test_persona_supervisor_degrades_when_group_scene_projection_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
