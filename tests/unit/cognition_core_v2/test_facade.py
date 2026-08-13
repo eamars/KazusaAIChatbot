@@ -15,7 +15,6 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     validate_cognition_state,
 )
 
-
 MODULE_PATH = "kazusa_ai_chatbot.cognition_core_v2.facade"
 EXPECTED_SYMBOLS = ["run_cognition"]
 _TIMESTAMP = "2026-07-27T00:00:00Z"
