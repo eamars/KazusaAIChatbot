@@ -155,6 +155,8 @@ async def promote_deferred_task_resolution(
     The accepted-task identity uses only the validated semantic objective and
     trusted requester/conversation scope. The checkpoint and trusted execution
     context remain internal to the v2 job and are never returned to cognition.
+    Existing active tasks are reused only when their stored goal continuation
+    reference matches the incoming validated context reference.
     """
 
     validated_result = validate_task_resolution_result(result)
@@ -166,6 +168,11 @@ async def promote_deferred_task_resolution(
     checkpoint = validate_task_resolution_checkpoint(
         validated_result["checkpoint"],
     )
+    _validate_deferred_result_context_binding(
+        validated_result,
+        checkpoint,
+        context,
+    )
     _require_promotion_text(source_trigger_source, "source_trigger_source")
     _require_promotion_text(source_platform_bot_id, "source_platform_bot_id")
     _require_promotion_text(requester_display_name, "requester_display_name")
@@ -173,6 +180,7 @@ async def promote_deferred_task_resolution(
         "task_kind": "task_resolution",
         "semantic_objective": checkpoint["semantic_objective"],
         "accepted_task_summary": checkpoint["semantic_objective"],
+        "goal_continuation_ref": context["goal_continuation_ref"],
         "requested_delivery": BACKGROUND_WORK_REQUESTED_DELIVERY,
         "max_output_chars": context["max_output_chars"],
         "source_trigger_source": source_trigger_source.strip(),
@@ -190,6 +198,13 @@ async def promote_deferred_task_resolution(
     create_result = await create_or_return_active_accepted_task(create_request)
     accepted_task = create_result["task"]
     active_state = str(accepted_task.get("state", ""))
+    if create_result["status"] == "already_active":
+        stored_ref = accepted_task.get("goal_continuation_ref")
+        if stored_ref != context["goal_continuation_ref"]:
+            raise TaskResolutionContractError(
+                "existing accepted task continuation reference does not "
+                "match the incoming lineage"
+            )
     if create_result["status"] == "already_active" and active_state not in {
         "enqueueing",
         "pending",
@@ -239,6 +254,7 @@ async def promote_deferred_task_resolution(
         "accepted_task_id": accepted_task_id,
         "task_identity_key": accepted_task["task_identity_key"],
         "semantic_objective": checkpoint["semantic_objective"],
+        "goal_continuation_ref": context["goal_continuation_ref"],
         "requested_worker": TASK_ORCHESTRATOR_WORKER,
         "worker_payload": {
             "schema_version": TASK_ORCHESTRATOR_WORKER_PAYLOAD_VERSION,
@@ -281,6 +297,39 @@ async def promote_deferred_task_resolution(
             "task-resolution durable promotion returned an unexpected job id"
         )
     return queue_result
+
+
+def _validate_deferred_result_context_binding(
+    result: TaskResolutionResultV1,
+    checkpoint: TaskResolutionCheckpointV1,
+    context: TaskResolutionExecutionContextV1,
+) -> None:
+    """Require promotion to preserve its original goal and scene lineage."""
+
+    if result["semantic_objective"] != checkpoint["semantic_objective"]:
+        raise TaskResolutionContractError(
+            "deferred result objective does not match task checkpoint"
+        )
+    if result["scene_context"] != checkpoint["scene_context"]:
+        raise TaskResolutionContractError(
+            "deferred result scene does not match task checkpoint"
+        )
+    if result["goal_continuation_ref"] != checkpoint[
+        "goal_continuation_ref"
+    ]:
+        raise TaskResolutionContractError(
+            "deferred result continuation reference does not match task checkpoint"
+        )
+    if checkpoint["scene_context"] != context["scene_context"]:
+        raise TaskResolutionContractError(
+            "task checkpoint scene does not match execution context"
+        )
+    if checkpoint["goal_continuation_ref"] != context[
+        "goal_continuation_ref"
+    ]:
+        raise TaskResolutionContractError(
+            "task checkpoint continuation reference does not match execution context"
+        )
 
 
 def _validate_inline_budget(inline_budget_seconds: float) -> None:

@@ -37,9 +37,11 @@ from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisodeV1,
     CognitiveEpisodeValidationError,
     DialogResponseOperation,
+    GoalContinuationRefV1,
     project_dialog_response_operation,
     validate_cognitive_episode_v1,
     validate_dialog_response_operation,
+    validate_goal_continuation_ref,
     validate_selected_response_operation,
 )
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
@@ -706,6 +708,7 @@ class SelectedIntentionV2(TypedDict):
     intention: str
     target_roles: list[RoleRefV2]
     reason: str
+    goal_continuation_ref: GoalContinuationRefV1 | None
     selected_response_operation: NotRequired[DialogResponseOperation]
 
 
@@ -748,6 +751,7 @@ class ResolverCapabilityRequestV2(TypedDict):
     reason: str
     evidence_handles: list[str]
     start_in_background: NotRequired[bool]
+    goal_continuation_ref: GoalContinuationRefV1 | None
 
 
 class ResolverProgressV2(TypedDict):
@@ -935,6 +939,7 @@ class CognitionCoreOutputV2(TypedDict):
 
     schema_version: Literal["cognition_core_output.v2"]
     intention: SelectedIntentionV2
+    goal_continuation_ref: GoalContinuationRefV1 | None
     admitted_bid: NotRequired[ActionBidV2]
     supporting_bids: list[ActionBidV2]
     state_update: StateUpdateV2
@@ -1493,6 +1498,7 @@ def validate_cognition_core_output(
         {
             "schema_version",
             "intention",
+            "goal_continuation_ref",
             "supporting_bids",
             "state_update",
             "affect_projection",
@@ -1539,6 +1545,16 @@ def validate_cognition_core_output(
     if not isinstance(payload["intention"], Mapping):
         raise CognitionContractError("output intention must be a mapping")
     _validate_intention(payload["intention"])
+    _validate_goal_continuation_ref_field(
+        payload["goal_continuation_ref"],
+        "cognition core output.goal_continuation_ref",
+    )
+    if payload["goal_continuation_ref"] != payload["intention"][
+        "goal_continuation_ref"
+    ]:
+        raise CognitionContractError(
+            "cognition core output continuation reference conflicts with intention"
+        )
     if not isinstance(payload["supporting_bids"], list):
         raise CognitionContractError("supporting_bids must be a list")
     for bid in payload["supporting_bids"]:
@@ -2273,7 +2289,13 @@ def _validate_intention(value: Any) -> None:
 
     if not isinstance(value, Mapping):
         raise CognitionContractError("intention must be a mapping")
-    required = {"route", "intention", "target_roles", "reason"}
+    required = {
+        "route",
+        "intention",
+        "target_roles",
+        "reason",
+        "goal_continuation_ref",
+    }
     if "selected_branch_id" in value:
         required.add("selected_branch_id")
     if "selected_response_operation" in value:
@@ -2290,6 +2312,10 @@ def _validate_intention(value: Any) -> None:
     _require_text(value["intention"], "intention")
     _require_text(value["reason"], "intention.reason")
     _validate_roles(value["target_roles"], "intention.target_roles")
+    _validate_goal_continuation_ref_field(
+        value["goal_continuation_ref"],
+        "intention.goal_continuation_ref",
+    )
     if "selected_branch_id" in value:
         _require_text(value["selected_branch_id"], "intention.selected_branch_id")
     if "selected_response_operation" in value:
@@ -2393,6 +2419,7 @@ def _validate_resolver_request(value: Any) -> None:
             "reason",
             "evidence_handles",
             "start_in_background",
+            "goal_continuation_ref",
         }:
             raise CognitionContractError(
                 "task resolution request fields are not exact"
@@ -2401,17 +2428,26 @@ def _validate_resolver_request(value: Any) -> None:
             raise CognitionContractError(
                 "task resolution start_in_background must be a boolean"
             )
+        if value["goal_continuation_ref"] is None:
+            raise CognitionContractError(
+                "task resolution request requires goal_continuation_ref"
+            )
     elif set(value) != {
         "capability",
         "semantic_goal",
         "reason",
         "evidence_handles",
+        "goal_continuation_ref",
     }:
         raise CognitionContractError("resolver request fields are not exact")
     _require_text(value["capability"], "resolver request.capability")
     _require_text(value["semantic_goal"], "resolver request.semantic_goal")
     _require_text(value["reason"], "resolver request.reason")
     _validate_text_list(value["evidence_handles"], "resolver request.evidence_handles")
+    _validate_goal_continuation_ref_field(
+        value["goal_continuation_ref"],
+        "resolver request.goal_continuation_ref",
+    )
 
 
 def _validate_affect_projection(value: Any) -> None:
@@ -3023,6 +3059,17 @@ def _validate_entity_ref(value: Any, label: str) -> None:
     if value["kind"] not in ENTITY_KINDS:
         raise CognitionContractError(f"{label}.kind is invalid")
     _require_text(value["entity_id"], f"{label}.entity_id")
+
+
+def _validate_goal_continuation_ref_field(value: Any, label: str) -> None:
+    """Validate one nullable canonical continuation reference field."""
+
+    if value is None:
+        return
+    try:
+        validate_goal_continuation_ref(value)
+    except CognitiveEpisodeValidationError as exc:
+        raise CognitionContractError(f"{label} is invalid: {exc}") from exc
 
 
 def _validate_roles(value: Any, label: str) -> None:

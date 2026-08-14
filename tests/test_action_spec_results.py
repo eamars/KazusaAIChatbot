@@ -21,7 +21,10 @@ from kazusa_ai_chatbot.action_spec.results import (
     project_episode_trace_for_consolidation,
 )
 from kazusa_ai_chatbot.brain_service.post_turn import settle_episode_trace
-from kazusa_ai_chatbot.cognition_episode import build_user_message_episode
+from kazusa_ai_chatbot.cognition_episode import (
+    build_goal_continuation_ref,
+    build_user_message_episode,
+)
 from kazusa_ai_chatbot.db import DatabaseOperationError
 
 
@@ -30,6 +33,8 @@ def _speak_action_spec() -> dict:
         "schema_version": "action_spec.v1",
         "kind": "speak",
         "cognition_mode": "deliberative",
+        "surface_role": "ordinary",
+        "goal_continuation_ref": None,
         "source_refs": [
             {
                 "schema_version": "action_source_ref.v1",
@@ -74,6 +79,8 @@ def _memory_lifecycle_action_spec() -> dict:
         "schema_version": "action_spec.v1",
         "kind": APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
         "cognition_mode": "deliberative",
+        "surface_role": "ordinary",
+        "goal_continuation_ref": None,
         "source_refs": [
             {
                 "schema_version": "action_source_ref.v1",
@@ -117,6 +124,8 @@ def _accepted_task_status_check_action_spec() -> dict:
         "schema_version": "action_spec.v1",
         "kind": ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
         "cognition_mode": "deliberative",
+        "surface_role": "ordinary",
+        "goal_continuation_ref": None,
         "source_refs": [
             {
                 "schema_version": "action_source_ref.v1",
@@ -175,6 +184,62 @@ def test_action_result_uses_evaluator_identity_without_raw_params() -> None:
     assert result["status"] == "executed"
     assert "params" not in result
     assert "handler_id" not in result
+
+
+def test_action_result_rejects_missing_surface_metadata() -> None:
+    """Result materialization must fail closed when metadata is absent."""
+
+    action_spec = _speak_action_spec()
+    eval_result = ActionSpecEvaluator().evaluate(action_spec)
+    del action_spec["surface_role"]
+
+    with pytest.raises(ValueError, match="surface metadata is incomplete"):
+        build_action_result(
+            action_spec,
+            eval_result,
+            status="executed",
+            result_summary="Text surface rendered.",
+        )
+
+
+def test_action_result_rejects_invalid_surface_metadata() -> None:
+    """Result materialization must fail closed on an unknown surface role."""
+
+    action_spec = _speak_action_spec()
+    eval_result = ActionSpecEvaluator().evaluate(action_spec)
+    action_spec["surface_role"] = "unknown_surface"
+
+    with pytest.raises(ValueError, match="surface_role is invalid"):
+        build_action_result(
+            action_spec,
+            eval_result,
+            status="executed",
+            result_summary="Text surface rendered.",
+        )
+
+
+def test_surface_output_preserves_surface_role_and_ref() -> None:
+    """Settled surface outputs retain the deterministic lifecycle metadata."""
+
+    continuation_ref = build_goal_continuation_ref(
+        source_episode_id="action-result-episode",
+        source_message_id="action-result-message",
+        branch_id="ordinary_response",
+        goal_ref={
+            "scope": "user",
+            "kind": "goal",
+            "entity_id": "action-result-goal",
+        },
+    )
+    output = build_text_surface_output(
+        fragments=["The validated task result is ready."],
+        created_at="2026-05-16T00:00:00+00:00",
+        surface_role="task_result",
+        goal_continuation_ref=continuation_ref,
+    )
+
+    assert output["surface_role"] == "task_result"
+    assert output["goal_continuation_ref"] == continuation_ref
 
 
 @pytest.mark.parametrize(
@@ -316,6 +381,49 @@ def test_episode_trace_projection_omits_handler_ids_and_raw_params() -> None:
     assert "mongodb" not in serialized.lower()
 
 
+def test_settled_trace_preserves_continuation_surface_role() -> None:
+    """Episode settlement keeps the result role and its goal reference."""
+
+    continuation_ref = build_goal_continuation_ref(
+        source_episode_id="settled-trace-episode",
+        source_message_id="settled-trace-message",
+        branch_id="ordinary_response",
+        goal_ref={
+            "scope": "user",
+            "kind": "goal",
+            "entity_id": "settled-trace-goal",
+        },
+    )
+    action_spec = _speak_action_spec()
+    action_spec["surface_role"] = "task_result"
+    action_spec["goal_continuation_ref"] = continuation_ref
+    eval_result = ActionSpecEvaluator().evaluate(action_spec)
+    action_result = build_action_result(
+        action_spec,
+        eval_result,
+        status="executed",
+        result_summary="The validated task result is ready.",
+    )
+    surface_output = build_text_surface_output(
+        fragments=["The validated task result is ready."],
+        created_at="2026-05-16T00:00:00+00:00",
+        action_attempt_id=action_result["action_attempt_id"],
+        surface_role="task_result",
+        goal_continuation_ref=continuation_ref,
+    )
+
+    trace = _settled_trace(
+        action_specs=[action_spec],
+        action_results=[action_result],
+        surface_outputs=[surface_output],
+    )
+
+    assert trace["surface_outputs"][0]["surface_role"] == "task_result"
+    assert trace["surface_outputs"][0]["goal_continuation_ref"] == (
+        continuation_ref
+    )
+
+
 def test_private_surface_and_action_results_are_consolidatable() -> None:
     """Private or action-only episodes should not require visible dialog."""
 
@@ -336,6 +444,8 @@ def test_private_surface_and_action_results_are_consolidatable() -> None:
             "action_attempt_id": "action_attempt:private-001",
             "action_kind": "speak",
             "handler_owner": "l3_text",
+            "surface_role": "ordinary",
+            "goal_continuation_ref": None,
             "status": "validated",
             "visibility": "private",
             "result_summary": "validated",

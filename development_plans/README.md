@@ -51,7 +51,8 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
-| [task_resolution_duplicate_visible_delivery_plan.md](active/bugfix/task_resolution_duplicate_visible_delivery_plan.md) | Task-resolution semantic duplicate visible delivery and evidence-contract repair | approved |
+| [scheduled_future_speech_temporal_grounding_and_content_gate_plan.md](active/bugfix/scheduled_future_speech_temporal_grounding_and_content_gate_plan.md) | Scheduled future-speech temporal grounding, provenance, pre-dispatch content gate, and consolidation safety | draft |
+
 
 ### Completed Bugfix Plans
 
@@ -63,6 +64,7 @@ recorded evidence.
 | [cognition_v2_parent_checkpoint_guardrail_plan.md](archive/completed/cognition_v2_parent_checkpoint_guardrail_plan.md) | Cognition V2 parent-checkpoint guardrail and bounded recovery epoch | completed |
 | [cognition_v2_group_ownership_terminalization_bugfix_plan.md](archive/completed/cognition_v2_group_ownership_terminalization_bugfix_plan.md) | Cognition V2 group ownership terminalization and role-domain bugfix | completed |
 | [cognition_v2_relational_carrier_recurrence_binding_plan.md](archive/completed/cognition_v2_relational_carrier_recurrence_binding_plan.md) | Cognition V2 relational-carrier recurrence binding regression hardening | completed |
+| [task_resolution_duplicate_visible_delivery_plan.md](archive/completed/task_resolution_duplicate_visible_delivery_plan.md) | Task-resolution semantic duplicate visible delivery and evidence-contract repair | completed |
 
 ## Working-Tree Policy
 

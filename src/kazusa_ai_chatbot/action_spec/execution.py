@@ -39,7 +39,9 @@ from kazusa_ai_chatbot.action_spec.registry import (
     recheck_action_affordance,
 )
 from kazusa_ai_chatbot.action_spec.results import (
+    ACTION_RESULT_VERSION,
     ActionResultV1,
+    DEFAULT_ACTION_CONTINUATION,
     action_attempt_id_from_eval_result,
     build_action_result,
     project_trace_action_result_v2,
@@ -400,14 +402,24 @@ async def execute_action_specs_for_trace(
         else:
             status = "validated"
             execution_result = {"status": status}
-        action_result = build_action_result(
-            validated_spec,
-            eval_result,
-            status=status,
-            result_summary=result_summary,
-            result_refs=result_refs,
-            completed_at=completed_at,
-        )
+        try:
+            action_result = build_action_result(
+                validated_spec,
+                eval_result,
+                status=status,
+                result_summary=result_summary,
+                result_refs=result_refs,
+                completed_at=completed_at,
+            )
+        except ValueError:
+            # Result materialization fails closed when the spec's surface
+            # metadata is missing or invalid; return a rejected row instead
+            # of crashing the episode trace.
+            action_result = _rejected_action_result_fail_closed(
+                validated_spec,
+                eval_result,
+                result_summary=result_summary,
+            )
         if prompt_result_fields:
             action_result.update(prompt_result_fields)
         action_result["semantic_result_v2"] = project_trace_action_result_v2(
@@ -424,6 +436,54 @@ async def execute_action_specs_for_trace(
             )
         action_results.append(action_result)
     return action_results
+
+
+def _rejected_action_result_fail_closed(
+    action_spec: dict[str, Any],
+    eval_result: dict[str, Any],
+    *,
+    result_summary: str,
+) -> ActionResultV1:
+    """Build a prompt-safe rejected result for unreadable surface metadata.
+
+    Deterministic result materialization refuses action specs whose surface
+    role and continuation reference are missing or invalid. Execution still
+    returns a rejected row so malformed cognition output cannot crash the
+    trace and cannot be executed or persisted as a valid action.
+
+    Args:
+        action_spec: Raw action spec rejected by deterministic evaluation.
+        eval_result: Evaluation output that rejected the action spec.
+        result_summary: Prompt-safe rejection summary from the evaluator.
+
+    Returns:
+        A fail-closed rejected ``ActionResultV1`` row with the canonical
+        no-continuation surface projection.
+    """
+
+    handler_owner = eval_result.get("handler_owner")
+    if not isinstance(handler_owner, str):
+        handler_owner = ""
+    kind = action_spec.get("kind")
+    action_kind = kind if isinstance(kind, str) and kind else "unknown"
+    visibility = action_spec.get("visibility")
+    if visibility not in ("private", "preview", "user_visible"):
+        visibility = "private"
+    action_result: ActionResultV1 = {
+        "schema_version": ACTION_RESULT_VERSION,
+        "action_attempt_id": action_attempt_id_from_eval_result(eval_result),
+        "action_kind": action_kind,
+        "handler_owner": handler_owner,
+        "status": "rejected",
+        "visibility": visibility,
+        "result_summary": result_summary,
+        "result_refs": [],
+        "continuation": dict(DEFAULT_ACTION_CONTINUATION),
+        "surface_role": "ordinary",
+        "goal_continuation_ref": None,
+        "completed_at": None,
+    }
+    return action_result
 
 
 def _action_availability_context(

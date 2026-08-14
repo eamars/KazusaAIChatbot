@@ -967,6 +967,8 @@ def test_v2_scheduled_speech_materializes_speak_action_spec() -> None:
     assert materialized["action_specs"][0]["params"][
         "delivery_mode"
     ] == "visible_reply"
+    assert materialized["action_specs"][0]["surface_role"] == "ordinary"
+    assert materialized["action_specs"][0]["goal_continuation_ref"] is None
 
 
 def test_classify_route_does_not_use_content_plan_without_speak_action() -> None:

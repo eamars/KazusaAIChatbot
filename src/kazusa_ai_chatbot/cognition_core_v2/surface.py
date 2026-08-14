@@ -429,7 +429,9 @@ def _project_surface_payload(
             payload["runtime_capability_limits"]
         )
     if "resolver_result" in payload:
-        result["resolver_result"] = dict(payload["resolver_result"])
+        result["resolver_result"] = _project_resolver_result_for_surface(
+            payload["resolver_result"]
+        )
     if "primary_bid" in payload:
         result["primary_bid"] = payload["primary_bid"]
     if "semantic_relationship" in payload:
@@ -483,6 +485,30 @@ def _project_action_results_for_prompt(
             "semantic_result": row["semantic_result"],
             "target_roles": projected_roles,
         })
+    return projected
+
+
+def _project_resolver_result_for_surface(
+    resolver_result: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Project a source-owned resolver result without factual evidence leaks.
+
+    Only succeeded task results with complete or partial evidence may expose
+    evidence excerpts and handles to the surface model. Pending, missing,
+    blocked, and unavailable/failed results are projected with those fields
+    emptied so the wording owner can never treat them as completed facts.
+    """
+
+    projected = dict(resolver_result)
+    evidence_state = projected.get("evidence_state")
+    status = projected.get("status")
+    non_factual = (
+        evidence_state in {"pending", "missing", "blocked"}
+        or status in {"blocked", "failed"}
+    )
+    if non_factual:
+        projected["evidence_excerpts"] = []
+        projected["evidence_handles"] = []
     return projected
 
 

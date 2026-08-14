@@ -44,9 +44,13 @@ async def execute_task_orchestrator_job(
     worker_payload = _required_job_mapping(job, "worker_payload")
     payload = validate_task_orchestrator_worker_payload(worker_payload)
     if payload["operation"] == "continue_bound_coding_run":
+        execution_context = validate_task_resolution_execution_context(
+            _required_job_mapping(job, "task_execution_context"),
+        )
         result = await _continue_bound_coding_run(
             payload,
             semantic_objective=_required_job_text(job, "semantic_objective"),
+            execution_context=execution_context,
         )
         return result
     if payload["operation"] != "resume_task_resolution":
@@ -98,8 +102,22 @@ async def _continue_bound_coding_run(
     payload: Mapping[str, object],
     *,
     semantic_objective: str,
+    execution_context: TaskResolutionExecutionContextV1,
 ) -> TaskResolutionResultV1:
-    """Continue one already-bound coding run through its frozen public API."""
+    """Continue one already-bound coding run through its frozen public API.
+
+    Args:
+        payload: Validated task-orchestrator worker payload owning the frozen
+            coding request.
+        semantic_objective: Job-owned semantic objective retained for the
+            result contract.
+        execution_context: Validated job context carrying the exact scene and
+            goal-continuation reference that bound the coding run.
+
+    Returns:
+        The validated terminal task result carrying the same scene and
+        continuation reference as the original bound goal.
+    """
 
     coding_request = payload.get("coding_request")
     if not isinstance(coding_request, Mapping):
@@ -123,6 +141,7 @@ async def _continue_bound_coding_run(
     result = project_result(
         dict(response),
         semantic_objective=semantic_objective,
+        execution_context=execution_context,
     )
     validated_result = validate_task_resolution_result(result)
     return validated_result

@@ -517,6 +517,7 @@ async def _run_cognition(
     output: dict[str, Any] = {
         "schema_version": "cognition_core_output.v2",
         "intention": intention,
+        "goal_continuation_ref": intention["goal_continuation_ref"],
         "supporting_bids": [
             bid for bid in supporting_bids
             if admitted_bid is None or bid["branch_id"] != admitted_bid["branch_id"]

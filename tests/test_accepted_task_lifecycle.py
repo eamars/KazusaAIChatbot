@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 from pymongo.errors import DuplicateKeyError
+from tests.test_task_resolution_orchestrator import _goal_continuation_ref
 
 
 def _create_request(**overrides: object) -> dict[str, object]:
@@ -127,6 +128,46 @@ async def test_create_or_return_active_claims_enqueueing_task(
     assert len(fake_db.accepted_tasks.documents) == 1
 
 
+def test_task_document_requires_goal_continuation_ref() -> None:
+    """Task-resolution documents fail closed without continuation lineage."""
+
+    from kazusa_ai_chatbot.accepted_task import lifecycle
+
+    request = _create_request(
+        task_kind="task_resolution",
+        goal_continuation_ref=None,
+    )
+
+    with pytest.raises(ValueError, match="goal_continuation_ref"):
+        lifecycle._build_enqueueing_task_doc(
+            request,
+            task_identity_key=lifecycle.build_task_identity_key(request),
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_or_return_active_persists_goal_continuation_ref(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Accepted task creation retains the task's canonical continuation ref."""
+
+    from kazusa_ai_chatbot.accepted_task import lifecycle
+    from kazusa_ai_chatbot.db import accepted_tasks as repository
+
+    fake_db = _FakeDb()
+    monkeypatch.setattr(repository, "get_db", _fake_get_db(fake_db))
+    request = _create_request(
+        task_kind="task_resolution",
+        goal_continuation_ref=_goal_continuation_ref(),
+    )
+
+    result = await lifecycle.create_or_return_active_accepted_task(request)
+
+    assert result["task"]["goal_continuation_ref"] == (
+        _goal_continuation_ref()
+    )
+
+
 @pytest.mark.asyncio
 async def test_create_or_return_active_rejects_duplicate_active_task(
     monkeypatch: pytest.MonkeyPatch,
@@ -157,6 +198,80 @@ async def test_create_or_return_active_rejects_duplicate_active_task(
         "message-002",
     ]
     assert len(fake_db.accepted_tasks.documents) == 1
+
+
+@pytest.mark.asyncio
+async def test_repository_duplicate_ref_mismatch_preserves_provenance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Repository duplicate handling gates mismatches before mutation."""
+
+    from kazusa_ai_chatbot.accepted_task import lifecycle
+    from kazusa_ai_chatbot.cognition_episode import build_goal_continuation_ref
+    from kazusa_ai_chatbot.db import accepted_tasks as repository
+    from kazusa_ai_chatbot.db.errors import DatabaseOperationError
+
+    fake_db = _FakeDb()
+    monkeypatch.setattr(repository, "get_db", _fake_get_db(fake_db))
+    request = _create_request(
+        task_kind="task_resolution",
+        goal_continuation_ref=_goal_continuation_ref(),
+    )
+    task_identity_key = lifecycle.build_task_identity_key(request)
+    first_task = lifecycle._build_enqueueing_task_doc(
+        request,
+        task_identity_key=task_identity_key,
+    )
+
+    created = await repository.insert_or_get_active_accepted_task(
+        first_task,
+        source_message_id="message-001",
+        observed_at="2026-05-15T21:00:00+00:00",
+    )
+    assert created["status"] == "created"
+
+    matching_duplicate = deepcopy(first_task)
+    matching_duplicate["accepted_task_id"] = "task-matching-duplicate"
+    matching = await repository.insert_or_get_active_accepted_task(
+        matching_duplicate,
+        source_message_id="message-002",
+        observed_at="2026-05-15T21:01:00+00:00",
+    )
+    assert matching["status"] == "already_active"
+    assert matching["task"]["related_source_message_ids"] == [
+        "message-001",
+        "message-002",
+    ]
+    before_mismatch = deepcopy(fake_db.accepted_tasks.documents[0])
+
+    mismatching_duplicate = deepcopy(first_task)
+    mismatching_duplicate["accepted_task_id"] = "task-mismatching-duplicate"
+    mismatching_duplicate["goal_continuation_ref"] = build_goal_continuation_ref(
+        source_episode_id="episode-task-002",
+        source_message_id="message-2",
+        branch_id="b1",
+        goal_ref={
+            "scope": "user",
+            "kind": "goal",
+            "entity_id": "goal-001",
+        },
+    )
+    with pytest.raises(
+        DatabaseOperationError,
+        match="different goal_continuation_ref",
+    ):
+        await repository.insert_or_get_active_accepted_task(
+            mismatching_duplicate,
+            source_message_id="message-003",
+            observed_at="2026-05-15T21:02:00+00:00",
+        )
+
+    current = fake_db.accepted_tasks.documents[0]
+    assert current["updated_at"] == before_mismatch["updated_at"]
+    assert current["related_source_message_ids"] == (
+        before_mismatch["related_source_message_ids"]
+    )
+    assert current == before_mismatch
 
 
 @pytest.mark.asyncio
@@ -546,6 +661,7 @@ async def test_future_speak_completion_requires_running_future_speak_task(
             task_kind="task_resolution",
             semantic_objective="Resolve one bounded task.",
             accepted_task_summary="Resolve one bounded task.",
+            goal_continuation_ref=_goal_continuation_ref(),
         )
     )
     task_id = task["task"]["accepted_task_id"]

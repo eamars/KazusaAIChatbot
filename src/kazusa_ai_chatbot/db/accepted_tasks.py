@@ -113,7 +113,12 @@ async def insert_or_get_active_accepted_task(
     source_message_id: str,
     observed_at: str,
 ) -> AcceptedTaskCreateResult:
-    """Insert one active task or return the existing duplicate."""
+    """Insert one active task or return the exact-reference duplicate.
+
+    An active duplicate is returned only when its stored goal continuation
+    reference exactly matches the incoming reference; a mismatch fails closed
+    before any provenance field changes.
+    """
 
     _validate_v2_task_document(task)
     db = await get_db()
@@ -121,6 +126,23 @@ async def insert_or_get_active_accepted_task(
     try:
         await collection.insert_one(dict(task))
     except DuplicateKeyError:
+        existing = await collection.find_one(
+            {
+                "schema_version": ACCEPTED_TASK_SCHEMA_VERSION,
+                "active_identity_key": task["active_identity_key"],
+            },
+            {"_id": 0},
+        )
+        if existing is None:
+            raise DatabaseOperationError(
+                "accepted task duplicate without readable active row"
+            )
+        incoming_ref = task.get("goal_continuation_ref")
+        stored_ref = existing.get("goal_continuation_ref")
+        if incoming_ref != stored_ref:
+            raise DatabaseOperationError(
+                "active accepted task has a different goal_continuation_ref"
+            )
         active_task = await _add_related_source_message_id(
             collection,
             active_identity_key=task["active_identity_key"],

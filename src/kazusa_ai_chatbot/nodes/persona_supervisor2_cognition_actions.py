@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from typing import TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
 from kazusa_ai_chatbot.action_spec.models import (
     ActionSourceRefV1,
     ActionSpecV1,
+    ActionValidationError,
+    SurfaceRoleV1,
     validate_action_spec,
 )
 from kazusa_ai_chatbot.action_spec.registry import (
@@ -23,7 +25,13 @@ from kazusa_ai_chatbot.action_spec.registry import (
 from kazusa_ai_chatbot.config import (
     BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
 )
+from kazusa_ai_chatbot.cognition_episode import GoalContinuationRefV1
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import CognitionState
+
+if TYPE_CHECKING:
+    from kazusa_ai_chatbot.task_resolution.contracts import (
+        TaskResolutionExecutionContextV1,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +58,9 @@ class ActionRequestV1(TypedDict, total=False):
     execution_request: str
     target_roles: list[dict[str, str]]
     evidence_handles: list[str]
+    surface_role: SurfaceRoleV1
+    goal_continuation_ref: GoalContinuationRefV1 | None
+    task_execution_context: TaskResolutionExecutionContextV1
 
 
 def _current_episode_source_ref() -> ActionSourceRefV1:
@@ -163,8 +174,36 @@ def _materialize_action_request(
         "target_roles": list(request.get("target_roles", [])),
         "evidence_handles": list(request.get("evidence_handles", [])),
     }
+    action_spec["surface_role"] = _required_semantic_surface_role(request)
+    action_spec["goal_continuation_ref"] = (
+        _required_semantic_goal_continuation_ref(request)
+    )
     validated_spec = validate_action_spec(action_spec)
     return validated_spec
+
+
+def _required_semantic_surface_role(request: ActionRequestV1) -> SurfaceRoleV1:
+    """Require the explicit surface role selected by the semantic producer."""
+
+    if "surface_role" not in request:
+        raise ActionValidationError(
+            "surface_role: required for action materialization"
+        )
+    surface_role = request["surface_role"]
+    return surface_role
+
+
+def _required_semantic_goal_continuation_ref(
+    request: ActionRequestV1,
+) -> GoalContinuationRefV1 | None:
+    """Require the explicit continuation reference from the producer."""
+
+    if "goal_continuation_ref" not in request:
+        raise ActionValidationError(
+            "goal_continuation_ref: required for action materialization"
+        )
+    goal_continuation_ref = request["goal_continuation_ref"]
+    return goal_continuation_ref
 
 
 def _build_speak_action_spec(
@@ -367,6 +406,9 @@ def _build_accepted_coding_task_action_spec(
         "requested_delivery": "send_result_when_done",
         "max_output_chars": BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
     }
+    params["task_execution_context"] = _required_task_execution_context(
+        request
+    )
     coding_run_ref = _coding_run_ref_for_request(request, state, coding_action)
     if not coding_run_ref:
         logger.warning(
@@ -418,6 +460,23 @@ def _build_accepted_coding_task_action_spec(
         reason=request["reason"],
     )
     return action_spec
+
+
+def _required_task_execution_context(
+    request: ActionRequestV1,
+) -> dict[str, object]:
+    """Require the execution context for one coding continuation."""
+
+    if "task_execution_context" not in request:
+        raise ActionValidationError(
+            "task_execution_context: required for accepted coding continuation"
+        )
+    task_execution_context = request["task_execution_context"]
+    if not isinstance(task_execution_context, Mapping):
+        raise ActionValidationError(
+            "task_execution_context: expected typed execution context"
+        )
+    return dict(task_execution_context)
 
 
 def _approval_evidence_from_state(

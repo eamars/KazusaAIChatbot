@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from typing import (
@@ -31,6 +34,46 @@ TriggerSource = Literal[
     "scheduled_tick",
     "tool_result",
 ]
+
+GOAL_CONTINUATION_REF_VERSION = "goal_continuation_ref.v1"
+GOAL_CONTINUATION_ID_PREFIX = "goal-continuation:"
+GOAL_CONTINUATION_SCOPE_VALUES = frozenset(("user", "character"))
+GOAL_CONTINUATION_ENTITY_KINDS = frozenset((
+    "relationship",
+    "goal",
+    "threat",
+    "event",
+    "knowledge_gap",
+    "drive",
+    "standard",
+    "meaning",
+))
+
+
+class GoalContinuationGoalRefV1(TypedDict):
+    """Validated scope-qualified entity reference inside one continuation."""
+
+    scope: Literal["user", "character"]
+    kind: str
+    entity_id: str
+
+
+class GoalContinuationRefV1(TypedDict):
+    """Deterministic reference linking one goal continuation to its source.
+
+    The deterministic constructor derives ``continuation_id`` from
+    ``source_episode_id``, ``branch_id``, and ``goal_ref``; the model never
+    authors the identifier. ``source_message_id`` is lineage metadata copied
+    unchanged and never participates in the identifier or duplicate keys.
+    """
+
+    schema_version: Literal["goal_continuation_ref.v1"]
+    continuation_id: str
+    source_episode_id: str
+    source_message_id: str
+    branch_id: str
+    goal_ref: GoalContinuationGoalRefV1
+
 
 class MediaDescriptionRow(TypedDict):
     content_type: str
@@ -167,6 +210,7 @@ class ToolResultOriginV1(TypedDict, total=False):
     task_id: str
     task_kind: str
     result_ref: str
+    goal_continuation_ref: GoalContinuationRefV1
     completed_at: str
     target_scope_ref: str
     correlation_id: str
@@ -192,6 +236,7 @@ class ToolResultReadyV1(TypedDict, total=False):
     source_platform_bot_id: str
     source_character_name: str
     source_message_id: str
+    goal_continuation_ref: GoalContinuationRefV1
 
 
 class CognitiveEpisodeV1(TypedDict):
@@ -373,6 +418,188 @@ def build_trigger_source_registry() -> dict[str, TriggerSourceSpecV1]:
     return registry
 
 
+def build_goal_continuation_ref(
+    *,
+    source_episode_id: str,
+    source_message_id: str,
+    branch_id: str,
+    goal_ref: Mapping[str, object],
+) -> GoalContinuationRefV1:
+    """Build the canonical goal-continuation reference for one source episode.
+
+    The identifier is derived deterministically from ``source_episode_id``,
+    ``branch_id``, and ``goal_ref``; callers never author it.
+    ``source_message_id`` is lineage metadata only and is copied unchanged.
+
+    Args:
+        source_episode_id: Original episode that selected the continued goal.
+        source_message_id: Original source message id preserved as lineage
+            metadata; it does not participate in the identifier.
+        branch_id: Selected bid branch owning the continued goal.
+        goal_ref: Validated scope-qualified entity reference for the goal.
+
+    Returns:
+        One canonical ``GoalContinuationRefV1``.
+    """
+
+    if not isinstance(source_episode_id, str) or not source_episode_id.strip():
+        raise CognitiveEpisodeValidationError(
+            "goal_continuation_ref.source_episode_id must be non-empty"
+        )
+    if not isinstance(source_message_id, str):
+        raise CognitiveEpisodeValidationError(
+            "goal_continuation_ref.source_message_id must be a string"
+        )
+    if not isinstance(branch_id, str) or not branch_id.strip():
+        raise CognitiveEpisodeValidationError(
+            "goal_continuation_ref.branch_id must be non-empty"
+        )
+    normalized_goal_ref = _validate_goal_ref(goal_ref)
+    digest = _goal_continuation_digest(
+        source_episode_id=source_episode_id,
+        branch_id=branch_id,
+        goal_ref=normalized_goal_ref,
+    )
+    continuation_id = f"{GOAL_CONTINUATION_ID_PREFIX}{digest}"
+    reference: GoalContinuationRefV1 = {
+        "schema_version": GOAL_CONTINUATION_REF_VERSION,
+        "continuation_id": continuation_id,
+        "source_episode_id": source_episode_id,
+        "source_message_id": source_message_id,
+        "branch_id": branch_id,
+        "goal_ref": normalized_goal_ref,
+    }
+    return reference
+
+
+def validate_goal_continuation_ref(value: object) -> GoalContinuationRefV1:
+    """Validate and return one exact goal-continuation reference."""
+
+    if not isinstance(value, Mapping):
+        raise CognitiveEpisodeValidationError(
+            "goal_continuation_ref must be an object"
+        )
+    required_fields = {
+        "schema_version",
+        "continuation_id",
+        "source_episode_id",
+        "source_message_id",
+        "branch_id",
+        "goal_ref",
+    }
+    if set(value) != required_fields:
+        raise CognitiveEpisodeValidationError(
+            "goal_continuation_ref fields are not exact"
+        )
+    if value["schema_version"] != GOAL_CONTINUATION_REF_VERSION:
+        raise CognitiveEpisodeValidationError(
+            "unsupported goal continuation reference schema version"
+        )
+    continuation_id = value["continuation_id"]
+    if (
+        not isinstance(continuation_id, str)
+        or not continuation_id.startswith(GOAL_CONTINUATION_ID_PREFIX)
+    ):
+        raise CognitiveEpisodeValidationError(
+            "goal_continuation_ref.continuation_id is invalid"
+        )
+    digest = continuation_id.removeprefix(GOAL_CONTINUATION_ID_PREFIX)
+    if len(digest) != 64 or any(
+        char not in "0123456789abcdef" for char in digest
+    ):
+        raise CognitiveEpisodeValidationError(
+            "goal_continuation_ref.continuation_id digest is invalid"
+        )
+    source_episode_id = value["source_episode_id"]
+    if not isinstance(source_episode_id, str) or not source_episode_id.strip():
+        raise CognitiveEpisodeValidationError(
+            "goal_continuation_ref.source_episode_id must be non-empty"
+        )
+    source_message_id = value["source_message_id"]
+    if not isinstance(source_message_id, str):
+        raise CognitiveEpisodeValidationError(
+            "goal_continuation_ref.source_message_id must be a string"
+        )
+    branch_id = value["branch_id"]
+    if not isinstance(branch_id, str) or not branch_id.strip():
+        raise CognitiveEpisodeValidationError(
+            "goal_continuation_ref.branch_id must be non-empty"
+        )
+    normalized_goal_ref = _validate_goal_ref(value["goal_ref"])
+    expected_digest = _goal_continuation_digest(
+        source_episode_id=source_episode_id,
+        branch_id=branch_id,
+        goal_ref=normalized_goal_ref,
+    )
+    if digest != expected_digest:
+        raise CognitiveEpisodeValidationError(
+            "goal_continuation_ref.continuation_id does not match its lineage"
+        )
+    reference: GoalContinuationRefV1 = {
+        "schema_version": GOAL_CONTINUATION_REF_VERSION,
+        "continuation_id": continuation_id,
+        "source_episode_id": source_episode_id,
+        "source_message_id": source_message_id,
+        "branch_id": branch_id,
+        "goal_ref": normalized_goal_ref,
+    }
+    return reference
+
+
+def _validate_goal_ref(value: object) -> GoalContinuationGoalRefV1:
+    """Validate one scope-qualified goal entity reference."""
+
+    if not isinstance(value, Mapping) or set(value) != {
+        "scope",
+        "kind",
+        "entity_id",
+    }:
+        raise CognitiveEpisodeValidationError(
+            "goal_continuation_ref.goal_ref fields are not exact"
+        )
+    if value["scope"] not in GOAL_CONTINUATION_SCOPE_VALUES:
+        raise CognitiveEpisodeValidationError(
+            "goal_continuation_ref.goal_ref.scope is invalid"
+        )
+    if value["kind"] not in GOAL_CONTINUATION_ENTITY_KINDS:
+        raise CognitiveEpisodeValidationError(
+            "goal_continuation_ref.goal_ref.kind is invalid"
+        )
+    entity_id = value["entity_id"]
+    if not isinstance(entity_id, str) or not entity_id.strip():
+        raise CognitiveEpisodeValidationError(
+            "goal_continuation_ref.goal_ref.entity_id is invalid"
+        )
+    normalized: GoalContinuationGoalRefV1 = {
+        "scope": value["scope"],
+        "kind": value["kind"],
+        "entity_id": entity_id,
+    }
+    return normalized
+
+
+def _goal_continuation_digest(
+    *,
+    source_episode_id: str,
+    branch_id: str,
+    goal_ref: Mapping[str, object],
+) -> str:
+    """Return the canonical sha256 digest for one continuation identity."""
+
+    canonical = json.dumps(
+        {
+            "source_episode_id": source_episode_id,
+            "branch_id": branch_id,
+            "goal_ref": goal_ref,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return digest
+
+
 def _canonical_percept(
     percept: PerceptV1,
     *,
@@ -540,6 +767,13 @@ def validate_cognitive_episode_v1(episode: object) -> CognitiveEpisodeV1:
         raise CognitiveEpisodeValidationError("episode_id must be non-empty")
     if not isinstance(episode["origin_metadata"], Mapping):
         raise CognitiveEpisodeValidationError("origin_metadata must be an object")
+    if trigger_source == "tool_result":
+        tool_result_ref = episode["origin_metadata"].get("goal_continuation_ref")
+        if tool_result_ref is None:
+            raise CognitiveEpisodeValidationError(
+                "tool-result episode origin requires goal_continuation_ref"
+            )
+        validate_goal_continuation_ref(tool_result_ref)
     if not isinstance(episode["target_scope"], Mapping):
         raise CognitiveEpisodeValidationError("target_scope must be an object")
     raw_percepts = episode["percepts"]
@@ -834,6 +1068,12 @@ def build_tool_result_episode(
         raise CognitiveEpisodeValidationError(
             "tool-result episode requires task_id and semantic_summary"
         )
+    continuation_ref = result_data.get("goal_continuation_ref")
+    if continuation_ref is None:
+        raise CognitiveEpisodeValidationError(
+            "tool-result episode requires goal_continuation_ref"
+        )
+    validated_continuation_ref = validate_goal_continuation_ref(continuation_ref)
     trigger_message_id = f"tool-result:{task_id}"
     origin = _origin_with_defaults(
         {
@@ -844,6 +1084,7 @@ def build_tool_result_episode(
             "task_id": task_id,
             "task_kind": str(result_data.get("task_kind", "")),
             "result_ref": str(result_data.get("result_ref", task_id)),
+            "goal_continuation_ref": validated_continuation_ref,
             "completed_at": str(result_data.get("completed_at", created_at)),
             "target_scope_ref": task_id,
             "correlation_id": task_id,
@@ -867,6 +1108,7 @@ def build_tool_result_episode(
             "semantic_summary": semantic_summary,
             "artifact_text": artifact_text,
             "failure_text": failure_text,
+            "goal_continuation_ref": validated_continuation_ref,
         },
         "observed_at": str(result_data.get("completed_at", created_at)),
     }

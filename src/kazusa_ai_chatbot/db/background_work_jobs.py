@@ -64,7 +64,12 @@ async def ensure_background_work_job_indexes() -> None:
 async def insert_background_work_job(
     job: BackgroundWorkJobDoc,
 ) -> BackgroundWorkJobDoc:
-    """Insert one v2 job or return the existing idempotent v2 row."""
+    """Insert one v2 job or return the existing idempotent v2 row.
+
+    An existing row is returned only when its stored goal continuation
+    reference exactly matches the incoming reference; a mismatch fails closed
+    without reusing the stored row.
+    """
 
     _validate_v2_job_document(job)
     db = await get_db()
@@ -84,6 +89,13 @@ async def insert_background_work_job(
                 "background work idempotency collision without a v2 row"
             )
         existing_job = dict(existing)
+        incoming_ref = job.get("goal_continuation_ref")
+        stored_ref = existing_job.get("goal_continuation_ref")
+        if incoming_ref != stored_ref:
+            raise DatabaseOperationError(
+                "background work idempotency row has a different "
+                "goal_continuation_ref"
+            )
         incoming_source = str(job.get("source_llm_trace_id") or "").strip()
         existing_source = str(
             existing_job.get("source_llm_trace_id") or ""

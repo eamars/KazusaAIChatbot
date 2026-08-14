@@ -7,6 +7,10 @@ from unittest.mock import AsyncMock
 import pytest
 
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
+from kazusa_ai_chatbot.action_spec.models import (
+    ActionValidationError,
+    validate_action_spec,
+)
 from kazusa_ai_chatbot.action_spec.registry import (
     ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
     FUTURE_SPEAK_CAPABILITY,
@@ -51,6 +55,8 @@ def test_l2d_materializes_future_speak_as_background_action() -> None:
             "decision": "2026-05-16 10:00",
             "detail": "Remind the user to drink water.",
             "reason": "The user asked for a delayed reminder.",
+            "surface_role": "ordinary",
+            "goal_continuation_ref": None,
         }
     ]
 
@@ -68,10 +74,62 @@ def test_l2d_materializes_future_speak_as_background_action() -> None:
     assert action_spec["params"]["continuation_objective"] == (
         "Remind the user to drink water."
     )
-
     eval_result = ActionSpecEvaluator().evaluate(action_spec)
     assert eval_result["ok"] is True
     assert eval_result["handler_owner"] == "background_work"
+
+
+def test_future_speak_action_spec_declares_surface_metadata() -> None:
+    """The worker's direct action producer must satisfy the metadata contract."""
+
+    from kazusa_ai_chatbot.background_work.subagent import future_speak
+
+    action_spec = future_speak._future_cognition_action_spec(
+        {
+            "source_platform": "debug",
+            "source_channel_id": "debug:user:test-user",
+            "source_channel_type": "private",
+            "source_platform_bot_id": "debug-bot-001",
+            "source_character_name": "Test Character",
+            "requester_global_user_id": "global-user-001",
+            "source_message_id": "message-001",
+        },
+        trigger_at="2026-05-16 10:00",
+        continuation_objective="Remind the user to drink water.",
+    )
+
+    validated = validate_action_spec(action_spec)
+
+    assert validated["surface_role"] == "ordinary"
+    assert validated["goal_continuation_ref"] is None
+
+
+def test_l2d_rejects_missing_surface_metadata() -> None:
+    """Semantic action producers must declare both lifecycle fields."""
+
+    with pytest.raises(ActionValidationError, match="surface_role"):
+        materialize_semantic_action_requests(
+            [{
+                "capability": FUTURE_SPEAK_CAPABILITY,
+                "decision": "2026-05-16 10:00",
+                "detail": "Remind the user to drink water.",
+                "reason": "The user asked for a delayed reminder.",
+                "goal_continuation_ref": None,
+            }],
+            _cognition_state(),
+        )
+
+    with pytest.raises(ActionValidationError, match="goal_continuation_ref"):
+        materialize_semantic_action_requests(
+            [{
+                "capability": FUTURE_SPEAK_CAPABILITY,
+                "decision": "2026-05-16 10:00",
+                "detail": "Remind the user to drink water.",
+                "reason": "The user asked for a delayed reminder.",
+                "surface_role": "ordinary",
+            }],
+            _cognition_state(),
+        )
 
 
 def test_l2d_materializes_status_check_without_handler_params() -> None:
@@ -84,6 +142,8 @@ def test_l2d_materializes_status_check_without_handler_params() -> None:
                 "decision": "check",
                 "detail": "读取当前作用域中的任务状态。",
                 "reason": "用户询问已经接纳的任务状态。",
+                "surface_role": "ordinary",
+                "goal_continuation_ref": None,
             }
         ],
         _cognition_state(),
@@ -134,6 +194,8 @@ async def test_future_speak_execution_enqueues_requested_worker(
                 "decision": "2026-05-16 10:00",
                 "detail": "Remind the user to drink water.",
                 "reason": "The user asked for a delayed reminder.",
+                "surface_role": "ordinary",
+                "goal_continuation_ref": None,
             }
         ],
         _cognition_state(),

@@ -8,7 +8,10 @@ from unittest.mock import AsyncMock
 import pytest
 
 from kazusa_ai_chatbot.task_resolution import TaskResolutionContractError
-from tests.test_task_resolution_orchestrator import _context
+from tests.test_task_resolution_orchestrator import (
+    _context,
+    _goal_continuation_ref,
+)
 
 
 def _request() -> dict[str, object]:
@@ -17,15 +20,23 @@ def _request() -> dict[str, object]:
         "semantic_goal": "Resolve one bounded public question.",
         "reason": "The current response lacks required evidence.",
         "evidence_handles": ["e1"],
+        "goal_continuation_ref": _goal_continuation_ref(),
     }
 
 
 def _deferred_result() -> dict[str, object]:
     state = importlib.import_module("kazusa_ai_chatbot.task_resolution.state")
-    checkpoint = state.create_task_resolution_checkpoint(_request(), _context())
+    context = _context()
+    checkpoint = state.create_task_resolution_checkpoint(_request(), context)
     return {
         "schema_version": "task_resolution_result.v1",
+        "semantic_objective": checkpoint["semantic_objective"],
         "status": "deferred",
+        "scene_context": context["scene_context"],
+        "goal_continuation_ref": context["goal_continuation_ref"],
+        "evidence_state": "pending",
+        "evidence_excerpts": [],
+        "evidence_handles": [],
         "prompt_safe_summary": "Durable continuation is required.",
         "evidence": [],
         "completed_subgoals": [],
@@ -117,6 +128,7 @@ async def test_background_start_materializes_one_pending_idempotent_job(
         "task_identity_key": "accepted_task:v2:abc",
         "accepted_task_summary": _request()["semantic_goal"],
         "state": "enqueueing",
+        "goal_continuation_ref": _context()["goal_continuation_ref"],
     }
     monkeypatch.setattr(
         service,
@@ -318,6 +330,7 @@ async def test_interrupted_enqueueing_promotion_reuses_idempotency_key(
         "task_identity_key": "accepted_task:v2:existing",
         "accepted_task_summary": _request()["semantic_goal"],
         "state": "enqueueing",
+        "goal_continuation_ref": _context()["goal_continuation_ref"],
     }
     monkeypatch.setattr(
         service,
@@ -369,6 +382,7 @@ async def test_pending_promotion_repairs_missing_job_idempotently(
         "accepted_task_summary": _request()["semantic_goal"],
         "state": "pending",
         "executor_ref": "job-existing",
+        "goal_continuation_ref": _context()["goal_continuation_ref"],
     }
     monkeypatch.setattr(
         service,

@@ -6,6 +6,12 @@ import re
 
 from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict
 
+from kazusa_ai_chatbot.cognition_episode import (
+    CognitiveEpisodeValidationError,
+    GoalContinuationRefV1,
+    validate_goal_continuation_ref,
+)
+
 if TYPE_CHECKING:
     from kazusa_ai_chatbot.action_spec.models import (
         ActionSpecV1,
@@ -147,6 +153,7 @@ class ResolverCapabilityRequestV1(TypedDict):
     objective: str
     reason: str
     priority: Literal["now", "background"]
+    goal_continuation_ref: GoalContinuationRefV1 | None
 
 
 ResolverObservationBlockerV1 = Literal["requires_user_input"]
@@ -169,6 +176,7 @@ class ResolverObservationV1(TypedDict):
     task_resolution_evidence_state: NotRequired[
         "ResolverEvidenceStateV1"
     ]
+    goal_continuation_ref: NotRequired[GoalContinuationRefV1]
     evidence_refs: list[EvidenceRefV1]
     created_at_utc: str
 
@@ -201,6 +209,7 @@ class RequiredResolverEvidenceDependencyV1(TypedDict):
     state: Literal["complete", "partial", "pending", "missing", "blocked"]
     evidence_handles: list[str]
     remaining_needs: list[str]
+    goal_continuation_ref: GoalContinuationRefV1
 
 
 class ResolverCycleTraceV1(TypedDict):
@@ -457,6 +466,7 @@ def validate_required_resolver_evidence_dependency(
             "state",
             "evidence_handles",
             "remaining_needs",
+            "goal_continuation_ref",
         },
         "required_resolver_evidence_dependency",
     )
@@ -480,6 +490,13 @@ def validate_required_resolver_evidence_dependency(
         "evidence_handles",
     )
     remaining_needs = _normalize_goal_text_list(data, "remaining_needs")
+    continuation_ref = _validate_continuation_ref(
+        data.get("goal_continuation_ref")
+    )
+    if continuation_ref is None:
+        raise ResolverValidationError(
+            "required_resolver_evidence_dependency: goal_continuation_ref is required"
+        )
     if state == "complete" and (not evidence_handles or remaining_needs):
         raise ResolverValidationError(
             "complete dependency requires evidence handles and no remaining needs"
@@ -501,6 +518,7 @@ def validate_required_resolver_evidence_dependency(
         "state": state,
         "evidence_handles": evidence_handles,
         "remaining_needs": remaining_needs,
+        "goal_continuation_ref": continuation_ref,
     }
     return return_value
 
@@ -520,12 +538,25 @@ def validate_resolver_capability_request(
     objective = _require_non_empty_string(data, "objective")
     reason = _require_non_empty_string(data, "reason")
     priority = _require_enum(data, "priority", ALLOWED_RESOLVER_PRIORITIES)
+    if "goal_continuation_ref" not in data:
+        raise ResolverValidationError(
+            "resolver_capability_request: goal_continuation_ref is required"
+        )
+    continuation_ref = _validate_continuation_ref(
+        data.get("goal_continuation_ref")
+    )
+    if capability_kind == "task_resolution_request" and continuation_ref is None:
+        raise ResolverValidationError(
+            "resolver_capability_request: task resolution requires "
+            "goal_continuation_ref"
+        )
     return_value = {
         "schema_version": RESOLVER_CAPABILITY_REQUEST_VERSION,
         "capability_kind": capability_kind,
         "objective": _clip_text(objective, MAX_RESOLVER_OBJECTIVE_CHARS),
         "reason": _clip_text(reason, MAX_RESOLVER_REASON_CHARS),
         "priority": priority,
+        "goal_continuation_ref": continuation_ref,
     }
     return return_value
 
@@ -548,6 +579,23 @@ def validate_resolver_observation(value: object) -> ResolverObservationV1:
     evidence_refs = _require_list(data, "evidence_refs")
     normalized_evidence_refs = _normalize_evidence_refs(evidence_refs)
     created_at_utc = _require_non_empty_string(data, "created_at_utc")
+    continuation_ref = None
+    if capability_kind == "task_resolution_request":
+        if "goal_continuation_ref" not in data:
+            raise ResolverValidationError(
+                "goal_continuation_ref: required for task resolution"
+            )
+        continuation_ref = _validate_continuation_ref(
+            data.get("goal_continuation_ref")
+        )
+        if continuation_ref is None:
+            raise ResolverValidationError(
+                "goal_continuation_ref: required for task resolution"
+            )
+    elif "goal_continuation_ref" in data:
+        raise ResolverValidationError(
+            "goal_continuation_ref: only valid for task resolution"
+        )
     task_evidence_state = None
     if capability_kind == "task_resolution_request":
         if "task_resolution_evidence_state" not in data:
@@ -613,6 +661,8 @@ def validate_resolver_observation(value: object) -> ResolverObservationV1:
         normalized["blocker_kind"] = blocker_kind
     if task_evidence_state is not None:
         normalized["task_resolution_evidence_state"] = task_evidence_state
+    if continuation_ref is not None:
+        normalized["goal_continuation_ref"] = continuation_ref
     return_value = normalized
     return return_value
 
@@ -1159,6 +1209,22 @@ def project_pending_resume_for_cognition(
     )
     return_value = projection
     return return_value
+
+
+def _validate_continuation_ref(
+    value: object,
+) -> GoalContinuationRefV1 | None:
+    """Validate one nullable canonical goal-continuation reference."""
+
+    if value is None:
+        return None
+    try:
+        validated_ref = validate_goal_continuation_ref(value)
+    except CognitiveEpisodeValidationError as exc:
+        raise ResolverValidationError(
+            f"goal_continuation_ref: invalid reference: {exc}"
+        ) from exc
+    return validated_ref
 
 
 def _require_mapping(value: object, label: str) -> dict:

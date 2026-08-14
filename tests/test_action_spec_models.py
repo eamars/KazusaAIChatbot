@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from kazusa_ai_chatbot.cognition_episode import build_goal_continuation_ref
 from kazusa_ai_chatbot.action_spec.models import (
     ACTION_SPEC_VERSION,
     LIFECYCLE_STATUS_BY_DECISION,
@@ -61,6 +62,8 @@ def _speak_action() -> dict:
         "schema_version": ACTION_SPEC_VERSION,
         "kind": "speak",
         "cognition_mode": "deliberative",
+        "surface_role": "ordinary",
+        "goal_continuation_ref": None,
         "source_refs": [_source_ref()],
         "target": _current_channel_target(),
         "params": {
@@ -102,6 +105,30 @@ def test_action_spec_validator_accepts_deliberative_contract() -> None:
     assert validated["kind"] == "speak"
     assert validated["cognition_mode"] == "deliberative"
     assert validated["continuation"]["mode"] == "none"
+
+
+def test_user_visible_speak_requires_goal_continuation_ref() -> None:
+    """Continuation surfaces cannot be user-visible without typed lineage."""
+
+    action_spec = _speak_action()
+    action_spec["surface_role"] = "factual_answer"
+    with pytest.raises(ActionValidationError, match="continuation"):
+        validate_action_spec(action_spec)
+
+    continuation_ref = build_goal_continuation_ref(
+        source_episode_id="action-model-episode",
+        source_message_id="action-model-message",
+        branch_id="ordinary_response",
+        goal_ref={
+            "scope": "user",
+            "kind": "goal",
+            "entity_id": "action-model-goal",
+        },
+    )
+    action_spec["goal_continuation_ref"] = continuation_ref
+    assert validate_action_spec(action_spec)["goal_continuation_ref"] == (
+        continuation_ref
+    )
 
 
 def test_action_spec_validator_rejects_reflex_for_initial_slice() -> None:

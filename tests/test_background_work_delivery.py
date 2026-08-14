@@ -15,7 +15,8 @@ from tests.cognition_core_v2_test_helpers import (
     canonical_service_character_profile,
 )
 from tests.test_background_work_jobs import _resume_queue_request
-
+from tests.test_task_resolution_background_resume import _recorded_checkpoint
+from tests.test_task_resolution_orchestrator import _goal_continuation_ref
 
 
 def _completed_job() -> dict:
@@ -41,6 +42,7 @@ def _completed_job() -> dict:
         "requester_display_name": "Test User",
         "created_at": "2026-06-06T00:00:00+00:00",
         "completed_at": "2026-06-06T00:01:00+00:00",
+        "goal_continuation_ref": _goal_continuation_ref(),
     }
     return job
 
@@ -49,9 +51,11 @@ def _accepted_task_completed_job() -> dict:
     """Build one completed job for a new accepted-task-backed request."""
 
     job = _completed_job()
+    _checkpoint, task_result = _recorded_checkpoint(status="resolved")
     job["accepted_task_id"] = "task-001"
     job["task_identity_key"] = "accepted_task:v1:abc"
     job["source_llm_trace_id"] = "llmtrace-parent-1"
+    job["task_resolution_result"] = task_result
     return job
 
 
@@ -118,7 +122,7 @@ def test_tool_result_source_builder_creates_prompt_safe_episode() -> None:
         "tool-result:task-001"
     ]
     assert episode["percepts"][0]["content"]["semantic_summary"] == (
-        "Generated a compact Fibonacci snippet."
+        "A public source resolved the requested fact."
     )
     assert "tool_result" in serialized
     retired_result_source = "accepted_" + "task_result_ready"
@@ -137,12 +141,28 @@ def test_tool_result_payload_uses_semantic_metadata() -> None:
         _accepted_task_completed_job()
     )
     metadata = episode["percepts"][0]["content"]
-    assert metadata["cognition_source"] == {
-        "source_kind": "tool_result",
-        "source_id": "task-001",
-        "occurred_at": "2026-06-06T00:01:00+00:00",
-        "semantic_summary": "Generated a compact Fibonacci snippet.",
-    }
+    source = metadata["cognition_source"]
+    assert source["source_kind"] == "tool_result"
+    assert source["source_id"] == "task-001"
+    assert source["occurred_at"] == "2026-06-06T00:01:00+00:00"
+    assert source["semantic_summary"] == (
+        "A public source resolved the requested fact."
+    )
+    assert source["semantic_objective"] == (
+        "Resolve one bounded public question."
+    )
+    assert source["task_status"] == "resolved"
+    assert source["evidence_state"] == "complete"
+    assert source["evidence_excerpts"] == [
+        "A public source resolved the requested fact."
+    ]
+    assert source["evidence_handles"] == ["public-evidence-1"]
+    assert source["remaining_needs"] == []
+    assert source["goal_continuation_ref"] == (
+        _accepted_task_completed_job()["task_resolution_result"][
+            "goal_continuation_ref"
+        ]
+    )
     serialized_payload = json.dumps(episode, ensure_ascii=False).lower()
     assert "tool_result" in serialized_payload
     retired_result_source = "accepted_" + "task_result_ready"
@@ -151,8 +171,45 @@ def test_tool_result_payload_uses_semantic_metadata() -> None:
         assert forbidden not in serialized_payload
 
 
-def test_tool_result_source_builder_preserves_enriched_blocker_summary() -> None:
-    """Enriched result summaries must stay the tool-result semantic text."""
+def test_result_source_preserves_typed_task_status_and_ref() -> None:
+    """A stored task result reaches the tool-result episode without flattening."""
+
+    jobs = importlib.import_module("kazusa_ai_chatbot.background_work.jobs")
+    result_source = importlib.import_module(
+        "kazusa_ai_chatbot.background_work.result_source"
+    )
+    from tests.test_task_resolution_background_resume import _recorded_checkpoint
+
+    request = _resume_queue_request()
+    job = jobs._build_job_document(
+        request,
+        job_id="job-typed-result-001",
+        storage_timestamp_utc="2026-06-06T00:00:00+00:00",
+    )
+    _checkpoint, task_result = _recorded_checkpoint(status="resolved")
+    job.update({
+        "status": "completed",
+        "completed_at": "2026-06-06T00:01:00+00:00",
+        "result_summary": task_result["prompt_safe_summary"],
+        "task_resolution_result": task_result,
+    })
+
+    episode = result_source.build_result_ready_episode_from_job(job)
+    source = episode["percepts"][0]["content"]["cognition_source"]
+
+    assert source["semantic_objective"] == task_result["semantic_objective"]
+    assert source["task_status"] == "resolved"
+    assert source["evidence_state"] == "complete"
+    assert source["goal_continuation_ref"] == task_result[
+        "goal_continuation_ref"
+    ]
+    assert episode["origin_metadata"]["goal_continuation_ref"] == (
+        task_result["goal_continuation_ref"]
+    )
+
+
+def test_tool_result_source_builder_ignores_untyped_job_summary() -> None:
+    """Untrusted job summaries cannot replace the stored typed result."""
 
     result_source = importlib.import_module(
         "kazusa_ai_chatbot.background_work.result_source"
@@ -169,7 +226,9 @@ def test_tool_result_source_builder_preserves_enriched_blocker_summary() -> None
 
     assert episode["trigger_source"] == "tool_result"
     assert episode["percepts"][0]["source_kind"] == "tool_result"
-    assert episode["percepts"][0]["content"]["semantic_summary"] == enriched_summary
+    assert episode["percepts"][0]["content"]["semantic_summary"] == (
+        "A public source resolved the requested fact."
+    )
 
 
 @pytest.mark.asyncio

@@ -7,6 +7,11 @@ from copy import deepcopy
 from typing import Any
 from uuid import uuid4
 
+from kazusa_ai_chatbot.cognition_episode import (
+    CognitiveEpisodeValidationError,
+    GoalContinuationRefV1,
+    validate_goal_continuation_ref,
+)
 from kazusa_ai_chatbot.task_resolution.contracts import (
     MAX_TASK_RESOLUTION_DISPATCHES,
     MAX_TASK_RESOLUTION_NODES,
@@ -54,10 +59,17 @@ def create_task_resolution_checkpoint(
             "capability: expected task_resolution_request"
         )
     semantic_objective = _request_text(request, "semantic_goal")
+    continuation_ref = _request_goal_continuation_ref(request)
+    if continuation_ref != context["goal_continuation_ref"]:
+        raise TaskResolutionContractError(
+            "goal_continuation_ref: request conflicts with execution context"
+        )
     checkpoint: TaskResolutionCheckpointV1 = {
         "schema_version": TASK_RESOLUTION_CHECKPOINT_VERSION,
         "session_id": f"task_resolution:{uuid4().hex}",
         "semantic_objective": semantic_objective,
+        "scene_context": context["scene_context"],
+        "goal_continuation_ref": continuation_ref,
         "source_scope": {
             "trigger_source": "user_message",
             "platform": context["platform"],
@@ -433,9 +445,18 @@ def result_from_checkpoint(
     checkpoint_projection: dict[str, object] = {}
     if status == "deferred":
         checkpoint_projection = dict(validated)
+    evidence_state, evidence_excerpts, evidence_handles = (
+        _result_evidence_projection(validated, status=status)
+    )
     result: TaskResolutionResultV1 = {
         "schema_version": TASK_RESOLUTION_RESULT_VERSION,
+        "semantic_objective": validated["semantic_objective"],
         "status": status,
+        "scene_context": validated["scene_context"],
+        "goal_continuation_ref": validated["goal_continuation_ref"],
+        "evidence_state": evidence_state,
+        "evidence_excerpts": evidence_excerpts,
+        "evidence_handles": evidence_handles,
         "prompt_safe_summary": prompt_safe_summary,
         "evidence": list(validated["evidence"]),
         "completed_subgoals": list(completed_subgoals),
@@ -794,6 +815,53 @@ def _validate_result_evidence_scope(
             raise TaskResolutionContractError(
                 "evidence.task_node_id: expected active task node"
             )
+
+
+def _result_evidence_projection(
+    checkpoint: TaskResolutionCheckpointV1,
+    *,
+    status: str,
+) -> tuple[str, list[str], list[str]]:
+    """Return result-visible evidence only for factual terminal states."""
+
+    state_by_status = {
+        "resolved": "complete",
+        "partial": "partial",
+        "deferred": "pending",
+        "needs_user_input": "blocked",
+        "approval_required": "blocked",
+        "unavailable": "blocked",
+        "failed": "blocked",
+    }
+    evidence_state = state_by_status.get(status)
+    if evidence_state is None:
+        raise TaskResolutionContractError(
+            "status: unsupported task-resolution result status"
+        )
+    if evidence_state not in {"complete", "partial"}:
+        return evidence_state, [], []
+    evidence_excerpts = [row["summary"] for row in checkpoint["evidence"]]
+    evidence_handles = [row["evidence_id"] for row in checkpoint["evidence"]]
+    return evidence_state, evidence_excerpts, evidence_handles
+
+
+def _request_goal_continuation_ref(
+    request: Mapping[str, object],
+) -> GoalContinuationRefV1:
+    """Require the upstream deterministic continuation reference."""
+
+    raw_ref = request.get("goal_continuation_ref")
+    if raw_ref is None:
+        raise TaskResolutionContractError(
+            "goal_continuation_ref: required for task-resolution request"
+        )
+    try:
+        continuation_ref = validate_goal_continuation_ref(raw_ref)
+    except CognitiveEpisodeValidationError as exc:
+        raise TaskResolutionContractError(
+            f"goal_continuation_ref: invalid reference: {exc}"
+        ) from exc
+    return continuation_ref
 
 
 def _request_text(request: Mapping[str, object], field_name: str) -> str:

@@ -527,6 +527,8 @@ def _materialize_v2_due_speak_action(
             "max_depth": 0,
             "include_result_as": None,
         },
+        "surface_role": "ordinary",
+        "goal_continuation_ref": None,
         "reason": (
             "当前到期认知已选择可见回应。"
             if scheduled_speech

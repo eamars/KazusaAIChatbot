@@ -97,6 +97,9 @@ def derive_action_route(
     action_requests: Sequence[Mapping[str, Any]],
     resolver_requests: Sequence[Mapping[str, Any]],
     self_cognition_response: Mapping[str, Any] | None = None,
+    goal_resolution: str | None = None,
+    goal_continuation_ref: Mapping[str, Any] | None = None,
+    required_resolver_evidence_dependency: Mapping[str, Any] | None = None,
 ) -> Literal["speech", "evidence", "action", "deferral", "silence"]:
     """Derive protocol route from output mode and validated request sets."""
 
@@ -104,6 +107,14 @@ def derive_action_route(
         raise CognitionExecutionError(
             "action and resolver requests are mutually exclusive"
         )
+    _reject_same_goal_factual_pending_route(
+        goal_resolution=goal_resolution,
+        goal_continuation_ref=goal_continuation_ref,
+        resolver_requests=resolver_requests,
+        required_resolver_evidence_dependency=(
+            required_resolver_evidence_dependency
+        ),
+    )
     output_mode = _episode_output_mode(episode)
     if output_mode == "silence":
         if action_requests or resolver_requests:
@@ -139,6 +150,50 @@ def derive_action_route(
             return "action"
         return "silence"
     raise CognitionExecutionError("episode output mode is unsupported")
+
+
+def _reject_same_goal_factual_pending_route(
+    *,
+    goal_resolution: str | None,
+    goal_continuation_ref: Mapping[str, Any] | None,
+    resolver_requests: Sequence[Mapping[str, Any]],
+    required_resolver_evidence_dependency: Mapping[str, Any] | None,
+) -> None:
+    """Reject one continuation's factual route while its evidence is pending."""
+
+    if (
+        goal_resolution != "answerable_now"
+        or not isinstance(goal_continuation_ref, Mapping)
+    ):
+        return
+    continuation_id = goal_continuation_ref.get("continuation_id")
+    if not isinstance(continuation_id, str) or not continuation_id:
+        raise CognitionExecutionError(
+            "factual continuation route requires a valid continuation id"
+        )
+    for request in resolver_requests:
+        request_ref = request.get("goal_continuation_ref")
+        if (
+            isinstance(request_ref, Mapping)
+            and request_ref.get("continuation_id") == continuation_id
+        ):
+            raise CognitionExecutionError(
+                "factual continuation route conflicts with a pending resolver "
+                "request for the same goal"
+            )
+    dependency = required_resolver_evidence_dependency
+    if not isinstance(dependency, Mapping):
+        return
+    dependency_ref = dependency.get("goal_continuation_ref")
+    if (
+        isinstance(dependency_ref, Mapping)
+        and dependency_ref.get("continuation_id") == continuation_id
+        and dependency.get("state") != "complete"
+    ):
+        raise CognitionExecutionError(
+            "factual continuation route conflicts with pending required "
+            "resolver evidence for the same goal"
+        )
 
 
 def _episode_output_mode(episode: Mapping[str, Any]) -> str:

@@ -8,6 +8,37 @@ from typing import Any
 
 import pytest
 
+from kazusa_ai_chatbot.cognition_episode import build_goal_continuation_ref
+
+
+def _scene_context() -> dict[str, object]:
+    """Build the canonical prompt-safe scene shared by task fixtures."""
+
+    return {
+        "channel_scope": "private",
+        "character_role": "Test Character",
+        "current_user_role": "Test User",
+        "semantic_scene": "A bounded task-resolution test scene.",
+        "public_group_scene": "",
+        "conversation_continuity": "The current turn continues one test goal.",
+        "semantic_temporal_context": "The current test turn is active.",
+    }
+
+
+def _goal_continuation_ref() -> dict[str, object]:
+    """Build the deterministic continuation identity used by task fixtures."""
+
+    return build_goal_continuation_ref(
+        source_episode_id="episode-task-001",
+        source_message_id="message-1",
+        branch_id="b1",
+        goal_ref={
+            "scope": "user",
+            "kind": "goal",
+            "entity_id": "goal-001",
+        },
+    )
+
 
 def _context() -> dict[str, object]:
     return {
@@ -19,6 +50,8 @@ def _context() -> dict[str, object]:
         "requester_global_user_id": "user-1",
         "requester_platform_user_id": "debug-user-1",
         "source_message_id": "message-1",
+        "scene_context": _scene_context(),
+        "goal_continuation_ref": _goal_continuation_ref(),
         "local_time_context": {"local_time": "2026-08-01 10:00"},
         "prompt_message_context": {"text": "Resolve this public source."},
         "chat_history_recent": [],
@@ -43,6 +76,7 @@ def _checkpoint() -> dict[str, object]:
             "semantic_goal": "Analyze a public documentation page.",
             "reason": "The answer requires source evidence.",
             "evidence_handles": ["e1"],
+            "goal_continuation_ref": _goal_continuation_ref(),
         },
         _context(),
     )
@@ -153,6 +187,64 @@ async def test_wrong_text_selection_reroutes_to_public_research(
         "Read the public page without repository work.",
         "Retrieve evidence from the public page.",
     ]
+
+
+@pytest.mark.asyncio
+async def test_terminal_result_preserves_typed_status_and_evidence_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Terminal orchestration retains typed evidence and continuation state."""
+
+    orchestrator = importlib.import_module(
+        "kazusa_ai_chatbot.task_resolution.orchestrator"
+    )
+
+    async def select_next(*args: object, **kwargs: object) -> dict[str, str]:
+        del args, kwargs
+        return {
+            "specialist": "public_research",
+            "subgoal": "Retrieve one bounded public source.",
+            "coding_objective_mode": "none",
+        }
+
+    async def public_handler(
+        request: dict[str, object],
+        execution_context: dict[str, object],
+    ) -> dict[str, object]:
+        del execution_context
+        return _result(
+            specialist="public_research",
+            status="resolved",
+            evidence=[{
+                "schema_version": "task_resolution_evidence.v1",
+                "evidence_id": "typed-terminal-evidence",
+                "task_node_id": request["task_node_id"],
+                "specialist": "public_research",
+                "summary": "The bounded source supplied the requested fact.",
+                "provenance_refs": ["https://example.test/source"],
+                "limitations": [],
+            }],
+        )
+
+    monkeypatch.setattr(orchestrator, "select_next_specialist", select_next)
+    monkeypatch.setattr(
+        orchestrator,
+        "specialist_handler",
+        lambda _name: public_handler,
+    )
+
+    result = await orchestrator.run_task_orchestrator(
+        _checkpoint(),
+        _context(),
+        inline_deadline=None,
+    )
+
+    assert result["status"] == "resolved"
+    assert result["evidence_state"] == "complete"
+    assert result["evidence_excerpts"] == [
+        "The bounded source supplied the requested fact."
+    ]
+    assert result["goal_continuation_ref"] == _goal_continuation_ref()
 
 
 @pytest.mark.asyncio

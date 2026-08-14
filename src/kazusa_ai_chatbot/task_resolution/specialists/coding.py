@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from hashlib import sha256
 
 from kazusa_ai_chatbot.coding_agent import (
     CodingRunResponse,
@@ -10,11 +11,14 @@ from kazusa_ai_chatbot.coding_agent import (
     start_coding_run,
 )
 from kazusa_ai_chatbot.task_resolution.contracts import (
+    TASK_RESOLUTION_EVIDENCE_VERSION,
     TASK_RESOLUTION_RESULT_VERSION,
     TaskResolutionExecutionContextV1,
+    TaskResolutionEvidenceV1,
     TaskResolutionResultV1,
     TaskSpecialistRequestV1,
     TaskSpecialistResultV1,
+    validate_task_resolution_execution_context,
     validate_task_resolution_result,
 )
 from kazusa_ai_chatbot.task_resolution.specialists import (
@@ -65,67 +69,94 @@ def project_bound_coding_continuation_result(
     response: CodingRunResponse,
     *,
     semantic_objective: str,
+    execution_context: TaskResolutionExecutionContextV1,
 ) -> TaskResolutionResultV1:
     """Project one public bound-run continuation into a task result.
 
     The coding-run lifecycle retains action, approval, execution, and repair
     semantics. Task resolution retains only the bounded public outcome needed
-    for accepted-task delivery and later cognition.
+    for accepted-task delivery and later cognition. The result carries the
+    exact validated scene and goal-continuation reference from the execution
+    context so a later tool-result episode stays bound to the original goal.
     """
 
     objective = _bounded_text(semantic_objective)
+    validated_context = validate_task_resolution_execution_context(
+        execution_context,
+    )
     coding_context = _coding_run_context(response)
     run_status = _response_text(response, "status", maximum=80)
     summary = _response_text(response, "answer_text")
     limitations = _response_text_items(response, "limitations")
     if run_status == "completed":
+        if not summary:
+            summary = "The coding run completed its requested work."
+        provenance_ref = _coding_provenance_ref(coding_context)
+        evidence = _continuation_evidence(
+            summary=summary,
+            provenance_ref=provenance_ref,
+            limitations=limitations,
+        )
         return _continuation_task_result(
             status="resolved",
-            summary=summary or "The coding run completed its requested work.",
+            semantic_objective=objective,
+            summary=summary,
             completed_subgoals=[objective],
             remaining_needs=[],
             coding_run_context=coding_context,
+            execution_context=validated_context,
+            evidence=[evidence],
         )
     if run_status == "awaiting_approval":
         return _continuation_task_result(
             status="approval_required",
+            semantic_objective=objective,
             summary=summary or "The coding run requires approval to continue.",
             completed_subgoals=[],
             remaining_needs=limitations or [
                 "Review the coding run and provide approval if desired.",
             ],
             coding_run_context=coding_context,
+            execution_context=validated_context,
         )
     if run_status == "blocked":
         return _continuation_task_result(
             status="needs_user_input",
+            semantic_objective=objective,
             summary=summary or "The coding run requires additional input.",
             completed_subgoals=[],
             remaining_needs=limitations or [objective],
             coding_run_context=coding_context,
+            execution_context=validated_context,
         )
     if _response_text(response, "operation_outcome", maximum=40) == "busy":
         return _continuation_task_result(
             status="unavailable",
+            semantic_objective=objective,
             summary=summary or "The coding run is temporarily unavailable.",
             completed_subgoals=[],
             remaining_needs=[objective],
             coding_run_context=coding_context,
+            execution_context=validated_context,
         )
     if run_status in {"rejected", "cancelled"}:
         return _continuation_task_result(
             status="unavailable",
+            semantic_objective=objective,
             summary=summary or "The coding run could not continue that action.",
             completed_subgoals=[],
             remaining_needs=limitations or [objective],
             coding_run_context=coding_context,
+            execution_context=validated_context,
         )
     return _continuation_task_result(
         status="failed",
+        semantic_objective=objective,
         summary=summary or "The coding run did not return a usable result.",
         completed_subgoals=[],
         remaining_needs=limitations or [objective],
         coding_run_context=coding_context,
+        execution_context=validated_context,
     )
 
 
@@ -223,18 +254,47 @@ def _response_result(
 def _continuation_task_result(
     *,
     status: str,
+    semantic_objective: str,
     summary: str,
     completed_subgoals: list[str],
     remaining_needs: list[str],
     coding_run_context: Mapping[str, object],
+    execution_context: TaskResolutionExecutionContextV1,
+    evidence: Sequence[TaskResolutionEvidenceV1] = (),
 ) -> TaskResolutionResultV1:
-    """Build one terminal task-resolution projection for a bound coding run."""
+    """Build one validated terminal projection for a bound coding run.
 
+    The projection keeps the exact scene and continuation reference from the
+    execution context and exposes evidence excerpts and handles only for
+    provenance-bearing factual statuses.
+    """
+
+    normalized_evidence = list(evidence)
+    if status in {"resolved", "partial"}:
+        evidence_state = "complete" if status == "resolved" else "partial"
+        evidence_excerpts = [
+            row["summary"]
+            for row in normalized_evidence
+        ]
+        evidence_handles = [
+            row["evidence_id"]
+            for row in normalized_evidence
+        ]
+    else:
+        evidence_state = "blocked"
+        evidence_excerpts = []
+        evidence_handles = []
     result: TaskResolutionResultV1 = {
         "schema_version": TASK_RESOLUTION_RESULT_VERSION,
+        "semantic_objective": _bounded_text(semantic_objective),
         "status": status,
+        "scene_context": execution_context["scene_context"],
+        "goal_continuation_ref": execution_context["goal_continuation_ref"],
+        "evidence_state": evidence_state,
+        "evidence_excerpts": evidence_excerpts,
+        "evidence_handles": evidence_handles,
         "prompt_safe_summary": _bounded_text(summary),
-        "evidence": [],
+        "evidence": normalized_evidence,
         "completed_subgoals": _bounded_text_items(completed_subgoals),
         "remaining_needs": _bounded_text_items(remaining_needs),
         "checkpoint": {},
@@ -242,6 +302,36 @@ def _continuation_task_result(
     }
     validated = validate_task_resolution_result(result)
     return validated
+
+
+def _continuation_evidence(
+    *,
+    summary: str,
+    provenance_ref: str,
+    limitations: Sequence[str],
+) -> TaskResolutionEvidenceV1:
+    """Project one coding-run outcome into a provenance-bearing evidence row."""
+
+    bounded_summary = _bounded_text(summary)
+    bounded_refs = _bounded_text_items([provenance_ref])
+    fingerprint = "\x1f".join((
+        "coding_continuation",
+        bounded_summary,
+        *bounded_refs,
+    ))
+    evidence: TaskResolutionEvidenceV1 = {
+        "schema_version": TASK_RESOLUTION_EVIDENCE_VERSION,
+        "evidence_id": (
+            f"task-evidence:coding:"
+            f"{sha256(fingerprint.encode('utf-8')).hexdigest()[:16]}"
+        ),
+        "task_node_id": "coding_continuation",
+        "specialist": SPECIALIST,
+        "summary": bounded_summary,
+        "provenance_refs": bounded_refs,
+        "limitations": _bounded_text_items(limitations),
+    }
+    return evidence
 
 
 def _coding_run_context(response: Mapping[str, object]) -> dict[str, object]:

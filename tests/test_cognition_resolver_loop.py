@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from kazusa_ai_chatbot.cognition_episode import build_goal_continuation_ref
 from kazusa_ai_chatbot.cognition_resolver import capabilities as capabilities_module
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     RESOLVER_CAPABILITY_REQUEST_VERSION,
@@ -50,7 +51,49 @@ def _resolver_request(
         "objective": objective,
         "reason": "当前认知循环缺少足够证据。",
         "priority": "now",
+        "goal_continuation_ref": (
+            _resolver_goal_ref()
+            if capability_kind == "task_resolution_request"
+            else None
+        ),
     }
+
+
+def _resolver_goal_ref() -> dict[str, object]:
+    """Build the continuation identity shared by resolver loop fixtures."""
+
+    return build_goal_continuation_ref(
+        source_episode_id="resolver-capability-episode",
+        source_message_id="message-123",
+        branch_id="ordinary_response",
+        goal_ref={
+            "scope": "user",
+            "kind": "goal",
+            "entity_id": "resolver-goal-001",
+        },
+    )
+
+
+def _resolver_scene_context() -> dict[str, object]:
+    """Build one bounded scene for resolver capability tests."""
+
+    return {
+        "channel_scope": "private",
+        "character_role": "Kazusa",
+        "current_user_role": "Test User",
+        "semantic_scene": "The resolver is handling one bounded evidence goal.",
+        "public_group_scene": "",
+        "conversation_continuity": "The current turn continues the evidence goal.",
+        "semantic_temporal_context": "The current test turn is active.",
+    }
+
+
+def _task_observation_fields(request: dict) -> dict[str, object]:
+    """Add the continuation field only to task-resolution observations."""
+
+    if request["capability_kind"] != "task_resolution_request":
+        return {}
+    return {"goal_continuation_ref": request["goal_continuation_ref"]}
 
 
 def _task_result(
@@ -58,6 +101,7 @@ def _task_result(
     status: str = "resolved",
     specialist: str = "local_context",
     summary: str = "找到一条相关证据。",
+    semantic_objective: str = "检索当前用户与这个问题有关的关系和记忆证据。",
 ) -> dict[str, object]:
     """Build one canonical task-resolution result for resolver tests."""
 
@@ -74,13 +118,33 @@ def _task_result(
         }]
     return {
         "schema_version": "task_resolution_result.v1",
+        "semantic_objective": semantic_objective,
         "status": status,
+        "scene_context": _resolver_scene_context(),
+        "goal_continuation_ref": _resolver_goal_ref(),
+        "evidence_state": {
+            "resolved": "complete",
+            "partial": "partial",
+            "deferred": "pending",
+            "needs_user_input": "blocked",
+            "approval_required": "blocked",
+            "unavailable": "blocked",
+            "failed": "blocked",
+        }.get(status, "blocked"),
+        "evidence_excerpts": [summary]
+        if status in {"resolved", "partial"}
+        else [],
+        "evidence_handles": ["evidence-1"]
+        if status in {"resolved", "partial"}
+        else [],
         "prompt_safe_summary": summary,
         "evidence": evidence,
         "completed_subgoals": [],
         "remaining_needs": (
             ["需要用户补充缺失指代。"]
             if status == "needs_user_input"
+            else ["The bounded task requires a truthful terminal disposition."]
+            if status in {"unavailable", "failed"}
             else []
         ),
         "checkpoint": {},
@@ -130,6 +194,7 @@ def _resolver_state() -> dict:
         },
         "conversation_episode_state": None,
         "promoted_reflection_context": None,
+        "scene_context": _resolver_scene_context(),
         "active_turn_platform_message_ids": ["message-123"],
         "active_turn_conversation_row_ids": ["row-123"],
         "cognitive_episode": episode,
@@ -175,11 +240,18 @@ def _cognition_result(
     }
 
 
-def _speak_action_spec(reason: str = "已经有足够证据，可以进入可见回复。") -> dict:
+def _speak_action_spec(
+    reason: str = "已经有足够证据，可以进入可见回复。",
+    *,
+    surface_role: str = "ordinary",
+    goal_continuation_ref: dict[str, object] | None = None,
+) -> dict:
     return {
         "schema_version": "action_spec.v1",
         "kind": "speak",
         "cognition_mode": "deliberative",
+        "surface_role": surface_role,
+        "goal_continuation_ref": goal_continuation_ref,
         "source_refs": [],
         "target": {
             "schema_version": "action_target.v1",
@@ -284,6 +356,7 @@ def test_resolver_context_projects_original_goal_and_objectives() -> None:
             "schema_version": RESOLVER_OBSERVATION_VERSION,
             "observation_id": "resolver_obs_web_1",
             "capability_kind": "task_resolution_request",
+            "goal_continuation_ref": _resolver_goal_ref(),
             "request_objective": "检索奥克兰 CBD 餐厅当前营业状态。",
             "request_reason": "需要当前营业证据。",
             "status": "failed",
@@ -304,6 +377,138 @@ def test_resolver_context_projects_original_goal_and_objectives() -> None:
     assert "objective=检索奥克兰 CBD 餐厅当前营业状态。" in resolver_context
     assert "summary=搜索工具未返回已确认事实。" in resolver_context
     assert "resolver_goal_progress:" in resolver_context
+
+
+def test_task_resolution_context_preserves_scene_and_continuation_ref() -> None:
+    """Capability context carries the same bounded scene and goal identity."""
+
+    from kazusa_ai_chatbot.cognition_resolver.capabilities import (
+        _task_resolution_execution_context_from_state,
+    )
+
+    state = _resolver_state()
+    continuation_ref = _resolver_goal_ref()
+    context = _task_resolution_execution_context_from_state(
+        state,
+        goal_continuation_ref=continuation_ref,
+    )
+
+    assert context["scene_context"] == state["scene_context"]
+    assert context["goal_continuation_ref"] == continuation_ref
+
+
+@pytest.mark.asyncio
+async def test_resolver_request_and_dependency_preserve_goal_continuation_ref() -> None:
+    """A task request, observation, and dependency share one exact ref."""
+
+    request = _resolver_request(objective="Resolve one bounded evidence goal.")
+    evidence_ref = {
+        "schema_version": "evidence_ref.v1",
+        "evidence_kind": "system_event",
+        "evidence_id": "resolver-evidence-1",
+        "owner": "cognition_resolver",
+        "excerpt": "A bounded source-backed fact.",
+        "observed_at": "2026-05-29T21:00:00+00:00",
+    }
+
+    async def call_cognition(state: dict) -> dict:
+        if state.get("resolver_state", {}).get("observations"):
+            return _cognition_result(
+                internal_monologue="The task result is ready.",
+                action_specs=[_speak_action_spec(
+                    "Present the validated task result.",
+                    surface_role="task_result",
+                    goal_continuation_ref=_resolver_goal_ref(),
+                )],
+                resolver_requests=[],
+                goal_resolution="answerable_now",
+            )
+        return _cognition_result(
+            internal_monologue="The task requires bounded evidence.",
+            resolver_requests=[request],
+        )
+
+    async def execute_capability(
+        capability_request: dict,
+        _state: dict,
+    ) -> dict:
+        return {
+            "schema_version": RESOLVER_OBSERVATION_VERSION,
+            "observation_id": "resolver_obs_typed_evidence",
+            "capability_kind": capability_request["capability_kind"],
+            **_task_observation_fields(capability_request),
+            "request_objective": capability_request["objective"],
+            "request_reason": capability_request["reason"],
+            "status": "succeeded",
+            "prompt_safe_summary": "The bounded evidence is ready.",
+            "evidence_refs": [evidence_ref],
+            "task_resolution_evidence_state": {
+                "schema_version": "resolver_evidence_state.v1",
+                "state": "complete",
+                "remaining_needs": [],
+            },
+            "created_at_utc": "2026-05-29T21:00:00+00:00",
+        }
+
+    result = await call_cognition_resolver_loop(
+        _resolver_state(),
+        call_cognition_subgraph_func=call_cognition,
+        execute_capability_func=execute_capability,
+        max_cycles=3,
+        capability_timeout_seconds=1.0,
+    )
+
+    resolver_state = result["resolver_state"]
+    assert resolver_state["observations"][0]["goal_continuation_ref"] == (
+        request["goal_continuation_ref"]
+    )
+    assert resolver_state[
+        "required_resolver_evidence_dependency"
+    ]["goal_continuation_ref"] == request["goal_continuation_ref"]
+
+
+@pytest.mark.asyncio
+async def test_pending_background_goal_reaches_acknowledgement_without_factual_surface() -> None:
+    """The resolver fails closed when one goal mixes pending and factual roles."""
+
+    request = _resolver_request(objective="Resolve one pending background goal.")
+    factual_action = _speak_action_spec(
+        "Answer the goal from current evidence.",
+        surface_role="factual_answer",
+        goal_continuation_ref=_resolver_goal_ref(),
+    )
+    calls = 0
+
+    async def call_cognition(_state: dict) -> dict:
+        nonlocal calls
+        calls += 1
+        return _cognition_result(
+            internal_monologue="The model proposed a mixed lifecycle.",
+            action_specs=[factual_action],
+            resolver_requests=[request],
+        )
+
+    async def execute_capability(_request: dict, _state: dict) -> dict:
+        raise AssertionError("mixed lifecycle must fail before task execution")
+
+    result = await call_cognition_resolver_loop(
+        _resolver_state(),
+        call_cognition_subgraph_func=call_cognition,
+        execute_capability_func=execute_capability,
+        max_cycles=3,
+        capability_timeout_seconds=1.0,
+    )
+
+    assert calls == 2
+    assert all(
+        row.get("surface_role") != "factual_answer"
+        for row in result["action_specs"]
+    )
+    assert any(
+        row.get("surface_role") == "task_status"
+        and row.get("goal_continuation_ref") == request["goal_continuation_ref"]
+        for row in result["action_specs"]
+    )
 
 
 async def _hil_pending_trace_state() -> dict:
@@ -392,6 +597,7 @@ async def test_loop_runs_cognition_capability_then_cognition_again() -> None:
             "schema_version": RESOLVER_OBSERVATION_VERSION,
             "observation_id": "resolver_obs_trust_memory",
             "capability_kind": capability_request["capability_kind"],
+            **_task_observation_fields(capability_request),
             "request_objective": capability_request["objective"],
             "request_reason": capability_request["reason"],
             "status": "succeeded",
@@ -579,6 +785,7 @@ async def test_loop_projects_goal_progress_across_iterations() -> None:
             "schema_version": RESOLVER_OBSERVATION_VERSION,
             "observation_id": "resolver_obs_evening_plan",
             "capability_kind": capability_request["capability_kind"],
+            **_task_observation_fields(capability_request),
             "request_objective": capability_request["objective"],
             "request_reason": capability_request["reason"],
             "status": "failed",
@@ -692,6 +899,7 @@ async def test_loop_blocks_duplicate_capability_objective_before_execution() -> 
             "schema_version": RESOLVER_OBSERVATION_VERSION,
             "observation_id": f"resolver_obs_web_{execute_count}",
             "capability_kind": capability_request["capability_kind"],
+            **_task_observation_fields(capability_request),
             "request_objective": capability_request["objective"],
             "request_reason": capability_request["reason"],
             "status": "failed",
@@ -815,6 +1023,7 @@ async def test_loop_blocks_renamed_retry_after_failed_observation() -> None:
             "schema_version": RESOLVER_OBSERVATION_VERSION,
             "observation_id": f"resolver_obs_failed_{execute_count}",
             "capability_kind": capability_request["capability_kind"],
+            **_task_observation_fields(capability_request),
             "request_objective": capability_request["objective"],
             "request_reason": capability_request["reason"],
             "status": "failed",
@@ -870,6 +1079,7 @@ async def test_duplicate_final_cognition_repeated_request_gets_terminal_speak() 
             "schema_version": RESOLVER_OBSERVATION_VERSION,
             "observation_id": f"resolver_obs_web_{execute_count}",
             "capability_kind": capability_request["capability_kind"],
+            **_task_observation_fields(capability_request),
             "request_objective": capability_request["objective"],
             "request_reason": capability_request["reason"],
             "status": "failed",
@@ -951,6 +1161,7 @@ async def test_duplicate_final_cognition_changed_request_gets_terminal_speak() -
             "schema_version": RESOLVER_OBSERVATION_VERSION,
             "observation_id": f"resolver_obs_web_{execute_count}",
             "capability_kind": capability_request["capability_kind"],
+            **_task_observation_fields(capability_request),
             "request_objective": capability_request["objective"],
             "request_reason": capability_request["reason"],
             "status": "failed",
@@ -1010,6 +1221,7 @@ async def test_duplicate_final_cognition_internal_thought_stays_private() -> Non
             "schema_version": RESOLVER_OBSERVATION_VERSION,
             "observation_id": f"resolver_obs_self_{execute_count}",
             "capability_kind": capability_request["capability_kind"],
+            **_task_observation_fields(capability_request),
             "request_objective": capability_request["objective"],
             "request_reason": capability_request["reason"],
             "status": "succeeded",
@@ -1063,6 +1275,7 @@ async def test_loop_runs_final_cognition_with_max_cycle_blocker() -> None:
             "schema_version": RESOLVER_OBSERVATION_VERSION,
             "observation_id": "resolver_obs_partial",
             "capability_kind": capability_request["capability_kind"],
+            **_task_observation_fields(capability_request),
             "request_objective": capability_request["objective"],
             "request_reason": capability_request["reason"],
             "status": "failed",
@@ -1119,6 +1332,7 @@ async def test_loop_converts_max_cycle_request_to_visible_blocker() -> None:
             "schema_version": RESOLVER_OBSERVATION_VERSION,
             "observation_id": "resolver_obs_partial",
             "capability_kind": capability_request["capability_kind"],
+            **_task_observation_fields(capability_request),
             "request_objective": capability_request["objective"],
             "request_reason": capability_request["reason"],
             "status": "failed",
@@ -1188,6 +1402,7 @@ async def test_max_cycle_internal_thought_request_stays_private() -> None:
             "schema_version": RESOLVER_OBSERVATION_VERSION,
             "observation_id": "resolver_obs_self_partial",
             "capability_kind": capability_request["capability_kind"],
+            **_task_observation_fields(capability_request),
             "request_objective": capability_request["objective"],
             "request_reason": capability_request["reason"],
             "status": "succeeded",
@@ -1349,6 +1564,21 @@ async def test_hil_repeated_after_pending_surfaces_pending_question() -> None:
     assert len(cognition_inputs) == 2
     assert len(pending_rows) == 1
     assert [spec["kind"] for spec in result["action_specs"]] == ["speak"]
+    assert result["action_specs"][0]["surface_role"] == "task_status"
+    pending = pending_rows[0]["execution_result"]["pending_resume"]
+    expected_continuation_ref = build_goal_continuation_ref(
+        source_episode_id="resolver-capability-episode",
+        source_message_id=pending["source_message_id"],
+        branch_id="resolver_pending_resume:human_clarification",
+        goal_ref={
+            "scope": "user",
+            "kind": "goal",
+            "entity_id": pending["global_user_id"],
+        },
+    )
+    assert result["action_specs"][0]["goal_continuation_ref"] == (
+        expected_continuation_ref
+    )
     assert result["resolver_capability_requests"] == []
     surface_requirements = result["action_specs"][0]["params"][
         "surface_requirements"
@@ -1879,6 +2109,7 @@ async def test_hil_follow_up_can_continue_original_goal_after_answer() -> None:
             "schema_version": RESOLVER_OBSERVATION_VERSION,
             "observation_id": "resolver_obs_city_plan",
             "capability_kind": capability_request["capability_kind"],
+            **_task_observation_fields(capability_request),
             "request_objective": capability_request["objective"],
             "request_reason": capability_request["reason"],
             "status": "succeeded",
@@ -2371,6 +2602,7 @@ async def test_user_input_blocker_converges_after_one_final_cognition() -> None:
             "schema_version": RESOLVER_OBSERVATION_VERSION,
             "observation_id": "resolver_obs_missing_referent",
             "capability_kind": capability_request["capability_kind"],
+            **_task_observation_fields(capability_request),
             "request_objective": capability_request["objective"],
             "request_reason": capability_request["reason"],
             "status": "blocked",
@@ -2436,6 +2668,7 @@ async def test_user_input_blocker_without_final_action_surfaces_clarification() 
             "schema_version": RESOLVER_OBSERVATION_VERSION,
             "observation_id": "resolver_obs_missing_referent_no_action",
             "capability_kind": capability_request["capability_kind"],
+            **_task_observation_fields(capability_request),
             "request_objective": capability_request["objective"],
             "request_reason": capability_request["reason"],
             "status": "blocked",
@@ -2488,7 +2721,10 @@ async def test_internal_thought_uses_unified_task_resolution_path(
         captured["request"] = request
         captured["context"] = context
         captured["inline_budget_seconds"] = inline_budget_seconds
-        return _task_result(summary="前文提到同一个话题。")
+        return _task_result(
+            summary="前文提到同一个话题。",
+            semantic_objective=request["semantic_goal"],
+        )
 
     monkeypatch.setattr(
         capabilities_module,
@@ -2611,6 +2847,7 @@ async def test_public_evidence_projects_through_task_resolution(
         return _task_result(
             specialist="public_research",
             summary="网页证据显示当前事实可用。",
+            semantic_objective=request["semantic_goal"],
         )
 
     monkeypatch.setattr(

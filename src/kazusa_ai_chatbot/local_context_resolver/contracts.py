@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import copy
-from typing import Literal, NotRequired, Protocol, TypedDict
+from typing import TYPE_CHECKING, Literal, NotRequired, Protocol, TypedDict
 
 from .constants import (
     DEFAULT_SUBAGENT_MAX_ATTEMPTS,
     OPTION_LIMIT_CAPS,
 )
+
+if TYPE_CHECKING:
+    from kazusa_ai_chatbot.cognition_core_v2.contracts import SceneContextV2
 
 LOCAL_CONTEXT_ARTIFACT_VERSION = "local_context_artifact.v1"
 LOCAL_CONTEXT_GRAPH_VERSION = "local_context_graph.v1"
@@ -112,6 +115,7 @@ class LocalContextResolverContextV1(TypedDict):
     platform_channel_id: str
     global_user_id: str
     user_name: str
+    scene_context: SceneContextV2
     local_time_context: dict[str, object]
     prompt_message_context: dict[str, object]
     chat_history_recent: list[dict[str, object]]
@@ -292,6 +296,18 @@ def validate_local_context_resolver_context(
         "user_name",
     ):
         _require_string(data, field_name)
+    scene_context = _require_dict(data, "scene_context")
+    from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+        CognitionContractError,
+        _validate_scene_context,
+    )
+
+    try:
+        _validate_scene_context(scene_context)
+    except CognitionContractError as exc:
+        raise LocalContextValidationError(
+            f"scene_context: invalid canonical scene context: {exc}"
+        ) from exc
     for field_name in (
         "local_time_context",
         "prompt_message_context",

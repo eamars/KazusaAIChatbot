@@ -27,6 +27,9 @@ from kazusa_ai_chatbot.config import (
     CODING_AGENT_WORKSPACE_ROOT,
 )
 from kazusa_ai_chatbot.db import DatabaseOperationError
+from kazusa_ai_chatbot.task_resolution.contracts import (
+    validate_task_resolution_execution_context,
+)
 from kazusa_ai_chatbot.time_boundary import local_llm_datetime_to_storage_utc_iso
 
 
@@ -64,6 +67,7 @@ _BOUND_CODING_PARAM_FIELDS = frozenset((
     "approval_evidence",
     "requested_delivery",
     "max_output_chars",
+    "task_execution_context",
 ))
 
 
@@ -99,6 +103,10 @@ def validate_accepted_coding_task_action(
         raise ActionValidationError(
             "kind: expected accepted_coding_task_request"
         )
+    if validated["surface_role"] != "task_acknowledgement":
+        raise ActionValidationError(
+            "surface_role: expected task_acknowledgement for accepted coding"
+        )
     _validate_private_background_target(validated)
     params = validated["params"]
     unsupported = set(params) - _BOUND_CODING_PARAM_FIELDS
@@ -118,6 +126,7 @@ def validate_accepted_coding_task_action(
         _validate_approval_evidence(params.get("approval_evidence"), validated)
     elif "approval_evidence" in params:
         raise ActionValidationError("approval_evidence: unexpected parameter")
+    _validate_accepted_coding_continuation(validated, params)
     return validated
 
 
@@ -271,6 +280,49 @@ def _validate_approval_evidence(
         raise ActionValidationError(
             "approval_evidence.requester_global_user_id: scope mismatch"
         )
+
+
+def _validate_accepted_coding_continuation(
+    validated: Mapping[str, Any],
+    params: Mapping[str, object],
+) -> None:
+    """Require the action reference to bind the full execution context."""
+
+    goal_continuation_ref = validated["goal_continuation_ref"]
+    if goal_continuation_ref is None:
+        raise ActionValidationError(
+            "goal_continuation_ref: required for accepted coding"
+        )
+    task_execution_context = _validated_task_execution_context(params)
+    if (
+        task_execution_context["goal_continuation_ref"]
+        != goal_continuation_ref
+    ):
+        raise ActionValidationError(
+            "task_execution_context.goal_continuation_ref: conflicts with "
+            "action goal_continuation_ref"
+        )
+
+
+def _validated_task_execution_context(
+    params: Mapping[str, object],
+) -> dict[str, object]:
+    """Require the complete typed context for a coding continuation."""
+
+    raw_context = params.get("task_execution_context")
+    if not isinstance(raw_context, Mapping):
+        raise ActionValidationError(
+            "task_execution_context: required for coding continuation"
+        )
+    try:
+        validated_context = validate_task_resolution_execution_context(
+            raw_context
+        )
+    except ValueError as exc:
+        raise ActionValidationError(
+            f"task_execution_context: invalid execution context: {exc}"
+        ) from exc
+    return dict(validated_context)
 
 
 def _bound_coding_request(
@@ -453,6 +505,7 @@ def _accepted_task_create_request(
         "task_kind": task_kind,
         "semantic_objective": semantic_objective,
         "accepted_task_summary": accepted_task_summary,
+        "goal_continuation_ref": validated["goal_continuation_ref"],
         "requested_delivery": BACKGROUND_WORK_REQUESTED_DELIVERY,
         "max_output_chars": int(params["max_output_chars"]),
         "source_trigger_source": _required_scope_text(
@@ -512,6 +565,7 @@ def _queue_request_from_accepted_task(
         "accepted_task_id": accepted_task_id,
         "task_identity_key": _task_text(accepted_task, "task_identity_key"),
         "semantic_objective": semantic_objective,
+        "goal_continuation_ref": validated["goal_continuation_ref"],
         "requested_worker": requested_worker,
         "worker_payload": dict(worker_payload),
         "source_platform": _required_scope_text(scope, "source_platform"),
@@ -542,6 +596,10 @@ def _queue_request_from_accepted_task(
         "max_output_chars": int(params["max_output_chars"]),
         "storage_timestamp_utc": storage_timestamp_utc,
     }
+    if requested_worker == TASK_ORCHESTRATOR_WORKER:
+        request["task_execution_context"] = _validated_task_execution_context(
+            params
+        )
     return request
 
 

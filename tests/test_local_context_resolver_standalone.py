@@ -19,6 +19,7 @@ from kazusa_ai_chatbot.local_context_resolver import (
 )
 from kazusa_ai_chatbot.local_context_resolver import service as resolver_service
 from kazusa_ai_chatbot.local_context_resolver import stages as resolver_stages
+from tests.test_task_resolution_orchestrator import _scene_context
 
 
 class _StageInvoker:
@@ -54,6 +55,7 @@ async def test_resolve_local_context_runs_standalone_public_io(
         "character_name": "active character",
         "platform": "debug",
         "platform_channel_id": "group-1",
+        "scene_context": _scene_context(),
         "global_user_id": "user-1",
         "user_name": "operator",
         "local_time_context": {"local_date": "2026-07-04"},
@@ -196,6 +198,7 @@ async def test_traversal_separates_model_and_source_owned_artifacts(
         "character_name": "active character",
         "platform": "debug",
         "platform_channel_id": "group-1",
+        "scene_context": _scene_context(),
         "global_user_id": "user-1",
         "user_name": "operator",
         "local_time_context": {"local_date": "2026-07-04"},
@@ -328,6 +331,7 @@ async def test_resolve_local_context_collapses_duplicate_candidate_ref(
         "character_name": "active character",
         "platform": "debug",
         "platform_channel_id": "group-1",
+        "scene_context": _scene_context(),
         "global_user_id": "user-1",
         "user_name": "operator",
         "local_time_context": {"local_date": "2026-07-04"},
@@ -503,7 +507,7 @@ def test_collapse_candidates_exclude_root_node() -> None:
     assert candidates == []
 
 
-def test_compact_context_strips_model_input_identifiers() -> None:
+def test_prompt_payload_includes_bounded_scene_context() -> None:
     """Sanitize prompt input before any LLM stage sees caller context."""
 
     context = validate_local_context_resolver_context({
@@ -511,6 +515,7 @@ def test_compact_context_strips_model_input_identifiers() -> None:
         "character_name": "active character",
         "platform": "debug",
         "platform_channel_id": "group-1",
+        "scene_context": _scene_context(),
         "global_user_id": "user-1",
         "user_name": "operator",
         "local_time_context": {"local_date": "2026-07-04"},
@@ -538,6 +543,7 @@ def test_compact_context_strips_model_input_identifiers() -> None:
     compact = resolver_service._compact_context(context)
     compact_text = str(compact)
 
+    assert compact["scene_context"] == _scene_context()
     assert "@active character #napcat" in compact_text
     assert "https://example.test/napcat" in compact_text
     assert "jasmine tea" in compact_text

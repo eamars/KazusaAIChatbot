@@ -15,6 +15,11 @@ from kazusa_ai_chatbot.background_work.models import (
     BackgroundWorkQueueResult,
     background_work_job_ref,
 )
+from kazusa_ai_chatbot.cognition_episode import (
+    CognitiveEpisodeValidationError,
+    GoalContinuationRefV1,
+    validate_goal_continuation_ref,
+)
 from kazusa_ai_chatbot.config import (
     BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
     BACKGROUND_WORK_WORKER_MAX_ATTEMPTS,
@@ -112,8 +117,13 @@ def _validate_queue_request(request: BackgroundWorkQueueRequest) -> None:
         raise ValueError("max_output_chars exceeds configured output limit")
     requested_worker = request.get("requested_worker")
     worker_payload = request.get("worker_payload")
+    continuation_ref = _validate_goal_continuation_ref_field(request)
     if requested_worker == TASK_ORCHESTRATOR_WORKER:
-        _validate_task_orchestrator_payload(worker_payload, request)
+        _validate_task_orchestrator_payload(
+            worker_payload,
+            request,
+            continuation_ref=continuation_ref,
+        )
         return
     if requested_worker == FUTURE_SPEAK_WORKER:
         _validate_future_speak_payload(worker_payload)
@@ -300,14 +310,34 @@ def _require_non_empty_mapping_text(
 def _validate_task_orchestrator_payload(
     value: object,
     request: BackgroundWorkQueueRequest,
+    *,
+    continuation_ref: GoalContinuationRefV1 | None,
 ) -> None:
-    """Validate a task-resume payload and its persisted execution context."""
+    """Validate a task payload and its persisted typed execution context.
+
+    Every task-resolution job fails closed without the exact validated
+    continuation reference and typed task execution context; both are required
+    to resume a checkpoint or continue a bound coding run through the same
+    worker result contract.
+    """
 
     payload = validate_task_orchestrator_worker_payload(value)
-    if payload["operation"] != "resume_task_resolution":
-        return
+    if continuation_ref is None:
+        raise ValueError(
+            "task-resolution jobs require goal_continuation_ref"
+        )
     execution_context = request.get("task_execution_context")
-    validate_task_resolution_execution_context(execution_context)
+    if not isinstance(execution_context, Mapping):
+        raise ValueError(
+            "task_execution_context is required for task-resolution jobs"
+        )
+    validated_context = validate_task_resolution_execution_context(
+        execution_context
+    )
+    if validated_context["goal_continuation_ref"] != continuation_ref:
+        raise ValueError(
+            "goal_continuation_ref conflicts with task execution context"
+        )
 
 
 def _validate_future_speak_payload(value: object) -> None:
@@ -321,6 +351,29 @@ def _validate_future_speak_payload(value: object) -> None:
         field_value = value.get(field_name)
         if not isinstance(field_value, str) or not field_value.strip():
             raise ValueError(f"future_speak worker_payload {field_name} is required")
+
+
+def _validate_goal_continuation_ref_field(
+    request: BackgroundWorkQueueRequest,
+) -> GoalContinuationRefV1 | None:
+    """Validate the explicit continuation reference on every queue request.
+
+    Task-resolution jobs require a non-null validated reference; future-speak
+    and private unrelated actions carry an explicit null reference.
+    """
+
+    if "goal_continuation_ref" not in request:
+        raise ValueError("goal_continuation_ref is required")
+    raw_ref = request["goal_continuation_ref"]
+    if raw_ref is None:
+        return None
+    try:
+        continuation_ref = validate_goal_continuation_ref(raw_ref)
+    except CognitiveEpisodeValidationError as exc:
+        raise ValueError(
+            f"goal_continuation_ref: invalid reference: {exc}"
+        ) from exc
+    return continuation_ref
 
 
 def _build_job_document(
@@ -347,6 +400,7 @@ def _build_job_document(
         "accepted_task_id": request["accepted_task_id"].strip(),
         "task_identity_key": request["task_identity_key"].strip(),
         "semantic_objective": request["semantic_objective"].strip(),
+        "goal_continuation_ref": request["goal_continuation_ref"],
         "status": "queued",
         "delivery_state": "queued",
         "requested_delivery": request["requested_delivery"],

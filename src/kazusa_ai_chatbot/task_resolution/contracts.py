@@ -9,7 +9,16 @@ internals.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Literal, TypedDict, cast
+from typing import TYPE_CHECKING, Literal, TypedDict, cast
+
+from kazusa_ai_chatbot.cognition_episode import (
+    CognitiveEpisodeValidationError,
+    GoalContinuationRefV1,
+    validate_goal_continuation_ref,
+)
+
+if TYPE_CHECKING:
+    from kazusa_ai_chatbot.cognition_core_v2.contracts import SceneContextV2
 
 
 TASK_RESOLUTION_EXECUTION_CONTEXT_VERSION = "task_resolution_execution_context.v1"
@@ -70,6 +79,13 @@ TASK_RESOLUTION_STATUSES = frozenset((
     "failed",
     "deferred",
 ))
+TASK_RESOLUTION_RESULT_EVIDENCE_STATES = frozenset((
+    "complete",
+    "partial",
+    "pending",
+    "missing",
+    "blocked",
+))
 TASK_NODE_STATUSES = frozenset((
     "pending",
     "resolving",
@@ -94,6 +110,8 @@ class TaskResolutionExecutionContextV1(TypedDict):
     requester_global_user_id: str
     requester_platform_user_id: str
     source_message_id: str
+    scene_context: SceneContextV2
+    goal_continuation_ref: GoalContinuationRefV1
     local_time_context: dict[str, object]
     prompt_message_context: dict[str, object]
     chat_history_recent: list[dict[str, object]]
@@ -173,6 +191,8 @@ class TaskResolutionCheckpointV1(TypedDict):
     schema_version: Literal["task_resolution_checkpoint.v1"]
     session_id: str
     semantic_objective: str
+    scene_context: SceneContextV2
+    goal_continuation_ref: GoalContinuationRefV1
     source_scope: dict[str, str]
     nodes: list[TaskResolutionNodeV1]
     active_node_id: str
@@ -218,7 +238,19 @@ class TaskResolutionResultV1(TypedDict):
     """Prompt-safe terminal or deferred session result."""
 
     schema_version: Literal["task_resolution_result.v1"]
+    semantic_objective: str
     status: str
+    scene_context: SceneContextV2
+    goal_continuation_ref: GoalContinuationRefV1
+    evidence_state: Literal[
+        "complete",
+        "partial",
+        "pending",
+        "missing",
+        "blocked",
+    ]
+    evidence_excerpts: list[str]
+    evidence_handles: list[str]
     prompt_safe_summary: str
     evidence: list[TaskResolutionEvidenceV1]
     completed_subgoals: list[str]
@@ -244,6 +276,8 @@ def validate_task_resolution_execution_context(
             "requester_global_user_id",
             "requester_platform_user_id",
             "source_message_id",
+            "scene_context",
+            "goal_continuation_ref",
             "local_time_context",
             "prompt_message_context",
             "chat_history_recent",
@@ -276,6 +310,14 @@ def validate_task_resolution_execution_context(
             "requester_platform_user_id",
         ),
         "source_message_id": _require_text(data, "source_message_id"),
+        "scene_context": _validate_scene_context_value(
+            data["scene_context"],
+            "scene_context",
+        ),
+        "goal_continuation_ref": _validate_goal_continuation_ref_value(
+            data["goal_continuation_ref"],
+            "goal_continuation_ref",
+        ),
         "local_time_context": _require_dict(data, "local_time_context"),
         "prompt_message_context": _require_dict(
             data,
@@ -333,6 +375,8 @@ def validate_task_resolution_checkpoint(
             "schema_version",
             "session_id",
             "semantic_objective",
+            "scene_context",
+            "goal_continuation_ref",
             "source_scope",
             "nodes",
             "active_node_id",
@@ -412,6 +456,14 @@ def validate_task_resolution_checkpoint(
         "schema_version": TASK_RESOLUTION_CHECKPOINT_VERSION,
         "session_id": _require_text(data, "session_id"),
         "semantic_objective": _require_text(data, "semantic_objective"),
+        "scene_context": _validate_scene_context_value(
+            data["scene_context"],
+            "scene_context",
+        ),
+        "goal_continuation_ref": _validate_goal_continuation_ref_value(
+            data["goal_continuation_ref"],
+            "goal_continuation_ref",
+        ),
         "source_scope": _validate_source_scope(data, "source_scope"),
         "nodes": nodes,
         "active_node_id": active_node_id,
@@ -557,7 +609,13 @@ def validate_task_resolution_result(value: object) -> TaskResolutionResultV1:
         data,
         {
             "schema_version",
+            "semantic_objective",
             "status",
+            "scene_context",
+            "goal_continuation_ref",
+            "evidence_state",
+            "evidence_excerpts",
+            "evidence_handles",
             "prompt_safe_summary",
             "evidence",
             "completed_subgoals",
@@ -568,8 +626,27 @@ def validate_task_resolution_result(value: object) -> TaskResolutionResultV1:
         "task_resolution_result",
     )
     _require_version(data, TASK_RESOLUTION_RESULT_VERSION)
+    semantic_objective = _require_text(data, "semantic_objective")
     status = _require_enum(data, "status", TASK_RESOLUTION_STATUSES)
+    scene_context = _validate_scene_context_value(
+        data["scene_context"],
+        "scene_context",
+    )
+    continuation_ref = _validate_goal_continuation_ref_value(
+        data["goal_continuation_ref"],
+        "goal_continuation_ref",
+    )
+    evidence_state = _require_enum(
+        data,
+        "evidence_state",
+        TASK_RESOLUTION_RESULT_EVIDENCE_STATES,
+    )
     evidence = _validate_evidence_list(data, "evidence")
+    evidence_excerpts = _require_bounded_text_list(
+        data,
+        "evidence_excerpts",
+    )
+    evidence_handles = _require_text_list(data, "evidence_handles")
     completed_subgoals = _require_bounded_text_list(
         data,
         "completed_subgoals",
@@ -577,6 +654,13 @@ def validate_task_resolution_result(value: object) -> TaskResolutionResultV1:
     remaining_needs = _require_bounded_text_list(
         data,
         "remaining_needs",
+    )
+    _validate_result_evidence_projection(
+        status=status,
+        evidence_state=evidence_state,
+        evidence=evidence,
+        evidence_excerpts=evidence_excerpts,
+        evidence_handles=evidence_handles,
     )
     if status == "resolved":
         if not evidence:
@@ -597,6 +681,13 @@ def validate_task_resolution_result(value: object) -> TaskResolutionResultV1:
                 "partial task-resolution result requires remaining needs"
             )
     checkpoint = _validate_result_checkpoint(data)
+    if checkpoint:
+        _validate_result_checkpoint_binding(
+            checkpoint,
+            semantic_objective=semantic_objective,
+            scene_context=scene_context,
+            continuation_ref=continuation_ref,
+        )
     if status == "deferred":
         if not checkpoint:
             raise TaskResolutionContractError(
@@ -619,10 +710,25 @@ def validate_task_resolution_result(value: object) -> TaskResolutionResultV1:
             raise TaskResolutionContractError(
                 "deferred checkpoint has exhausted orchestrator-call budget"
             )
+    if status in {
+        "needs_user_input",
+        "approval_required",
+        "unavailable",
+        "failed",
+    } and not remaining_needs:
+        raise TaskResolutionContractError(
+            "objective-scoped task status requires remaining needs"
+        )
     coding_run_context = _validate_result_coding_context(data)
     normalized: TaskResolutionResultV1 = {
         "schema_version": TASK_RESOLUTION_RESULT_VERSION,
+        "semantic_objective": semantic_objective,
         "status": status,
+        "scene_context": scene_context,
+        "goal_continuation_ref": continuation_ref,
+        "evidence_state": evidence_state,
+        "evidence_excerpts": evidence_excerpts,
+        "evidence_handles": evidence_handles,
         "prompt_safe_summary": _require_text(
             data,
             "prompt_safe_summary",
@@ -1106,6 +1212,70 @@ def _validate_result_coding_context(
     return normalized
 
 
+def _validate_result_evidence_projection(
+    *,
+    status: str,
+    evidence_state: str,
+    evidence: list[TaskResolutionEvidenceV1],
+    evidence_excerpts: list[str],
+    evidence_handles: list[str],
+) -> None:
+    """Keep result-visible evidence tied to validated task evidence only."""
+
+    expected_state = {
+        "resolved": "complete",
+        "partial": "partial",
+        "deferred": "pending",
+        "needs_user_input": "blocked",
+        "approval_required": "blocked",
+        "unavailable": "blocked",
+        "failed": "blocked",
+    }[status]
+    if evidence_state != expected_state:
+        raise TaskResolutionContractError(
+            "evidence_state: does not match task-resolution status"
+        )
+    if evidence_state not in {"complete", "partial"}:
+        if evidence_excerpts or evidence_handles:
+            raise TaskResolutionContractError(
+                "non-factual task state cannot expose evidence excerpts or handles"
+            )
+        return
+    expected_excerpts = [row["summary"] for row in evidence]
+    expected_handles = [row["evidence_id"] for row in evidence]
+    if evidence_excerpts != expected_excerpts:
+        raise TaskResolutionContractError(
+            "evidence_excerpts: expected validated evidence summaries"
+        )
+    if evidence_handles != expected_handles:
+        raise TaskResolutionContractError(
+            "evidence_handles: expected validated evidence identifiers"
+        )
+
+
+def _validate_result_checkpoint_binding(
+    checkpoint: dict[str, object],
+    *,
+    semantic_objective: str,
+    scene_context: SceneContextV2,
+    continuation_ref: GoalContinuationRefV1,
+) -> None:
+    """Require a result checkpoint to retain the same task context lineage."""
+
+    if checkpoint["semantic_objective"] != semantic_objective:
+        raise TaskResolutionContractError(
+            "checkpoint.semantic_objective: conflicts with result"
+        )
+    if checkpoint["scene_context"] != scene_context:
+        raise TaskResolutionContractError(
+            "checkpoint.scene_context: conflicts with result"
+        )
+    if checkpoint["goal_continuation_ref"] != continuation_ref:
+        raise TaskResolutionContractError(
+            "checkpoint.goal_continuation_ref: conflicts with result"
+        )
+
+
 def _validate_coding_run_context(
     context: Mapping[str, object],
 ) -> dict[str, object]:
@@ -1155,6 +1325,47 @@ def _validate_result_checkpoint(
     validated = validate_task_resolution_checkpoint(checkpoint)
     normalized = cast(dict[str, object], dict(validated))
     return normalized
+
+
+def _validate_scene_context_value(
+    value: object,
+    field_name: str,
+) -> SceneContextV2:
+    """Reuse the canonical bounded scene validator at this public boundary."""
+
+    if not isinstance(value, Mapping):
+        raise TaskResolutionContractError(f"{field_name}: expected object")
+
+    # Local import only: a module-scope import would cycle through
+    # cognition_core_v2.facade -> llm_tracing -> db.background_work_jobs,
+    # which imports this module.
+    from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+        CognitionContractError,
+        _validate_scene_context,
+    )
+
+    try:
+        _validate_scene_context(value)
+    except CognitionContractError as exc:
+        raise TaskResolutionContractError(
+            f"{field_name}: invalid canonical scene context: {exc}"
+        ) from exc
+    return cast("SceneContextV2", dict(value))
+
+
+def _validate_goal_continuation_ref_value(
+    value: object,
+    field_name: str,
+) -> GoalContinuationRefV1:
+    """Require one exact deterministic continuation reference."""
+
+    try:
+        continuation_ref = validate_goal_continuation_ref(value)
+    except CognitiveEpisodeValidationError as exc:
+        raise TaskResolutionContractError(
+            f"{field_name}: invalid goal continuation reference: {exc}"
+        ) from exc
+    return continuation_ref
 
 
 def _require_mapping(value: object, label: str) -> dict[str, object]:

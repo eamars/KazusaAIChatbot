@@ -1624,6 +1624,7 @@ def _compact_context(
         "platform": context["platform"],
         "character_role": "active character",
         "current_user": context["user_name"],
+        "scene_context": context["scene_context"],
         "local_time_context": _sanitized_prompt_payload(
             context["local_time_context"]
         ),

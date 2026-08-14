@@ -7,12 +7,13 @@ import json
 import logging
 from collections.abc import Mapping
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 
 from kazusa_ai_chatbot import llm_tracing
 from kazusa_ai_chatbot.action_spec.models import (
     ActionAvailabilityContextV1,
     RuntimeCapabilitySnapshotV1,
+    SurfaceRoleV1,
 )
 from kazusa_ai_chatbot.action_spec.registry import (
     ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
@@ -25,8 +26,13 @@ from kazusa_ai_chatbot.action_spec.registry import (
 )
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
 from kazusa_ai_chatbot.action_spec.results import project_trace_action_result_v2
+from kazusa_ai_chatbot.background_work.result_source import (
+    ToolResultCognitionSourceV1,
+    validate_tool_result_cognition_source,
+)
 from kazusa_ai_chatbot.config import (
     AFFECT_SETTLING_WAKE_PREP_MINUTES,
+    BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
     BACKGROUND_WORK_WORKER_ENABLED,
     CALENDAR_SCHEDULER_ENABLED,
     CHARACTER_SLEEP_LOCAL_PERIOD,
@@ -97,12 +103,15 @@ from kazusa_ai_chatbot.config import (
     COGNITION_LLM_WORKSPACE_COLLAPSE_MAX_COMPLETION_TOKENS,
     COGNITION_LLM_WORKSPACE_COLLAPSE_MODEL,
     COGNITION_LLM_WORKSPACE_COLLAPSE_THINKING_ENABLED,
+    CODING_AGENT_WORKSPACE_ROOT,
 )
 from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisodeValidationError,
+    GoalContinuationRefV1,
     project_dialog_response_operation,
     project_dialog_role_explicit_content,
     validate_cognitive_episode_v1,
+    validate_goal_continuation_ref,
 )
 from kazusa_ai_chatbot.cognition_core_v2 import run_cognition
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
@@ -178,6 +187,9 @@ from kazusa_ai_chatbot.event_logging import (
     record_cognition_v2_event,
     record_continuity_boundary_event,
 )
+from kazusa_ai_chatbot.media_inspection.session_cache import (
+    list_session_media_refs,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_actions import (
     materialize_semantic_action_requests,
 )
@@ -185,6 +197,13 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_memory_lifecycle import (
     has_trusted_active_commitments,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
+from kazusa_ai_chatbot.task_resolution.contracts import (
+    MAX_TASK_RESOLUTION_TEXT_CHARS,
+    MAX_TASK_RESOLUTION_TEXT_ITEMS,
+    TASK_RESOLUTION_EXECUTION_CONTEXT_VERSION,
+    TaskResolutionExecutionContextV1,
+    validate_task_resolution_execution_context,
+)
 from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
 
 logger = logging.getLogger(__name__)
@@ -1110,6 +1129,7 @@ def _project_output_to_global_state(
                 "objective": request["semantic_goal"],
                 "reason": request["reason"],
                 "priority": _resolver_request_priority(request),
+                "goal_continuation_ref": request["goal_continuation_ref"],
             }
             for request in output["resolver_requests"]
         ],
@@ -1210,6 +1230,26 @@ def _materialize_v2_action_requests(
             raise CognitionExecutionError(
                 "V2 action request failed deterministic validation"
             )
+        if request["action_kind"] == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY:
+            continuation_ref = _coding_continuation_ref(output)
+            requests.append({
+                "capability": request["action_kind"],
+                "decision": request["decision"],
+                "context_ref": request["context_ref"],
+                "detail": request["semantic_goal"],
+                "reason": request["reason"],
+                "target_roles": list(request["target_roles"]),
+                "evidence_handles": list(request["evidence_handles"]),
+                "surface_role": "task_acknowledgement",
+                "goal_continuation_ref": continuation_ref,
+                "task_execution_context": (
+                    _coding_execution_context_from_state(
+                        state,
+                        goal_continuation_ref=continuation_ref,
+                    )
+                ),
+            })
+            continue
         requests.append({
             "capability": request["action_kind"],
             "decision": request["decision"],
@@ -1218,6 +1258,8 @@ def _materialize_v2_action_requests(
             "reason": request["reason"],
             "target_roles": list(request["target_roles"]),
             "evidence_handles": list(request["evidence_handles"]),
+            "surface_role": "ordinary",
+            "goal_continuation_ref": None,
         })
     materialization_state = dict(state)
     action_specs = materialize_semantic_action_requests(
@@ -1233,6 +1275,10 @@ def _materialize_v2_action_requests(
         if isinstance(admitted_bid, Mapping)
         else []
     )
+    surface_role, goal_continuation_ref = _continuation_surface_metadata(
+        output,
+        state,
+    )
     speak_specs = materialize_semantic_action_requests(
         [{
             "capability": SPEAK_CAPABILITY,
@@ -1241,6 +1287,8 @@ def _materialize_v2_action_requests(
             "reason": output["intention"]["reason"],
             "target_roles": list(output["intention"]["target_roles"]),
             "evidence_handles": evidence_handles,
+            "surface_role": surface_role,
+            "goal_continuation_ref": goal_continuation_ref,
         }],
         materialization_state,
     )
@@ -1249,6 +1297,329 @@ def _materialize_v2_action_requests(
             "V2 speech intention failed action-spec materialization"
         )
     return [*action_specs, speak_specs[0]]
+
+
+def _continuation_surface_metadata(
+    output: CognitionCoreOutputV2,
+    state: GlobalPersonaState,
+) -> tuple[SurfaceRoleV1, GoalContinuationRefV1 | None]:
+    """Bind a visible surface to its continuation lifecycle state."""
+
+    episode = state.get("cognitive_episode")
+    if (
+        isinstance(episode, Mapping)
+        and episode.get("trigger_source") == "tool_result"
+    ):
+        typed_source = _tool_result_episode_cognition_source(episode)
+        result_ref = typed_source["goal_continuation_ref"]
+        if typed_source["task_status"] in {"resolved", "partial"}:
+            return "task_result", result_ref
+        return "task_status", result_ref
+
+    raw_continuation_ref = output["intention"].get(
+        "goal_continuation_ref"
+    )
+    if not isinstance(raw_continuation_ref, Mapping):
+        return "ordinary", None
+    continuation_ref = cast(GoalContinuationRefV1, raw_continuation_ref)
+    has_same_goal_task_resolution = False
+    for request in output.get("resolver_requests", []):
+        if (
+            request["capability"] == "task_resolution_request"
+            and request.get("goal_continuation_ref") == continuation_ref
+        ):
+            has_same_goal_task_resolution = True
+            if request.get("start_in_background") is True:
+                return "task_acknowledgement", continuation_ref
+    if has_same_goal_task_resolution:
+        return "task_status", continuation_ref
+
+    resolver_state = state.get("resolver_state")
+    if isinstance(resolver_state, Mapping):
+        dependency = resolver_state.get(
+            "required_resolver_evidence_dependency"
+        )
+        if (
+            isinstance(dependency, Mapping)
+            and dependency.get("goal_continuation_ref") == continuation_ref
+        ):
+            dependency_state = dependency.get("state")
+            if dependency_state == "pending":
+                return "task_acknowledgement", continuation_ref
+            if dependency_state in {"missing", "blocked"}:
+                return "task_status", continuation_ref
+
+    if output.get("goal_resolution") != "answerable_now":
+        return "task_status", continuation_ref
+    return "factual_answer", continuation_ref
+
+
+def _coding_continuation_ref(
+    output: CognitionCoreOutputV2,
+) -> GoalContinuationRefV1:
+    """Require the canonical bound continuation for a coding action."""
+
+    raw_ref = output["intention"]["goal_continuation_ref"]
+    try:
+        continuation_ref = validate_goal_continuation_ref(raw_ref)
+    except CognitiveEpisodeValidationError as exc:
+        raise CognitionExecutionError(
+            f"accepted coding continuation goal_continuation_ref is invalid: "
+            f"{exc}"
+        ) from exc
+    return continuation_ref
+
+
+def _coding_execution_context_from_state(
+    state: GlobalPersonaState,
+    *,
+    goal_continuation_ref: GoalContinuationRefV1,
+) -> TaskResolutionExecutionContextV1:
+    """Project trusted persona state into the coding continuation context."""
+
+    character_profile = state.get("character_profile")
+    if not isinstance(character_profile, Mapping):
+        raise CognitionExecutionError(
+            "character_profile: expected trusted mapping"
+        )
+    character_name = _text(character_profile.get("name"))
+    if not character_name:
+        raise CognitionExecutionError(
+            "character_profile.name: expected non-empty text"
+        )
+    timestamp = _required_context_state_text(
+        state,
+        "storage_timestamp_utc",
+    )
+    platform = _required_context_state_text(state, "platform")
+    channel_id = _required_context_state_text(state, "platform_channel_id")
+    channel_type = _required_context_state_text(state, "channel_type")
+    requester_global_user_id = _required_context_state_text(
+        state,
+        "global_user_id",
+    )
+    requester_platform_user_id = _required_context_state_text(
+        state,
+        "platform_user_id",
+    )
+    source_message_id = _context_source_message_id(state)
+    local_time_context = state.get("local_time_context")
+    prompt_message_context = state.get("prompt_message_context")
+    if not isinstance(local_time_context, Mapping) or not isinstance(
+        prompt_message_context,
+        Mapping,
+    ):
+        raise CognitionExecutionError(
+            "local_time_context and prompt_message_context are required"
+        )
+    conversation_progress = state.get("conversation_progress")
+    if conversation_progress is None:
+        progress_context: dict[str, object] = {}
+    elif not isinstance(conversation_progress, Mapping):
+        raise CognitionExecutionError(
+            "conversation progress must be a V2 prompt mapping"
+        )
+    else:
+        progress_context = dict(conversation_progress)
+    scene_context = _coding_scene_context(
+        state,
+        character_name=character_name,
+        timestamp=timestamp,
+    )
+    context: TaskResolutionExecutionContextV1 = {
+        "schema_version": TASK_RESOLUTION_EXECUTION_CONTEXT_VERSION,
+        "character_name": character_name,
+        "platform": platform,
+        "channel_id": channel_id,
+        "channel_type": channel_type,
+        "requester_global_user_id": requester_global_user_id,
+        "requester_platform_user_id": requester_platform_user_id,
+        "source_message_id": source_message_id,
+        "scene_context": scene_context,
+        "goal_continuation_ref": goal_continuation_ref,
+        "local_time_context": dict(local_time_context),
+        "prompt_message_context": dict(prompt_message_context),
+        "chat_history_recent": _context_history_rows(
+            state.get("chat_history_recent")
+        )[-MAX_TASK_RESOLUTION_TEXT_ITEMS:],
+        "chat_history_wide": _context_history_rows(
+            state.get("chat_history_wide")
+        )[-MAX_TASK_RESOLUTION_TEXT_ITEMS:],
+        "conversation_progress": progress_context,
+        "persona_summary": _coding_persona_summary(
+            character_name=character_name,
+            channel_type=channel_type,
+            user_name=_text(state.get("user_name")),
+        ),
+        "conversation_summary": _text(
+            state.get("decontextualized_input")
+        )[:MAX_TASK_RESOLUTION_TEXT_CHARS],
+        "current_timestamp_utc": timestamp,
+        "active_turn_platform_message_ids": _context_string_list(
+            state.get("active_turn_platform_message_ids")
+        ),
+        "active_turn_conversation_row_ids": _context_string_list(
+            state.get("active_turn_conversation_row_ids")
+        ),
+        "session_media_refs": list_session_media_refs(
+            (platform, channel_id, requester_global_user_id)
+        ),
+        "coding_workspace_root": _text(CODING_AGENT_WORKSPACE_ROOT),
+        "max_output_chars": BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
+    }
+    validated_context = validate_task_resolution_execution_context(context)
+    return validated_context
+
+
+def _coding_scene_context(
+    state: GlobalPersonaState,
+    *,
+    character_name: str,
+    timestamp: str,
+) -> dict[str, object]:
+    """Project the canonical prompt-safe scene for one coding continuation."""
+
+    episode = state.get("cognitive_episode")
+    channel_scope = _scene_channel_scope(
+        (
+            episode["target_scope"].get("channel_type")
+            if isinstance(episode, Mapping)
+            and isinstance(episode.get("target_scope"), Mapping)
+            else state.get("channel_type")
+        ),
+        (
+            episode.get("trigger_source")
+            if isinstance(episode, Mapping)
+            else None
+        ),
+    )
+    user_name = _text(state.get("user_name"))
+    character_role = _named_role_label("当前角色", character_name)
+    current_user_role = _named_role_label("当前用户", user_name)
+    if (
+        isinstance(episode, Mapping)
+        and episode.get("trigger_source") == "user_message"
+        and _episode_has_source_kind(episode, "dialog")
+    ):
+        character_role = (
+            f"{character_role}；dialog_text 的直接收件人，也是直接命令的隐含主语"
+        )
+        current_user_role = (
+            f"{current_user_role}；dialog_text 的发言者，"
+            "也是该证据中第一人称代词的所属者"
+        )
+    conversation_progress = state.get("conversation_progress")
+    conversation_continuity = ""
+    if (
+        isinstance(conversation_progress, Mapping)
+        and "current_thread" in conversation_progress
+    ):
+        conversation_continuity = project_conversation_progress_scene(
+            conversation_progress
+        )
+    if conversation_continuity:
+        conversation_continuity = (
+            "Current participant continuity:\n"
+            f"{conversation_continuity}"
+        )[:2200].rstrip()
+    scene_context: dict[str, object] = {
+        "channel_scope": channel_scope,
+        "character_role": character_role,
+        "current_user_role": current_user_role,
+        "character_sleep_phase": project_character_sleep_phase(
+            parse_storage_utc_datetime(timestamp),
+            sleep_local_period=CHARACTER_SLEEP_LOCAL_PERIOD,
+            character_time_zone=CHARACTER_TIME_ZONE,
+            wake_prep_minutes=AFFECT_SETTLING_WAKE_PREP_MINUTES,
+        ),
+        "semantic_scene": _semantic_episode_text(state)[:500],
+        "public_group_scene": _text(state.get("public_group_scene"))[:1800],
+        "conversation_continuity": conversation_continuity,
+        "semantic_temporal_context": _semantic_temporal_context(
+            state.get("conversation_episode_state"),
+            current_timestamp=timestamp,
+        ),
+    }
+    return scene_context
+
+
+def _required_context_state_text(
+    state: Mapping[str, Any],
+    field_name: str,
+) -> str:
+    """Require one trusted non-empty persona-state text field."""
+
+    value = state.get(field_name)
+    if not isinstance(value, str) or not value.strip():
+        raise CognitionExecutionError(
+            f"{field_name}: expected non-empty trusted state text"
+        )
+    text = value.strip()
+    return text
+
+
+def _context_source_message_id(state: Mapping[str, Any]) -> str:
+    """Require the trusted source message id for a coding continuation."""
+
+    value = state.get("platform_message_id")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    episode = state.get("cognitive_episode")
+    if isinstance(episode, Mapping):
+        origin_metadata = episode.get("origin_metadata")
+        if isinstance(origin_metadata, Mapping):
+            value = origin_metadata.get("platform_message_id")
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    raise CognitionExecutionError(
+        "platform_message_id: expected non-empty trusted state text"
+    )
+
+
+def _context_history_rows(value: object) -> list[dict[str, object]]:
+    """Copy trusted prompt-safe conversation rows for the coding context."""
+
+    if not isinstance(value, list):
+        raise CognitionExecutionError("chat history: expected list")
+    copied_rows: list[dict[str, object]] = []
+    for row in value:
+        if not isinstance(row, Mapping):
+            raise CognitionExecutionError(
+                "chat history: expected mapping rows"
+            )
+        copied_rows.append(dict(row))
+    return copied_rows
+
+
+def _context_string_list(value: object) -> list[str]:
+    """Return stripped strings from an optional trusted id-list field."""
+
+    if not isinstance(value, list):
+        items: list[str] = []
+        return items
+    items = [
+        item.strip()
+        for item in value
+        if isinstance(item, str) and item.strip()
+    ]
+    return items
+
+
+def _coding_persona_summary(
+    *,
+    character_name: str,
+    channel_type: str,
+    user_name: str,
+) -> str:
+    """Build compact character context without raw identifiers."""
+
+    segments = [f"active_character={character_name}"]
+    if channel_type:
+        segments.append(f"channel_type={channel_type}")
+    if user_name:
+        segments.append(f"current_user_display_name={user_name}")
+    summary = "; ".join(segments)
+    return summary
 
 
 def _available_action_affordances(
@@ -1692,6 +2063,7 @@ def _episode_evidence(
     }.get(trigger_source, "episode")
     source_id = f"episode:{episode_id}"
     semantic_text = fallback_text
+    evidence_authority = "current_event"
     dialog_semantic_projection = None
     if source_kind == "episode":
         dialog_semantic_projection = _dialog_semantic_projection_text(
@@ -1719,44 +2091,37 @@ def _episode_evidence(
             metadata = percept.get("metadata")
             if not isinstance(metadata, Mapping) and isinstance(raw_content, Mapping):
                 metadata = raw_content
-            cognition_source = (
-                metadata.get("cognition_source")
-                if isinstance(metadata, Mapping)
-                else None
-            )
-            if isinstance(cognition_source, Mapping):
-                typed_source_kind = _text(
-                    cognition_source.get("source_kind")
+            if source_kind == "tool_result":
+                typed_source = _typed_tool_result_source(metadata)
+                source_id = typed_source["source_id"]
+                semantic_text = typed_source["semantic_summary"]
+                evidence_authority = _tool_result_evidence_authority(
+                    typed_source
                 )
-                typed_source_id = _text(cognition_source.get("source_id"))
-                typed_summary = _text(
-                    cognition_source.get("semantic_summary")
+            else:
+                cognition_source = (
+                    metadata.get("cognition_source")
+                    if isinstance(metadata, Mapping)
+                    else None
                 )
-                if (
-                    typed_source_kind == source_kind
-                    and typed_source_id
-                    and typed_summary
-                ):
-                    source_id = typed_source_id
-                    semantic_text = typed_summary
-            if source_kind == "tool_result" and isinstance(
-                metadata,
-                Mapping,
-            ):
-                    if not isinstance(cognition_source, Mapping):
-                        source_id = (
-                            _text(metadata.get("task_id"))
-                            or _text(percept.get("source_id"))
-                            or source_id
-                        )
-                    semantic_text = _tool_result_text(
-                        metadata,
-                        content,
-                        fallback_text,
+                if isinstance(cognition_source, Mapping):
+                    typed_source_kind = _text(
+                        cognition_source.get("source_kind")
                     )
-            elif content and not isinstance(cognition_source, Mapping):
-                semantic_text = dialog_semantic_projection or content
-                source_id = _text(percept.get("source_id")) or source_id
+                    typed_source_id = _text(cognition_source.get("source_id"))
+                    typed_summary = _text(
+                        cognition_source.get("semantic_summary")
+                    )
+                    if (
+                        typed_source_kind == source_kind
+                        and typed_source_id
+                        and typed_summary
+                    ):
+                        source_id = typed_source_id
+                        semantic_text = typed_summary
+                elif content and not isinstance(cognition_source, Mapping):
+                    semantic_text = dialog_semantic_projection or content
+                    source_id = _text(percept.get("source_id")) or source_id
             break
     semantic_text = semantic_text[:1000]
     semantic_summary = semantic_text[:500]
@@ -1770,25 +2135,70 @@ def _episode_evidence(
         },
         "semantic_text": semantic_text,
         "visible_to": list(EVIDENCE_SOURCE_QUESTION_IDS[source_kind]),
-        "authority": "current_event",
+        "authority": evidence_authority,
     }]
 
 
-def _tool_result_text(
-    metadata: Mapping[str, Any],
-    content: str,
-    fallback_text: str,
-) -> str:
-    """Build bounded semantic evidence from a completed tool outcome."""
+def _typed_tool_result_source(
+    metadata: object,
+) -> ToolResultCognitionSourceV1:
+    """Require one validated typed tool-result source on a tool percept."""
 
-    parts = [
-        _text(metadata.get("semantic_summary")),
-        _text(metadata.get("result_summary")),
-        _text(metadata.get("failure_summary")),
-        content,
-    ]
-    semantic_text = "; ".join(part for part in parts if part)
-    return semantic_text or fallback_text
+    if not isinstance(metadata, Mapping):
+        raise CognitionExecutionError(
+            "tool-result percept requires a typed cognition_source"
+        )
+    raw_source = metadata.get("cognition_source")
+    if not isinstance(raw_source, Mapping):
+        raise CognitionExecutionError(
+            "tool-result percept requires a typed cognition_source"
+        )
+    try:
+        typed_source = validate_tool_result_cognition_source(raw_source)
+    except ValueError as exc:
+        raise CognitionExecutionError(
+            f"tool-result cognition_source is invalid: {exc}"
+        ) from exc
+    return typed_source
+
+
+def _tool_result_episode_cognition_source(
+    episode: Mapping[str, Any],
+) -> ToolResultCognitionSourceV1:
+    """Return the validated typed source of one tool-result episode.
+
+    The typed cognition source is projected from the stored task result and is
+    the authoritative delayed-result contract for surface-role derivation.
+    """
+
+    percepts = episode.get("percepts")
+    if not isinstance(percepts, list):
+        raise CognitionExecutionError(
+            "tool-result episode requires a typed cognition_source"
+        )
+    for percept in percepts:
+        if not isinstance(percept, Mapping):
+            continue
+        if percept.get("source_kind") != "tool_result":
+            continue
+        metadata = percept.get("metadata")
+        raw_content = percept.get("content")
+        if not isinstance(metadata, Mapping) and isinstance(raw_content, Mapping):
+            metadata = raw_content
+        return _typed_tool_result_source(metadata)
+    raise CognitionExecutionError(
+        "tool-result episode requires a typed cognition_source"
+    )
+
+
+def _tool_result_evidence_authority(
+    typed_source: ToolResultCognitionSourceV1,
+) -> str:
+    """Label tool-result evidence without upgrading status text to facts."""
+
+    if typed_source["task_status"] in {"resolved", "partial"}:
+        return "current_event"
+    return "contextual_fact_only"
 
 
 def _rag_evidence(value: object, occurred_at: str) -> list[dict[str, Any]]:

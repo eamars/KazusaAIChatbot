@@ -12,6 +12,7 @@ from uuid import uuid4
 from openai import OpenAIError
 
 from kazusa_ai_chatbot import event_logging
+from kazusa_ai_chatbot.cognition_episode import GoalContinuationRefV1
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     RESOLVER_EVIDENCE_STATE_VERSION,
     RESOLVER_OBSERVATION_VERSION,
@@ -25,6 +26,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionEvidenceV2,
     DirectFactV2,
     EVIDENCE_SOURCE_QUESTION_IDS,
+    ResolverCapabilityRequestV2,
 )
 from kazusa_ai_chatbot.config import (
     BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
@@ -71,6 +73,7 @@ from kazusa_ai_chatbot.task_resolution.contracts import (
     TaskResolutionExecutionContextV1,
     TaskResolutionResultV1,
     validate_task_resolution_execution_context,
+    validate_task_resolution_result,
 )
 from kazusa_ai_chatbot.task_resolution.service import (
     promote_deferred_task_resolution,
@@ -122,8 +125,10 @@ def project_resolver_observation_for_cognition(
         f"{capability}: {summary}" if capability else summary,
     ]
     evidence_state = observation.get("task_resolution_evidence_state")
+    factual_evidence_state = ""
     if isinstance(evidence_state, Mapping):
         state = text_or_empty(evidence_state.get("state")).strip()
+        factual_evidence_state = state
         if state:
             semantic_segments.append(f"evidence_state={state}")
         remaining_needs = evidence_state.get("remaining_needs")
@@ -138,7 +143,10 @@ def project_resolver_observation_for_cognition(
                     "remaining_needs=" + " | ".join(needs[:4])
                 )
     raw_evidence_refs = observation.get("evidence_refs")
-    if isinstance(raw_evidence_refs, list):
+    if (
+        factual_evidence_state in {"complete", "partial"}
+        and isinstance(raw_evidence_refs, list)
+    ):
         evidence_excerpts = [
             excerpt.strip()
             for evidence_ref in raw_evidence_refs
@@ -476,12 +484,18 @@ async def _execute_task_resolution_request(
     finish.
     """
 
-    execution_context = _task_resolution_execution_context_from_state(state)
-    task_request = {
+    continuation_ref = _task_continuation_ref(request)
+    execution_context = _task_resolution_execution_context_from_state(
+        state,
+        goal_continuation_ref=continuation_ref,
+    )
+    task_request: ResolverCapabilityRequestV2 = {
         "capability": "task_resolution_request",
         "semantic_goal": request["objective"],
         "reason": request["reason"],
         "evidence_handles": [],
+        "start_in_background": request["priority"] == "background",
+        "goal_continuation_ref": continuation_ref,
     }
     if request["priority"] == "background":
         try:
@@ -538,6 +552,8 @@ async def _execute_task_resolution_request(
 
 def _task_resolution_execution_context_from_state(
     state: GlobalPersonaState,
+    *,
+    goal_continuation_ref: GoalContinuationRefV1,
 ) -> TaskResolutionExecutionContextV1:
     """Project trusted persona state into the exact specialist context shape."""
 
@@ -569,6 +585,8 @@ def _task_resolution_execution_context_from_state(
             state,
             "platform_message_id",
         ),
+        "scene_context": _required_scene_context_from_state(state),
+        "goal_continuation_ref": goal_continuation_ref,
         "local_time_context": dict(state["local_time_context"]),
         "prompt_message_context": dict(state["prompt_message_context"]),
         "chat_history_recent": _history_rows(state["chat_history_recent"])[
@@ -613,7 +631,9 @@ def _task_resolution_observation(
 ) -> ResolverObservationV1:
     """Map one validated task result into the resolver recurrence contract."""
 
-    status = result["status"]
+    validated_result = validate_task_resolution_result(result)
+    _validate_task_result_request_binding(request, validated_result)
+    status = validated_result["status"]
     if status == "deferred":
         if not durably_promoted:
             raise ResolverValidationError(
@@ -630,26 +650,9 @@ def _task_resolution_observation(
         )
         observation["task_resolution_evidence_state"] = {
             "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
-            "state": "pending",
-            "remaining_needs": list(result["remaining_needs"]),
+            "state": validated_result["evidence_state"],
+            "remaining_needs": list(validated_result["remaining_needs"]),
         }
-        if result["evidence"]:
-            observation["evidence_refs"] = _task_resolution_evidence_refs(
-                result,
-                observed_at=_created_at_utc(state),
-            )
-            observation["knowledge_projection"] = {
-                "investigation_summary": result["prompt_safe_summary"],
-                "knowledge_we_know_so_far": [
-                    evidence["summary"]
-                    for evidence in result["evidence"]
-                ],
-                "knowledge_still_lacking": list(result["remaining_needs"]),
-                "recommended_next_iteration": [],
-                "evidence_boundary_notes": _task_resolution_limitations(
-                    result,
-                ),
-            }
         validated_observation = validate_resolver_observation(observation)
         return validated_observation
     if status in {"resolved", "partial"}:
@@ -657,26 +660,29 @@ def _task_resolution_observation(
             request,
             state,
             status="succeeded",
-            prompt_safe_summary=result["prompt_safe_summary"],
+            prompt_safe_summary=validated_result["prompt_safe_summary"],
         )
         observation["task_resolution_evidence_state"] = {
             "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
-            "state": "complete" if status == "resolved" else "partial",
-            "remaining_needs": list(result["remaining_needs"]),
+            "state": validated_result["evidence_state"],
+            "remaining_needs": list(validated_result["remaining_needs"]),
         }
         observation["evidence_refs"] = _task_resolution_evidence_refs(
-            result,
+            validated_result,
             observed_at=_created_at_utc(state),
         )
         observation["knowledge_projection"] = {
-            "investigation_summary": result["prompt_safe_summary"],
-            "knowledge_we_know_so_far": [
-                evidence["summary"]
-                for evidence in result["evidence"]
-            ],
-            "knowledge_still_lacking": list(result["remaining_needs"]),
+            "investigation_summary": validated_result["prompt_safe_summary"],
+            "knowledge_we_know_so_far": list(
+                validated_result["evidence_excerpts"]
+            ),
+            "knowledge_still_lacking": list(
+                validated_result["remaining_needs"]
+            ),
             "recommended_next_iteration": [],
-            "evidence_boundary_notes": _task_resolution_limitations(result),
+            "evidence_boundary_notes": _task_resolution_limitations(
+                validated_result,
+            ),
         }
         validated_observation = validate_resolver_observation(observation)
         return validated_observation
@@ -685,13 +691,13 @@ def _task_resolution_observation(
             request,
             state,
             status="blocked",
-            prompt_safe_summary=result["prompt_safe_summary"],
+            prompt_safe_summary=validated_result["prompt_safe_summary"],
         )
         observation["blocker_kind"] = "requires_user_input"
         observation["task_resolution_evidence_state"] = {
             "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
-            "state": "blocked",
-            "remaining_needs": list(result["remaining_needs"]),
+            "state": validated_result["evidence_state"],
+            "remaining_needs": list(validated_result["remaining_needs"]),
         }
         validated_observation = validate_resolver_observation(observation)
         return validated_observation
@@ -700,12 +706,12 @@ def _task_resolution_observation(
             request,
             state,
             status="blocked",
-            prompt_safe_summary=result["prompt_safe_summary"],
+            prompt_safe_summary=validated_result["prompt_safe_summary"],
         )
         observation["task_resolution_evidence_state"] = {
             "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
-            "state": "blocked",
-            "remaining_needs": list(result["remaining_needs"]),
+            "state": validated_result["evidence_state"],
+            "remaining_needs": list(validated_result["remaining_needs"]),
         }
         validated_observation = validate_resolver_observation(observation)
         return validated_observation
@@ -714,12 +720,12 @@ def _task_resolution_observation(
             request,
             state,
             status="failed",
-            prompt_safe_summary=result["prompt_safe_summary"],
+            prompt_safe_summary=validated_result["prompt_safe_summary"],
         )
         observation["task_resolution_evidence_state"] = {
             "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
-            "state": "blocked",
-            "remaining_needs": list(result["remaining_needs"]),
+            "state": validated_result["evidence_state"],
+            "remaining_needs": list(validated_result["remaining_needs"]),
         }
         validated_observation = validate_resolver_observation(observation)
         return validated_observation
@@ -746,7 +752,7 @@ def _task_resolution_failure_observation(
     observation["task_resolution_evidence_state"] = {
         "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
         "state": "blocked",
-        "remaining_needs": [],
+        "remaining_needs": [request["objective"]],
     }
     validated_observation = validate_resolver_observation(observation)
     return validated_observation
@@ -850,16 +856,21 @@ def _task_resolution_evidence_refs(
     *,
     observed_at: str,
 ) -> list[dict[str, object]]:
-    """Project validated specialist evidence into resolver-safe references."""
+    """Project result-owned factual evidence into resolver-safe references."""
 
     references: list[dict[str, object]] = []
-    for evidence in result["evidence"]:
+    for evidence, evidence_handle, evidence_excerpt in zip(
+        result["evidence"],
+        result["evidence_handles"],
+        result["evidence_excerpts"],
+        strict=True,
+    ):
         references.append({
             "schema_version": "evidence_ref.v1",
             "evidence_kind": "tool_result",
-            "evidence_id": evidence["evidence_id"],
+            "evidence_id": evidence_handle,
             "owner": evidence["specialist"],
-            "excerpt": evidence["summary"],
+            "excerpt": evidence_excerpt,
             "observed_at": observed_at,
         })
     return references
@@ -876,6 +887,46 @@ def _task_resolution_limitations(
             if limitation not in limitations:
                 limitations.append(limitation)
     return limitations
+
+
+def _task_continuation_ref(
+    request: ResolverCapabilityRequestV1,
+) -> GoalContinuationRefV1:
+    """Require the exact validated continuation selected by cognition V2."""
+
+    continuation_ref = request["goal_continuation_ref"]
+    if continuation_ref is None:
+        raise ResolverValidationError(
+            "task-resolution request requires goal_continuation_ref"
+        )
+    return continuation_ref
+
+
+def _validate_task_result_request_binding(
+    request: ResolverCapabilityRequestV1,
+    result: TaskResolutionResultV1,
+) -> None:
+    """Keep a task result bound to the request that authorized it."""
+
+    if result["semantic_objective"] != request["objective"]:
+        raise ResolverValidationError(
+            "task-resolution result objective conflicts with resolver request"
+        )
+    if result["goal_continuation_ref"] != _task_continuation_ref(request):
+        raise ResolverValidationError(
+            "task-resolution result continuation reference conflicts with resolver request"
+        )
+
+
+def _required_scene_context_from_state(
+    state: GlobalPersonaState,
+) -> dict[str, object]:
+    """Return the canonical scene object required by task and RAG boundaries."""
+
+    scene_context = state.get("scene_context")
+    if not isinstance(scene_context, dict):
+        raise ResolverValidationError("scene_context: expected canonical object")
+    return scene_context
 
 
 def _required_state_text(state: GlobalPersonaState, field_name: str) -> str:
@@ -926,10 +977,11 @@ def _observation_base(
         "created_at_utc": _created_at_utc(state),
     }
     if request["capability_kind"] == "task_resolution_request":
+        observation["goal_continuation_ref"] = _task_continuation_ref(request)
         observation["task_resolution_evidence_state"] = {
             "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
             "state": "missing" if status == "succeeded" else "blocked",
-            "remaining_needs": [],
+            "remaining_needs": [request["objective"]],
         }
     return observation
 
@@ -1120,6 +1172,7 @@ def _local_context_resolver_context_from_state(
         "platform_channel_id": state["platform_channel_id"],
         "global_user_id": state["global_user_id"],
         "user_name": state["user_name"],
+        "scene_context": _required_scene_context_from_state(state),
         "local_time_context": _local_context_time_context_from_state(state),
         "prompt_message_context": dict(state["prompt_message_context"]),
         "chat_history_recent": list(state["chat_history_recent"]),

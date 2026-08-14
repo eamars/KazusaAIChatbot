@@ -17,6 +17,11 @@ from kazusa_ai_chatbot.accepted_task.models import (
     AcceptedTaskStatusCheckRequest,
     AcceptedTaskStatusResult,
 )
+from kazusa_ai_chatbot.cognition_episode import (
+    CognitiveEpisodeValidationError,
+    GoalContinuationRefV1,
+    validate_goal_continuation_ref,
+)
 from kazusa_ai_chatbot.db import accepted_tasks as repository
 
 
@@ -298,14 +303,20 @@ def _build_enqueueing_task_doc(
     storage_timestamp_utc = _text(request, "storage_timestamp_utc")
     source_message_id = _text(request, "source_message_id")
     identity_material = _identity_material(request)
+    task_kind = _task_kind(request)
+    continuation_ref = _validated_goal_continuation_ref(
+        request,
+        task_kind=task_kind,
+    )
     task: AcceptedTaskDoc = {
         "schema_version": ACCEPTED_TASK_SCHEMA_VERSION,
         "accepted_task_id": f"task-{uuid4().hex}",
         "task_identity_key": task_identity_key,
         "active_identity_key": task_identity_key,
         "task_identity_material": identity_material,
-        "task_kind": _task_kind(request),
+        "task_kind": task_kind,
         "semantic_objective": _text(request, "semantic_objective"),
+        "goal_continuation_ref": continuation_ref,
         "first_source_message_id": source_message_id,
         "related_source_message_ids": [source_message_id]
         if source_message_id
@@ -397,3 +408,31 @@ def _task_kind(request: Mapping[str, object]) -> str:
     if value not in {"task_resolution", "future_speak", "coding_continuation"}:
         raise ValueError("task_kind is invalid")
     return value
+
+
+def _validated_goal_continuation_ref(
+    request: Mapping[str, object],
+    *,
+    task_kind: str,
+) -> GoalContinuationRefV1 | None:
+    """Return the exact persisted continuation reference for one task kind.
+
+    Task-resolution rows require the deterministic reference selected by
+    cognition; future-speak and coding continuations carry an explicit null
+    reference until their own continuation lineage is bound.
+    """
+
+    raw_ref = request.get("goal_continuation_ref")
+    if raw_ref is None:
+        if task_kind == "task_resolution":
+            raise ValueError(
+                "task_resolution accepted task requires goal_continuation_ref"
+            )
+        return None
+    try:
+        continuation_ref = validate_goal_continuation_ref(raw_ref)
+    except CognitiveEpisodeValidationError as exc:
+        raise ValueError(
+            f"goal_continuation_ref: invalid reference: {exc}"
+        ) from exc
+    return continuation_ref

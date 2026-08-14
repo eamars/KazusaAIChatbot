@@ -9,6 +9,7 @@ from kazusa_ai_chatbot.cognition_core_v2.action_selection import (
     ACTION_PLANNING_PROMPT,
     plan_actions,
 )
+from tests.test_task_resolution_orchestrator import _scene_context
 
 
 def _bid() -> dict[str, object]:
@@ -162,3 +163,60 @@ async def test_action_planning_payload_projects_provenance_roles_only() -> None:
     assert "raw-episode-1" not in serialized
     assert "raw-conversation-2" not in serialized
     assert "occurred_at" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_action_planning_payload_projects_authoritative_scene_context() -> None:
+    """The planner receives only the bounded canonical scene projection."""
+
+    captured: dict[str, object] = {}
+
+    class _LLM:
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            del config
+            captured.update(json.loads(str(messages[-1].content)))
+            return SimpleNamespace(content=json.dumps({
+                "action_requests": [],
+                "resolver_requests": [],
+                "goal_resolution": "answerable_now",
+                "resolver_pending_resolution": None,
+                "resolver_goal_progress": None,
+            }))
+
+    scene = _scene_context()
+    scene["public_group_scene"] = "The public group scene contains one bounded fact."
+    scene["participant_bindings"] = [{
+        "handle": "participant_1",
+        "role": "current_user",
+        "display_name": "current user",
+    }]
+    await plan_actions(
+        primary_bid=_bid(),
+        supporting_bids=[],
+        episode={
+            "episode_id": "episode-scene",
+            "trigger_source": "user_message",
+            "output_mode": "visible_reply",
+        },
+        evidence=[],
+        available_actions=[],
+        available_resolvers=[],
+        resolver_context="resolver_status=idle",
+        scene_context=scene,
+        services=SimpleNamespace(
+            llm=_LLM(),
+            action_planning_config=object(),
+            action_authorization_config=object(),
+            resolver_authorization_config=object(),
+        ),
+    )
+
+    assert captured["scene_context"] == scene
+    serialized = json.dumps(captured["scene_context"], ensure_ascii=False)
+    assert "platform_channel_id" not in serialized
+    assert "raw" not in serialized

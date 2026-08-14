@@ -54,7 +54,9 @@ permitted_action_results、resolver_result、runtime_capability_limits 和 chara
 goal_resolution 是当前目标可回答性的已确认判断：answerable_now 直接回答；requires_required_evidence 或 requires_user_input
 说明缺口；blocked 表达当前边界和下一步。permitted_action_results 按 executed、pending、scheduled、failed 或 unavailable
 的真实状态表述结果；pending、scheduled 表达已记录、已排队、待执行或等待。若 resolver_result.status=succeeded 且 semantic_result 已接纳任务，表达已接纳并等待后续结果，
-不要改写成失败或能力不可用；task_resolution_request 仅以 complete 的 evidence_excerpts 回答，其他 evidence_state 保留缺口。
+ 不要改写成失败或能力不可用；task_resolution_request 仅以 complete 的 evidence_excerpts 回答；partial 只能依据
+ evidence_excerpts 陈述已确认部分并保留 remaining_needs；pending、missing、blocked、unavailable 和 failed 只陈述
+ 客观状态、缺口或下一步，不得编造缺失的事实答案。
 
 # 规划步骤
 1. 回应当前输入，结合先前消息、角色关系、情绪和场景压力推进互动。
@@ -95,7 +97,7 @@ PREFERENCE_SYSTEM_PROMPT = '''识别当前角色判断和场景中真实存在�
 expression policy、semantic affect、semantic relationship、interaction style 和 permitted_action_results 为语境；
 relational_willingness、resolver_result 按原义保留。task_resolution_request 的 resolver_result 中 evidence_state、
 evidence_excerpts、evidence_handles 和 remaining_needs 是来源自有的答案边界；complete 只支持 supplied excerpts，
-其他状态保留事实缺口。runtime_capability_limits 只约束现实能力。
+ partial 只支持 supplied excerpts 和 remaining_needs；其他状态保留事实缺口。runtime_capability_limits 只约束现实能力。
 
 当前版本没有 typed source-bound visible-boundary contract，因此 visible_boundaries 始终返回空列表；不要从关系、情绪、主题、能力
 或一般常识推导可见边界。每一条 addressee_plan 都对应真实存在的称呼安排；逐条保留输入的 handle、display_name、semantic_role 和 wording_policy，不新增、删除、
@@ -167,8 +169,10 @@ delivery_profile 表达。
 5. 按 permitted_action_results 和 runtime_capability_limits 的原义重建状态：executed 对应有界
 的完成效果，pending 或 scheduled 对应等待状态，其他 status 对应当前限制。
 resolver_result 明确任务已接纳并将继续执行时，保留该等待后续结果的事实，不得改写为任务失败。
-task_resolution_request 的 evidence_state=complete 只能依据 evidence_excerpts；partial、pending、
-missing 和 blocked 必须保留缺口、等待或 typed blocker，不得把 semantic_result 当作缺失答案。
+task_resolution_request 的 evidence_state=complete 只能依据 evidence_excerpts；partial 只能依据
+evidence_excerpts 陈述已确认部分并保留 remaining_needs；pending、missing、blocked、unavailable 和
+failed 必须保留缺口、等待或 typed blocker，只陈述客观状态与下一步，不得把 semantic_result 当作缺失
+答案，也不得编造事实内容。
 6. content_requirements 使用正向目标句式，描述回应应呈现的立场、情绪流动、角色特征、事实和
 互动推进；delivery_profile 用词语层次、句式、节奏、犹豫和标点实现这些语义选择，让角色声音
 保持鲜明。

@@ -88,11 +88,22 @@ def _recorded_checkpoint(
 def _incident_result() -> dict[str, object]:
     """Build the incident-shaped needs_user_input worker fixture."""
 
+    context = _context()
     return {
+        "schema_version": "task_resolution_result.v1",
+        "semantic_objective": "Resolve one bounded public question.",
         "status": "needs_user_input",
+        "scene_context": context["scene_context"],
+        "goal_continuation_ref": context["goal_continuation_ref"],
+        "evidence_state": "blocked",
+        "evidence_excerpts": [],
+        "evidence_handles": [],
         "prompt_safe_summary": (
             "The task needs additional user-provided information."
         ),
+        "evidence": [],
+        "completed_subgoals": [],
+        "checkpoint": {},
         "coding_run_context": {
             "schema_version": "coding_run_context.v1",
             "coding_run_ref": "coding-run-001",
@@ -109,6 +120,16 @@ def _incident_result() -> dict[str, object]:
         },
         "remaining_needs": ["Source-reading report limit would be exceeded."],
     }
+
+
+def test_task_checkpoint_and_result_preserve_continuation_ref() -> None:
+    """Checkpoint and terminal result retain one task continuation lineage."""
+
+    checkpoint, snapshot = _recorded_checkpoint(status="resolved")
+    continuation_ref = _context()["goal_continuation_ref"]
+
+    assert checkpoint["goal_continuation_ref"] == continuation_ref
+    assert snapshot["goal_continuation_ref"] == continuation_ref
 
 
 @pytest.mark.asyncio
@@ -131,6 +152,77 @@ async def test_terminal_snapshot_recovers_without_redispatch(
 
     assert result == snapshot
     run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_completed_job_preserves_typed_result_ref() -> None:
+    """A completed job returns the persisted typed result lineage unchanged."""
+
+    worker = importlib.import_module(
+        "kazusa_ai_chatbot.background_work.subagent.task_orchestrator"
+    )
+    checkpoint, snapshot = _recorded_checkpoint(status="resolved")
+
+    result = await worker.execute_task_orchestrator_job(
+        _job(checkpoint, task_result=snapshot),
+        lease_owner="worker-a",
+    )
+
+    assert result["goal_continuation_ref"] == _context()[
+        "goal_continuation_ref"
+    ]
+    assert result["evidence_state"] == "complete"
+
+
+@pytest.mark.asyncio
+async def test_bound_coding_continuation_preserves_scene_and_ref(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bound coding continuation projects the durable task context unchanged."""
+
+    worker = importlib.import_module(
+        "kazusa_ai_chatbot.background_work.subagent.task_orchestrator"
+    )
+    coding_agent = importlib.import_module("kazusa_ai_chatbot.coding_agent")
+    response = {
+        "status": "completed",
+        "run_id": "run-1",
+        "answer_text": "The bounded coding continuation completed.",
+    }
+    monkeypatch.setattr(
+        coding_agent,
+        "continue_coding_run",
+        AsyncMock(return_value=response),
+    )
+    request = _resume_queue_request()
+    job = {
+        "job_id": "job-coding-continuation-001",
+        "semantic_objective": request["semantic_objective"],
+        "worker_payload": {
+            "schema_version": "task_orchestrator_worker_payload.v1",
+            "operation": "continue_bound_coding_run",
+            "checkpoint": None,
+            "coding_request": {
+                "workspace_root": "workspace",
+                "run_id": "run-1",
+                "action": "status",
+            },
+        },
+        "task_execution_context": _context(),
+    }
+
+    result = await worker.execute_task_orchestrator_job(
+        job,
+        lease_owner="worker-coding",
+    )
+
+    assert result["status"] == "resolved"
+    assert result["scene_context"] == _context()["scene_context"]
+    assert result["goal_continuation_ref"] == _context()[
+        "goal_continuation_ref"
+    ]
+    assert result["evidence_state"] == "complete"
+    assert result["evidence"]
 
 
 @pytest.mark.asyncio

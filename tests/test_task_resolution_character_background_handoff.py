@@ -26,6 +26,7 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     RESOLVER_OBSERVATION_VERSION,
 )
 from kazusa_ai_chatbot.cognition_resolver.loop import call_cognition_resolver_loop
+from kazusa_ai_chatbot.cognition_episode import build_goal_continuation_ref
 from kazusa_ai_chatbot.task_resolution import TaskResolutionContractError
 from tests.test_cognition_core_v2_action_planning_bugfix import (
     _bid,
@@ -35,9 +36,13 @@ from tests.test_cognition_resolver_loop import (
     _cognition_result,
     _resolver_request,
     _resolver_state,
+    _task_observation_fields,
     _task_result,
 )
-from tests.test_task_resolution_orchestrator import _context
+from tests.test_task_resolution_orchestrator import (
+    _context,
+    _goal_continuation_ref,
+)
 
 
 def _background_request() -> dict:
@@ -48,17 +53,25 @@ def _background_request() -> dict:
     return request
 
 
-def _deferred_result_with_evidence() -> dict[str, object]:
+def _deferred_result_with_evidence(
+    *,
+    continuation_ref: dict[str, object] | None = None,
+) -> dict[str, object]:
     """Build one deferred result carrying committed partial evidence."""
 
     state = importlib.import_module("kazusa_ai_chatbot.task_resolution.state")
+    resolver_request = _resolver_request()
+    selected_ref = continuation_ref or resolver_request["goal_continuation_ref"]
+    execution_context = _context()
+    execution_context["goal_continuation_ref"] = selected_ref
     request = {
         "capability": "task_resolution_request",
-        "semantic_goal": "Resolve one bounded public question.",
+        "semantic_goal": resolver_request["objective"],
         "reason": "The current response lacks required evidence.",
         "evidence_handles": [],
+        "goal_continuation_ref": selected_ref,
     }
-    checkpoint = state.create_task_resolution_checkpoint(request, _context())
+    checkpoint = state.create_task_resolution_checkpoint(request, execution_context)
     specialist_result = {
         "schema_version": "task_specialist_result.v1",
         "specialist": "public_research",
@@ -88,17 +101,25 @@ def _deferred_result_with_evidence() -> dict[str, object]:
     return result
 
 
-def _empty_deferred_result() -> dict[str, object]:
+def _empty_deferred_result(
+    *,
+    continuation_ref: dict[str, object] | None = None,
+) -> dict[str, object]:
     """Build one deferred result with only the initial empty checkpoint."""
 
     state = importlib.import_module("kazusa_ai_chatbot.task_resolution.state")
+    resolver_request = _resolver_request()
+    selected_ref = continuation_ref or resolver_request["goal_continuation_ref"]
+    execution_context = _context()
+    execution_context["goal_continuation_ref"] = selected_ref
     request = {
         "capability": "task_resolution_request",
-        "semantic_goal": "Resolve one bounded public question.",
+        "semantic_goal": resolver_request["objective"],
         "reason": "The current response lacks required evidence.",
         "evidence_handles": [],
+        "goal_continuation_ref": selected_ref,
     }
-    checkpoint = state.create_task_resolution_checkpoint(request, _context())
+    checkpoint = state.create_task_resolution_checkpoint(request, execution_context)
     result = state.result_from_checkpoint(
         checkpoint,
         status="deferred",
@@ -132,6 +153,7 @@ def _succeeded_observation(capability_request: dict) -> dict[str, object]:
         "schema_version": RESOLVER_OBSERVATION_VERSION,
         "observation_id": "resolver_obs_background_acceptance",
         "capability_kind": capability_request["capability_kind"],
+        **_task_observation_fields(capability_request),
         "request_objective": capability_request["objective"],
         "request_reason": capability_request["reason"],
         "status": "succeeded",
@@ -201,6 +223,98 @@ async def test_true_direct_background_skips_inline_and_accepts_after_queue(
 
 
 @pytest.mark.asyncio
+async def test_background_promotion_persists_continuation_ref(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Durable promotion copies one ref into accepted task and queue job."""
+
+    service = importlib.import_module("kazusa_ai_chatbot.task_resolution.service")
+    deferred = _empty_deferred_result(
+        continuation_ref=_context()["goal_continuation_ref"],
+    )
+    continuation_ref = _context()["goal_continuation_ref"]
+    accepted_task = {
+        "accepted_task_id": "task-promotion-001",
+        "task_identity_key": "accepted_task:v2:promotion",
+        "accepted_task_summary": "Resolve one bounded public question.",
+        "state": "enqueueing",
+        "goal_continuation_ref": continuation_ref,
+    }
+    create = AsyncMock(return_value={"status": "created", "task": accepted_task})
+    enqueue = AsyncMock(return_value=_queue_result(job_id="job-promotion-001"))
+    monkeypatch.setattr(service, "create_or_return_active_accepted_task", create)
+    monkeypatch.setattr(
+        service,
+        "mark_accepted_task_pending",
+        AsyncMock(return_value={**accepted_task, "state": "pending"}),
+    )
+    monkeypatch.setattr(service, "enqueue_background_work_request", enqueue)
+
+    await service.promote_deferred_task_resolution(
+        deferred,
+        _context(),
+        source_trigger_source="user_message",
+        source_platform_bot_id="debug-bot-001",
+        requester_display_name="Test User",
+    )
+
+    assert create.await_args.args[0]["goal_continuation_ref"] == continuation_ref
+    assert enqueue.await_args.args[0]["goal_continuation_ref"] == continuation_ref
+
+
+@pytest.mark.asyncio
+async def test_local_context_specialist_receives_canonical_scene_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The local specialist forwards the bounded scene without transport data."""
+
+    specialist = importlib.import_module(
+        "kazusa_ai_chatbot.task_resolution.specialists.local_context"
+    )
+    state = importlib.import_module("kazusa_ai_chatbot.task_resolution.state")
+    checkpoint = state.create_task_resolution_checkpoint(
+        {
+            "capability": "task_resolution_request",
+            "semantic_goal": "Resolve one bounded public question.",
+            "reason": "The answer needs bounded evidence.",
+            "evidence_handles": [],
+            "goal_continuation_ref": _goal_continuation_ref(),
+        },
+        _context(),
+    )
+    request = state.build_specialist_request(checkpoint)
+    captured: dict[str, object] = {}
+
+    async def resolve_local_context(
+        resolver_request: dict[str, object],
+        resolver_context: dict[str, object],
+        options: dict[str, object],
+    ) -> dict[str, object]:
+        captured["request"] = resolver_request
+        captured["context"] = resolver_context
+        captured["options"] = options
+        return {}
+
+    monkeypatch.setattr(specialist, "resolve_local_context", resolve_local_context)
+    monkeypatch.setattr(
+        specialist,
+        "project_local_context_packet",
+        lambda _packet: {
+            "memory_evidence": [{"summary": "bounded scene evidence"}],
+            "knowledge_still_lacking": [],
+        },
+    )
+
+    result = await specialist.resolve_with_local_context(request, _context())
+
+    assert result["status"] == "resolved"
+    assert captured["context"]["scene_context"] == _context()["scene_context"]
+    assert "platform_channel_id" not in str(
+        captured["context"]["scene_context"]
+    )
+
+
+@pytest.mark.asyncio
 async def test_false_inline_complete_returns_validated_result_without_queue(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -239,10 +353,10 @@ async def test_false_inline_complete_returns_validated_result_without_queue(
 
 
 @pytest.mark.asyncio
-async def test_deferred_partial_evidence_projects_knowledge_in_typed_order(
+async def test_deferred_partial_evidence_stays_out_of_acknowledgement(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Committed evidence and remaining needs reach the observation."""
+    """Deferred acceptance exposes no factual evidence before completion."""
 
     deferred = _deferred_result_with_evidence()
     inline = AsyncMock(return_value=deferred)
@@ -263,21 +377,11 @@ async def test_deferred_partial_evidence_projects_knowledge_in_typed_order(
         "The bounded task was accepted for continued work; its later "
         "result will return through the normal conversation path."
     )
-    assert observation["evidence_refs"][0]["owner"] == "public_research"
-    knowledge = observation["knowledge_projection"]
-    projection_fields = list(knowledge)
-    assert projection_fields.index(
-        "knowledge_we_know_so_far",
-    ) < projection_fields.index("knowledge_still_lacking")
-    assert knowledge["knowledge_we_know_so_far"] == [
-        "The public source returned a grounded partial fact.",
-    ]
-    assert knowledge["knowledge_still_lacking"] == [
-        "Confirm the source is current.",
-    ]
-    assert knowledge["evidence_boundary_notes"] == [
-        "The scope is bounded to the current question.",
-    ]
+    assert observation["evidence_refs"] == []
+    assert "knowledge_projection" not in observation
+    assert observation["task_resolution_evidence_state"]["state"] == (
+        "pending"
+    )
 
 
 @pytest.mark.asyncio
@@ -688,6 +792,7 @@ async def test_delayed_pending_reuses_existing_continuation(
         "accepted_task_summary": "Resolve one bounded public question.",
         "state": "pending",
         "executor_ref": "job-existing",
+        "goal_continuation_ref": _goal_continuation_ref(),
     }
     monkeypatch.setattr(
         service,
@@ -705,6 +810,7 @@ async def test_delayed_pending_reuses_existing_continuation(
             "semantic_goal": "Resolve one bounded public question.",
             "reason": "The current response lacks required evidence.",
             "evidence_handles": [],
+            "goal_continuation_ref": _goal_continuation_ref(),
         },
         _context(),
         source_trigger_source="user_message",
@@ -715,6 +821,64 @@ async def test_delayed_pending_reuses_existing_continuation(
     queued = enqueue.await_args.args[0]
     assert queued["job_id"] == "job-existing"
     assert queued["idempotency_key"] == "background_work:task-existing"
+    mark_pending.assert_not_awaited()
+
+
+@pytest.mark.parametrize("active_state", ["pending", "enqueueing"])
+@pytest.mark.asyncio
+async def test_active_task_rejects_continuation_ref_mismatch(
+    active_state: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Refs A and B cannot share an active task in either reuse state."""
+
+    service = importlib.import_module(
+        "kazusa_ai_chatbot.task_resolution.service",
+    )
+    stored_ref = _goal_continuation_ref()
+    incoming_ref = build_goal_continuation_ref(
+        source_episode_id="resolver-capability-episode-b",
+        source_message_id="message-123-b",
+        branch_id="ordinary_response",
+        goal_ref={
+            "scope": "user",
+            "kind": "goal",
+            "entity_id": "resolver-goal-001",
+        },
+    )
+    deferred = _empty_deferred_result(continuation_ref=incoming_ref)
+    context = _context()
+    context["goal_continuation_ref"] = incoming_ref
+    task = {
+        "accepted_task_id": "task-existing-mismatch",
+        "task_identity_key": "accepted_task:v2:existing-mismatch",
+        "accepted_task_summary": "Resolve one bounded public question.",
+        "state": active_state,
+        "executor_ref": "job-existing-mismatch",
+        "goal_continuation_ref": stored_ref,
+    }
+    monkeypatch.setattr(
+        service,
+        "create_or_return_active_accepted_task",
+        AsyncMock(return_value={"status": "already_active", "task": task}),
+    )
+    enqueue = AsyncMock(return_value=_queue_result(
+        job_id="job-existing-mismatch",
+    ))
+    monkeypatch.setattr(service, "enqueue_background_work_request", enqueue)
+    mark_pending = AsyncMock()
+    monkeypatch.setattr(service, "mark_accepted_task_pending", mark_pending)
+
+    with pytest.raises(TaskResolutionContractError, match="continuation"):
+        await service.promote_deferred_task_resolution(
+            deferred,
+            context,
+            source_trigger_source="user_message",
+            source_platform_bot_id="debug-bot-001",
+            requester_display_name="Test User",
+        )
+
+    enqueue.assert_not_awaited()
     mark_pending.assert_not_awaited()
 
 

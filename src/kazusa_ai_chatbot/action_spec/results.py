@@ -6,12 +6,19 @@ from collections.abc import Mapping
 from typing import Literal, NotRequired, TypeAlias, TypedDict
 
 from kazusa_ai_chatbot.cognition_core_v2.contracts import RoleRefV2
+from kazusa_ai_chatbot.cognition_episode import (
+    GoalContinuationRefV1,
+    validate_goal_continuation_ref,
+)
 
 from kazusa_ai_chatbot.action_spec.models import (
     ACTION_SPEC_VERSION,
+    ALLOWED_SURFACE_ROLES,
     ActionContinuationV1,
     ActionSpecV1,
+    CONTINUATION_SURFACE_ROLES,
     EvidenceRefV1,
+    SurfaceRoleV1,
 )
 
 ACTION_RESULT_VERSION = "action_result.v1"
@@ -49,6 +56,8 @@ class ActionResultV1(TypedDict):
     result_summary: str
     result_refs: list[EvidenceRefV1]
     continuation: ActionContinuationV1
+    surface_role: SurfaceRoleV1
+    goal_continuation_ref: GoalContinuationRefV1 | None
     completed_at: str | None
     queue_state: NotRequired[str]
     work_kind: NotRequired[str]
@@ -142,6 +151,8 @@ class SurfaceOutputV1(TypedDict):
     artifact_refs: list[EvidenceRefV1]
     delivery_intent: Literal["deliver_now", "deliver_later", "do_not_deliver"]
     created_at: str
+    surface_role: SurfaceRoleV1
+    goal_continuation_ref: GoalContinuationRefV1 | None
 
 
 EpisodeTerminalStatusV1 = Literal[
@@ -197,6 +208,37 @@ class EpisodeTraceV2(TypedDict):
     delivery_correlation: DeliveryCorrelationV1
     created_at: str
     settled_at: str
+
+
+def _validate_trace_surface_fields(
+    row: Mapping[str, object],
+    label: str,
+) -> None:
+    """Validate the deterministic surface role and continuation reference."""
+
+    if "surface_role" not in row or "goal_continuation_ref" not in row:
+        raise ValueError(f"episode trace {label} surface fields are incomplete")
+    surface_role = row["surface_role"]
+    if surface_role not in ALLOWED_SURFACE_ROLES:
+        raise ValueError(f"episode trace {label} surface_role is invalid")
+    continuation_ref = row["goal_continuation_ref"]
+    if surface_role in CONTINUATION_SURFACE_ROLES:
+        if continuation_ref is None:
+            raise ValueError(
+                f"episode trace {label} continuation surface requires "
+                "goal_continuation_ref"
+            )
+        try:
+            validate_goal_continuation_ref(continuation_ref)
+        except ValueError as exc:
+            raise ValueError(
+                f"episode trace {label} goal_continuation_ref is invalid: {exc}"
+            ) from exc
+    elif continuation_ref is not None:
+        raise ValueError(
+            f"episode trace {label} ordinary surface cannot carry a "
+            "continuation reference"
+        )
 
 
 def validate_episode_trace_v2(value: object) -> EpisodeTraceV2:
@@ -258,11 +300,13 @@ def validate_episode_trace_v2(value: object) -> EpisodeTraceV2:
             raise ValueError("episode trace action spec must be an object")
         if spec.get("schema_version") != ACTION_SPEC_VERSION:
             raise ValueError("episode trace action spec version is invalid")
+        _validate_trace_surface_fields(spec, "action spec")
     for result in value["action_results"]:
         if not isinstance(result, Mapping):
             raise ValueError("episode trace action result must be an object")
         if result.get("schema_version") != ACTION_RESULT_VERSION:
             raise ValueError("episode trace action result version is invalid")
+        _validate_trace_surface_fields(result, "action result")
         action_attempt_id = result.get("action_attempt_id")
         if not isinstance(action_attempt_id, str) or not action_attempt_id:
             raise ValueError("episode trace action attempt id is required")
@@ -275,6 +319,7 @@ def validate_episode_trace_v2(value: object) -> EpisodeTraceV2:
             raise ValueError("episode trace surface output must be an object")
         if output.get("schema_version") != SURFACE_OUTPUT_VERSION:
             raise ValueError("episode trace surface output version is invalid")
+        _validate_trace_surface_fields(output, "surface output")
     diagnostic_fields = {
         "schema_version",
         "stage",
@@ -390,6 +435,10 @@ def build_action_result(
 
     Returns:
         An ``ActionResultV1`` row without handler IDs or raw params.
+
+    Raises:
+        ValueError: If the action spec omits or invalidly combines its
+            surface role and continuation reference.
     """
 
     handler_owner = eval_result.get("handler_owner")
@@ -398,6 +447,7 @@ def build_action_result(
     summary = result_summary.strip()
     if not summary:
         summary = _default_result_summary(action_spec, status)
+    surface_role, goal_continuation_ref = _action_surface_metadata(action_spec)
     result: ActionResultV1 = {
         "schema_version": ACTION_RESULT_VERSION,
         "action_attempt_id": action_attempt_id_from_eval_result(eval_result),
@@ -408,6 +458,8 @@ def build_action_result(
         "result_summary": summary,
         "result_refs": list(result_refs or []),
         "continuation": _action_continuation(action_spec),
+        "surface_role": surface_role,
+        "goal_continuation_ref": goal_continuation_ref,
         "completed_at": completed_at,
     }
     return result
@@ -424,6 +476,8 @@ def build_text_surface_output(
         "deliver_later",
         "do_not_deliver",
     ] = "deliver_now",
+    surface_role: SurfaceRoleV1 = "ordinary",
+    goal_continuation_ref: GoalContinuationRefV1 | None = None,
 ) -> SurfaceOutputV1:
     """Build a text surface artifact from final dialog fragments."""
 
@@ -436,6 +490,8 @@ def build_text_surface_output(
         "artifact_refs": [],
         "delivery_intent": delivery_intent,
         "created_at": created_at,
+        "surface_role": surface_role,
+        "goal_continuation_ref": goal_continuation_ref,
     }
     return output
 
@@ -456,6 +512,8 @@ def build_visual_surface_output(
         "artifact_refs": [],
         "delivery_intent": "do_not_deliver",
         "created_at": created_at,
+        "surface_role": "ordinary",
+        "goal_continuation_ref": None,
     }
     return output
 
@@ -601,6 +659,54 @@ def _action_continuation(action_spec: dict[str, object]) -> ActionContinuationV1
             }
             return continuation
     return_value = dict(DEFAULT_ACTION_CONTINUATION)
+    return return_value
+
+
+def _action_surface_metadata(
+    action_spec: dict[str, object],
+) -> tuple[SurfaceRoleV1, GoalContinuationRefV1 | None]:
+    """Read and validate the required action surface metadata pair.
+
+    Args:
+        action_spec: Materialized action selected for the episode.
+
+    Returns:
+        The validated surface role and continuation reference pair.
+
+    Raises:
+        ValueError: If either metadata field is absent, invalid, or
+            inconsistent with the other field.
+    """
+
+    if "surface_role" not in action_spec or "goal_continuation_ref" not in action_spec:
+        raise ValueError("action spec surface metadata is incomplete")
+    surface_role = action_spec["surface_role"]
+    if surface_role not in ALLOWED_SURFACE_ROLES:
+        raise ValueError(
+            "action spec surface_role is invalid; expected one of "
+            f"{sorted(ALLOWED_SURFACE_ROLES)}"
+        )
+    continuation_ref = action_spec["goal_continuation_ref"]
+    if surface_role in CONTINUATION_SURFACE_ROLES:
+        if continuation_ref is None:
+            raise ValueError(
+                "action spec continuation surface requires goal_continuation_ref"
+            )
+        if not isinstance(continuation_ref, Mapping):
+            raise ValueError("action spec goal_continuation_ref must be an object")
+        try:
+            validated_ref = validate_goal_continuation_ref(continuation_ref)
+        except ValueError as exc:
+            raise ValueError(
+                f"action spec goal_continuation_ref is invalid: {exc}"
+            ) from exc
+        return_value = (surface_role, validated_ref)
+        return return_value
+    if continuation_ref is not None:
+        raise ValueError(
+            "action spec ordinary surface cannot carry a continuation reference"
+        )
+    return_value = (surface_role, None)
     return return_value
 
 

@@ -18,6 +18,10 @@ from kazusa_ai_chatbot.background_work.models import (
     FUTURE_SPEAK_WORKER,
     TASK_ORCHESTRATOR_WORKER,
 )
+from kazusa_ai_chatbot.cognition_episode import (
+    CognitiveEpisodeValidationError,
+    validate_goal_continuation_ref,
+)
 from kazusa_ai_chatbot.background_work.subagent.task_orchestrator import (
     execute_task_orchestrator_job,
 )
@@ -196,6 +200,7 @@ async def _complete_task_orchestrator_job(
     """Persist terminal task resolution and its accepted-task delivery state."""
 
     completed_at = storage_utc_now_iso()
+    _validate_job_result_continuation_binding(job, result)
     result_status = result["status"]
     if result_status not in {
         "resolved",
@@ -258,6 +263,29 @@ def _bounded_artifact_text(job: Mapping[str, object], summary: str) -> str:
         raise ValueError("background job max_output_chars is invalid")
     artifact_text = summary[:max_output_chars]
     return artifact_text
+
+
+def _validate_job_result_continuation_binding(
+    job: Mapping[str, object],
+    result: TaskResolutionResultV1,
+) -> None:
+    """Require a terminal task result to carry the job's exact reference."""
+
+    raw_ref = job.get("goal_continuation_ref")
+    if raw_ref is None:
+        raise TaskResolutionContractError(
+            "task-resolution job is missing goal_continuation_ref"
+        )
+    try:
+        continuation_ref = validate_goal_continuation_ref(raw_ref)
+    except CognitiveEpisodeValidationError as exc:
+        raise TaskResolutionContractError(
+            f"background job goal_continuation_ref is invalid: {exc}"
+        ) from exc
+    if result["goal_continuation_ref"] != continuation_ref:
+        raise TaskResolutionContractError(
+            "task-resolution result goal_continuation_ref conflicts with job"
+        )
 
 
 def _task_result_delivery_summary(result: TaskResolutionResultV1) -> str:

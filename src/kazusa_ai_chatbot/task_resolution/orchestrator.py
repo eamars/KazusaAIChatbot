@@ -142,6 +142,7 @@ async def run_task_orchestrator(
 
     current = normalize_started_dispatch_ledger(checkpoint)
     context = validate_task_resolution_execution_context(execution_context)
+    _validate_checkpoint_execution_context_binding(current, context)
     completed_subgoals, coding_run_context = _prior_result_state(
         current,
         prior_result,
@@ -362,7 +363,11 @@ async def select_next_specialist(
     """
 
     validated_checkpoint = normalize_started_dispatch_ledger(checkpoint)
-    validate_task_resolution_execution_context(execution_context)
+    context = validate_task_resolution_execution_context(execution_context)
+    _validate_checkpoint_execution_context_binding(
+        validated_checkpoint,
+        context,
+    )
     active_node = _active_node(validated_checkpoint)
     payload = {
         "semantic_objective": validated_checkpoint["semantic_objective"],
@@ -634,6 +639,24 @@ def _remaining_seconds(inline_deadline: float | None) -> float | None:
     return remaining
 
 
+def _validate_checkpoint_execution_context_binding(
+    checkpoint: TaskResolutionCheckpointV1,
+    context: TaskResolutionExecutionContextV1,
+) -> None:
+    """Keep a resumed task bound to its original scene and continuation."""
+
+    if checkpoint["scene_context"] != context["scene_context"]:
+        raise TaskResolutionContractError(
+            "execution context scene does not match task checkpoint"
+        )
+    if checkpoint["goal_continuation_ref"] != context[
+        "goal_continuation_ref"
+    ]:
+        raise TaskResolutionContractError(
+            "execution context continuation reference does not match task checkpoint"
+        )
+
+
 def _prior_result_state(
     checkpoint: TaskResolutionCheckpointV1,
     prior_result: TaskResolutionResultV1 | None,
@@ -653,6 +676,38 @@ def _prior_result_state(
     if persisted_checkpoint["session_id"] != checkpoint["session_id"]:
         raise TaskResolutionContractError(
             "prior_result: checkpoint session does not match resume checkpoint"
+        )
+    if persisted_checkpoint["semantic_objective"] != checkpoint[
+        "semantic_objective"
+    ]:
+        raise TaskResolutionContractError(
+            "prior_result: checkpoint objective does not match resume checkpoint"
+        )
+    if persisted_checkpoint["scene_context"] != checkpoint["scene_context"]:
+        raise TaskResolutionContractError(
+            "prior_result: checkpoint scene does not match resume checkpoint"
+        )
+    if persisted_checkpoint["goal_continuation_ref"] != checkpoint[
+        "goal_continuation_ref"
+    ]:
+        raise TaskResolutionContractError(
+            "prior_result: continuation reference does not match resume checkpoint"
+        )
+    if validated_result["semantic_objective"] != checkpoint[
+        "semantic_objective"
+    ]:
+        raise TaskResolutionContractError(
+            "prior_result: objective does not match resume checkpoint"
+        )
+    if validated_result["scene_context"] != checkpoint["scene_context"]:
+        raise TaskResolutionContractError(
+            "prior_result: scene does not match resume checkpoint"
+        )
+    if validated_result["goal_continuation_ref"] != checkpoint[
+        "goal_continuation_ref"
+    ]:
+        raise TaskResolutionContractError(
+            "prior_result: continuation reference does not match resume checkpoint"
         )
     completed_subgoals = list(validated_result["completed_subgoals"])
     coding_run_context = dict(validated_result["coding_run_context"])

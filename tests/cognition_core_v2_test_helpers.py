@@ -7,6 +7,7 @@ from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisodeV1,
     MAX_COGNITIVE_EPISODE_MEDIA_PERCEPTS,
     TriggerSource,
+    build_goal_continuation_ref,
     build_text_chat_media_description_rows,
     build_user_message_episode,
     validate_cognitive_episode_v1,
@@ -395,6 +396,18 @@ def canonical_cognition_output(
 ) -> dict[str, Any]:
     """Build one exact committed V2 cognition output for connector tests."""
 
+    continuation_ref = None
+    if route == "speech":
+        continuation_ref = build_goal_continuation_ref(
+            source_episode_id="v2-test-episode",
+            source_message_id="message-test",
+            branch_id="ordinary_response",
+            goal_ref={
+                "scope": "user",
+                "kind": "goal",
+                "entity_id": "goal:ordinary-response",
+            },
+        )
     output: dict[str, Any] = {
         "schema_version": "cognition_core_output.v2",
         "intention": {
@@ -403,7 +416,9 @@ def canonical_cognition_output(
             "intention": "acknowledge the grounded episode",
             "target_roles": [],
             "reason": "the current episode establishes the selected route",
+            "goal_continuation_ref": continuation_ref,
         },
+        "goal_continuation_ref": continuation_ref,
         "supporting_bids": [],
         "state_update": {
             "state_scope": "user",

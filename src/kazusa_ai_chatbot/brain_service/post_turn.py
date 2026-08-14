@@ -8,11 +8,15 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal, TypeAlias
 
+from kazusa_ai_chatbot import event_logging
+from kazusa_ai_chatbot.action_spec.models import (
+    CONTINUATION_SURFACE_ROLES,
+    ActionSpecV1,
+    SurfaceRoleV1,
+)
 from kazusa_ai_chatbot.action_spec.registry import (
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
 )
-from kazusa_ai_chatbot import event_logging
-from kazusa_ai_chatbot.action_spec.models import ActionSpecV1
 from kazusa_ai_chatbot.action_spec.results import (
     ActionResultV1,
     DeliveryCorrelationV1,
@@ -23,19 +27,23 @@ from kazusa_ai_chatbot.action_spec.results import (
     build_text_surface_output,
     validate_episode_trace_v2,
 )
-from kazusa_ai_chatbot.conversation_progress import (
-    ConversationProgressRecordInput,
-    ConversationProgressScope,
-)
 from kazusa_ai_chatbot.brain_service.outbound import (
     record_assistant_outbound_message,
     utc_timestamp,
+)
+from kazusa_ai_chatbot.cognition_episode import (
+    CognitiveEpisodeValidationError,
+    GoalContinuationRefV1,
+    validate_goal_continuation_ref,
+)
+from kazusa_ai_chatbot.conversation_progress import (
+    ConversationProgressRecordInput,
+    ConversationProgressScope,
 )
 from kazusa_ai_chatbot.db.schemas import PostTurnLifecycleRecordV1
 from kazusa_ai_chatbot.logging_retention import expiry_from_storage_iso
 from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
 from kazusa_ai_chatbot.utils import log_preview
-
 
 _module_logger = logging.getLogger(__name__)
 
@@ -181,12 +189,6 @@ async def settle_runtime_episode_trace(
     action_specs = _dict_rows(graph_result.get("action_specs"))
     action_results = _dict_rows(graph_result.get("action_results"))
     surface_outputs = _dict_rows(graph_result.get("surface_outputs"))
-    if not surface_outputs and response_dialog:
-        surface_outputs = [build_text_surface_output(
-            fragments=[str(fragment) for fragment in response_dialog],
-            created_at=settled_at,
-        )]
-
     raw_cognition_output = graph_result.get("cognition_core_output")
     if not isinstance(raw_cognition_output, Mapping):
         raw_cognition_output = graph_result.get("cognition_output")
@@ -195,6 +197,18 @@ async def settle_runtime_episode_trace(
         if isinstance(raw_cognition_output, Mapping)
         else None
     )
+    if not surface_outputs and response_dialog:
+        surface_role, continuation_ref = _fallback_surface_metadata(
+            action_specs=action_specs,
+            action_results=action_results,
+            cognition_output=cognition_output,
+        )
+        surface_outputs = [build_text_surface_output(
+            fragments=[str(fragment) for fragment in response_dialog],
+            created_at=settled_at,
+            surface_role=surface_role,
+            goal_continuation_ref=continuation_ref,
+        )]
 
     terminal_status = _runtime_terminal_status(
         graph_result=graph_result,
@@ -235,6 +249,61 @@ def _dict_rows(value: object) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
     return [dict(row) for row in value if isinstance(row, Mapping)]
+
+
+def _fallback_surface_metadata(
+    *,
+    action_specs: Sequence[Mapping[str, object]],
+    action_results: Sequence[Mapping[str, object]],
+    cognition_output: Mapping[str, object] | None = None,
+) -> tuple[SurfaceRoleV1, GoalContinuationRefV1 | None]:
+    """Derive the settled surface role and continuation reference fallback.
+
+    The fallback text surface is created only when no surface output reached
+    settlement. It must preserve the deterministic role and exact
+    continuation reference of the action that produced the dialog so the
+    settled trace keeps one continuation lineage instead of degrading to an
+    ordinary surface. When no continuation action exists, a direct
+    answerable-now cognition result supplies the typed continuation reference
+    and settles a factual answer surface.
+
+    Returns:
+        The first continuation surface role and its validated reference, or
+        a factual answer with the cognition-owned reference when cognition
+        settled answerable-now, or
+        ordinary with a null reference when no continuation action exists.
+
+    Raises:
+        ValueError: When a continuation surface action omits or invalidates
+            its required goal-continuation reference, or the cognition-owned
+            continuation reference is invalid.
+    """
+
+    for action in (*action_specs, *action_results):
+        surface_role = action.get("surface_role")
+        if surface_role not in CONTINUATION_SURFACE_ROLES:
+            continue
+        raw_ref = action.get("goal_continuation_ref")
+        try:
+            continuation_ref = validate_goal_continuation_ref(raw_ref)
+        except CognitiveEpisodeValidationError as exc:
+            raise ValueError(
+                f"fallback continuation surface has an invalid reference: {exc}"
+            ) from exc
+        return surface_role, continuation_ref
+    if isinstance(cognition_output, Mapping):
+        goal_resolution = cognition_output.get("goal_resolution")
+        raw_ref = cognition_output.get("goal_continuation_ref")
+        if goal_resolution == "answerable_now" and raw_ref is not None:
+            try:
+                continuation_ref = validate_goal_continuation_ref(raw_ref)
+            except CognitiveEpisodeValidationError as exc:
+                raise ValueError(
+                    "fallback factual answer has an invalid reference: "
+                    f"{exc}"
+                ) from exc
+            return "factual_answer", continuation_ref
+    return "ordinary", None
 
 
 def _runtime_terminal_status(

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Literal, NotRequired, TypedDict
 
+from kazusa_ai_chatbot.cognition_episode import GoalContinuationRefV1
+
 
 ACCEPTED_TASKS_COLLECTION = "accepted_tasks"
 ACCEPTED_TASK_SCHEMA_VERSION = "accepted_task.v2"
@@ -76,6 +78,7 @@ class AcceptedTaskCreateRequest(TypedDict):
     task_kind: AcceptedTaskKind
     semantic_objective: str
     accepted_task_summary: str
+    goal_continuation_ref: GoalContinuationRefV1 | None
     requested_delivery: Literal["send_result_when_done"]
     max_output_chars: int
     source_trigger_source: str
@@ -111,6 +114,7 @@ class AcceptedTaskDoc(TypedDict, total=False):
     task_identity_material: AcceptedTaskIdentityMaterial
     task_kind: AcceptedTaskKind
     semantic_objective: str
+    goal_continuation_ref: GoalContinuationRefV1 | None
     first_source_message_id: str
     related_source_message_ids: list[str]
     source_trigger_source: str

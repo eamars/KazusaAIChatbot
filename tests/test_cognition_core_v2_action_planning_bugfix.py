@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 from langchain_core.messages import HumanMessage
 
+from kazusa_ai_chatbot.cognition_episode import build_goal_continuation_ref
 from kazusa_ai_chatbot.cognition_core_v2.action_authorization import (
     ACTION_AUTHORIZATION_PROMPT_CAP,
     invoke_semantic_authorizer,
@@ -1468,11 +1469,18 @@ async def test_task_resolution_boolean_survives_authorization_and_materializatio
         ),
     )
 
+    expected_continuation_ref = build_goal_continuation_ref(
+        source_episode_id="episode-background-boolean",
+        source_message_id="",
+        branch_id="ordinary_response",
+        goal_ref=_bid("ordinary_response")["goal_ref"],
+    )
     assert result["resolver_requests"] == [{
         "capability": "task_resolution_request",
         "semantic_goal": "resolve the bounded evidence task",
         "reason": "the admitted motive has an evidence gap",
         "evidence_handles": ["e1"],
+        "goal_continuation_ref": expected_continuation_ref,
         "start_in_background": True,
     }]
     authorization_candidates = captured_authorization_candidates["candidates"]

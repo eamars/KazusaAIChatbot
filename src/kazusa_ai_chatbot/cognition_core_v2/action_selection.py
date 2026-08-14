@@ -18,6 +18,11 @@ from kazusa_ai_chatbot.action_spec.registry import (
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
 )
+from kazusa_ai_chatbot.cognition_episode import (
+    GoalContinuationRefV1,
+    build_goal_continuation_ref,
+    validate_goal_continuation_ref,
+)
 from kazusa_ai_chatbot.cognition_core_v2.action_authorization import (
     authorize_action_requests,
     derive_action_route,
@@ -87,6 +92,9 @@ task_resolution_request 保留该审计目标；不得仅凭 bid 或角色自述
 task_resolution_request；不得把当前用户的历史事实误判为角色自身的私有自我认知目标。
 `self_goal_resolution` 只处理角色自身符合资格的私有自我认知目标，不负责检索当前用户的
 历史事实。
+
+scene_context 是当前回合唯一的有界场景事实；其中 public_group_scene 是当前群组公共事实的权威来源，
+semantic_scene、participant_bindings、conversation_continuity 与 semantic_temporal_context 共同约束当前目标。
 
 输出一个语义提案对象。action_requests 与 resolver_requests 互斥，各自最多包含三项。即时可见
 发言不是能力请求，不放入本输出。需要补充证据、持久化澄清或批准步骤时，只选择 resolver；后续
@@ -302,6 +310,10 @@ async def plan_actions(
     if primary_bid is None:
         return_value = _silence_result()
         return return_value
+    goal_continuation_ref = _bind_goal_continuation_ref(
+        episode,
+        primary_bid,
+    )
 
     if group_engagement_action_context is None:
         group_engagement_action_context = {
@@ -395,6 +407,9 @@ async def plan_actions(
             for handle, affordance in resolver_handles.items()
         },
         "resolver_context": resolver_context,
+        "scene_context": _project_scene_context_for_action_planning(
+            scene_context,
+        ),
         "group_engagement_action_context": {
             "engagement_guidelines": list(
                 group_engagement_action_context[
@@ -512,10 +527,7 @@ async def plan_actions(
         action_handles,
     )
     action_owner_denied = bool(decision["action_requests"]) and not action_requests
-    goal_resolution = _enforce_required_evidence_answerability(
-        decision["goal_resolution"],
-        validated_dependency,
-    )
+    goal_resolution = decision["goal_resolution"]
     if (
         selected_stance_suppresses_effects
         or goal_resolution == "answerable_now"
@@ -534,6 +546,7 @@ async def plan_actions(
             authorized_resolver_rows,
             bid_handles,
             resolver_handles,
+            goal_continuation_ref,
         )
     resolver_owner_denied = (
         bool(decision["resolver_requests"]) and not resolver_requests
@@ -551,6 +564,9 @@ async def plan_actions(
         action_requests=action_requests,
         resolver_requests=resolver_requests,
         self_cognition_response=decision.get("self_cognition_response"),
+        goal_resolution=goal_resolution,
+        goal_continuation_ref=goal_continuation_ref,
+        required_resolver_evidence_dependency=validated_dependency,
     )
     intention: SelectedIntentionV2 = {
         "selected_branch_id": primary_bid["branch_id"],
@@ -558,6 +574,7 @@ async def plan_actions(
         "intention": primary_bid["intention"],
         "target_roles": list(primary_bid["target_roles"]),
         "reason": primary_bid["reason"],
+        "goal_continuation_ref": goal_continuation_ref,
     }
     if "selected_response_operation" in primary_bid:
         intention["selected_response_operation"] = dict(
@@ -906,18 +923,25 @@ def _validate_action_plan_decision(
             )
         )
         response_contract_status = "valid"
+    goal_resolution = _validate_goal_resolution(
+        parsed.get("goal_resolution"),
+        required_resolver_evidence_dependency=(
+            required_resolver_evidence_dependency
+        ),
+    )
     return_value = {
         "action_requests": normalized_actions,
         "resolver_requests": normalized_resolvers,
-        "goal_resolution": _validate_goal_resolution(
-            parsed.get("goal_resolution"),
-            required_resolver_evidence_dependency=(
-                required_resolver_evidence_dependency
-            ),
-        ),
+        "goal_resolution": goal_resolution,
         "resolver_pending_resolution": pending_resolution,
         "resolver_goal_progress": goal_progress,
     }
+    _validate_no_primary_background_factual_route(
+        goal_resolution=goal_resolution,
+        resolver_requests=normalized_resolvers,
+        resolver_handles=resolver_handles,
+        primary_bid_handle=next(iter(bid_handles), ""),
+    )
     if self_cognition_response_required:
         return_value["self_cognition_response"] = response
         return_value["self_cognition_response_contract_status"] = (
@@ -963,21 +987,88 @@ def _project_required_evidence_dependency(
     }
 
 
-def _enforce_required_evidence_answerability(
-    goal_resolution: GoalResolutionV2,
-    dependency: RequiredResolverEvidenceDependencyV1 | None,
-) -> GoalResolutionV2:
-    """Keep final action routing aligned with a bound evidence state."""
+def _project_scene_context_for_action_planning(
+    scene_context: Mapping[str, Any] | None,
+) -> dict[str, object]:
+    """Project the validated bounded scene contract into the planner payload."""
 
-    if (
-        goal_resolution == "answerable_now"
-        and dependency is not None
-        and dependency["state"] != "complete"
+    if scene_context is None:
+        return {}
+    fields = (
+        "channel_scope",
+        "character_role",
+        "semantic_scene",
+        "public_group_scene",
+        "conversation_continuity",
+        "semantic_temporal_context",
+    )
+    projected: dict[str, object] = {
+        field_name: scene_context[field_name]
+        for field_name in fields
+    }
+    for field_name in (
+        "current_user_role",
+        "character_sleep_phase",
     ):
-        return_value: GoalResolutionV2 = "requires_required_evidence"
-        return return_value
-    return_value = goal_resolution
-    return return_value
+        if field_name in scene_context:
+            projected[field_name] = scene_context[field_name]
+    if "participant_bindings" in scene_context:
+        projected["participant_bindings"] = [
+            dict(binding)
+            for binding in scene_context["participant_bindings"]
+        ]
+    return projected
+
+
+def _bind_goal_continuation_ref(
+    episode: Mapping[str, Any],
+    primary_bid: ActionBidV2,
+) -> GoalContinuationRefV1:
+    """Bind the selected branch to deterministic source-goal lineage."""
+
+    origin_metadata = episode.get("origin_metadata")
+    if episode.get("trigger_source") == "tool_result":
+        if not isinstance(origin_metadata, Mapping):
+            raise ValueError("tool-result origin metadata is invalid")
+        return validate_goal_continuation_ref(
+            origin_metadata["goal_continuation_ref"],
+        )
+    source_message_id = ""
+    if isinstance(origin_metadata, Mapping):
+        source_value = origin_metadata.get("platform_message_id")
+        if isinstance(source_value, str):
+            source_message_id = source_value
+    return build_goal_continuation_ref(
+        source_episode_id=episode["episode_id"],
+        source_message_id=source_message_id,
+        branch_id=primary_bid["branch_id"],
+        goal_ref=primary_bid["goal_ref"],
+    )
+
+
+def _validate_no_primary_background_factual_route(
+    *,
+    goal_resolution: GoalResolutionV2,
+    resolver_requests: Sequence[Mapping[str, Any]],
+    resolver_handles: Mapping[str, ResolverAffordanceV2],
+    primary_bid_handle: str,
+) -> None:
+    """Reject a planner candidate that mixes direct facts with pending work."""
+
+    if goal_resolution != "answerable_now":
+        return
+    for request in resolver_requests:
+        resolver_handle = request["resolver_handle"]
+        if (
+            request["bid_handle"] == primary_bid_handle
+            and resolver_handles[resolver_handle]["capability"]
+            == "task_resolution_request"
+            and request.get("start_in_background") is True
+        ):
+            raise ValueError(
+                "answerable_now cannot share the primary goal with a "
+                "pending background task-resolution request"
+            )
 
 
 def _normalize_action_request_rows(
@@ -1300,6 +1391,7 @@ def _materialize_resolver_requests(
     requests: Sequence[Mapping[str, Any]],
     bids: Mapping[str, ActionBidV2],
     resolvers: Mapping[str, ResolverAffordanceV2],
+    goal_continuation_ref: GoalContinuationRefV1,
 ) -> list[ResolverCapabilityRequestV2]:
     """Copy admitted evidence provenance into resolver requests."""
 
@@ -1312,6 +1404,7 @@ def _materialize_resolver_requests(
             "semantic_goal": request["semantic_goal"],
             "reason": request["reason"],
             "evidence_handles": list(bid["evidence_handles"]),
+            "goal_continuation_ref": goal_continuation_ref,
         }
         if "start_in_background" in request:
             row["start_in_background"] = request["start_in_background"]
@@ -1392,6 +1485,7 @@ def _silence_result() -> dict[str, Any]:
             "intention": "remain silent",
             "target_roles": [],
             "reason": "no valid admitted bid",
+            "goal_continuation_ref": None,
         },
         "action_requests": [],
         "resolver_requests": [],

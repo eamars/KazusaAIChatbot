@@ -375,6 +375,9 @@ async def test_v2_facade_returns_exact_one_scope_output() -> None:
     assert validated["schema_version"] == "cognition_core_output.v2"
     assert validated["state_update"]["state_scope"] == "user"
     assert validated["intention"]["route"] == "silence"
+    assert validated["goal_continuation_ref"] == validated["intention"][
+        "goal_continuation_ref"
+    ]
     assert "admitted_bid" not in validated
 
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Literal, NotRequired, TypedDict
 
+from kazusa_ai_chatbot.cognition_episode import GoalContinuationRefV1
+
 
 BACKGROUND_WORK_JOBS_COLLECTION = "background_work_jobs"
 BACKGROUND_WORK_JOB_SCHEMA_VERSION = "background_work_job.v2"
@@ -62,6 +64,7 @@ class BackgroundWorkQueueRequest(TypedDict):
     accepted_task_id: str
     task_identity_key: str
     semantic_objective: str
+    goal_continuation_ref: GoalContinuationRefV1 | None
     requested_worker: BackgroundWorkRequestedWorker
     worker_payload: TaskOrchestratorWorkerPayloadV1 | FutureSpeakWorkerPayloadV1
     task_execution_context: NotRequired[dict[str, object]]
@@ -117,6 +120,7 @@ class BackgroundWorkJobDoc(TypedDict, total=False):
     accepted_task_id: str
     task_identity_key: str
     semantic_objective: str
+    goal_continuation_ref: GoalContinuationRefV1 | None
     status: BackgroundWorkJobStatus
     delivery_state: BackgroundWorkDeliveryState
     requested_delivery: Literal["send_result_when_done"]

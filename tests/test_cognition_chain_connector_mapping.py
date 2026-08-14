@@ -24,6 +24,7 @@ from tests.cognition_core_v2_test_helpers import (
     canonical_character_identity,
     canonical_episode,
 )
+from tests.test_task_resolution_orchestrator import _goal_continuation_ref
 
 
 NOW = "2026-07-14T00:00:00Z"
@@ -513,6 +514,7 @@ def test_connector_projects_routing_boolean_to_v1_priority() -> None:
             "reason": "the work should start in the durable path",
             "evidence_handles": [],
             "start_in_background": True,
+            "goal_continuation_ref": _goal_continuation_ref(),
         },
         {
             "capability": "task_resolution_request",
@@ -520,12 +522,14 @@ def test_connector_projects_routing_boolean_to_v1_priority() -> None:
             "reason": "the current response lacks required evidence",
             "evidence_handles": [],
             "start_in_background": False,
+            "goal_continuation_ref": _goal_continuation_ref(),
         },
         {
             "capability": "human_clarification",
             "semantic_goal": "ask which city the user means",
             "reason": "the current phrase is incomplete",
             "evidence_handles": [],
+            "goal_continuation_ref": _goal_continuation_ref(),
         },
     ]
 
@@ -766,21 +770,17 @@ def test_connector_preserves_accepted_task_source_ownership() -> None:
     from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
         build_cognition_input_from_global_state,
     )
+    from kazusa_ai_chatbot.background_work.result_source import (
+        build_result_ready_episode_from_job,
+    )
+    from tests.test_background_work_delivery import (
+        _accepted_task_completed_job,
+    )
 
     state = _global_state()
-    state["cognitive_episode"] = canonical_episode(
-        episode_id="accepted-task-episode",
-        trigger_source="tool_result",
-        current_global_user_id="user-1",
-        content="The requested report is ready.",
-        metadata={
-            "accepted_task_id": "task-1",
-            "accepted_task_summary": "Prepare the report.",
-            "result_summary": "Report completed.",
-            "failure_summary": "",
-        },
+    state["cognitive_episode"] = build_result_ready_episode_from_job(
+        _accepted_task_completed_job()
     )
-    state["cognitive_episode"]["percepts"][0]["source_id"] = "task-1"
     payload = build_cognition_input_from_global_state(
         state,
         mutable_state=build_acquaintance_user_state(
@@ -791,7 +791,7 @@ def test_connector_preserves_accepted_task_source_ownership() -> None:
 
     evidence = payload["evidence"][0]
     assert evidence["evidence_ref"]["source_kind"] == "tool_result"
-    assert evidence["evidence_ref"]["source_id"] == "task-1"
+    assert evidence["evidence_ref"]["source_id"] == "task-001"
     assert evidence["visible_to"] == [
         "q:event_agency",
         "q:relationship_social",

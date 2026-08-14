@@ -12,9 +12,15 @@ from kazusa_ai_chatbot.action_spec.models import (
     ACTION_SOURCE_REF_VERSION,
     ACTION_SPEC_VERSION,
     ACTION_TARGET_VERSION,
+    SurfaceRoleV1,
     validate_action_spec,
 )
 from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
+from kazusa_ai_chatbot.cognition_episode import (
+    CognitiveEpisodeValidationError,
+    GoalContinuationRefV1,
+    build_goal_continuation_ref,
+)
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     RESOLVER_CYCLE_TRACE_VERSION,
     RESOLVER_EVIDENCE_STATE_VERSION,
@@ -25,11 +31,11 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     ResolverPendingResolutionV1,
     ResolverPendingResumeV1,
     ResolverValidationError,
+    validate_required_resolver_evidence_dependency,
     validate_resolver_capability_request,
     validate_resolver_goal_progress,
     validate_resolver_observation,
     validate_resolver_pending_resolution,
-    validate_required_resolver_evidence_dependency,
 )
 from kazusa_ai_chatbot.cognition_resolver.pending import (
     apply_pending_resolution,
@@ -109,6 +115,18 @@ async def call_cognition_resolver_loop(
         cognition_output = await call_cognition_subgraph_func(current_state)
         cognition_state = _merge_state(current_state, cognition_output)
         cognition_state = _sync_goal_progress_from_cognition(cognition_state)
+        lifecycle_conflict = _final_lifecycle_conflict(cognition_state)
+        if lifecycle_conflict is not None:
+            selected_request, reason = lifecycle_conflict
+            final_state = await _run_mixed_lifecycle_final_cognition(
+                cognition_state,
+                selected_request=selected_request,
+                status_before=status_before,
+                conflict_reason=reason,
+                call_cognition_subgraph_func=call_cognition_subgraph_func,
+                apply_pending_resolution_func=apply_pending_resolution_func,
+            )
+            return final_state
         resolver_state = _resolver_state(cognition_state)
         if _suppress_optional_resolver_request(cognition_state):
             final_state = await _finalize_without_capability(
@@ -118,7 +136,12 @@ async def call_cognition_resolver_loop(
                 apply_pending_resolution_func=apply_pending_resolution_func,
                 terminal_reason=ANSWERABLE_NOW_TERMINAL_REASON,
             )
-            return_value = final_state
+            return_value = await _enforce_final_lifecycle_state(
+                final_state,
+                status_before=status_before,
+                call_cognition_subgraph_func=call_cognition_subgraph_func,
+                apply_pending_resolution_func=apply_pending_resolution_func,
+            )
             return return_value
         selected_request = _select_immediate_request(cognition_state)
 
@@ -129,7 +152,12 @@ async def call_cognition_resolver_loop(
                 status_before=status_before,
                 apply_pending_resolution_func=apply_pending_resolution_func,
             )
-            return_value = final_state
+            return_value = await _enforce_final_lifecycle_state(
+                final_state,
+                status_before=status_before,
+                call_cognition_subgraph_func=call_cognition_subgraph_func,
+                apply_pending_resolution_func=apply_pending_resolution_func,
+            )
             return return_value
 
         if _is_repeated_capability_request(selected_request, resolver_state):
@@ -141,7 +169,12 @@ async def call_cognition_resolver_loop(
                 call_cognition_subgraph_func=call_cognition_subgraph_func,
                 apply_pending_resolution_func=apply_pending_resolution_func,
             )
-            return_value = final_state
+            return_value = await _enforce_final_lifecycle_state(
+                final_state,
+                status_before=status_before,
+                call_cognition_subgraph_func=call_cognition_subgraph_func,
+                apply_pending_resolution_func=apply_pending_resolution_func,
+            )
             return return_value
 
         observation = await _execute_with_timeout(
@@ -160,7 +193,12 @@ async def call_cognition_resolver_loop(
                 upsert_pending_resume_func=upsert_pending_resume_func,
                 apply_pending_resolution_func=apply_pending_resolution_func,
             )
-            return_value = final_state
+            return_value = await _enforce_final_lifecycle_state(
+                final_state,
+                status_before=status_before,
+                call_cognition_subgraph_func=call_cognition_subgraph_func,
+                apply_pending_resolution_func=apply_pending_resolution_func,
+            )
             return return_value
 
         if _is_user_input_blocker_observation(observation):
@@ -172,7 +210,12 @@ async def call_cognition_resolver_loop(
                 call_cognition_subgraph_func=call_cognition_subgraph_func,
                 apply_pending_resolution_func=apply_pending_resolution_func,
             )
-            return_value = final_state
+            return_value = await _enforce_final_lifecycle_state(
+                final_state,
+                status_before=status_before,
+                call_cognition_subgraph_func=call_cognition_subgraph_func,
+                apply_pending_resolution_func=apply_pending_resolution_func,
+            )
             return return_value
 
         resolver_state = append_observation(resolver_state, observation)
@@ -207,14 +250,535 @@ async def call_cognition_resolver_loop(
         )
         resolver_state = append_cycle_trace(resolver_state, trace)
         cognition_state = _with_resolver_state(cognition_state, resolver_state)
+        lifecycle_conflict = _final_lifecycle_conflict(cognition_state)
+        if lifecycle_conflict is not None:
+            selected_request, reason = lifecycle_conflict
+            final_state = await _run_mixed_lifecycle_final_cognition(
+                cognition_state,
+                selected_request=selected_request,
+                status_before=status_before,
+                conflict_reason=reason,
+                call_cognition_subgraph_func=call_cognition_subgraph_func,
+                apply_pending_resolution_func=apply_pending_resolution_func,
+            )
+            return final_state
         current_state = cognition_state
 
-    return_value = await _run_max_cycle_final_cognition(
+    final_state = await _run_max_cycle_final_cognition(
         current_state,
         call_cognition_subgraph_func=call_cognition_subgraph_func,
         apply_pending_resolution_func=apply_pending_resolution_func,
     )
+    return_value = await _enforce_final_lifecycle_state(
+        final_state,
+        status_before=_resolver_state(current_state)["status"],
+        call_cognition_subgraph_func=call_cognition_subgraph_func,
+        apply_pending_resolution_func=apply_pending_resolution_func,
+    )
     return return_value
+
+
+async def _run_mixed_lifecycle_final_cognition(
+    state: GlobalPersonaState,
+    *,
+    selected_request: ResolverCapabilityRequestV1,
+    status_before: str,
+    conflict_reason: str,
+    call_cognition_subgraph_func: CognitionSubgraphFunc,
+    apply_pending_resolution_func: PendingResolutionApplyFunc,
+) -> GlobalPersonaState:
+    """Regenerate once after blocking a same-reference factual/task mix."""
+
+    blocker = _mixed_lifecycle_observation(
+        selected_request,
+        state,
+        stage="regeneration",
+    )
+    resolver_state = _resolver_state(state)
+    resolver_state = _record_mixed_lifecycle_blocker(
+        state,
+        resolver_state=resolver_state,
+        selected_request=selected_request,
+        observation=blocker,
+    )
+    updated_resolver_state = dict(resolver_state)
+    updated_resolver_state["status"] = "blocked"
+    updated_resolver_state["terminal_reason"] = conflict_reason
+    trace = _build_cycle_trace(
+        state,
+        resolver_state=updated_resolver_state,
+        cycle_index=updated_resolver_state["cycle_index"],
+        status_before=status_before,
+        selected_capability_kind=selected_request["capability_kind"],
+        observation_ids=[blocker["observation_id"]],
+        terminal_reason=conflict_reason,
+    )
+    updated_resolver_state = append_cycle_trace(updated_resolver_state, trace)
+    cognition_input = _with_resolver_state(state, updated_resolver_state)
+    cognition_input["resolver_capability_requests"] = (
+        _without_same_continuation_task_requests(
+            cognition_input.get("resolver_capability_requests"),
+            selected_request["goal_continuation_ref"],
+        )
+    )
+    cognition_output = await call_cognition_subgraph_func(cognition_input)
+    cognition_state = _merge_state(cognition_input, cognition_output)
+    cognition_state = _sync_goal_progress_from_cognition(cognition_state)
+    await _apply_pending_resolution_if_present(
+        cognition_state,
+        apply_pending_resolution_func=apply_pending_resolution_func,
+    )
+    final_conflict = _final_lifecycle_conflict(cognition_state)
+    final_terminal_reason = "same-reference lifecycle conflict regenerated"
+    if final_conflict is not None:
+        fallback_request, fallback_reason = final_conflict
+        fallback_blocker = _mixed_lifecycle_observation(
+            fallback_request,
+            cognition_state,
+            stage="fail_closed",
+        )
+        cognition_state = _fail_closed_mixed_lifecycle_state(
+            cognition_state,
+            selected_request=fallback_request,
+            blocker=fallback_blocker,
+        )
+        final_terminal_reason = (
+            "same-reference lifecycle conflict failed closed after regeneration: "
+            f"{fallback_reason}"
+        )
+    else:
+        cognition_state["resolver_capability_requests"] = (
+            _without_same_continuation_task_requests(
+                cognition_state.get("resolver_capability_requests"),
+                selected_request["goal_continuation_ref"],
+            )
+        )
+
+    final_resolver_state = dict(_resolver_state(cognition_state))
+    final_resolver_state["held_action_specs"] = list(
+        cognition_state.get("action_specs", []),
+    )
+    final_resolver_state["status"] = "blocked"
+    final_resolver_state["terminal_reason"] = final_terminal_reason
+    final_trace = _build_cycle_trace(
+        cognition_state,
+        resolver_state=final_resolver_state,
+        cycle_index=final_resolver_state["cycle_index"],
+        status_before="blocked",
+        selected_capability_kind="",
+        observation_ids=[],
+        terminal_reason=final_terminal_reason,
+    )
+    final_resolver_state = append_cycle_trace(final_resolver_state, final_trace)
+    return _with_resolver_state(cognition_state, final_resolver_state)
+
+
+async def _enforce_final_lifecycle_state(
+    state: GlobalPersonaState,
+    *,
+    status_before: str,
+    call_cognition_subgraph_func: CognitionSubgraphFunc,
+    apply_pending_resolution_func: PendingResolutionApplyFunc,
+) -> GlobalPersonaState:
+    """Run the same-reference lifecycle gate before returning a final state."""
+
+    lifecycle_conflict = _final_lifecycle_conflict(state)
+    if lifecycle_conflict is None:
+        return state
+    selected_request, reason = lifecycle_conflict
+    return await _run_mixed_lifecycle_final_cognition(
+        state,
+        selected_request=selected_request,
+        status_before=status_before,
+        conflict_reason=reason,
+        call_cognition_subgraph_func=call_cognition_subgraph_func,
+        apply_pending_resolution_func=apply_pending_resolution_func,
+    )
+
+
+def _final_lifecycle_conflict(
+    state: GlobalPersonaState,
+) -> tuple[ResolverCapabilityRequestV1, str] | None:
+    """Find one typed same-reference surface/lifecycle conflict.
+
+    This validator checks typed continuation references and surface roles only.
+    It does not reinterpret the cognition stage's answerability or wording.
+    """
+
+    task_requests = _task_resolution_requests(state)
+    resolver_state = _resolver_state(state)
+    dependency = resolver_state.get("required_resolver_evidence_dependency")
+    dependency_request = _request_from_required_dependency(
+        resolver_state,
+        dependency,
+    )
+    tool_result_ref = _tool_result_continuation_ref(state)
+
+    if state.get("goal_resolution") == "answerable_now":
+        output_ref = _cognition_output_continuation_ref(state)
+        if output_ref is not None:
+            matching_request = _request_for_continuation_ref(
+                task_requests,
+                output_ref,
+            )
+            if matching_request is not None:
+                return (
+                    matching_request,
+                    "answerable_now cannot retain a same-reference task request",
+                )
+
+    for task_request in task_requests:
+        if (
+            tool_result_ref is not None
+            and _same_continuation_ref(
+                task_request["goal_continuation_ref"],
+                tool_result_ref,
+            )
+        ):
+            return (
+                task_request,
+                "tool-result continuation cannot create another task request",
+            )
+
+    action_specs = state.get("action_specs")
+    if not isinstance(action_specs, list):
+        return None
+    continuation_surfaces = [
+        (action_spec, _continuation_surface_ref(action_spec))
+        for action_spec in action_specs
+        if isinstance(action_spec, Mapping)
+        and _continuation_surface_ref(action_spec) is not None
+    ]
+    for action_spec, action_ref in continuation_surfaces:
+        surface_role = action_spec.get("surface_role")
+        matching_request = _request_for_continuation_ref(
+            task_requests,
+            action_ref,
+        )
+        matching_dependency = (
+            isinstance(dependency, Mapping)
+            and _same_continuation_ref(
+                dependency.get("goal_continuation_ref"),
+                action_ref,
+            )
+        )
+        fallback_request = matching_request or (
+            dependency_request if matching_dependency else None
+        )
+        if surface_role == "factual_answer":
+            if matching_request is not None:
+                return (
+                    matching_request,
+                    "factual surface cannot coexist with a same-reference task request",
+                )
+            if matching_dependency and dependency.get("state") != "complete":
+                if fallback_request is None:
+                    raise ResolverValidationError(
+                        "same-reference dependency lacks a request for fail-closed status"
+                    )
+                return (
+                    fallback_request,
+                    "factual surface cannot coexist with non-complete task evidence",
+                )
+            for other_spec, other_ref in continuation_surfaces:
+                if other_spec is action_spec or not _same_continuation_ref(
+                    other_ref,
+                    action_ref,
+                ):
+                    continue
+                if other_spec.get("surface_role") in {
+                    "task_acknowledgement",
+                    "task_result",
+                    "task_status",
+                }:
+                    if fallback_request is None:
+                        raise ResolverValidationError(
+                            "same-reference continuation surfaces lack a task request"
+                        )
+                    return (
+                        fallback_request,
+                        "factual surface cannot coexist with another task surface",
+                    )
+        if (
+            surface_role == "task_acknowledgement"
+            and matching_dependency
+            and dependency.get("state") != "pending"
+        ):
+            if fallback_request is None:
+                raise ResolverValidationError(
+                    "task acknowledgement lacks a request for fail-closed status"
+                )
+            return (
+                fallback_request,
+                "task acknowledgement requires pending task evidence",
+            )
+        if (
+            surface_role == "task_result"
+            and matching_dependency
+            and dependency.get("state") not in {"complete", "partial"}
+        ):
+            if fallback_request is None:
+                raise ResolverValidationError(
+                    "task result lacks a request for fail-closed status"
+                )
+            return (
+                fallback_request,
+                "task result requires complete or partial task evidence",
+            )
+    return None
+
+
+def _task_resolution_requests(
+    state: GlobalPersonaState,
+) -> list[ResolverCapabilityRequestV1]:
+    """Return validated task-resolution requests from one cognition cycle."""
+
+    raw_requests = state.get("resolver_capability_requests", [])
+    if not isinstance(raw_requests, list):
+        raise ResolverValidationError("resolver_capability_requests: expected list")
+    requests: list[ResolverCapabilityRequestV1] = []
+    for raw_request in raw_requests:
+        request = validate_resolver_capability_request(raw_request)
+        if request["capability_kind"] == "task_resolution_request":
+            requests.append(request)
+    return requests
+
+
+def _request_for_continuation_ref(
+    requests: list[ResolverCapabilityRequestV1],
+    continuation_ref: object,
+) -> ResolverCapabilityRequestV1 | None:
+    """Return the one task request carrying an exact continuation reference."""
+
+    for request in requests:
+        if _same_continuation_ref(
+            request["goal_continuation_ref"],
+            continuation_ref,
+        ):
+            return request
+    return None
+
+
+def _request_from_required_dependency(
+    resolver_state: ResolverCycleStateV1,
+    dependency: object,
+) -> ResolverCapabilityRequestV1 | None:
+    """Rebuild a status-only request from validated dependency provenance."""
+
+    if not isinstance(dependency, Mapping):
+        return None
+    observation_id = dependency.get("observation_id")
+    continuation_ref = dependency.get("goal_continuation_ref")
+    if not isinstance(observation_id, str) or not isinstance(
+        continuation_ref,
+        Mapping,
+    ):
+        return None
+    for observation in resolver_state["observations"]:
+        if observation["observation_id"] != observation_id:
+            continue
+        return validate_resolver_capability_request({
+            "schema_version": "resolver_capability_request.v1",
+            "capability_kind": "task_resolution_request",
+            "objective": observation["request_objective"],
+            "reason": observation["request_reason"],
+            "priority": "now",
+            "goal_continuation_ref": dict(continuation_ref),
+        })
+    return None
+
+
+def _continuation_surface_ref(
+    action_spec: Mapping[str, object],
+) -> Mapping[str, object] | None:
+    """Return a continuation surface reference without parsing wording."""
+
+    surface_role = action_spec.get("surface_role")
+    if surface_role not in {
+        "factual_answer",
+        "task_acknowledgement",
+        "task_result",
+        "task_status",
+    }:
+        return None
+    continuation_ref = action_spec.get("goal_continuation_ref")
+    if not isinstance(continuation_ref, Mapping):
+        raise ResolverValidationError(
+            "continuation surface lacks goal_continuation_ref"
+        )
+    return continuation_ref
+
+
+def _same_continuation_ref(first: object, second: object) -> bool:
+    """Compare exact validated continuation-reference payloads."""
+
+    return isinstance(first, Mapping) and isinstance(second, Mapping) and (
+        dict(first) == dict(second)
+    )
+
+
+def _cognition_output_continuation_ref(
+    state: GlobalPersonaState,
+) -> Mapping[str, object] | None:
+    """Read the V2 output continuation reference when it is present."""
+
+    output = state.get("cognition_core_output")
+    if not isinstance(output, Mapping):
+        return None
+    continuation_ref = output.get("goal_continuation_ref")
+    if not isinstance(continuation_ref, Mapping):
+        return None
+    return continuation_ref
+
+
+def _tool_result_continuation_ref(
+    state: GlobalPersonaState,
+) -> Mapping[str, object] | None:
+    """Read tool-result lineage without inferring a replacement reference."""
+
+    episode = state.get("cognitive_episode")
+    if not isinstance(episode, Mapping) or episode.get("trigger_source") != "tool_result":
+        return None
+    origin = episode.get("origin_metadata")
+    if not isinstance(origin, Mapping):
+        return None
+    continuation_ref = origin.get("goal_continuation_ref")
+    if not isinstance(continuation_ref, Mapping):
+        raise ResolverValidationError(
+            "tool-result episode requires goal_continuation_ref"
+        )
+    return continuation_ref
+
+
+def _without_same_continuation_task_requests(
+    raw_requests: object,
+    continuation_ref: object,
+) -> list[object]:
+    """Remove only the blocked task request while retaining distinct goals."""
+
+    if not isinstance(raw_requests, list):
+        raise ResolverValidationError("resolver_capability_requests: expected list")
+    retained_requests: list[object] = []
+    for raw_request in raw_requests:
+        request = validate_resolver_capability_request(raw_request)
+        if (
+            request["capability_kind"] == "task_resolution_request"
+            and _same_continuation_ref(
+                request["goal_continuation_ref"],
+                continuation_ref,
+            )
+        ):
+            continue
+        retained_requests.append(raw_request)
+    return retained_requests
+
+
+def _fail_closed_mixed_lifecycle_state(
+    state: GlobalPersonaState,
+    *,
+    selected_request: ResolverCapabilityRequestV1,
+    blocker: ResolverObservationV1,
+) -> GlobalPersonaState:
+    """Replace only the invalid same-reference surface with typed status."""
+
+    continuation_ref = _task_continuation_ref(selected_request)
+    resolver_state = _record_mixed_lifecycle_blocker(
+        state,
+        resolver_state=_resolver_state(state),
+        selected_request=selected_request,
+        observation=blocker,
+    )
+    state = _with_resolver_state(state, resolver_state)
+    state["resolver_capability_requests"] = (
+        _without_same_continuation_task_requests(
+            state.get("resolver_capability_requests"),
+            continuation_ref,
+        )
+    )
+    raw_action_specs = state.get("action_specs", [])
+    if not isinstance(raw_action_specs, list):
+        raise ResolverValidationError("action_specs: expected list")
+    retained_action_specs = [
+        action_spec
+        for action_spec in raw_action_specs
+        if not (
+            isinstance(action_spec, Mapping)
+            and _same_continuation_ref(
+                action_spec.get("goal_continuation_ref"),
+                continuation_ref,
+            )
+        )
+    ]
+    if _should_surface_terminal_blocker(state):
+        retained_action_specs.append(
+            _terminal_blocker_speak_action_spec(selected_request, blocker)
+        )
+    state["action_specs"] = retained_action_specs
+    return state
+
+
+def _record_mixed_lifecycle_blocker(
+    state: GlobalPersonaState,
+    *,
+    resolver_state: ResolverCycleStateV1,
+    selected_request: ResolverCapabilityRequestV1,
+    observation: ResolverObservationV1,
+) -> ResolverCycleStateV1:
+    """Persist a lifecycle blocker while retaining existing task provenance."""
+
+    updated_resolver_state = append_observation(resolver_state, observation)
+    continuation_ref = _task_continuation_ref(selected_request)
+    matching_request = _request_for_continuation_ref(
+        _task_resolution_requests(state),
+        continuation_ref,
+    )
+    if matching_request is None:
+        return _mark_existing_dependency_blocked(
+            updated_resolver_state,
+            observation,
+        )
+    return _bind_required_evidence_dependency(
+        updated_resolver_state,
+        selected_request=matching_request,
+        observation=observation,
+        request_ordinal=_resolver_request_ordinal(state, matching_request),
+        required=True,
+    )
+
+
+def _mixed_lifecycle_observation(
+    request: ResolverCapabilityRequestV1,
+    state: GlobalPersonaState,
+    *,
+    stage: str,
+) -> ResolverObservationV1:
+    """Record a typed task blocker without executing mixed lifecycle work."""
+
+    resolver_state = _resolver_state(state)
+    observation = {
+        "schema_version": RESOLVER_OBSERVATION_VERSION,
+        "observation_id": (
+            "resolver_obs_lifecycle_conflict_"
+            f"{resolver_state['cycle_index']}_{stage}"
+        ),
+        "capability_kind": "task_resolution_request",
+        "request_objective": request["objective"],
+        "request_reason": request["reason"],
+        "status": "failed",
+        "prompt_safe_summary": (
+            "The task continuation was blocked before execution because its "
+            "factual surface and pending lifecycle state conflicted."
+        ),
+        "evidence_refs": [],
+        "task_resolution_evidence_state": {
+            "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
+            "state": "blocked",
+            "remaining_needs": [request["objective"]],
+        },
+        "goal_continuation_ref": _task_continuation_ref(request),
+        "created_at_utc": _created_at_utc(state),
+    }
+    return validate_resolver_observation(observation)
 
 
 async def _attach_past_dialog_cognition_from_rag_result(
@@ -528,6 +1092,7 @@ async def _run_blocked_pending_final_cognition(
         cognition_state["resolver_capability_requests"] = []
         cognition_state["action_specs"] = [
             _pending_resume_speak_action_spec(
+                cognition_state,
                 pending_resume,
                 normalized_observation,
             ),
@@ -640,7 +1205,10 @@ async def _run_user_input_blocker_final_cognition(
                     "to a visible clarification surface"
                 )
                 cognition_state["action_specs"] = [
-                    _user_input_blocker_speak_action_spec(observation),
+                    _user_input_blocker_speak_action_spec(
+                        selected_request,
+                        observation,
+                    ),
                 ]
                 final_terminal_reason = USER_INPUT_BLOCKER_TERMINAL_REASON
             else:
@@ -660,7 +1228,10 @@ async def _run_user_input_blocker_final_cognition(
                 "a visible clarification surface"
             )
             cognition_state["action_specs"] = [
-                _user_input_blocker_speak_action_spec(observation),
+                _user_input_blocker_speak_action_spec(
+                    selected_request,
+                    observation,
+                ),
             ]
             final_terminal_reason = USER_INPUT_BLOCKER_TERMINAL_REASON
 
@@ -684,6 +1255,7 @@ async def _run_user_input_blocker_final_cognition(
 
 
 def _pending_resume_speak_action_spec(
+    state: GlobalPersonaState,
     pending_resume: ResolverPendingResumeV1,
     observation: ResolverObservationV1,
 ) -> dict[str, Any]:
@@ -697,6 +1269,7 @@ def _pending_resume_speak_action_spec(
         detail = pending_resume["prompt_safe_approval_summary"]
     if not detail:
         detail = observation["prompt_safe_summary"]
+    continuation_ref = _pending_resume_continuation_ref(state, pending_resume)
 
     action_spec = {
         "schema_version": ACTION_SPEC_VERSION,
@@ -737,9 +1310,11 @@ def _pending_resume_speak_action_spec(
             "max_depth": 0,
             "include_result_as": None,
         },
+        "surface_role": "task_status",
+        "goal_continuation_ref": continuation_ref,
         "reason": (
             "Resolver created a pending row and must surface its prompt-safe "
-            "question or approval summary."
+            "question or approval summary as a continuation status."
         ),
     }
     validated_spec = validate_action_spec(action_spec)
@@ -747,11 +1322,55 @@ def _pending_resume_speak_action_spec(
     return return_value
 
 
+def _pending_resume_continuation_ref(
+    state: GlobalPersonaState,
+    pending_resume: ResolverPendingResumeV1,
+) -> GoalContinuationRefV1:
+    """Derive the validated continuation identity from pending-resume lineage.
+
+    A pending clarification or approval is a continuation surface of the
+    original goal, so its reference is constructed deterministically from the
+    source episode, source message, capability, and user scope. The model
+    never authors the identifier.
+    """
+
+    episode = state.get("cognitive_episode")
+    if not isinstance(episode, Mapping):
+        raise ResolverValidationError("cognitive_episode: expected mapping")
+    source_episode_id = episode.get("episode_id")
+    if not isinstance(source_episode_id, str) or not source_episode_id.strip():
+        raise ResolverValidationError(
+            "cognitive_episode.episode_id: expected non-empty string"
+        )
+    goal_ref = {
+        "scope": "user",
+        "kind": "goal",
+        "entity_id": pending_resume["global_user_id"],
+    }
+    try:
+        continuation_ref = build_goal_continuation_ref(
+            source_episode_id=source_episode_id,
+            source_message_id=pending_resume["source_message_id"],
+            branch_id=(
+                f"resolver_pending_resume:"
+                f"{pending_resume['capability_kind']}"
+            ),
+            goal_ref=goal_ref,
+        )
+    except CognitiveEpisodeValidationError as exc:
+        raise ResolverValidationError(
+            f"pending resume goal_continuation_ref is invalid: {exc}"
+        ) from exc
+    return continuation_ref
+
+
 def _user_input_blocker_speak_action_spec(
+    request: ResolverCapabilityRequestV1,
     observation: ResolverObservationV1,
 ) -> dict[str, Any]:
     """Build a prompt-safe clarification action from a typed blocker."""
 
+    surface_role, continuation_ref = _terminal_surface_metadata(request)
     action_spec = {
         "schema_version": ACTION_SPEC_VERSION,
         "kind": SPEAK_CAPABILITY,
@@ -791,6 +1410,8 @@ def _user_input_blocker_speak_action_spec(
             "max_depth": 0,
             "include_result_as": None,
         },
+        "surface_role": surface_role,
+        "goal_continuation_ref": continuation_ref,
         "reason": (
             "Resolver requires user input before the blocked capability can "
             "act and must surface a prompt-safe clarification."
@@ -1114,6 +1735,29 @@ def _resolver_request_ordinal(
     )
 
 
+def _terminal_surface_metadata(
+    request: ResolverCapabilityRequestV1,
+) -> tuple[SurfaceRoleV1, GoalContinuationRefV1 | None]:
+    """Return lifecycle metadata for one resolver-owned terminal surface."""
+
+    if request["capability_kind"] == "task_resolution_request":
+        return "task_status", _task_continuation_ref(request)
+    return "ordinary", None
+
+
+def _task_continuation_ref(
+    request: ResolverCapabilityRequestV1,
+) -> GoalContinuationRefV1:
+    """Require the V1 task request to retain its V2 continuation identity."""
+
+    continuation_ref = request["goal_continuation_ref"]
+    if continuation_ref is None:
+        raise ResolverValidationError(
+            "task-resolution request requires goal_continuation_ref"
+        )
+    return continuation_ref
+
+
 def _bind_required_evidence_dependency(
     resolver_state: ResolverCycleStateV1,
     *,
@@ -1158,6 +1802,7 @@ def _bind_required_evidence_dependency(
         "state": evidence_state["state"],
         "evidence_handles": evidence_handles[:4],
         "remaining_needs": list(evidence_state["remaining_needs"]),
+        "goal_continuation_ref": _task_continuation_ref(selected_request),
     }
     validated_dependency = validate_required_resolver_evidence_dependency(
         dependency,
@@ -1216,8 +1861,9 @@ def _timeout_observation(
         observation["task_resolution_evidence_state"] = {
             "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
             "state": "blocked",
-            "remaining_needs": [],
+            "remaining_needs": [request["objective"]],
         }
+        observation["goal_continuation_ref"] = _task_continuation_ref(request)
     return_value = validate_resolver_observation(observation)
     return return_value
 
@@ -1247,8 +1893,9 @@ def _duplicate_request_observation(
         observation["task_resolution_evidence_state"] = {
             "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
             "state": "blocked",
-            "remaining_needs": [],
+            "remaining_needs": [request["objective"]],
         }
+        observation["goal_continuation_ref"] = _task_continuation_ref(request)
     return_value = validate_resolver_observation(observation)
     return return_value
 
@@ -1276,6 +1923,7 @@ def _terminal_blocker_speak_action_spec(
 ) -> dict[str, Any]:
     """Build a visible text-surface action for terminal resolver blockers."""
 
+    surface_role, continuation_ref = _terminal_surface_metadata(request)
     detail = (
         f'围绕 objective={request["objective"]} 说明当前证据获取已经阻塞，'
         '不能给出来源确认的具体当前对象或状态；不要重复请求同一解析能力。'
@@ -1333,6 +1981,8 @@ def _terminal_blocker_speak_action_spec(
             "max_depth": 0,
             "include_result_as": None,
         },
+        "surface_role": surface_role,
+        "goal_continuation_ref": continuation_ref,
         "reason": (
             "Resolver reached a terminal capability blocker and must surface "
             "the evidence boundary instead of looping silently."
@@ -1367,8 +2017,11 @@ def _max_cycle_observation(
         observation["task_resolution_evidence_state"] = {
             "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
             "state": "blocked",
-            "remaining_needs": [],
+            "remaining_needs": [previous_observation["request_objective"]],
         }
+        observation["goal_continuation_ref"] = (
+            previous_observation["goal_continuation_ref"]
+        )
     return_value = validate_resolver_observation(observation)
     return return_value
 

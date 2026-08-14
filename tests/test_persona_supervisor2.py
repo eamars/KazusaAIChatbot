@@ -17,6 +17,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionContractError,
     CognitionExecutionError,
 )
+from kazusa_ai_chatbot.cognition_episode import build_goal_continuation_ref
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
 )
@@ -74,6 +75,20 @@ def test_decontextualizer_preserves_direct_imperative_roles() -> None:
 def _cognition_output(route: str) -> dict[str, object]:
     """Build one exact native V2 result for persona routing."""
 
+    continuation_ref = (
+        build_goal_continuation_ref(
+            source_episode_id="persona-episode-1",
+            source_message_id="message-1",
+            branch_id="ordinary_response",
+            goal_ref={
+                "scope": "user",
+                "kind": "goal",
+                "entity_id": "persona-goal-1",
+            },
+        )
+        if route == "speech"
+        else None
+    )
     return {
         "schema_version": "cognition_core_output.v2",
         "intention": {
@@ -81,7 +96,9 @@ def _cognition_output(route: str) -> dict[str, object]:
             "intention": "respond to the grounded episode",
             "target_roles": [],
             "reason": "the current episode establishes the selected route",
+            "goal_continuation_ref": continuation_ref,
         },
+        "goal_continuation_ref": continuation_ref,
         "supporting_bids": [],
         "state_update": {
             "state_scope": "user",
@@ -341,6 +358,20 @@ def _accepted_coding_action_spec() -> dict[str, object]:
             "allowed_next_actions": ["revise_proposal"],
         }],
     }
+    continuation_ref = build_goal_continuation_ref(
+        source_episode_id="persona-episode-1",
+        source_message_id="message-1",
+        branch_id="ordinary_response",
+        goal_ref={
+            "scope": "user",
+            "kind": "goal",
+            "entity_id": "persona-coding-goal-1",
+        },
+    )
+    execution_context = cognition_module._coding_execution_context_from_state(
+        state,
+        goal_continuation_ref=continuation_ref,
+    )
     specs = materialize_semantic_action_requests(
         [{
             "capability": ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
@@ -348,10 +379,16 @@ def _accepted_coding_action_spec() -> dict[str, object]:
             "detail": "Revise the accepted coding proposal.",
             "reason": "The user requested a revision to the existing run.",
             "context_ref": "coding_run:run-1",
+            "surface_role": "task_acknowledgement",
+            "goal_continuation_ref": continuation_ref,
+            "task_execution_context": execution_context,
         }],
         state,
     )
     assert len(specs) == 1
+    assert specs[0]["params"]["task_execution_context"] == (
+        execution_context
+    )
     return specs[0]
 
 
@@ -378,6 +415,41 @@ def test_v2_speech_intention_materializes_one_speak_action() -> None:
     assert requirements["detail"] == (
         "respond to the grounded episode"
     )
+
+
+def test_background_pending_goal_materializes_acknowledgement_only() -> None:
+    """A background task owns an acknowledgement, not a factual surface."""
+
+    continuation_ref = build_goal_continuation_ref(
+        source_episode_id="persona-background-episode",
+        source_message_id="message-1",
+        branch_id="ordinary_response",
+        goal_ref={
+            "scope": "user",
+            "kind": "goal",
+            "entity_id": "persona-background-goal",
+        },
+    )
+    output = _cognition_output("speech")
+    output["goal_continuation_ref"] = continuation_ref
+    output["intention"]["goal_continuation_ref"] = continuation_ref
+    output["resolver_requests"] = [{
+        "capability": "task_resolution_request",
+        "semantic_goal": "resolve one bounded evidence goal",
+        "reason": "the current response lacks required evidence",
+        "evidence_handles": [],
+        "goal_continuation_ref": continuation_ref,
+        "start_in_background": True,
+    }]
+
+    specs = cognition_module._materialize_v2_action_requests(
+        output,
+        _persona_state(),
+    )
+
+    assert [spec["kind"] for spec in specs] == [SPEAK_CAPABILITY]
+    assert specs[0]["surface_role"] == "task_acknowledgement"
+    assert specs[0]["goal_continuation_ref"] == continuation_ref
 
 
 @pytest.mark.asyncio
@@ -494,12 +566,23 @@ async def test_live_persona_loads_open_coding_run_contexts(
 def test_resolver_owned_speak_spec_overrides_stale_evidence_route() -> None:
     """A terminal resolver surface remains visible after recurrence."""
 
+    continuation_ref = build_goal_continuation_ref(
+        source_episode_id="persona-episode-1",
+        source_message_id="message-1",
+        branch_id="ordinary_response",
+        goal_ref={
+            "scope": "user",
+            "kind": "goal",
+            "entity_id": "persona-goal-1",
+        },
+    )
     request = {
         "schema_version": "resolver_capability_request.v1",
         "capability_kind": "task_resolution_request",
         "objective": "retrieve grounded breakfast evidence",
         "reason": "the direct question requested one grounded answer",
         "priority": "now",
+        "goal_continuation_ref": continuation_ref,
     }
     blocker = {
         "schema_version": "resolver_observation.v1",
@@ -510,6 +593,12 @@ def test_resolver_owned_speak_spec_overrides_stale_evidence_route() -> None:
         "status": "failed",
         "prompt_safe_summary": "No additional grounded evidence was found.",
         "evidence_refs": [],
+        "task_resolution_evidence_state": {
+            "schema_version": "resolver_evidence_state.v1",
+            "state": "blocked",
+            "remaining_needs": ["retrieve grounded breakfast evidence"],
+        },
+        "goal_continuation_ref": continuation_ref,
         "created_at_utc": NOW,
     }
     state = {

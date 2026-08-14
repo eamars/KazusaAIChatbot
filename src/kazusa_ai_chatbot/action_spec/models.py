@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict
+from typing import TYPE_CHECKING, Literal, NotRequired, TypeAlias, TypedDict
+
+from kazusa_ai_chatbot.cognition_episode import (
+    GoalContinuationRefV1,
+    validate_goal_continuation_ref,
+)
 
 if TYPE_CHECKING:
     from kazusa_ai_chatbot.cognition_core_v2.contracts import RoleRefV2
@@ -69,6 +74,27 @@ ALLOWED_CAPABILITY_OWNERS = frozenset(
 ALLOWED_COGNITION_MODES = frozenset(("deliberative", "reflex"))
 ALLOWED_URGENCY_VALUES = frozenset(("now", "background", "scheduled"))
 ALLOWED_VISIBILITY_VALUES = frozenset(("private", "preview", "user_visible"))
+ALLOWED_SURFACE_ROLES = frozenset((
+    "factual_answer",
+    "task_acknowledgement",
+    "task_result",
+    "task_status",
+    "ordinary",
+))
+CONTINUATION_SURFACE_ROLES = frozenset((
+    "factual_answer",
+    "task_acknowledgement",
+    "task_result",
+    "task_status",
+))
+
+SurfaceRoleV1: TypeAlias = Literal[
+    "factual_answer",
+    "task_acknowledgement",
+    "task_result",
+    "task_status",
+    "ordinary",
+]
 
 LIFECYCLE_STATUS_BY_DECISION = {
     "fulfilled": "completed",
@@ -245,6 +271,8 @@ class ActionSpecV1(TypedDict):
     visibility: Literal["private", "preview", "user_visible"]
     deadline: str | None
     continuation: ActionContinuationV1
+    surface_role: SurfaceRoleV1
+    goal_continuation_ref: GoalContinuationRefV1 | None
     reason: str
     cognition_provenance: NotRequired[dict[str, object]]
 
@@ -421,6 +449,25 @@ def validate_action_spec(value: object) -> ActionSpecV1:
     _require_enum(data, "visibility", ALLOWED_VISIBILITY_VALUES)
     _require_nullable_string(data, "deadline")
     validate_action_continuation(data.get("continuation"))
+    surface_role = _require_enum(data, "surface_role", ALLOWED_SURFACE_ROLES)
+    if "goal_continuation_ref" not in data:
+        raise ActionValidationError("goal_continuation_ref: required")
+    goal_continuation_ref = data["goal_continuation_ref"]
+    if surface_role in CONTINUATION_SURFACE_ROLES:
+        if goal_continuation_ref is None:
+            raise ActionValidationError(
+                "goal_continuation_ref: required for continuation surface role"
+            )
+        try:
+            validate_goal_continuation_ref(goal_continuation_ref)
+        except ValueError as exc:
+            raise ActionValidationError(
+                f"goal_continuation_ref: invalid reference: {exc}"
+            ) from exc
+    elif goal_continuation_ref is not None:
+        raise ActionValidationError(
+            "goal_continuation_ref: expected null for ordinary surface role"
+        )
     _require_non_empty_string(data, "reason")
     return_value = data
     return return_value

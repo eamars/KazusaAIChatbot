@@ -14,6 +14,7 @@ from kazusa_ai_chatbot.action_spec.handlers.memory_lifecycle import (
     validate_memory_lifecycle_action,
 )
 from kazusa_ai_chatbot.action_spec.models import ActionValidationError
+from kazusa_ai_chatbot.action_spec.models import validate_action_spec
 from kazusa_ai_chatbot.action_spec.registry import (
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
@@ -35,6 +36,8 @@ def _action_spec() -> dict:
         "schema_version": "action_spec.v1",
         "kind": APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
         "cognition_mode": "deliberative",
+        "surface_role": "ordinary",
+        "goal_continuation_ref": None,
         "source_refs": [
             {
                 "schema_version": "action_source_ref.v1",
@@ -74,6 +77,25 @@ def test_lifecycle_status_mapping_matches_existing_user_memory_statuses() -> Non
     assert map_lifecycle_decision_to_status("abandoned") == "cancelled"
     assert map_lifecycle_decision_to_status("obsolete") == "archived"
     assert map_lifecycle_decision_to_status("deferred") == "active"
+
+
+def test_memory_lifecycle_action_spec_declares_surface_metadata() -> None:
+    """The lifecycle producer must emit explicit non-continuation metadata."""
+
+    from kazusa_ai_chatbot.nodes import persona_supervisor2_memory_lifecycle
+
+    action_spec = (
+        persona_supervisor2_memory_lifecycle._build_apply_lifecycle_action_spec(
+            unit_id="promise-001",
+            lifecycle_decision="abandoned",
+            due_at=None,
+            reason="The commitment is no longer active.",
+        )
+    )
+    validated = validate_action_spec(action_spec)
+
+    assert validated["surface_role"] == "ordinary"
+    assert validated["goal_continuation_ref"] is None
 
 
 def test_apply_memory_lifecycle_update_builds_narrow_repository_call() -> None:

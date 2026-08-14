@@ -7,6 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from kazusa_ai_chatbot.cognition_episode import build_goal_continuation_ref
+from kazusa_ai_chatbot.cognition_core_v2.contracts import CognitionExecutionError
 from kazusa_ai_chatbot.cognition_core_v2.action_authorization import (
     authorize_action_requests,
     derive_action_route,
@@ -116,6 +118,34 @@ def test_route_is_derived_from_protocol_and_validated_request_sets(
     )
 
     assert result == expected
+
+
+def test_same_goal_pending_resolver_cannot_derive_factual_speech_route() -> None:
+    """A pending resolver and factual route cannot share one continuation."""
+
+    continuation_ref = build_goal_continuation_ref(
+        source_episode_id="episode-route",
+        source_message_id="message-route",
+        branch_id="ordinary_response",
+        goal_ref={
+            "scope": "user",
+            "kind": "goal",
+            "entity_id": "goal-route",
+        },
+    )
+
+    with pytest.raises(CognitionExecutionError, match="same goal"):
+        derive_action_route(
+            episode={"output_mode": "visible_reply"},
+            primary_bid=_bid(),
+            action_requests=[],
+            resolver_requests=[{
+                "capability": "task_resolution_request",
+                "goal_continuation_ref": continuation_ref,
+            }],
+            goal_resolution="answerable_now",
+            goal_continuation_ref=continuation_ref,
+        )
 
 
 @pytest.mark.asyncio

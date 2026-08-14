@@ -9,6 +9,10 @@ from typing import Any
 from kazusa_ai_chatbot.action_spec.results import (
     project_trace_action_result_v2,
 )
+from kazusa_ai_chatbot.background_work.result_source import (
+    ToolResultCognitionSourceV1,
+    validate_tool_result_cognition_source,
+)
 from kazusa_ai_chatbot.character_identity_growth.models import (
     TOP_LEVEL_IDENTITY_KEYS,
 )
@@ -39,6 +43,10 @@ from kazusa_ai_chatbot.cognition_core_v2.surface import (
     run_visual_surface_planning,
 )
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
+    MAX_RESOLVER_EVIDENCE_EXCERPT_CHARS,
+    MAX_RESOLVER_EVIDENCE_EXCERPTS,
+    MAX_RESOLVER_GOAL_ITEM_CHARS,
+    MAX_RESOLVER_GOAL_ITEMS,
     resolver_evidence_excerpts_for_cognition,
 )
 from kazusa_ai_chatbot.cognition_resolver.state import validate_resolver_state
@@ -121,7 +129,10 @@ def build_text_surface_input_from_global_state(
     runtime_limits = build_runtime_capability_limits(state)
     if runtime_limits:
         payload["runtime_capability_limits"] = runtime_limits
-    resolver_result = _resolver_result(state)
+    resolver_result = _resolver_result(
+        state,
+        continuation_ref=validated_output["intention"]["goal_continuation_ref"],
+    )
     if resolver_result is not None:
         payload["resolver_result"] = resolver_result
     admitted = validated_output.get("admitted_bid")
@@ -635,8 +646,19 @@ def _action_results(state: Mapping[str, Any]) -> list[dict[str, Any]]:
     return result
 
 
-def _resolver_result(state: Mapping[str, Any]) -> dict[str, Any] | None:
+def _resolver_result(
+    state: Mapping[str, Any],
+    *,
+    continuation_ref: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
     """Project the bound source-owned resolver outcome into L3."""
+
+    episode = state.get("cognitive_episode")
+    if (
+        isinstance(episode, Mapping)
+        and episode.get("trigger_source") == "tool_result"
+    ):
+        return _tool_result_resolver_result(episode, continuation_ref)
 
     raw_resolver_state = state.get("resolver_state")
     if not isinstance(raw_resolver_state, Mapping):
@@ -665,11 +687,19 @@ def _resolver_result(state: Mapping[str, Any]) -> dict[str, Any] | None:
             raise ValueError(
                 "required resolver evidence observation has wrong capability"
             )
-        return _task_resolver_result(observation, dependency=dependency)
+        return _task_resolver_result(
+            observation,
+            dependency=dependency,
+            continuation_ref=continuation_ref,
+        )
 
     observation = observations[-1]
     if observation["capability_kind"] == "task_resolution_request":
-        return _task_resolver_result(observation, dependency=None)
+        return _task_resolver_result(
+            observation,
+            dependency=None,
+            continuation_ref=continuation_ref,
+        )
     return {
         "capability_kind": observation["capability_kind"],
         "status": observation["status"],
@@ -677,13 +707,126 @@ def _resolver_result(state: Mapping[str, Any]) -> dict[str, Any] | None:
     }
 
 
+_TOOL_RESULT_SURFACE_STATUS = {
+    "resolved": "succeeded",
+    "partial": "succeeded",
+    "deferred": "succeeded",
+    "needs_user_input": "blocked",
+    "approval_required": "blocked",
+    "unavailable": "failed",
+    "failed": "failed",
+}
+_TOOL_RESULT_OBSERVATION_HANDLE = "tool_result_episode"
+
+
+def _tool_result_resolver_result(
+    episode: Mapping[str, Any],
+    continuation_ref: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Project the stored typed task result as the L3 source-owned authority.
+
+    A later tool-result episode carries its own typed result contract in the
+    percept; current-cycle resolver observations never replace it. Factual
+    states expose only validated evidence excerpts, and every non-factual
+    state keeps empty evidence so surface wording stays objective-scoped
+    status or clarification.
+    """
+
+    origin = episode.get("origin_metadata")
+    if not isinstance(origin, Mapping):
+        raise ValueError("tool-result episode origin is required")
+    if origin.get("goal_continuation_ref") != continuation_ref:
+        raise ValueError(
+            "tool-result episode origin continuation reference conflicts "
+            "with the committed cognition reference"
+        )
+    typed_source = _episode_tool_result_source(episode)
+    if typed_source["goal_continuation_ref"] != continuation_ref:
+        raise ValueError(
+            "tool-result cognition source continuation reference conflicts "
+            "with the committed cognition reference"
+        )
+    surface_status = _TOOL_RESULT_SURFACE_STATUS[typed_source["task_status"]]
+    return {
+        "capability_kind": "task_resolution_request",
+        "status": surface_status,
+        "semantic_result": typed_source["semantic_summary"],
+        "prompt_safe_observation_handle": _TOOL_RESULT_OBSERVATION_HANDLE,
+        "evidence_state": typed_source["evidence_state"],
+        "evidence_excerpts": [
+            excerpt[:MAX_RESOLVER_EVIDENCE_EXCERPT_CHARS]
+            for excerpt in typed_source["evidence_excerpts"][
+                :MAX_RESOLVER_EVIDENCE_EXCERPTS
+            ]
+        ],
+        "evidence_handles": [
+            handle[:MAX_RESOLVER_GOAL_ITEM_CHARS]
+            for handle in typed_source["evidence_handles"][
+                :MAX_RESOLVER_EVIDENCE_EXCERPTS
+            ]
+        ],
+        "remaining_needs": [
+            need[:MAX_RESOLVER_GOAL_ITEM_CHARS]
+            for need in typed_source["remaining_needs"][
+                :MAX_RESOLVER_GOAL_ITEMS
+            ]
+        ],
+    }
+
+
+def _episode_tool_result_source(
+    episode: Mapping[str, Any],
+) -> ToolResultCognitionSourceV1:
+    """Require the validated typed tool-result source on one result percept."""
+
+    percepts = episode.get("percepts")
+    if not isinstance(percepts, list):
+        raise ValueError("tool-result episode percepts are required")
+    for percept in percepts:
+        if not isinstance(percept, Mapping):
+            continue
+        if percept.get("source_kind") != "tool_result":
+            continue
+        content = percept.get("content")
+        if not isinstance(content, Mapping):
+            raise ValueError("tool-result percept content is required")
+        raw_source = content.get("cognition_source")
+        if not isinstance(raw_source, Mapping):
+            raise ValueError(
+                "tool-result percept requires a typed cognition_source"
+            )
+        try:
+            typed_source = validate_tool_result_cognition_source(raw_source)
+        except ValueError as exc:
+            raise ValueError(
+                f"tool-result cognition_source is invalid: {exc}"
+            ) from exc
+        return typed_source
+    raise ValueError(
+        "tool-result episode requires a typed tool-result percept"
+    )
+
+
 def _task_resolver_result(
     observation: Mapping[str, Any],
     *,
     dependency: Mapping[str, Any] | None,
+    continuation_ref: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
-    """Project one task observation with source-owned evidence metadata."""
+    """Project one task observation with source-owned evidence metadata.
 
+    The observation and any required dependency must carry the exact
+    goal-continuation reference committed by cognition; a missing or
+    mismatched reference fails closed so no result wording can detach from
+    its original goal.
+    """
+
+    observation_ref = observation.get("goal_continuation_ref")
+    if observation_ref != continuation_ref:
+        raise ValueError(
+            "task resolver observation continuation reference conflicts with "
+            "the committed cognition reference"
+        )
     evidence_state = observation.get("task_resolution_evidence_state")
     if not isinstance(evidence_state, Mapping):
         raise ValueError("task resolver observation lacks evidence state")
@@ -695,6 +838,11 @@ def _task_resolver_result(
             for index, _excerpt in enumerate(excerpts, start=1)
         ]
     else:
+        if dependency["goal_continuation_ref"] != continuation_ref:
+            raise ValueError(
+                "required resolver dependency continuation reference conflicts "
+                "with the committed cognition reference"
+            )
         prompt_safe_observation_handle = dependency[
             "prompt_safe_observation_handle"
         ]

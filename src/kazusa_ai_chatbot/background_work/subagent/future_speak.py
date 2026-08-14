@@ -126,6 +126,8 @@ def _future_cognition_action_spec(
             "max_depth": 1,
             "include_result_as": "scheduled_event",
         },
+        "surface_role": "ordinary",
+        "goal_continuation_ref": None,
         "reason": "A reviewed future-speak task requested deterministic scheduling.",
     }
     return action_spec

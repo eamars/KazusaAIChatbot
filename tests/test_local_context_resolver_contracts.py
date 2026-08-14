@@ -21,6 +21,7 @@ from kazusa_ai_chatbot.local_context_resolver import (
     validate_local_context_resolver_options,
     validate_local_context_resolver_request,
 )
+from tests.test_task_resolution_orchestrator import _scene_context
 
 
 def test_request_context_and_packet_contracts_validate() -> None:
@@ -38,9 +39,10 @@ def test_request_context_and_packet_contracts_validate() -> None:
         "character_name": "active character",
         "platform": "debug",
         "platform_channel_id": "group-1",
-        "global_user_id": "user-1",
-        "user_name": "operator",
-        "local_time_context": {"local_date": "2026-07-04"},
+            "global_user_id": "user-1",
+            "user_name": "operator",
+            "scene_context": _scene_context(),
+            "local_time_context": {"local_date": "2026-07-04"},
         "prompt_message_context": {
             "message_text": "@active character #napcat",
             "addressed_to_active_character": True,
@@ -79,6 +81,29 @@ def test_request_context_and_packet_contracts_validate() -> None:
     assert packet["rag_result"]["memory_evidence"][0]["summary"] == (
         "#napcat is a playful local command anchor."
     )
+
+
+def test_context_requires_bounded_scene_context() -> None:
+    """The standalone resolver cannot run without the canonical scene."""
+
+    context = {
+        "schema_version": LOCAL_CONTEXT_RESOLVER_CONTEXT_VERSION,
+        "character_name": "active character",
+        "platform": "debug",
+        "platform_channel_id": "group-1",
+        "global_user_id": "user-1",
+        "user_name": "operator",
+        "scene_context": _scene_context(),
+        "local_time_context": {"local_date": "2026-07-04"},
+        "prompt_message_context": {"message_text": "resolve this"},
+        "chat_history_recent": [],
+        "chat_history_wide": [],
+        "conversation_progress": {},
+    }
+    context.pop("scene_context")
+
+    with pytest.raises(LocalContextValidationError, match="scene_context"):
+        validate_local_context_resolver_context(context)
 
 
 def test_node_and_artifact_contracts_validate_source_owned_evidence() -> None:

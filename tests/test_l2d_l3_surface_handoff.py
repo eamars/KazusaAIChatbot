@@ -21,6 +21,7 @@ from kazusa_ai_chatbot.cognition_episode import (
     CURRENT_USER_ROLE,
     NO_ROLE,
 )
+from kazusa_ai_chatbot.action_spec.results import build_text_surface_output
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as persona_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_surface
 from tests.cognition_core_v2_test_helpers import (
@@ -136,7 +137,13 @@ def test_l3_builder_uses_only_committed_v2_surface_fields() -> None:
     assert payload["primary_bid"]["desired_outcome"] == "maintain continuity"
     assert payload["character_expression_context"]["tempo"] == "moderate"
     assert "Current Character" in payload["visual_character_context"]
-    assert "entity_id" not in json.dumps(payload)
+    assert payload["intention"]["goal_continuation_ref"] == (
+        _state()["cognition_core_output"]["intention"][
+            "goal_continuation_ref"
+        ]
+    )
+    serialized = json.dumps(payload)
+    assert "handler_id" not in serialized
 
 
 def test_selected_response_operation_reaches_dialog_unchanged() -> None:
@@ -291,6 +298,9 @@ def test_l3_builder_projects_latest_resolver_result_as_separate_authority() -> N
     """L3 receives capability truth without recasting it as an action result."""
 
     state = _state()
+    continuation_ref = state["cognition_core_output"]["intention"][
+        "goal_continuation_ref"
+    ]
     resolver_state = new_resolver_state(
         decontextualized_input="research current retail evidence",
         max_cycles=3,
@@ -302,6 +312,7 @@ def test_l3_builder_projects_latest_resolver_result_as_separate_authority() -> N
             "schema_version": "resolver_observation.v1",
             "observation_id": "resolver-observation-scheduled-research",
             "capability_kind": "task_resolution_request",
+            "goal_continuation_ref": continuation_ref,
             "request_objective": "research current retail evidence",
             "request_reason": "current evidence is required",
             "status": "succeeded",
@@ -345,6 +356,100 @@ def test_l3_builder_projects_latest_resolver_result_as_separate_authority() -> N
 
     degraded_output = build_degraded_text_surface(payload)
     assert degraded_output["resolver_result"] == payload["resolver_result"]
+
+
+def test_tool_result_surface_role_is_typed() -> None:
+    """The L3 handoff retains typed result lineage for one continuation."""
+
+    state = _state()
+    continuation_ref = state["cognition_core_output"]["intention"][
+        "goal_continuation_ref"
+    ]
+    output = build_text_surface_output(
+        fragments=["The task status is ready."],
+        created_at="2026-07-14T00:00:00Z",
+        surface_role="task_status",
+        goal_continuation_ref=continuation_ref,
+    )
+    payload = l3_surface.build_text_surface_input_from_global_state(
+        state,
+        interaction_style_context="brief and natural",
+    )
+
+    assert output["surface_role"] == "task_status"
+    assert output["goal_continuation_ref"] == continuation_ref
+    assert payload["intention"]["goal_continuation_ref"] == continuation_ref
+
+
+def test_pending_task_result_cannot_be_rendered_as_factual_answer() -> None:
+    """Missing task evidence reaches L3 as a status-only result boundary."""
+
+    state = _state()
+    continuation_ref = state["cognition_core_output"]["intention"][
+        "goal_continuation_ref"
+    ]
+    resolver_state = new_resolver_state(
+        decontextualized_input="research current retail evidence",
+        max_cycles=3,
+        episode_id="surface-episode",
+    )
+    state["resolver_state"] = append_observation(
+        resolver_state,
+        {
+            "schema_version": "resolver_observation.v1",
+            "observation_id": "resolver-observation-pending-result",
+            "capability_kind": "task_resolution_request",
+            "goal_continuation_ref": continuation_ref,
+            "request_objective": "research current retail evidence",
+            "request_reason": "current evidence is required",
+            "status": "succeeded",
+            "prompt_safe_summary": "The task is still waiting for evidence.",
+            "task_resolution_evidence_state": {
+                "schema_version": "resolver_evidence_state.v1",
+                "state": "pending",
+                "remaining_needs": ["the final evidence"],
+            },
+            "evidence_refs": [],
+            "created_at_utc": "2026-07-14T00:00:00Z",
+        },
+    )
+
+    payload = l3_surface.build_text_surface_input_from_global_state(
+        state,
+        interaction_style_context="brief and natural",
+    )
+    from kazusa_ai_chatbot.cognition_core_v2.surface import (
+        build_degraded_text_surface,
+    )
+
+    output = build_degraded_text_surface(payload)
+
+    assert output["resolver_result"]["evidence_state"] == "pending"
+    assert output["resolver_result"]["evidence_excerpts"] == []
+    assert output["resolver_result"]["evidence_handles"] == []
+
+
+def test_result_status_wording_matrix_is_exact() -> None:
+    """Surface prompts distinguish facts from every non-factual task state."""
+
+    from kazusa_ai_chatbot.cognition_core_v2 import surface_stages
+
+    prompt = (
+        surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
+        + surface_stages.PREFERENCE_SYSTEM_PROMPT
+        + surface_stages.DIALOG_COMPLIANCE_REPAIR_SYSTEM_PROMPT
+    )
+    for state_name in (
+        "complete",
+        "partial",
+        "pending",
+        "missing",
+        "blocked",
+        "unavailable",
+        "failed",
+    ):
+        assert state_name in prompt
+    assert "不得编造缺失的事实答案" in prompt
 
 
 @pytest.mark.asyncio

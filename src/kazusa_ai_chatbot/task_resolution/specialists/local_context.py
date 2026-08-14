@@ -67,6 +67,7 @@ async def resolve_with_local_context(
         "platform_channel_id": context["channel_id"],
         "global_user_id": context["requester_global_user_id"],
         "user_name": context["requester_platform_user_id"],
+        "scene_context": context["scene_context"],
         "local_time_context": dict(context["local_time_context"]),
         "prompt_message_context": dict(context["prompt_message_context"]),
         "chat_history_recent": list(context["chat_history_recent"]),

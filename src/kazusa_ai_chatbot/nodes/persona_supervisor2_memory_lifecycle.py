@@ -983,6 +983,8 @@ def _build_apply_lifecycle_action_spec(
         "visibility": "private",
         "deadline": None,
         "continuation": _no_continuation(),
+        "surface_role": "ordinary",
+        "goal_continuation_ref": None,
         "reason": reason,
     }
     return action_spec
