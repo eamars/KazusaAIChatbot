@@ -113,6 +113,14 @@ An observation is evidence, never persona, intention, affect, relationship
 state, or final stance. Resolver code cannot write `replacement_state`, choose
 a goal branch, or rewrite an intention route.
 
+Task and local-context execution require the validated cognition-owned
+`GlobalPersonaState.cognition_scene_context` carrier. The generic loop validates
+that carrier before invoking a task executor, so a missing or malformed handoff
+is a typed boundary failure outside checkpoint replay. Task-resolution
+advertisement uses the same deterministic readiness contract as execution;
+targetless self-cognition with no executable identity therefore retains other
+valid affordances while omitting task resolution.
+
 `task_resolution_request` is the single generic evidence-work capability. The
 model-owned `start_in_background` boolean selects its entry route. `true`
 creates the checkpoint and enters the same accepted-task, pending-state, queue,

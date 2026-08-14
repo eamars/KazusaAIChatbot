@@ -9,6 +9,7 @@ from kazusa_ai_chatbot.action_spec.results import (
 from kazusa_ai_chatbot.cognition_episode import CognitiveEpisodeV1
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     GoalResolutionV2,
+    SceneContextV2,
     SceneParticipantBindingV1,
     TextSurfaceInputV2,
     TextSurfaceOutputV2,
@@ -104,6 +105,7 @@ class GlobalPersonaState(TypedDict):
     conversation_episode_state: NotRequired[ConversationProgressStateV2 | None]
     conversation_progress: NotRequired[ConversationProgressPromptV2]
     public_group_scene: str
+    cognition_scene_context: NotRequired[SceneContextV2]
     ambient_logical_turns: NotRequired[list[ConversationLogicalTurnV1]]
     interaction_logical_turns: NotRequired[list[ConversationLogicalTurnV1]]
     conversation_progress_diagnostics: NotRequired[

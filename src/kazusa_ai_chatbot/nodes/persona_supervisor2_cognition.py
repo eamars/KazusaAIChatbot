@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Mapping
+from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, cast
 
@@ -116,6 +117,7 @@ from kazusa_ai_chatbot.cognition_episode import (
 from kazusa_ai_chatbot.cognition_core_v2 import run_cognition
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     ActionAffordanceV2,
+    CognitionContractError,
     CognitionCoreInputV2,
     CognitionCoreOutputV2,
     CognitionCoreServicesV2,
@@ -124,6 +126,8 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     GroupEngagementActionContextV2,
     PAST_DIALOG_COGNITION_CONTEXT_MAX_CHARS,
     ResolverAffordanceV2,
+    SceneContextV2,
+    _validate_scene_context,
     validate_cognition_core_input,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
@@ -143,6 +147,7 @@ from kazusa_ai_chatbot.cognition_resolver.capabilities import (
     merge_shared_memory_prewarm_result,
     project_resolver_observation_for_cognition,
     run_first_cycle_shared_memory_prewarm,
+    validate_task_resolution_execution_readiness,
 )
 from kazusa_ai_chatbot.cognition_resolver.guardrail import (
     CognitionRetryCoordinator,
@@ -169,6 +174,7 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     CURRENT_TURN_RELATIONAL_WILLINGNESS_VERSION,
     RESOLVER_CAPABILITY_REQUEST_VERSION,
     RESOLVER_CAPABILITY_SEMANTICS,
+    ResolverValidationError,
     validate_current_turn_relational_willingness,
 )
 from kazusa_ai_chatbot.cognition_resolver.state import validate_resolver_state
@@ -467,6 +473,117 @@ def build_cognition_core_services() -> CognitionCoreServicesV2:
     )
 
 
+def build_scene_context_from_global_state(
+    state: Mapping[str, Any],
+) -> SceneContextV2:
+    """Build and validate the one prompt-safe scene for a cognition episode.
+
+    The returned scene is the canonical bounded representation shared by the
+    V2 cognition input, resolver capabilities, and accepted coding context.
+    It contains semantic roles, current scene text, temporal continuity,
+    sleep phase, and the episode-local participant bindings without transport
+    or persistent identifiers.
+    """
+
+    episode = state.get("cognitive_episode")
+    if not isinstance(episode, Mapping):
+        raise CognitionExecutionError(
+            "canonical cognitive episode is required for scene context"
+        )
+    try:
+        validate_cognitive_episode_v1(episode)
+    except CognitiveEpisodeValidationError as exc:
+        raise CognitionExecutionError(str(exc)) from exc
+
+    character_profile = state.get("character_profile")
+    if not isinstance(character_profile, Mapping):
+        raise CognitionExecutionError(
+            "character profile is required for scene context"
+        )
+    timestamp = _v2_timestamp(episode["created_at"])
+    semantic_text = _semantic_episode_text(state)
+    conversation_progress = state.get("conversation_progress")
+    if conversation_progress is None:
+        conversation_continuity = ""
+    elif not isinstance(conversation_progress, Mapping):
+        raise CognitionExecutionError(
+            "conversation progress must be a V2 prompt mapping"
+        )
+    else:
+        conversation_continuity = project_conversation_progress_scene(
+            conversation_progress,
+        )
+    if conversation_continuity:
+        conversation_continuity = (
+            "Current participant continuity:\n"
+            f"{conversation_continuity}"
+        )[:2200].rstrip()
+
+    character_name = _text(character_profile.get("name"))
+    user_name = _text(state.get("user_name"))
+    character_label = _named_role_label("当前角色", character_name)
+    current_user_label = _named_role_label("当前用户", user_name)
+    character_role = character_label
+    current_user_role = current_user_label
+    if (
+        episode["trigger_source"] == "user_message"
+        and _episode_has_source_kind(episode, "dialog")
+    ):
+        character_role = (
+            f"{character_label}；dialog_text 的直接收件人，也是直接命令的隐含主语"
+        )
+        current_user_role = (
+            f"{current_user_label}；dialog_text 的发言者，也是该证据中第一人称代词的所属者"
+        )
+
+    scene_context: dict[str, Any] = {
+        "channel_scope": _scene_channel_scope(
+            episode["target_scope"].get("channel_type"),
+            episode.get("trigger_source"),
+        ),
+        "character_role": character_role,
+        "current_user_role": current_user_role,
+        "character_sleep_phase": project_character_sleep_phase(
+            parse_storage_utc_datetime(timestamp),
+            sleep_local_period=CHARACTER_SLEEP_LOCAL_PERIOD,
+            character_time_zone=CHARACTER_TIME_ZONE,
+            wake_prep_minutes=AFFECT_SETTLING_WAKE_PREP_MINUTES,
+        ),
+        "semantic_scene": semantic_text[:500],
+        "public_group_scene": _text(state.get("public_group_scene"))[:1800],
+        "conversation_continuity": conversation_continuity,
+        "semantic_temporal_context": _semantic_temporal_context(
+            state.get("conversation_episode_state"),
+            current_timestamp=timestamp,
+        ),
+    }
+    participant_bindings = state.get("scene_participant_bindings")
+    if participant_bindings is not None:
+        if not isinstance(participant_bindings, list):
+            raise CognitionExecutionError(
+                "scene participant bindings must be a list"
+            )
+        if any(
+            not isinstance(binding, Mapping)
+            for binding in participant_bindings
+        ):
+            raise CognitionExecutionError(
+                "scene participant bindings must contain mappings"
+            )
+        scene_context["participant_bindings"] = [
+            dict(binding)
+            for binding in participant_bindings
+        ]
+    try:
+        _validate_scene_context(scene_context)
+    except CognitionContractError as exc:
+        raise CognitionExecutionError(
+            f"canonical scene context is invalid: {exc}"
+        ) from exc
+    validated_scene_context = cast(SceneContextV2, scene_context)
+    return validated_scene_context
+
+
 def build_cognition_input_from_global_state(
     state: GlobalPersonaState,
     *,
@@ -558,6 +675,7 @@ def build_cognition_input_from_global_state(
         )
     episode_id = episode["episode_id"]
     semantic_text = _semantic_episode_text(state)
+    scene_context = build_scene_context_from_global_state(state)
     evidence = _episode_evidence(
         episode,
         episode_id=episode_id,
@@ -570,31 +688,15 @@ def build_cognition_input_from_global_state(
         timestamp,
     ))
     conversation_progress = state.get("conversation_progress")
-    conversation_episode_state = state.get("conversation_episode_state")
-    if conversation_progress is None:
-        conversation_continuity = ""
-    elif not isinstance(conversation_progress, dict):
-        raise CognitionExecutionError(
-            "conversation progress must be a V2 prompt mapping"
-        )
-    else:
-        conversation_continuity = project_conversation_progress_scene(
-            conversation_progress,
-        )
+    if conversation_progress is not None:
+        if not isinstance(conversation_progress, dict):
+            raise CognitionExecutionError(
+                "conversation progress must be a V2 prompt mapping"
+            )
         evidence.extend(project_conversation_progress_evidence(
             conversation_progress,
             timestamp,
         ))
-    if conversation_continuity:
-        conversation_continuity = (
-            'Current participant continuity:\n'
-            f'{conversation_continuity}'
-        )[:2200].rstrip()
-    semantic_temporal_context = _semantic_temporal_context(
-        conversation_episode_state,
-        current_timestamp=timestamp,
-    )
-    public_group_scene = _text(state['public_group_scene'])[:1800]
     evidence.extend(_rag_evidence(state.get("rag_result"), timestamp))
     evidence.extend(_promoted_reflection_evidence(
         state.get("promoted_reflection_context"),
@@ -615,36 +717,6 @@ def build_cognition_input_from_global_state(
     for index, row in enumerate(evidence, start=1):
         row["evidence_handle"] = f"e{index}"
     scope = selected_mutable_state["state_scope"]
-    channel_scope = _scene_channel_scope(
-        episode["target_scope"].get("channel_type"),
-        episode.get("trigger_source"),
-    )
-    character_name = (
-        _text(character_profile.get("name"))
-        if isinstance(character_profile, Mapping)
-        else ""
-    )
-    user_name = _text(state.get("user_name"))
-    character_label = _named_role_label("当前角色", character_name)
-    current_user_label = _named_role_label("当前用户", user_name)
-    character_role = character_label
-    current_user_role = current_user_label
-    character_sleep_phase = project_character_sleep_phase(
-        parse_storage_utc_datetime(timestamp),
-        sleep_local_period=CHARACTER_SLEEP_LOCAL_PERIOD,
-        character_time_zone=CHARACTER_TIME_ZONE,
-        wake_prep_minutes=AFFECT_SETTLING_WAKE_PREP_MINUTES,
-    )
-    if (
-        episode["trigger_source"] == "user_message"
-        and _episode_has_source_kind(episode, "dialog")
-    ):
-        character_role = (
-            f"{character_label}；dialog_text 的直接收件人，也是直接命令的隐含主语"
-        )
-        current_user_role = (
-            f"{current_user_label}；dialog_text 的发言者，也是该证据中第一人称代词的所属者"
-        )
     payload: CognitionCoreInputV2 = {
         "schema_version": "cognition_core_input.v2",
         "episode": dict(episode),
@@ -656,7 +728,10 @@ def build_cognition_input_from_global_state(
         "evidence": evidence[:32],
         "direct_facts": _typed_direct_facts(state.get("direct_facts")),
         "available_actions": _available_action_affordances(state),
-        "available_resolver_capabilities": _available_resolver_affordances(state),
+        "available_resolver_capabilities": _available_resolver_affordances(
+            state,
+            cognition_scene_context=scene_context,
+        ),
         "resolver_context": _text(state.get("resolver_context"))[:8000],
         "private_continuity_context": _text(
             state.get("internal_monologue_residue_context")
@@ -673,24 +748,8 @@ def build_cognition_input_from_global_state(
                 },
             )
         ),
-        "scene_context": {
-            "channel_scope": channel_scope,
-            "character_role": character_role,
-            "current_user_role": current_user_role,
-            "character_sleep_phase": character_sleep_phase,
-            "semantic_scene": semantic_text[:500],
-            "public_group_scene": public_group_scene,
-            "conversation_continuity": conversation_continuity,
-            "semantic_temporal_context": semantic_temporal_context,
-        },
+        "scene_context": scene_context,
     }
-    participant_bindings = state.get("scene_participant_bindings")
-    if isinstance(participant_bindings, list) and participant_bindings:
-        payload["scene_context"]["participant_bindings"] = [
-            dict(binding)
-            for binding in participant_bindings
-            if isinstance(binding, Mapping)
-        ]
     if relationship_operational_context is not None:
         payload["relationship_context"] = relationship_operational_context
     runtime_limits = build_runtime_capability_limits(state)
@@ -943,7 +1002,14 @@ async def call_cognition_subgraph(
             output,
             expected_character_updated_at=character_base_updated_at,
         )
+    resolved_state["cognition_scene_context"] = deepcopy(
+        cognition_input["scene_context"]
+    )
+    state = resolved_state  # type: ignore[assignment]
     update = _project_output_to_global_state(output, state)
+    update["cognition_scene_context"] = deepcopy(
+        cognition_input["scene_context"]
+    )
     if character_base_updated_at is not None:
         update["character_cognition_base_updated_at"] = (
             character_base_updated_at
@@ -1435,11 +1501,19 @@ def _coding_execution_context_from_state(
         )
     else:
         progress_context = dict(conversation_progress)
-    scene_context = _coding_scene_context(
-        state,
-        character_name=character_name,
-        timestamp=timestamp,
-    )
+    raw_scene_context = state.get("cognition_scene_context")
+    if not isinstance(raw_scene_context, Mapping):
+        raise CognitionExecutionError(
+            "cognition_scene_context: expected canonical object"
+        )
+    try:
+        _validate_scene_context(raw_scene_context)
+    except CognitionContractError as exc:
+        raise CognitionExecutionError(
+            "cognition_scene_context: invalid canonical object: "
+            f"{exc}"
+        ) from exc
+    scene_context = deepcopy(dict(raw_scene_context))
     context: TaskResolutionExecutionContextV1 = {
         "schema_version": TASK_RESOLUTION_EXECUTION_CONTEXT_VERSION,
         "character_name": character_name,
@@ -1483,78 +1557,6 @@ def _coding_execution_context_from_state(
     }
     validated_context = validate_task_resolution_execution_context(context)
     return validated_context
-
-
-def _coding_scene_context(
-    state: GlobalPersonaState,
-    *,
-    character_name: str,
-    timestamp: str,
-) -> dict[str, object]:
-    """Project the canonical prompt-safe scene for one coding continuation."""
-
-    episode = state.get("cognitive_episode")
-    channel_scope = _scene_channel_scope(
-        (
-            episode["target_scope"].get("channel_type")
-            if isinstance(episode, Mapping)
-            and isinstance(episode.get("target_scope"), Mapping)
-            else state.get("channel_type")
-        ),
-        (
-            episode.get("trigger_source")
-            if isinstance(episode, Mapping)
-            else None
-        ),
-    )
-    user_name = _text(state.get("user_name"))
-    character_role = _named_role_label("当前角色", character_name)
-    current_user_role = _named_role_label("当前用户", user_name)
-    if (
-        isinstance(episode, Mapping)
-        and episode.get("trigger_source") == "user_message"
-        and _episode_has_source_kind(episode, "dialog")
-    ):
-        character_role = (
-            f"{character_role}；dialog_text 的直接收件人，也是直接命令的隐含主语"
-        )
-        current_user_role = (
-            f"{current_user_role}；dialog_text 的发言者，"
-            "也是该证据中第一人称代词的所属者"
-        )
-    conversation_progress = state.get("conversation_progress")
-    conversation_continuity = ""
-    if (
-        isinstance(conversation_progress, Mapping)
-        and "current_thread" in conversation_progress
-    ):
-        conversation_continuity = project_conversation_progress_scene(
-            conversation_progress
-        )
-    if conversation_continuity:
-        conversation_continuity = (
-            "Current participant continuity:\n"
-            f"{conversation_continuity}"
-        )[:2200].rstrip()
-    scene_context: dict[str, object] = {
-        "channel_scope": channel_scope,
-        "character_role": character_role,
-        "current_user_role": current_user_role,
-        "character_sleep_phase": project_character_sleep_phase(
-            parse_storage_utc_datetime(timestamp),
-            sleep_local_period=CHARACTER_SLEEP_LOCAL_PERIOD,
-            character_time_zone=CHARACTER_TIME_ZONE,
-            wake_prep_minutes=AFFECT_SETTLING_WAKE_PREP_MINUTES,
-        ),
-        "semantic_scene": _semantic_episode_text(state)[:500],
-        "public_group_scene": _text(state.get("public_group_scene"))[:1800],
-        "conversation_continuity": conversation_continuity,
-        "semantic_temporal_context": _semantic_temporal_context(
-            state.get("conversation_episode_state"),
-            current_timestamp=timestamp,
-        ),
-    }
-    return scene_context
 
 
 def _required_context_state_text(
@@ -2017,6 +2019,8 @@ def _coding_run_blocker_summary(value: object) -> str:
 
 def _available_resolver_affordances(
     state: Mapping[str, Any],
+    *,
+    cognition_scene_context: SceneContextV2,
 ) -> list[ResolverAffordanceV2]:
     """Project resolver capabilities as availability, not execution authority.
 
@@ -2040,8 +2044,16 @@ def _available_resolver_affordances(
         for status in task_resolution_owner_states
     ):
         available_capabilities.discard("task_resolution_request")
+    if "task_resolution_request" in available_capabilities:
+        try:
+            validate_task_resolution_execution_readiness(
+                state,
+                cognition_scene_context=cognition_scene_context,
+            )
+        except ResolverValidationError:
+            available_capabilities.discard("task_resolution_request")
 
-    return [
+    affordances = [
         {
             "capability": capability,
             "semantic_capability": RESOLVER_CAPABILITY_SEMANTICS[capability],
@@ -2049,6 +2061,7 @@ def _available_resolver_affordances(
         }
         for capability in sorted(available_capabilities)
     ]
+    return affordances
 
 
 def _typed_direct_facts(value: object) -> list[dict[str, Any]]:

@@ -66,6 +66,7 @@ from kazusa_ai_chatbot.nodes.dialog_agent import (
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     build_action_availability_snapshot,
+    build_scene_context_from_global_state,
     call_cognition_subgraph,
     commit_cognition_output,
 )
@@ -656,8 +657,13 @@ async def run_rag_evidence_for_persona_state(
 ) -> dict:
     """Run reusable persona RAG evidence with this module's patch surface."""
 
+    prepared_state = dict(state)
+    if isinstance(prepared_state.get("cognitive_episode"), Mapping):
+        prepared_state["cognition_scene_context"] = (
+            build_scene_context_from_global_state(prepared_state)
+        )
     rag_result = await _run_rag_evidence_for_persona_state(
-        state,
+        prepared_state,
         agent_name=agent_name,
         objective=objective,
     )

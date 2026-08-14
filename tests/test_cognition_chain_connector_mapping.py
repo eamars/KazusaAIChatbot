@@ -17,6 +17,7 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
 )
+from kazusa_ai_chatbot.cognition_resolver import capabilities as resolver_capabilities
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     new_empty_goal_progress,
 )
@@ -127,6 +128,7 @@ def _global_state() -> dict[str, object]:
         "user_input": "hello",
         "decontextualized_input": "hello",
         "prompt_message_context": {},
+        "local_time_context": {},
         "cognitive_episode": episode,
         "user_multimedia_input": [],
         "platform": "debug",
@@ -186,6 +188,75 @@ def test_persona_connector_maps_one_native_user_scope() -> None:
         "quirks": "Use occasional dry, characterful phrasing.",
         "taboos": "Ground scene facts in available evidence.",
     }
+
+
+@pytest.mark.asyncio
+async def test_connector_projects_one_canonical_scene_to_all_downstream_consumers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One child scene reaches every downstream consumer independently."""
+
+    state = _global_state()
+    state["scene_participant_bindings"] = [{
+        "handle": "p1",
+        "display_name": "Other User",
+        "entity_kind": "third_party",
+    }]
+    run_cognition = AsyncMock(return_value=_core_output())
+    monkeypatch.setattr(
+        connector,
+        "get_user_cognition_state",
+        AsyncMock(return_value=build_acquaintance_user_state(
+            global_user_id="user-1",
+            updated_at=NOW,
+        )),
+    )
+    monkeypatch.setattr(
+        connector,
+        "get_character_cognition_state",
+        AsyncMock(return_value=build_character_production_state(
+            updated_at=NOW,
+        )),
+    )
+    monkeypatch.setattr(connector, "run_cognition", run_cognition)
+
+    update = await connector.call_cognition_subgraph(state, commit=False)
+
+    cognition_input = run_cognition.await_args.args[0]
+    canonical_scene_context = cognition_input["scene_context"]
+    projected_scene_context = update["cognition_scene_context"]
+    merged_state = dict(state)
+    merged_state.update(update)
+    resolver_context = (
+        resolver_capabilities._task_resolution_execution_context_from_state(
+            merged_state,
+            goal_continuation_ref=_goal_continuation_ref(),
+        )
+    )
+    accepted_coding_context = connector._coding_execution_context_from_state(
+        merged_state,
+        goal_continuation_ref=_goal_continuation_ref(),
+    )
+    downstream_scenes = [
+        projected_scene_context,
+        resolver_context["scene_context"],
+        accepted_coding_context["scene_context"],
+    ]
+    for downstream_scene in downstream_scenes:
+        assert downstream_scene == canonical_scene_context
+        assert downstream_scene is not canonical_scene_context
+        assert downstream_scene["participant_bindings"] is not (
+            canonical_scene_context["participant_bindings"]
+        )
+        assert downstream_scene["participant_bindings"][0] is not (
+            canonical_scene_context["participant_bindings"][0]
+        )
+    assert canonical_scene_context["participant_bindings"][0][
+        "display_name"
+    ] == "Other User"
+    assert projected_scene_context["participant_bindings"] is not (
+        canonical_scene_context["participant_bindings"]
+    )
 
 
 def test_connector_maps_private_residual_and_bounded_group_guidance() -> None:
@@ -445,7 +516,12 @@ def test_connector_keeps_inline_task_resolution_without_automatic_worker(
     assert any("只有 inline 能力" in item for item in limits)
     assert any(
         row["capability"] == "task_resolution_request"
-        for row in connector._available_resolver_affordances(state)
+        for row in connector._available_resolver_affordances(
+            state,
+            cognition_scene_context=(
+                connector.build_scene_context_from_global_state(state)
+            ),
+        )
     )
     assert all(
         row["action_kind"] != "accepted_coding_task_request"
@@ -463,7 +539,12 @@ def test_connector_omits_task_resolver_when_owner_is_unavailable() -> None:
         },
     }
 
-    resolvers = connector._available_resolver_affordances(state)
+    resolvers = connector._available_resolver_affordances(
+        state,
+        cognition_scene_context=connector.build_scene_context_from_global_state(
+            state
+        ),
+    )
 
     assert all(
         row["capability"] != "task_resolution_request"
@@ -481,7 +562,13 @@ def test_connector_omits_task_resolver_when_owner_is_unavailable() -> None:
 def test_connector_projects_one_generic_task_resolution_owner() -> None:
     """All generic task domains enter through one resolver capability."""
 
-    resolvers = connector._available_resolver_affordances(_global_state())
+    state = _global_state()
+    resolvers = connector._available_resolver_affordances(
+        state,
+        cognition_scene_context=connector.build_scene_context_from_global_state(
+            state
+        ),
+    )
     actions = connector._available_action_affordances(_global_state())
 
     assert {row["capability"] for row in resolvers} == {
@@ -501,6 +588,78 @@ def test_connector_projects_one_generic_task_resolution_owner() -> None:
     assert "trigger_future_cognition" not in action_kinds
     assert "memory_lifecycle_update" not in action_kinds
     assert all(row["context_ref"] == "" for row in actions)
+
+
+def test_targetless_state_omits_unexecutable_task_resolution() -> None:
+    """Self-cognition without a target keeps only executable affordances."""
+
+    state = _global_state()
+    state["channel_type"] = "group"
+    state["global_user_id"] = ""
+    state["platform_user_id"] = ""
+    state["platform_message_id"] = ""
+    episode = state["cognitive_episode"]
+    assert isinstance(episode, dict)
+    episode["trigger_source"] = "self_cognition"
+    target_scope = episode["target_scope"]
+    assert isinstance(target_scope, dict)
+    target_scope["channel_type"] = "group"
+    target_scope["current_global_user_id"] = None
+    target_scope["current_platform_user_id"] = None
+
+    resolvers = connector._available_resolver_affordances(
+        state,
+        cognition_scene_context=connector.build_scene_context_from_global_state(
+            state
+        ),
+    )
+
+    assert {
+        row["capability"] for row in resolvers
+    } == {
+        "human_clarification",
+        "approval_preparation",
+        "self_goal_resolution",
+    }
+
+
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    [
+        ("chat_history_recent", None),
+        ("chat_history_recent", "not-a-list"),
+        ("chat_history_recent", ["not-a-mapping-row"]),
+        ("chat_history_wide", None),
+        ("chat_history_wide", "not-a-list"),
+        ("chat_history_wide", ["not-a-mapping-row"]),
+    ],
+)
+def test_invalid_history_omits_unexecutable_task_resolution(
+    field_name: str,
+    invalid_value: object,
+) -> None:
+    """Invalid required history carriers remove only task resolution."""
+
+    state = _global_state()
+    if invalid_value is None:
+        state.pop(field_name)
+    else:
+        state[field_name] = invalid_value
+
+    resolvers = connector._available_resolver_affordances(
+        state,
+        cognition_scene_context=connector.build_scene_context_from_global_state(
+            state
+        ),
+    )
+
+    assert {
+        row["capability"] for row in resolvers
+    } == {
+        "human_clarification",
+        "approval_preparation",
+        "self_goal_resolution",
+    }
 
 
 def test_connector_projects_routing_boolean_to_v1_priority() -> None:
@@ -566,7 +725,12 @@ def test_connector_omits_capabilities_with_unavailable_runtime_routes() -> None:
     )
     assert all(
         row["capability"] != "task_resolution_request"
-        for row in connector._available_resolver_affordances(state)
+        for row in connector._available_resolver_affordances(
+            state,
+            cognition_scene_context=(
+                connector.build_scene_context_from_global_state(state)
+            ),
+        )
     )
 
 

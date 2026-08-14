@@ -11,7 +11,10 @@ from kazusa_ai_chatbot.action_spec.registry import (
 )
 
 MODULE_PATH = "kazusa_ai_chatbot.nodes.persona_supervisor2_cognition"
-EXPECTED_SYMBOLS = ["build_cognition_input_from_global_state"]
+EXPECTED_SYMBOLS = [
+    "build_cognition_input_from_global_state",
+    "build_scene_context_from_global_state",
+]
 
 
 def test_persona_supervisor2_cognition_exposes_owned_contract() -> None:

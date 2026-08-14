@@ -6,6 +6,7 @@ import logging
 import re
 import time
 from collections.abc import Awaitable, Callable, Mapping
+from copy import deepcopy
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -23,10 +24,12 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     validate_resolver_observation,
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionContractError,
     CognitionEvidenceV2,
     DirectFactV2,
     EVIDENCE_SOURCE_QUESTION_IDS,
     ResolverCapabilityRequestV2,
+    _validate_scene_context,
 )
 from kazusa_ai_chatbot.config import (
     BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
@@ -472,6 +475,63 @@ async def execute_resolver_capability_request(
     raise ResolverValidationError(f"unsupported capability: {capability_kind}")
 
 
+def validate_task_resolution_execution_readiness(
+    state: GlobalPersonaState,
+    *,
+    cognition_scene_context: Mapping[str, object],
+) -> None:
+    """Validate every deterministic input required by task execution.
+
+    Capability advertisement and execution use this same contract so a
+    resolver request is advertised only when its executor can construct the
+    task context without consulting the relevance-owned scene string.
+    """
+
+    _validate_cognition_scene_context(cognition_scene_context)
+    character_profile = state.get("character_profile")
+    if not isinstance(character_profile, Mapping):
+        raise ResolverValidationError(
+            "character_profile: expected trusted mapping"
+        )
+    character_name = text_or_empty(character_profile.get("name")).strip()
+    if not character_name:
+        raise ResolverValidationError(
+            "character_profile.name: expected non-empty state text"
+        )
+    for field_name in (
+        "platform",
+        "platform_channel_id",
+        "channel_type",
+        "global_user_id",
+        "platform_user_id",
+        "platform_message_id",
+        "storage_timestamp_utc",
+        "platform_bot_id",
+        "user_name",
+    ):
+        _required_state_text(state, field_name)
+    for field_name in ("local_time_context", "prompt_message_context"):
+        value = state.get(field_name)
+        if not isinstance(value, Mapping):
+            raise ResolverValidationError(f"{field_name}: expected mapping")
+    for field_name in ("chat_history_recent", "chat_history_wide"):
+        try:
+            _history_rows(state.get(field_name))
+        except ResolverValidationError as exc:
+            raise ResolverValidationError(
+                f"{field_name}: invalid history carrier: {exc}"
+            ) from exc
+    if (
+        not isinstance(BACKGROUND_WORK_OUTPUT_CHAR_LIMIT, int)
+        or isinstance(BACKGROUND_WORK_OUTPUT_CHAR_LIMIT, bool)
+        or BACKGROUND_WORK_OUTPUT_CHAR_LIMIT <= 0
+    ):
+        raise ResolverValidationError(
+            "background work output limit: expected positive integer"
+        )
+    _cognitive_episode_trigger_source(state)
+
+
 async def _execute_task_resolution_request(
     request: ResolverCapabilityRequestV1,
     state: GlobalPersonaState,
@@ -557,6 +617,11 @@ def _task_resolution_execution_context_from_state(
 ) -> TaskResolutionExecutionContextV1:
     """Project trusted persona state into the exact specialist context shape."""
 
+    cognition_scene_context = _required_scene_context_from_state(state)
+    validate_task_resolution_execution_readiness(
+        state,
+        cognition_scene_context=cognition_scene_context,
+    )
     character_profile = state["character_profile"]
     character_name = text_or_empty(character_profile.get("name"))
     if not character_name:
@@ -585,7 +650,7 @@ def _task_resolution_execution_context_from_state(
             state,
             "platform_message_id",
         ),
-        "scene_context": _required_scene_context_from_state(state),
+        "scene_context": cognition_scene_context,
         "goal_continuation_ref": goal_continuation_ref,
         "local_time_context": dict(state["local_time_context"]),
         "prompt_message_context": dict(state["prompt_message_context"]),
@@ -921,11 +986,32 @@ def _validate_task_result_request_binding(
 def _required_scene_context_from_state(
     state: GlobalPersonaState,
 ) -> dict[str, object]:
-    """Return the canonical scene object required by task and RAG boundaries."""
+    """Return a validated copy of the cognition-owned scene carrier."""
 
-    scene_context = state.get("scene_context")
-    if not isinstance(scene_context, dict):
-        raise ResolverValidationError("scene_context: expected canonical object")
+    scene_context = _validate_cognition_scene_context(
+        state.get("cognition_scene_context")
+    )
+    return_value = scene_context
+    return return_value
+
+
+def _validate_cognition_scene_context(
+    value: object,
+) -> dict[str, object]:
+    """Validate and copy the one scene carrier owned by cognition."""
+
+    if not isinstance(value, Mapping):
+        raise ResolverValidationError(
+            "cognition_scene_context: expected canonical object"
+        )
+    try:
+        _validate_scene_context(value)
+    except CognitionContractError as exc:
+        raise ResolverValidationError(
+            "cognition_scene_context: invalid canonical object: "
+            f"{exc}"
+        ) from exc
+    scene_context = deepcopy(dict(value))
     return scene_context
 
 

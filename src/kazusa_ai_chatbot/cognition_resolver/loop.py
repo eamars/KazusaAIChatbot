@@ -21,6 +21,10 @@ from kazusa_ai_chatbot.cognition_episode import (
     GoalContinuationRefV1,
     build_goal_continuation_ref,
 )
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionContractError,
+    _validate_scene_context,
+)
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     RESOLVER_CYCLE_TRACE_VERSION,
     RESOLVER_EVIDENCE_STATE_VERSION,
@@ -177,6 +181,7 @@ async def call_cognition_resolver_loop(
             )
             return return_value
 
+        _validate_capability_handoff(selected_request, cognition_state)
         observation = await _execute_with_timeout(
             selected_request,
             cognition_state,
@@ -1614,6 +1619,28 @@ async def _execute_with_timeout(
         observation = _timeout_observation(request, state)
     return_value = validate_resolver_observation(observation)
     return return_value
+
+
+def _validate_capability_handoff(
+    request: ResolverCapabilityRequestV1,
+    state: GlobalPersonaState,
+) -> None:
+    """Validate cognition-owned carriers before invoking a capability."""
+
+    if request["capability_kind"] != "task_resolution_request":
+        return
+    scene_context = state.get("cognition_scene_context")
+    if not isinstance(scene_context, Mapping):
+        raise ResolverValidationError(
+            "cognition_scene_context: expected canonical mapping"
+        )
+    try:
+        _validate_scene_context(scene_context)
+    except CognitionContractError as exc:
+        raise ResolverValidationError(
+            "cognition_scene_context: invalid canonical mapping: "
+            f"{exc}"
+        ) from exc
 
 
 def _select_immediate_request(
