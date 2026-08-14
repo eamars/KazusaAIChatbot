@@ -126,32 +126,26 @@ async def insert_or_get_active_accepted_task(
     try:
         await collection.insert_one(dict(task))
     except DuplicateKeyError:
-        existing = await collection.find_one(
-            {
-                "schema_version": ACCEPTED_TASK_SCHEMA_VERSION,
-                "active_identity_key": task["active_identity_key"],
-            },
-            {"_id": 0},
-        )
-        if existing is None:
-            raise DatabaseOperationError(
-                "accepted task duplicate without readable active row"
-            )
-        incoming_ref = task.get("goal_continuation_ref")
-        stored_ref = existing.get("goal_continuation_ref")
-        if incoming_ref != stored_ref:
-            raise DatabaseOperationError(
-                "active accepted task has a different goal_continuation_ref"
+        duplicate_filter: dict[str, Any] = {
+            "schema_version": ACCEPTED_TASK_SCHEMA_VERSION,
+            "active_identity_key": task["active_identity_key"],
+            "goal_continuation_ref": task.get("goal_continuation_ref"),
+        }
+        incoming_authority = task.get("scheduled_future_speech_authority")
+        if incoming_authority is not None:
+            duplicate_filter["scheduled_future_speech_authority"] = (
+                incoming_authority
             )
         active_task = await _add_related_source_message_id(
             collection,
-            active_identity_key=task["active_identity_key"],
             source_message_id=source_message_id,
             observed_at=observed_at,
+            matching_duplicate_filter=duplicate_filter,
         )
         if active_task is None:
             raise DatabaseOperationError(
-                "accepted task duplicate without readable active row"
+                "active accepted task has a different goal_continuation_ref "
+                "or scheduled authority"
             )
         duplicate_result: AcceptedTaskCreateResult = {
             "status": "already_active",
@@ -620,11 +614,17 @@ async def mark_accepted_task_delivery_failed(
 async def _add_related_source_message_id(
     collection: Any,
     *,
-    active_identity_key: str,
     source_message_id: str,
     observed_at: str,
+    matching_duplicate_filter: dict[str, Any],
 ) -> AcceptedTaskDoc | None:
-    """Attach provenance from a duplicate attempt and return the active row."""
+    """Atomically attach provenance only when the duplicate row is identical.
+
+    The comparison and the related-source mutation are one atomic update: the
+    stored row is mutated only when its continuation reference and scheduled
+    authority exactly match the incoming task. A mismatch returns ``None``
+    without touching provenance.
+    """
 
     update: dict[str, object] = {
         "$set": {
@@ -637,10 +637,7 @@ async def _add_related_source_message_id(
         }
     try:
         document = await collection.find_one_and_update(
-            {
-                "schema_version": ACCEPTED_TASK_SCHEMA_VERSION,
-                "active_identity_key": active_identity_key,
-            },
+            matching_duplicate_filter,
             update,
             projection={"_id": 0},
             return_document=ReturnDocument.AFTER,

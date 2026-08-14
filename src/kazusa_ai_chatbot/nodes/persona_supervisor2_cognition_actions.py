@@ -61,6 +61,7 @@ class ActionRequestV1(TypedDict, total=False):
     surface_role: SurfaceRoleV1
     goal_continuation_ref: GoalContinuationRefV1 | None
     task_execution_context: TaskResolutionExecutionContextV1
+    scheduled_authority_proposal: dict[str, object]
 
 
 def _current_episode_source_ref() -> ActionSourceRefV1:
@@ -366,6 +367,22 @@ def _build_future_speak_action_spec(
     continuation_objective = _semantic_text(request, "detail")
     if not continuation_objective:
         continuation_objective = request["reason"]
+    params: dict[str, object] = {
+        "trigger_at": trigger_at,
+        "continuation_objective": continuation_objective,
+        "requested_delivery": "send_result_when_done",
+        "max_output_chars": BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
+    }
+    scheduled_authority_proposal = request.get(
+        "scheduled_authority_proposal"
+    )
+    if isinstance(scheduled_authority_proposal, dict):
+        params["scheduled_authority_proposal"] = dict(
+            scheduled_authority_proposal
+        )
+    params["source_episode_id"] = _source_episode_id_for_scope(state)
+    params["source_message_id"] = _source_message_id_for_scope(state)
+    params["accepted_at_utc"] = _accepted_at_utc_for_scope(state)
     action_spec = _build_action_spec(
         kind=FUTURE_SPEAK_CAPABILITY,
         source_refs=[_current_episode_source_ref()],
@@ -376,12 +393,7 @@ def _build_future_speak_action_spec(
             "owner": "background_work",
             "scope": _background_work_target_scope(state),
         },
-        params={
-            "trigger_at": trigger_at,
-            "continuation_objective": continuation_objective,
-            "requested_delivery": "send_result_when_done",
-            "max_output_chars": BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
-        },
+        params=params,
         urgency="background",
         visibility="private",
         deadline=None,
@@ -704,6 +716,43 @@ def _background_work_target_scope(
         ),
     }
     return scope
+
+
+def _source_episode_id_for_scope(state: CognitionState) -> str:
+    """Return the current cognitive episode id for scheduled authority."""
+
+    episode = state.get("cognitive_episode")
+    if not isinstance(episode, Mapping):
+        return ""
+    episode_id = _mapping_text(episode, "episode_id")
+    return episode_id
+
+
+def _source_message_id_for_scope(state: CognitionState) -> str:
+    """Return the trusted source message id for scheduled authority."""
+
+    episode = state.get("cognitive_episode")
+    origin_metadata: Mapping[str, object] = {}
+    if isinstance(episode, Mapping):
+        raw_origin_metadata = episode.get("origin_metadata")
+        if isinstance(raw_origin_metadata, Mapping):
+            origin_metadata = raw_origin_metadata
+    source_message_id = _state_or_mapping_text(
+        state,
+        "platform_message_id",
+        origin_metadata,
+        "platform_message_id",
+    )
+    return source_message_id
+
+
+def _accepted_at_utc_for_scope(state: CognitionState) -> str:
+    """Return the episode storage UTC instant used as accepted time."""
+
+    storage_timestamp_utc = state.get("storage_timestamp_utc")
+    if not isinstance(storage_timestamp_utc, str):
+        return ""
+    return storage_timestamp_utc.strip()
 
 
 def _future_cognition_objective(

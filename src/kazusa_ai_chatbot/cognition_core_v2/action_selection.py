@@ -42,6 +42,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     is_targetless_group_self_cognition_episode,
     project_evidence_provenance_role,
     validate_self_cognition_response_decision,
+    validate_scheduled_authority_proposal,
 )
 from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
     V2_MODEL_TOTAL_ATTEMPTS,
@@ -56,6 +57,13 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     validate_required_resolver_evidence_dependency,
     validate_resolver_goal_progress,
 )
+from kazusa_ai_chatbot.config import CHARACTER_TIME_ZONE
+from kazusa_ai_chatbot.time_boundary import (
+    local_time_context_from_storage_utc,
+    local_llm_datetime_to_storage_utc_iso,
+    normalize_storage_utc_iso,
+    parse_storage_utc_datetime,
+)
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 ACTION_REQUEST_CAP = 3
@@ -63,6 +71,7 @@ ACTION_PLANNING_PROMPT_CAP = 32000
 ACTION_PLANNING_REPAIR_OUTPUT_CAP = 4000
 ACTION_PLANNING_ATTEMPT_LIMIT = V2_MODEL_TOTAL_ATTEMPTS
 MODEL_TEXT_CAP = 500
+SCHEDULED_AUTHORITY_EXPRESSION_CAP = 2000
 
 
 logger = logging.getLogger(__name__)
@@ -74,10 +83,13 @@ ACTION_PLANNING_PROMPT = '''你负责为当前角色提出语义能力请求。�
 不执行或核准能力，也不虚构未提供的能力。协议代码会在语义授权完成后派生 route。
 
 # 生成步骤
-先识别当前用户请求要达成的效果，以及该效果的目标对象、范围和明确的时间约束。证据行中的
+先识别当前用户请求要达成的效果，以及该效果的目标对象、范围和明确的时间约束。普通规划中的证据行
 provenance_role 是确定性代码给出的语义权威标签：current_episode 是当前用户请求与当前场景的
 权威来源；current_user_history_only、character_or_world_context_only 和 contextual_fact_only
-只提供支持性上下文，不能替代或改写当前请求的效果。已接纳目标（bid）的措辞只是当前角色对
+只提供支持性上下文，不能替代或改写当前请求的效果。当 action_handles 中存在 future_speak 时，
+证据行改用 scheduled authority vocabulary：current_event 或 public_scene；这两个值必须逐字复制
+到 scheduled_authority_proposal.detail_refs.provenance_role，并且仍然只能表示证据行已经携带的当前
+授权。已接纳目标（bid）的措辞只是当前角色对
 请求的理解，不能改变当前用户请求本身；当 bid 出现能力确认、权限核验、可行性评估或 API 支持
 检查等措辞，而当前用户请求没有明确询问这些内容时，这些措辞属于运行时约束或角色顾虑，不得
 写入 semantic_goal。能力、权限、可行性和 API 支持是运行时约束：除非当前用户明确要求审核是否
@@ -127,6 +139,19 @@ task_resolution_request 代替它。若限制同时说明 coding worker 尚未�
 allowed_next_actions 时选择该动作；结果保持待执行，后续 surface 不得表述 worker 已执行或完成。
 没有绑定既有 run 的新代码或仓库工作应通过 task_resolution_request 提出。没有可用 owner 时保持
 action_requests=[]，并将 goal_resolution 设为 blocked。
+
+当选择 future_speak 行时，必须额外返回精确的 scheduled_authority_proposal
+对象。该对象只表达本次已接纳未来发言的当前任务授权，不是最终对话、不是承诺执行未请求的具体
+动作，也不包含任何 ID。temporal_alignment 依据输入中的 accepted_local_datetime 与
+accepted_timezone 判断 trigger 时间与 scheduled_authority_context 中的
+original_relative_expression 所表达的用户相对时间是否一致：一致用 aligned；日期落在错误的
+相对日期用 relative_date_mismatch；不是未来时间用 past_or_not_future；时区或日期无法可靠
+判断用 timezone_unclear；无法判断时用 unavailable。只有 aligned 才能进入持久化路径。
+authorized_content_summary 是有界的语义内容摘要，只能概括当前已接纳目标。authorized_detail_refs
+只能引用输入证据中确实存在的当前证据句柄，且每个 detail 的 provenance_role 必须与该证据行本身
+显示的 provenance_role 完全一致；在 future_speak 模式下该值只能是 current_event 或 public_scene。
+历史记忆、角色世界背景、条件指导和一般事实不能仅靠标注 current_event
+就变成当前授权。detail 的 semantic_summary 只概括该证据对当前授权的支持，不扩展新内容。
 
 当用户询问已经持久化的 accepted task 或 coding run 当前状态时，优先使用
 accepted_task_status_check 读取已有任务记录。该查询直接读取当前作用域的任务及其
@@ -252,7 +277,10 @@ semantic_target_handle 必须是单个字符串，不得使用 target_handles；
 # 输出格式
 只返回一个 JSON 对象，字段必须恰好是：
 - action_requests：零到三个对象，每个对象必须恰好包含 bid_handle、action_handle、decision、
-  semantic_goal 和 reason；
+  semantic_goal 和 reason；其中 action_handle 对应 future_speak 时，该对象必须额外恰好包含
+  scheduled_authority_proposal（schema_version、temporal_alignment、
+  authorized_content_summary、authorized_detail_refs；authorized_detail_refs 是对象数组，
+  每个对象恰好包含 evidence_handle、semantic_summary 和 provenance_role）；
 - resolver_requests：零到三个对象；task_resolution_request 行必须恰好包含 bid_handle、
   resolver_handle、semantic_goal、reason 和 start_in_background（JSON 布尔值），其他
   resolver 行必须恰好包含 bid_handle、resolver_handle、semantic_goal 和 reason；
@@ -370,6 +398,11 @@ async def plan_actions(
                 bid["relational_willingness"]
             )
         projected_bids[handle] = projected_bid
+    future_speak_handles = [
+        handle
+        for handle, affordance in action_handles.items()
+        if affordance["action_kind"] == "future_speak"
+    ]
     prompt_payload = {
         "bids": projected_bids,
         "episode": {
@@ -381,9 +414,13 @@ async def plan_actions(
                 "handle": row["evidence_handle"],
                 "source_kind": row["evidence_ref"]["source_kind"],
                 "semantic_text": row["semantic_text"],
-                "provenance_role": project_evidence_provenance_role(
-                    row["evidence_ref"]["source_kind"],
-                    row.get("memory_scope"),
+                "provenance_role": (
+                    row["authority"]
+                    if future_speak_handles
+                    else project_evidence_provenance_role(
+                        row["evidence_ref"]["source_kind"],
+                        row.get("memory_scope"),
+                    )
                 ),
             }
             for row in evidence
@@ -426,6 +463,16 @@ async def plan_actions(
             else None
         ),
     }
+    if future_speak_handles:
+        accepted_local_datetime, accepted_timezone = (
+            _accepted_scheduled_authority_context(episode)
+        )
+        prompt_payload["scheduled_authority_context"] = {
+            "action_handles": future_speak_handles,
+            "accepted_local_datetime": accepted_local_datetime,
+            "accepted_timezone": accepted_timezone,
+            "original_relative_expression": _dialog_percept_text(episode),
+        }
     if group_self_cognition:
         prompt_payload["self_cognition_response_context"] = {
             "required": True,
@@ -466,6 +513,7 @@ async def plan_actions(
             contract_failed=group_self_cognition,
         )
     else:
+        accepted_at_utc = _accepted_at_utc(episode)
         messages: list[BaseMessage] = [
             SystemMessage(content=ACTION_PLANNING_PROMPT),
             HumanMessage(content=prompt_text),
@@ -479,6 +527,7 @@ async def plan_actions(
             "current_goal_progress": current_goal_progress,
             "required_resolver_evidence_dependency": validated_dependency,
             "runtime_capability_limits": runtime_capability_limits,
+            "accepted_at_utc": accepted_at_utc,
         }
         if group_self_cognition:
             planner_kwargs.update({
@@ -616,6 +665,7 @@ async def _invoke_action_planner(
     self_cognition_response_required: bool = False,
     evidence: Sequence[CognitionEvidenceV2] = (),
     target_handles: Sequence[str] = (),
+    accepted_at_utc: str = "",
 ) -> dict[str, Any]:
     """Invoke the semantic planner with bounded contract replacements."""
 
@@ -700,6 +750,7 @@ async def _invoke_action_planner(
                 ),
                 evidence=evidence,
                 target_handles=target_handles,
+                accepted_at_utc=accepted_at_utc,
             )
         except (ResolverValidationError, ValueError) as exc:
             await _record_action_planning_trace(
@@ -840,6 +891,41 @@ def _action_planning_repair_message(
             if self_cognition_response_required
             else None
         ),
+        "scheduled_authority_contract": {
+            "required_for_action_kind": "future_speak",
+            "proposal_fields": [
+                "schema_version",
+                "temporal_alignment",
+                "authorized_content_summary",
+                "authorized_detail_refs",
+            ],
+            "temporal_alignment_values": [
+                "aligned",
+                "relative_date_mismatch",
+                "past_or_not_future",
+                "timezone_unclear",
+                "unavailable",
+            ],
+            "temporal_alignment_rule": (
+                "只有 aligned 才能进入持久化路径；其他取值属于语义不匹配，"
+                "必须用与 accepted_local_datetime 和 accepted_timezone 一致的"
+                "正确未来本地时间重新生成完整 proposal。"
+            ),
+            "detail_ref_fields": [
+                "evidence_handle",
+                "semantic_summary",
+                "provenance_role",
+            ],
+            "detail_ref_rule": (
+                "detail 只能引用当前证据中存在的句柄，provenance_role 必须与"
+                "该证据行显示的 provenance_role 一致，且只能使用当前事件授权角色；"
+                "历史证据不能改标为 current_event。"
+            ),
+            "summary_rule": (
+                "authorized_content_summary 与 detail semantic_summary 是"
+                "有界语义摘要，不写最终对话，也不承诺未请求的具体动作。"
+            ),
+        },
         "contract_error": contract_error[:MODEL_TEXT_CAP],
         "invalid_response": bounded_response,
     }
@@ -876,6 +962,7 @@ def _validate_action_plan_decision(
     self_cognition_response_required: bool = False,
     evidence: Sequence[CognitionEvidenceV2] = (),
     target_handles: Sequence[str] = (),
+    accepted_at_utc: str = "",
 ) -> dict[str, Any]:
     """Normalize semantic choices into the canonical planner contract."""
 
@@ -890,10 +977,18 @@ def _validate_action_plan_decision(
     if action_requests and resolver_requests:
         raise ValueError("action and resolver requests are mutually exclusive")
 
+    _validate_future_speak_proposal_rows(
+        action_requests,
+        action_handles=action_handles,
+        evidence=evidence,
+        accepted_at_utc=accepted_at_utc,
+    )
     normalized_actions = _normalize_action_request_rows(
         action_requests,
         bid_handles,
         action_handles,
+        evidence=evidence,
+        accepted_at_utc=accepted_at_utc,
     )
     normalized_resolvers = _normalize_resolver_request_rows(
         resolver_requests,
@@ -1075,13 +1170,22 @@ def _normalize_action_request_rows(
     values: Sequence[object],
     bids: Mapping[str, ActionBidV2],
     actions: Mapping[str, ActionAffordanceV2],
+    *,
+    evidence: Sequence[CognitionEvidenceV2] = (),
+    accepted_at_utc: str = "",
 ) -> list[dict[str, str]]:
     """Keep bounded canonical action proposals with valid trusted handles."""
 
-    normalized: list[dict[str, str]] = []
+    normalized: list[dict[str, object]] = []
     for value in values:
         try:
-            row = _validate_action_request_row(value, bids, actions)
+            row = _validate_action_request_row(
+                value,
+                bids,
+                actions,
+                evidence=evidence,
+                accepted_at_utc=accepted_at_utc,
+            )
         except ValueError as exc:
             logger.warning(
                 f"Action planning dropped an invalid action request row: {exc}"
@@ -1151,7 +1255,10 @@ def _validate_action_request_row(
     value: object,
     bids: Mapping[str, ActionBidV2],
     actions: Mapping[str, ActionAffordanceV2],
-) -> dict[str, str]:
+    *,
+    evidence: Sequence[CognitionEvidenceV2] = (),
+    accepted_at_utc: str = "",
+) -> dict[str, object]:
     """Validate one action row and its registry-derived decision semantics."""
 
     required = {
@@ -1207,14 +1314,167 @@ def _validate_action_request_row(
             f"action request {action_handle} decision must full-match "
             f"{decision_pattern!r}"
         )
-    return_value = {
+    return_value: dict[str, object] = {
         "bid_handle": bid_handle,
         "action_handle": action_handle,
         "decision": decision,
         "semantic_goal": semantic_goal,
         "reason": reason,
     }
+    if affordance["action_kind"] == "future_speak":
+        return_value["scheduled_authority_proposal"] = (
+            _future_speak_proposal_contract(
+                value,
+                affordance=affordance,
+                evidence=evidence,
+                accepted_at_utc=accepted_at_utc,
+            )
+        )
+    elif "scheduled_authority_proposal" in value:
+        raise ValueError(
+            "scheduled_authority_proposal is only valid for future_speak"
+        )
     return return_value
+
+
+def _validate_future_speak_proposal_rows(
+    values: Sequence[object],
+    *,
+    action_handles: Mapping[str, ActionAffordanceV2],
+    evidence: Sequence[CognitionEvidenceV2],
+    accepted_at_utc: str,
+) -> None:
+    """Require every future-speak row to carry a valid authority proposal.
+
+    A temporal or authority mismatch on any future-speak row invalidates the
+    whole candidate so the existing bounded planner replacement owns the
+    repair instead of silently dropping the row.
+    """
+
+    for value in values:
+        if not isinstance(value, Mapping):
+            continue
+        action_handle = value.get("action_handle")
+        if not isinstance(action_handle, str) or action_handle not in action_handles:
+            continue
+        affordance = action_handles[action_handle]
+        if affordance["action_kind"] != "future_speak":
+            if "scheduled_authority_proposal" in value:
+                raise ValueError(
+                    "scheduled_authority_proposal is only valid for future_speak"
+                )
+            continue
+        _future_speak_proposal_contract(
+            value,
+            affordance=affordance,
+            evidence=evidence,
+            accepted_at_utc=accepted_at_utc,
+        )
+
+
+def _future_speak_proposal_contract(
+    value: Mapping[str, object],
+    *,
+    affordance: ActionAffordanceV2,
+    evidence: Sequence[CognitionEvidenceV2],
+    accepted_at_utc: str,
+) -> dict[str, object]:
+    """Validate one planner-owned future-speak authority proposal.
+
+    The semantic temporal alignment is the action-planning owner's judgment;
+    deterministic code additionally enforces that the normalized trigger is
+    strictly later than the accepted time.
+    """
+
+    if "scheduled_authority_proposal" not in value:
+        raise ValueError(
+            "future_speak action requires scheduled_authority_proposal"
+        )
+    validated_proposal = validate_scheduled_authority_proposal(
+        value["scheduled_authority_proposal"],
+        evidence=evidence or None,
+    )
+    if validated_proposal["temporal_alignment"] != "aligned":
+        raise ValueError(
+            "future_speak temporal alignment is not aligned"
+        )
+    decision = _bounded_model_text(
+        value["decision"],
+        "action request decision",
+        maximum=200,
+        allow_empty=True,
+    )
+    if accepted_at_utc:
+        try:
+            trigger_at_utc = local_llm_datetime_to_storage_utc_iso(decision)
+            accepted_at_dt = parse_storage_utc_datetime(accepted_at_utc)
+            trigger_at_dt = parse_storage_utc_datetime(trigger_at_utc)
+        except ValueError as exc:
+            raise ValueError(
+                "future_speak trigger time is invalid"
+            ) from exc
+        if trigger_at_dt <= accepted_at_dt:
+            raise ValueError(
+                "future_speak trigger must be later than accepted time"
+            )
+    return dict(validated_proposal)
+
+
+def _accepted_at_utc(episode: Mapping[str, Any]) -> str:
+    """Return the canonical accepted storage UTC instant for an episode."""
+
+    created_at = episode.get("created_at")
+    if not isinstance(created_at, str) or not created_at.strip():
+        return ""
+    try:
+        accepted_at_utc = normalize_storage_utc_iso(created_at)
+    except ValueError:
+        return ""
+    return accepted_at_utc
+
+
+def _accepted_scheduled_authority_context(
+    episode: Mapping[str, Any],
+) -> tuple[str, str]:
+    """Project accepted local datetime and timezone for the planner prompt."""
+
+    accepted_at_utc = _accepted_at_utc(episode)
+    if not accepted_at_utc:
+        accepted_local_datetime = ""
+    else:
+        local_time_context = local_time_context_from_storage_utc(
+            accepted_at_utc,
+        )
+        accepted_local_datetime = local_time_context[
+            "current_local_datetime"
+        ]
+    accepted_timezone = CHARACTER_TIME_ZONE.strip()
+    return accepted_local_datetime, accepted_timezone
+
+
+def _dialog_percept_text(episode: Mapping[str, Any]) -> str:
+    """Return the current user-message dialog percept text for the planner.
+
+    The original relative-time expression is the user's own wording, so the
+    action-planning owner can judge the trigger candidate against the exact
+    request without deterministic keyword or date interpretation.
+    """
+
+    percepts = episode.get("percepts")
+    if not isinstance(percepts, list):
+        return ""
+    for percept in percepts:
+        if not isinstance(percept, Mapping):
+            continue
+        if percept.get("source_kind") != "dialog":
+            continue
+        content = percept.get("content")
+        if not isinstance(content, Mapping):
+            continue
+        text = content.get("semantic_text") or content.get("text")
+        if isinstance(text, str):
+            return text.strip()[:SCHEDULED_AUTHORITY_EXPRESSION_CAP]
+    return ""
 
 
 def _validate_resolver_request_row(
@@ -1365,7 +1625,7 @@ def _is_empty_goal_progress_shell(
 
 
 def _materialize_action_requests(
-    requests: Sequence[Mapping[str, str]],
+    requests: Sequence[Mapping[str, object]],
     bids: Mapping[str, ActionBidV2],
     actions: Mapping[str, ActionAffordanceV2],
 ) -> list[SemanticActionRequestV2]:
@@ -1375,7 +1635,7 @@ def _materialize_action_requests(
     for request in requests:
         bid = bids[request["bid_handle"]]
         affordance = actions[request["action_handle"]]
-        result.append({
+        row: SemanticActionRequestV2 = {
             "action_kind": affordance["action_kind"],
             "decision": request["decision"],
             "context_ref": affordance["context_ref"],
@@ -1383,7 +1643,20 @@ def _materialize_action_requests(
             "reason": request["reason"],
             "target_roles": list(bid["target_roles"]),
             "evidence_handles": list(bid["evidence_handles"]),
-        })
+        }
+        if "scheduled_authority_proposal" in request:
+            proposal = request["scheduled_authority_proposal"]
+            row["scheduled_authority_proposal"] = {
+                "schema_version": proposal["schema_version"],
+                "temporal_alignment": proposal["temporal_alignment"],
+                "authorized_content_summary": proposal[
+                    "authorized_content_summary"
+                ],
+                "authorized_detail_refs": [
+                    dict(ref) for ref in proposal["authorized_detail_refs"]
+                ],
+            }
+        result.append(row)
     return result
 
 

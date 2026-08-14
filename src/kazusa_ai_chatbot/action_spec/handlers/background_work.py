@@ -24,7 +24,14 @@ from kazusa_ai_chatbot.background_work.models import (
 )
 from kazusa_ai_chatbot.config import (
     BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
+    CHARACTER_TIME_ZONE,
     CODING_AGENT_WORKSPACE_ROOT,
+)
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionContractError,
+    build_scheduled_future_speech_authority,
+    validate_scheduled_authority_proposal,
+    validate_scheduled_future_speech_authority,
 )
 from kazusa_ai_chatbot.db import DatabaseOperationError
 from kazusa_ai_chatbot.task_resolution.contracts import (
@@ -90,7 +97,41 @@ def validate_future_speak_action(
             f"trigger_at: expected exact local YYYY-MM-DD HH:MM: {exc}"
         ) from exc
     _required_param_text(params, "continuation_objective")
+    _validate_scheduled_authority_input(validated)
     return validated
+
+
+def _validate_scheduled_authority_input(
+    validated: Mapping[str, Any],
+) -> None:
+    """Require the planner-owned proposal and source identity inputs."""
+
+    params = validated["params"]
+    proposal = params.get("scheduled_authority_proposal")
+    if proposal is None:
+        raise ActionValidationError(
+            "params.scheduled_authority_proposal: required for future_speak"
+        )
+    try:
+        validate_scheduled_authority_proposal(proposal)
+    except (CognitionContractError, ValueError) as exc:
+        raise ActionValidationError(
+            f"params.scheduled_authority_proposal: invalid: {exc}"
+        ) from exc
+    for field_name in (
+        "source_episode_id",
+        "source_message_id",
+        "accepted_at_utc",
+    ):
+        _required_param_text(params, field_name)
+    scope = validated["target"]["scope"]
+    if _required_param_text(
+        params,
+        "source_message_id",
+    ) != _required_scope_text(scope, "source_message_id"):
+        raise ActionValidationError(
+            "params.source_message_id: trusted scope mismatch"
+        )
 
 
 def validate_accepted_coding_task_action(
@@ -137,6 +178,7 @@ async def enqueue_future_speak_action(
     action_attempt_id: str,
     enqueue_background_work_func: BackgroundWorkEnqueueFunc | None = None,
     source_llm_trace_id: str = "",
+    scheduled_authority_proposal: Mapping[str, object] | None = None,
 ) -> BackgroundWorkQueueResult:
     """Persist a retained future-speak task and its deterministic worker job."""
 
@@ -148,6 +190,17 @@ async def enqueue_future_speak_action(
         "continuation_objective",
     )
     task_summary = f"Schedule future speak for {trigger_at}: {continuation_objective}"
+    authority = _build_scheduled_authority(
+        validated=validated,
+        proposal=(
+            scheduled_authority_proposal
+            if scheduled_authority_proposal is not None
+            else params.get("scheduled_authority_proposal")
+        ),
+        storage_timestamp_utc=storage_timestamp_utc,
+        action_attempt_id=action_attempt_id,
+        source_llm_trace_id=source_llm_trace_id,
+    )
     return await _create_or_queue_accepted_task(
         validated,
         storage_timestamp_utc=storage_timestamp_utc,
@@ -163,6 +216,7 @@ async def enqueue_future_speak_action(
         },
         enqueue_background_work_func=enqueue_background_work_func,
         task_brief=task_summary,
+        scheduled_future_speech_authority=authority,
     )
 
 
@@ -325,6 +379,76 @@ def _validated_task_execution_context(
     return dict(validated_context)
 
 
+def _build_scheduled_authority(
+    *,
+    validated: Mapping[str, Any],
+    proposal: object,
+    storage_timestamp_utc: str,
+    action_attempt_id: str,
+    source_llm_trace_id: str,
+) -> dict[str, Any]:
+    """Construct and validate the immutable pre-persistence authority.
+
+    The authority is created here, before accepted-task, job, schedule, and
+    run ids exist, and is copied unchanged into every carrier.
+    """
+
+    if not isinstance(proposal, Mapping):
+        raise ActionValidationError(
+            "scheduled_authority_proposal: required for future_speak"
+        )
+    try:
+        validated_proposal = validate_scheduled_authority_proposal(proposal)
+    except (CognitionContractError, ValueError) as exc:
+        raise ActionValidationError(
+            f"scheduled_authority_proposal: invalid: {exc}"
+        ) from exc
+    if validated_proposal["temporal_alignment"] != "aligned":
+        raise ActionValidationError(
+            "scheduled_authority_proposal.temporal_alignment: expected aligned"
+        )
+    params = validated["params"]
+    scope = validated["target"]["scope"]
+    channel_type = _required_scope_text(scope, "source_channel_type")
+    audience_kind = "group" if channel_type == "group" else "private"
+    try:
+        authority = build_scheduled_future_speech_authority(
+            source_episode_id=_required_param_text(
+                params,
+                "source_episode_id",
+            ),
+            source_message_id=_required_scope_text(
+                scope,
+                "source_message_id",
+            ),
+            source_action_attempt_id=action_attempt_id,
+            source_llm_trace_id=source_llm_trace_id,
+            accepted_at_utc=_required_param_text(params, "accepted_at_utc"),
+            timezone=CHARACTER_TIME_ZONE,
+            trigger_local=_required_param_text(params, "trigger_at"),
+            platform=_required_scope_text(scope, "source_platform"),
+            channel_type=channel_type,
+            audience_kind=audience_kind,
+            semantic_objective=_required_param_text(
+                params,
+                "continuation_objective",
+            ),
+            authorized_content_summary=validated_proposal[
+                "authorized_content_summary"
+            ],
+            authorized_detail_refs=validated_proposal[
+                "authorized_detail_refs"
+            ],
+            goal_continuation_ref=validated.get("goal_continuation_ref"),
+        )
+    except (CognitionContractError, ValueError) as exc:
+        raise ActionValidationError(
+            f"scheduled future-speech authority is invalid: {exc}"
+        ) from exc
+    validate_scheduled_future_speech_authority(authority)
+    return dict(authority)
+
+
 def _bound_coding_request(
     params: Mapping[str, object],
     *,
@@ -387,6 +511,7 @@ async def _create_or_queue_accepted_task(
     worker_payload: dict[str, object],
     enqueue_background_work_func: BackgroundWorkEnqueueFunc | None,
     task_brief: str,
+    scheduled_future_speech_authority: dict[str, Any] | None = None,
 ) -> BackgroundWorkQueueResult:
     """Create v2 accepted state and enqueue its single approved worker."""
 
@@ -402,9 +527,25 @@ async def _create_or_queue_accepted_task(
         task_kind=task_kind,
         semantic_objective=semantic_objective,
         accepted_task_summary=accepted_task_summary,
+        scheduled_future_speech_authority=scheduled_future_speech_authority,
     )
     create_result = await create_or_return_active_accepted_task(create_request)
     accepted_task = create_result["task"]
+    if (
+        create_result["status"] == "already_active"
+        and scheduled_future_speech_authority is not None
+    ):
+        _reject_active_duplicate_authority_mismatch(
+            accepted_task,
+            scheduled_future_speech_authority,
+        )
+    if (
+        create_result["status"] == "created"
+        and scheduled_future_speech_authority is not None
+    ):
+        accepted_task["scheduled_future_speech_authority"] = dict(
+            scheduled_future_speech_authority
+        )
     active_state = _task_text(accepted_task, "state")
     if create_result["status"] == "already_active" and active_state not in {
         "enqueueing",
@@ -429,6 +570,7 @@ async def _create_or_queue_accepted_task(
         semantic_objective=semantic_objective,
         requested_worker=requested_worker,
         worker_payload=worker_payload,
+        scheduled_future_speech_authority=scheduled_future_speech_authority,
     )
     job_id = queue_request["job_id"]
     if active_state == "pending":
@@ -487,6 +629,25 @@ async def _create_or_queue_accepted_task(
     )
 
 
+def _reject_active_duplicate_authority_mismatch(
+    stored_task: Mapping[str, Any],
+    incoming_authority: Mapping[str, Any],
+) -> None:
+    """Reject an active duplicate whose stored authority differs.
+
+    The stored authority is the durable commitment already accepted by the
+    character. A changed trigger or objective must produce a new authority and
+    a new accepted work item through the normal deterministic path instead of
+    silently re-enqueueing under the existing task identity.
+    """
+
+    stored_authority = stored_task.get("scheduled_future_speech_authority")
+    if stored_authority != incoming_authority:
+        raise ActionValidationError(
+            "active accepted task has a different scheduled authority"
+        )
+
+
 def _accepted_task_create_request(
     validated: Mapping[str, Any],
     *,
@@ -494,6 +655,7 @@ def _accepted_task_create_request(
     task_kind: str,
     semantic_objective: str,
     accepted_task_summary: str,
+    scheduled_future_speech_authority: dict[str, Any] | None = None,
 ) -> AcceptedTaskCreateRequest:
     """Build one trusted v2 accepted-task request from the action scope."""
 
@@ -538,6 +700,10 @@ def _accepted_task_create_request(
         ),
         "storage_timestamp_utc": storage_timestamp_utc,
     }
+    if scheduled_future_speech_authority is not None:
+        request["scheduled_future_speech_authority"] = dict(
+            scheduled_future_speech_authority
+        )
     return request
 
 
@@ -551,6 +717,7 @@ def _queue_request_from_accepted_task(
     semantic_objective: str,
     requested_worker: str,
     worker_payload: Mapping[str, object],
+    scheduled_future_speech_authority: dict[str, Any] | None = None,
 ) -> BackgroundWorkQueueRequest:
     """Build one internal v2 job request from accepted-task state."""
 
@@ -596,6 +763,10 @@ def _queue_request_from_accepted_task(
         "max_output_chars": int(params["max_output_chars"]),
         "storage_timestamp_utc": storage_timestamp_utc,
     }
+    if scheduled_future_speech_authority is not None:
+        request["scheduled_future_speech_authority"] = dict(
+            scheduled_future_speech_authority
+        )
     if requested_worker == TASK_ORCHESTRATOR_WORKER:
         request["task_execution_context"] = _validated_task_execution_context(
             params

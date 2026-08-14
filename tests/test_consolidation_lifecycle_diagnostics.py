@@ -376,3 +376,138 @@ async def test_apply_consolidation_target_lifecycle_cleanup_quarantines_rows(
     assert fake_db.user_memory_units.delete_many_filters == [
         EXPECTED_FILTERS["synthetic_user_memory_units"],
     ]
+
+
+def test_rejected_scheduled_candidate_is_not_candidate_memory_input() -> None:
+    """Suppressed candidate text never reaches candidate memory inputs."""
+
+    from kazusa_ai_chatbot.self_cognition import models, worker
+
+    candidate_text = "厕所隔间的检查已经准备好了。"
+    artifact_payloads = {
+        models.ARTIFACT_ACTION_CANDIDATE: {
+            "text": candidate_text,
+        },
+        models.ARTIFACT_COGNITION_OUTPUT: {
+            "surface_outputs": [
+                {
+                    "schema_version": "surface_output.v1",
+                    "visibility": "user_visible",
+                    "delivery_intent": "deliver_now",
+                    "text": candidate_text,
+                }
+            ]
+        },
+        models.RUNTIME_CONSOLIDATION_STATE: {
+            "final_dialog": [candidate_text],
+            "surface_outputs": [
+                {
+                    "schema_version": "surface_output.v1",
+                    "visibility": "user_visible",
+                    "delivery_intent": "deliver_now",
+                    "text": candidate_text,
+                }
+            ],
+            "decontextualized_input": "来源：其他有效认知证据。",
+        },
+    }
+    case = {
+        "scheduled_future_speech_authority": {
+            "authority_id": "sha256-abc",
+        },
+    }
+
+    worker._scrub_scheduled_candidate_from_consolidation(artifact_payloads)
+    worker._record_scheduled_gate_outcome(
+        case=case,
+        artifact_payloads=artifact_payloads,
+        gate_codes=["scheduled_objective_mismatch"],
+        disposition=models.SCHEDULED_GATE_DISPOSITION_SUPPRESSED,
+        evaluator_attempt_count=1,
+        dispatch_status="scheduled_content_suppressed",
+    )
+
+    consolidation_state = artifact_payloads[
+        models.RUNTIME_CONSOLIDATION_STATE
+    ]
+    candidate_memory_input = " ".join(
+        str(value)
+        for value in (
+            consolidation_state["final_dialog"],
+            consolidation_state["surface_outputs"],
+            consolidation_state["decontextualized_input"],
+        )
+    )
+    assert candidate_text not in candidate_memory_input
+    admission = consolidation_state["scheduled_candidate_admission"]
+    assert admission["disposition"] == "suppressed"
+    assert admission["authority_id"] == "sha256-abc"
+    assert "来源：其他有效认知证据。" in candidate_memory_input
+
+
+def test_undelivered_scheduled_candidate_is_not_candidate_memory_input() -> None:
+    """A gate-accepted candidate that fails delivery is scrubbed from memory inputs."""
+
+    from kazusa_ai_chatbot.self_cognition import models, worker
+
+    candidate_text = "今晚十点开始补偿考核。"
+    artifact_payloads = {
+        models.ARTIFACT_ACTION_CANDIDATE: {
+            "text": candidate_text,
+        },
+        models.ARTIFACT_COGNITION_OUTPUT: {
+            "surface_outputs": [
+                {
+                    "schema_version": "surface_output.v1",
+                    "visibility": "user_visible",
+                    "delivery_intent": "deliver_now",
+                    "text": candidate_text,
+                }
+            ]
+        },
+        models.RUNTIME_CONSOLIDATION_STATE: {
+            "final_dialog": [candidate_text],
+            "surface_outputs": [
+                {
+                    "schema_version": "surface_output.v1",
+                    "visibility": "user_visible",
+                    "delivery_intent": "deliver_now",
+                    "text": candidate_text,
+                }
+            ],
+            "decontextualized_input": "来源：其他有效认知证据。",
+        },
+    }
+    case = {
+        "scheduled_future_speech_authority": {
+            "authority_id": "sha256-abc",
+        },
+    }
+
+    worker._scrub_scheduled_candidate_from_consolidation(artifact_payloads)
+    worker._record_scheduled_gate_outcome(
+        case=case,
+        artifact_payloads=artifact_payloads,
+        gate_codes=[],
+        disposition=models.SCHEDULED_GATE_DISPOSITION_ACCEPTED,
+        evaluator_attempt_count=1,
+        dispatch_status="delivery_failed",
+    )
+
+    consolidation_state = artifact_payloads[
+        models.RUNTIME_CONSOLIDATION_STATE
+    ]
+    candidate_memory_input = " ".join(
+        str(value)
+        for value in (
+            consolidation_state["final_dialog"],
+            consolidation_state["surface_outputs"],
+            consolidation_state["decontextualized_input"],
+        )
+    )
+    assert candidate_text not in candidate_memory_input
+    admission = consolidation_state["scheduled_candidate_admission"]
+    assert admission["disposition"] == "suppressed"
+    assert admission["dispatch_status"] == "delivery_failed"
+    assert admission["authority_id"] == "sha256-abc"
+    assert "来源：其他有效认知证据。" in candidate_memory_input

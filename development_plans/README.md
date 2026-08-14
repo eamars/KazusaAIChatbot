@@ -51,8 +51,7 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
-| [scheduled_future_speech_temporal_grounding_and_content_gate_plan.md](active/bugfix/scheduled_future_speech_temporal_grounding_and_content_gate_plan.md) | Scheduled future-speech temporal grounding, provenance, pre-dispatch content gate, and consolidation safety | draft |
-
+| None | No active bugfix plans in this scope | — |
 
 ### Completed Bugfix Plans
 
@@ -66,6 +65,8 @@ recorded evidence.
 | [cognition_v2_relational_carrier_recurrence_binding_plan.md](archive/completed/cognition_v2_relational_carrier_recurrence_binding_plan.md) | Cognition V2 relational-carrier recurrence binding regression hardening | completed |
 | [task_resolution_duplicate_visible_delivery_plan.md](archive/completed/task_resolution_duplicate_visible_delivery_plan.md) | Task-resolution semantic duplicate visible delivery and evidence-contract repair | completed |
 | [required_selection_prompt_contract_and_evaluator_relaxation_plan.md](archive/completed/required_selection_prompt_contract_and_evaluator_relaxation_plan.md) | Required-selection prompt contract and evaluator relaxation | completed |
+| [scheduled_future_speech_temporal_grounding_and_content_gate_plan.md](archive/completed/scheduled_future_speech_temporal_grounding_and_content_gate_plan.md) | Scheduled future-speech temporal grounding, provenance, pre-dispatch content gate, and consolidation safety | completed |
+| [scheduled_future_speech_legacy_record_cutover_plan.md](archive/completed/scheduled_future_speech_legacy_record_cutover_plan.md) | Exact legacy scheduled-future-speech big-bang deletion | completed |
 
 ## Working-Tree Policy
 

@@ -5,7 +5,10 @@ from __future__ import annotations
 from importlib import import_module
 
 import kazusa_ai_chatbot.nodes.persona_supervisor2_cognition as cognition_module
-from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
+from kazusa_ai_chatbot.action_spec.registry import (
+    FUTURE_SPEAK_CAPABILITY,
+    SPEAK_CAPABILITY,
+)
 
 MODULE_PATH = "kazusa_ai_chatbot.nodes.persona_supervisor2_cognition"
 EXPECTED_SYMBOLS = [
@@ -114,3 +117,74 @@ def test_promoted_self_guidance_is_goal_only_conditional_context() -> None:
     assert evidence[0]['evidence_ref']['source_id'] == (
         'promoted-reflection:self_guidance:1'
     )
+
+
+def test_future_speak_v2_bridge_preserves_validated_authority_proposal(
+    monkeypatch,
+) -> None:
+    """The runtime V2 bridge keeps the validated proposal on future_speak."""
+
+    captured: list[list[dict[str, object]]] = []
+    proposal = {
+        "schema_version": "scheduled_authority_proposal.v1",
+        "temporal_alignment": "aligned",
+        "authorized_content_summary": "在约定时间开始补偿考核。",
+        "authorized_detail_refs": [
+            {
+                "evidence_handle": "e1",
+                "semantic_summary": (
+                    "当前对话明确约定在该时间开始补偿考核。"
+                ),
+                "provenance_role": "current_event",
+            }
+        ],
+    }
+
+    def materialize(
+        requests: list[dict[str, object]],
+        state: dict[str, object],
+    ) -> list[dict[str, object]]:
+        del state
+        captured.append(requests)
+        return [
+            {"kind": request["capability"]}
+            for request in requests
+            if isinstance(request, dict)
+        ]
+
+    monkeypatch.setattr(
+        cognition_module,
+        "materialize_semantic_action_requests",
+        materialize,
+    )
+    output = {
+        "action_requests": [
+            {
+                "action_kind": FUTURE_SPEAK_CAPABILITY,
+                "decision": "2026-05-10 13:00",
+                "context_ref": "current episode",
+                "semantic_goal": "在约定时间开始补偿考核。",
+                "reason": "用户要求在未来时间开始补偿考核。",
+                "target_roles": [],
+                "evidence_handles": ["e1"],
+                "scheduled_authority_proposal": proposal,
+            }
+        ],
+        "intention": {
+            "route": "silence",
+            "intention": "stay silent",
+            "target_roles": [],
+            "reason": "No visible surface selected.",
+        },
+    }
+
+    action_specs = cognition_module._materialize_v2_action_requests(
+        output,
+        {},
+    )
+
+    assert len(captured) == 1
+    materialized_request = captured[0][0]
+    assert materialized_request["capability"] == FUTURE_SPEAK_CAPABILITY
+    assert materialized_request["scheduled_authority_proposal"] == proposal
+    assert action_specs == [{"kind": FUTURE_SPEAK_CAPABILITY}]

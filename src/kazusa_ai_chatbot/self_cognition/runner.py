@@ -49,8 +49,10 @@ from kazusa_ai_chatbot.cognition_resolver.state import (
     ensure_initial_resolver_inputs,
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionContractError,
     is_targetless_group_self_cognition_episode,
     validate_text_surface_output,
+    validate_scheduled_future_speech_authority,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     resolve_state_scope,
@@ -101,6 +103,78 @@ SELF_COGNITION_PRIVATE_ACTION_KINDS = frozenset(
     )
 )
 logger = logging.getLogger(__name__)
+
+
+def enforce_scheduled_authority_due_guard(
+    case: models.SelfCognitionCase,
+    now_utc: datetime,
+) -> tuple[bool, list[str]]:
+    """Enforce the deterministic scheduled due and identity guard.
+
+    Before scheduled cognition starts, the run must carry a structurally valid
+    authority whose trigger equals the run due time and whose trigger is not
+    later than the current instant. Any failure fails closed without dialog
+    or delivery.
+
+    Args:
+        case: Scheduled future-speak self-cognition case.
+        now_utc: Current worker tick instant.
+
+    Returns:
+        A boolean pass flag and the bounded closed gate codes produced by the
+        guard.
+    """
+
+    authority = case.get("scheduled_future_speech_authority")
+    if not isinstance(authority, dict):
+        return False, ["scheduled_authority_missing"]
+    try:
+        validate_scheduled_future_speech_authority(authority)
+    except (CognitionContractError, ValueError):
+        return False, ["scheduled_authority_invalid"]
+    trigger_utc = authority["trigger"]["utc"]
+    try:
+        trigger_time = parse_storage_utc_datetime(trigger_utc)
+    except ValueError:
+        return False, ["scheduled_authority_invalid"]
+    run_due_at = _scheduled_run_due_at(case)
+    if not run_due_at:
+        return False, ["scheduled_trigger_identity_mismatch"]
+    try:
+        run_due_time = parse_storage_utc_datetime(run_due_at)
+    except ValueError:
+        return False, ["scheduled_trigger_identity_mismatch"]
+    if run_due_time != trigger_time:
+        return False, ["scheduled_trigger_identity_mismatch"]
+    if now_utc < trigger_time:
+        return False, ["scheduled_due_not_reached"]
+    return True, []
+
+
+def is_scheduled_future_speech_case(
+    case: models.SelfCognitionCase,
+) -> bool:
+    """Identify scheduled-speech cases by their carried authority field."""
+
+    return (
+        case.get("trigger_kind")
+        == models.TRIGGER_SCHEDULED_FUTURE_COGNITION
+        and "scheduled_future_speech_authority" in case
+    )
+
+
+def _scheduled_run_due_at(case: models.SelfCognitionCase) -> str:
+    """Return the deterministic run due time carried by a scheduled case."""
+
+    due_at = _string_field(case, "source_calendar_run_due_at")
+    if due_at:
+        return due_at
+    source_refs = case.get("source_refs")
+    if isinstance(source_refs, list) and source_refs:
+        first_ref = source_refs[0]
+        if isinstance(first_ref, dict):
+            return _string_field(first_ref, "due_at")
+    return ""
 
 
 def build_self_cognition_case_artifacts(
@@ -207,6 +281,25 @@ async def build_self_cognition_case_artifacts_async(
         raise StateContractError(
             f"self-cognition source state contract is invalid: {exc}"
         ) from exc
+
+    if (
+        case_name == models.CASE_SCHEDULED_FUTURE_COGNITION
+        and is_scheduled_future_speech_case(case)
+    ):
+        now_utc = parse_storage_utc_datetime(
+            _string_field(case, "idle_timestamp_utc")
+        )
+        guard_passed, guard_codes = enforce_scheduled_authority_due_guard(
+            case,
+            now_utc,
+        )
+        if not guard_passed:
+            blocked_artifacts = _scheduled_guard_blocked_artifacts(
+                case,
+                trigger_record,
+                guard_codes=guard_codes,
+            )
+            return blocked_artifacts
 
     if pipeline_run_handle is not None:
         pipeline_run_handle.raise_if_cancelled("before_source_packet")
@@ -541,6 +634,44 @@ def _materialize_v2_due_speak_action(
         speak_spec,
     ]
     return updated_output
+
+
+def _scheduled_guard_blocked_artifacts(
+    case: models.SelfCognitionCase,
+    trigger_record: dict[str, Any],
+    *,
+    guard_codes: list[str],
+) -> dict[str, Any]:
+    """Build fail-closed artifacts when the due guard blocks a scheduled case."""
+
+    gate_result: models.SelfCognitionScheduledGateResult = {
+        "schema_version": models.SCHEDULED_GATE_RESULT_SCHEMA_VERSION,
+        "disposition": models.SCHEDULED_GATE_DISPOSITION_SUPPRESSED,
+        "gate_codes": list(guard_codes),
+        "evaluator_attempt_count": 0,
+    }
+    artifact_payloads: dict[str, Any] = {
+        models.ARTIFACT_TRIGGER_RECORD: trigger_record,
+        models.ARTIFACT_SCHEDULED_GATE_RESULT: gate_result,
+    }
+    run_record = tracking.build_run_record(
+        case,
+        trigger_record,
+        models.ROUTE_AUDIT_ONLY,
+        _budget(rag_calls=0, cognition_calls=0, dialog_calls=0),
+    )
+    route_effect = _route_effect_for_route(
+        run_record,
+        models.ROUTE_AUDIT_ONLY,
+    )
+    artifact_payloads[models.ARTIFACT_RUN_RECORD] = run_record
+    artifact_payloads[models.ARTIFACT_ROUTE_EFFECT] = route_effect
+    artifact_payloads[models.ARTIFACT_LOOP_TRACE] = _loop_trace(
+        case,
+        run_record,
+        route_effect,
+    )
+    return artifact_payloads
 
 
 async def _load_residue_context_for_case(
@@ -1498,6 +1629,18 @@ def _loop_trace(
         f"- consumer: {route_effect['consumer']}",
         f"- production_write: {route_effect['production_write']}",
     ]
+    scheduled_authority_id = run_record.get("scheduled_authority_id")
+    if isinstance(scheduled_authority_id, str) and scheduled_authority_id:
+        lines.append(f"- scheduled_authority_id: {scheduled_authority_id}")
+    scheduled_gate_trace = run_record.get("scheduled_gate_trace")
+    if isinstance(scheduled_gate_trace, dict):
+        lines.append(
+            f"- scheduled_gate_disposition: "
+            f"{scheduled_gate_trace.get('gate_disposition', '')}"
+        )
+        gate_codes = scheduled_gate_trace.get("gate_codes")
+        if isinstance(gate_codes, list):
+            lines.append(f"- scheduled_gate_codes: {gate_codes}")
     if action_attempt is not None:
         lines.append(f"- action_attempt_status: {action_attempt['status']}")
     if action_candidate is not None:

@@ -12,6 +12,8 @@ CALENDAR_SCHEDULE_SCHEMA_VERSION = "calendar_schedule.v1"
 CALENDAR_RUN_SCHEMA_VERSION = "calendar_run.v1"
 CALENDAR_OWNER = "calendar_scheduler"
 DEFAULT_RUN_MAX_ATTEMPTS = 3
+SCHEDULED_AUTHORITY_PAYLOAD_KEY = "scheduled_future_speech_authority"
+FUTURE_SPEAK_SOURCE_REF_ID = "future_speak_background_work"
 
 TRIGGER_FUTURE_COGNITION = "future_cognition"
 TRIGGER_COMMITMENT_DUE_COGNITION = "commitment_due_cognition"
@@ -48,6 +50,7 @@ def build_one_time_calendar_schedule(
     timezone: str = "UTC",
     legacy_source: dict[str, Any] | None = None,
     source_llm_trace_id: str = "",
+    scheduled_future_speech_authority: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build one active one-time schedule for a closed trigger kind.
 
@@ -60,6 +63,8 @@ def build_one_time_calendar_schedule(
         storage_timestamp_utc: Storage timestamp used for created/updated.
         timezone: IANA timezone label used by recurring schedule types.
         legacy_source: Optional migration provenance for one-time legacy rows.
+        scheduled_future_speech_authority: Optional immutable scheduled
+            future-speech authority copied into the schedule payload carrier.
 
     Returns:
         A deterministic schedule document ready for upsert.
@@ -67,6 +72,11 @@ def build_one_time_calendar_schedule(
 
     _validate_trigger_kind(trigger_kind)
     schedule_id = _stable_id("calendar_schedule", idempotency_key)
+    schedule_payload = deepcopy(payload)
+    if scheduled_future_speech_authority is not None:
+        schedule_payload[SCHEDULED_AUTHORITY_PAYLOAD_KEY] = deepcopy(
+            scheduled_future_speech_authority
+        )
     schedule = {
         "schema_version": CALENDAR_SCHEDULE_SCHEMA_VERSION,
         "owner": CALENDAR_OWNER,
@@ -76,7 +86,7 @@ def build_one_time_calendar_schedule(
         "start_at": due_at,
         "next_run_at": due_at,
         "recurrence": {"kind": "once"},
-        "payload": deepcopy(payload),
+        "payload": schedule_payload,
         "source_scope": deepcopy(source_scope),
         "source_llm_trace_id": source_llm_trace_id.strip(),
         "idempotency_key": idempotency_key,

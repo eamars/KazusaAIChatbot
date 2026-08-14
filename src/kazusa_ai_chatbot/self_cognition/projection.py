@@ -9,6 +9,10 @@ from kazusa_ai_chatbot.channel_scene_projection import (
     project_group_review_instruction_preamble,
 )
 from kazusa_ai_chatbot.config import SELF_COGNITION_SOURCE_PACKET_CHAR_LIMIT
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionContractError,
+    validate_scheduled_future_speech_authority,
+)
 from kazusa_ai_chatbot.conversation_progress import (
     project_conversation_progress_evidence,
     project_conversation_progress_scene,
@@ -400,15 +404,62 @@ def _source_context(
         if not isinstance(continuation_mode, str):
             return_value = None
             return return_value
-        return_value = {
+        projected_context: dict[str, Any] = {
             "context_kind": context_kind,
             "continuation_objective": continuation_objective,
             "continuation_mode": continuation_mode,
         }
+        projected_authority = _project_scheduled_authority(case)
+        if projected_authority is not None:
+            projected_context["scheduled_authority"] = projected_authority
+        return_value = projected_context
         return return_value
 
     return_value = None
     return return_value
+
+
+def _project_scheduled_authority(
+    case: models.SelfCognitionCase,
+) -> dict[str, Any] | None:
+    """Project the bounded semantic authority without delivery identifiers."""
+
+    authority = case.get("scheduled_future_speech_authority")
+    if not isinstance(authority, dict):
+        return_value = None
+        return return_value
+    authorized_content = authority.get("authorized_content")
+    if not isinstance(authorized_content, dict):
+        return_value = None
+        return return_value
+    target = authority.get("target")
+    if not isinstance(target, dict):
+        return_value = None
+        return return_value
+    detail_refs = [
+        {
+            "semantic_summary": _string_field(
+                detail_ref,
+                "semantic_summary",
+            ),
+            "provenance_role": _string_field(
+                detail_ref,
+                "provenance_role",
+            ),
+        }
+        for detail_ref in authorized_content.get("detail_refs", [])
+        if isinstance(detail_ref, dict)
+    ]
+    trigger = authority.get("trigger")
+    trigger_utc = trigger.get("utc") if isinstance(trigger, dict) else None
+    projected_authority: dict[str, Any] = {
+        "objective": _string_field(authority, "semantic_objective"),
+        "summary": _string_field(authorized_content, "summary"),
+        "detail_refs": detail_refs,
+        "audience_kind": _string_field(target, "audience_kind"),
+        "local_due_datetime": format_storage_utc_for_llm(trigger_utc),
+    }
+    return projected_authority
 
 
 def _project_participant_context(value: object) -> dict[str, Any] | None:
@@ -694,6 +745,8 @@ def validate_case_contract(case: models.SelfCognitionCase) -> None:
             raise ValueError(
                 'scheduled cognition cases require conversation_progress=None'
             )
+        if 'scheduled_future_speech_authority' in case:
+            _validate_scheduled_authority_contract(case)
         _validate_scheduled_source_context(source_context)
         return
     if source_context is not None:
@@ -843,6 +896,24 @@ def _validate_scheduled_source_context(value: object) -> None:
             raise ValueError(
                 f'scheduled source_context.{field_name} must be text'
             )
+
+
+def _validate_scheduled_authority_contract(
+    case: models.SelfCognitionCase,
+) -> None:
+    """Validate the immutable authority carried by scheduled-speech cases."""
+
+    authority = case.get('scheduled_future_speech_authority')
+    if not isinstance(authority, dict):
+        raise ValueError(
+            'scheduled cognition case requires scheduled_future_speech_authority'
+        )
+    try:
+        validate_scheduled_future_speech_authority(authority)
+    except (CognitionContractError, ValueError) as exc:
+        raise ValueError(
+            f'scheduled cognition authority is invalid: {exc}'
+        ) from exc
 
 
 def validate_case_name(case: models.SelfCognitionCase) -> str:

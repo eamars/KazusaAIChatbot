@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, NotRequired, TypedDict
+from typing import Annotated, Literal, NotRequired, TypedDict
 
 
 from kazusa_ai_chatbot.consolidation.origin import (
@@ -90,6 +90,16 @@ def content_plan_from_action_directives(
     return return_value
 
 
+class ScheduledCandidateAdmissionV1(TypedDict):
+    """Structural admission metadata for one scheduled speech candidate."""
+
+    schema_version: Literal["scheduled_candidate_admission.v1"]
+    disposition: Literal["not_scheduled", "accepted", "suppressed"]
+    gate_codes: list[str]
+    authority_id: str
+    dispatch_status: str
+
+
 class ConsolidatorState(TypedDict):
     # Inputs for db_writer
     storage_timestamp_utc: str
@@ -134,3 +144,4 @@ class ConsolidatorState(TypedDict):
     new_facts: list[dict]
     future_promises: list[dict]
     should_stop: bool
+    scheduled_candidate_admission: NotRequired[ScheduledCandidateAdmissionV1]

@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable
 from collections.abc import Mapping
+from copy import deepcopy
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -12,6 +13,10 @@ from kazusa_ai_chatbot.calendar_scheduler import handlers as calendar_handlers
 from kazusa_ai_chatbot.calendar_scheduler import models as calendar_models
 from kazusa_ai_chatbot.calendar_scheduler import repository as calendar_repository
 from kazusa_ai_chatbot.channel_scene_projection import usable_channel_label
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionContractError,
+    validate_scheduled_future_speech_authority,
+)
 from kazusa_ai_chatbot.config import (
     CALENDAR_SCHEDULER_MAX_ATTEMPTS,
     CHARACTER_GLOBAL_USER_ID,
@@ -394,6 +399,9 @@ async def collect_scheduled_future_cognition_cases(
             user_profile=user_profile,
         )
         if case is None:
+            continue
+        if case.get("source_calendar_skip_reason"):
+            cases.append(case)
             continue
         await _attach_scheduled_delivery_binding(
             case,
@@ -1357,12 +1365,49 @@ def _build_scheduled_future_cognition_case(
         return return_value
 
     due_at = text_or_empty(run.get("due_at"))
+    is_scheduled_future_speech = _is_scheduled_future_speech_run(run)
+    scheduled_authority = None
+    if is_scheduled_future_speech:
+        scheduled_authority, authority_skip_reason = (
+            _scheduled_authority_from_run(run)
+        )
+        if authority_skip_reason is not None:
+            return _scheduled_authority_skip_case(
+                run,
+                reason=authority_skip_reason,
+            )
     slot_source_id = _scheduled_future_cognition_slot_source_id(run_id)
     case_id = slot_source_id
     source_action_attempt_id = text_or_empty(
         payload.get("source_action_attempt_id")
     )
     source_scope = _calendar_source_scope(run)
+    if scheduled_authority is not None:
+        source_scope_message_id = text_or_empty(
+            source_scope.get("source_message_id")
+        )
+        authority_message_id = scheduled_authority["source"][
+            "source_message_id"
+        ]
+        if source_scope_message_id and (
+            source_scope_message_id != authority_message_id
+        ):
+            return _scheduled_authority_skip_case(
+                run,
+                reason="scheduled_authority_invalid",
+            )
+        mismatch_reason = _scheduled_authority_carrier_mismatch(
+            run=run,
+            payload=payload,
+            authority=scheduled_authority,
+            continuation_objective=continuation_objective,
+            due_at=due_at,
+        )
+        if mismatch_reason is not None:
+            return _scheduled_authority_skip_case(
+                run,
+                reason=mismatch_reason,
+            )
     source_platform = text_or_empty(source_scope.get("source_platform"))
     source_channel_id = text_or_empty(source_scope.get("source_channel_id"))
     source_channel_type = text_or_empty(
@@ -1429,6 +1474,7 @@ def _build_scheduled_future_cognition_case(
             run.get("source_llm_trace_id")
         ),
         "source_action_attempt_id": source_action_attempt_id,
+        "source_calendar_run_due_at": due_at,
         "cognition_source": {
             "source_kind": "scheduler_event",
             "source_id": run_id,
@@ -1438,7 +1484,124 @@ def _build_scheduled_future_cognition_case(
             ),
         },
     }
+    if is_scheduled_future_speech and scheduled_authority is not None:
+        case["scheduled_future_speech_authority"] = deepcopy(
+            scheduled_authority
+        )
     return case
+
+
+def _scheduled_authority_from_run(
+    run: dict[str, Any],
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Validate the immutable authority carried by a scheduled run payload."""
+
+    payload = run.get("payload")
+    if not isinstance(payload, dict):
+        return None, "scheduled_authority_missing"
+    raw_authority = payload.get(
+        calendar_models.SCHEDULED_AUTHORITY_PAYLOAD_KEY
+    )
+    if raw_authority is None:
+        return None, "scheduled_authority_missing"
+    if not isinstance(raw_authority, dict):
+        return None, "scheduled_authority_invalid"
+    try:
+        validated_authority = validate_scheduled_future_speech_authority(
+            raw_authority
+        )
+    except (CognitionContractError, ValueError):
+        return None, "scheduled_authority_invalid"
+    return dict(validated_authority), None
+
+
+def _scheduled_authority_carrier_mismatch(
+    *,
+    run: dict[str, Any],
+    payload: dict[str, Any],
+    authority: dict[str, Any],
+    continuation_objective: str,
+    due_at: str,
+) -> str | None:
+    """Return a closed skip reason when a scheduled carrier contradicts its authority.
+
+    The scheduled source is bound to the trusted action attempt, objective,
+    trigger, platform, channel type, and audience scope recorded in the
+    immutable authority. Operational channel and user ids are not compared:
+    they are carrier metadata and cannot authorize different wording.
+    """
+
+    if (
+        text_or_empty(payload.get("source_action_attempt_id"))
+        != authority["source"]["source_action_attempt_id"]
+    ):
+        return "scheduled_authority_invalid"
+    if continuation_objective != authority["semantic_objective"]:
+        return "scheduled_authority_invalid"
+    try:
+        due_time = parse_storage_utc_datetime(due_at)
+        trigger_time = parse_storage_utc_datetime(
+            authority["trigger"]["utc"]
+        )
+    except ValueError:
+        return "scheduled_authority_invalid"
+    if due_time != trigger_time:
+        return "scheduled_authority_invalid"
+    source_scope = _calendar_source_scope(run)
+    platform = text_or_empty(source_scope.get("source_platform"))
+    channel_type = text_or_empty(source_scope.get("source_channel_type"))
+    target = authority["target"]
+    if platform != target["platform"]:
+        return "scheduled_authority_invalid"
+    if channel_type != target["channel_type"]:
+        return "scheduled_authority_invalid"
+    audience_kind = "group" if channel_type == "group" else "private"
+    if audience_kind != target["audience_kind"]:
+        return "scheduled_authority_invalid"
+    return None
+
+
+def _scheduled_authority_skip_case(
+    run: dict[str, Any],
+    *,
+    reason: str,
+) -> models.SelfCognitionCase:
+    """Build a typed worker skip case for an incompatible scheduled run."""
+
+    run_id = text_or_empty(run.get("run_id"))
+    due_at = text_or_empty(run.get("due_at"))
+    case: models.SelfCognitionCase = {
+        "case_name": models.CASE_SCHEDULED_FUTURE_COGNITION,
+        "case_id": f"scheduled_future_cognition_authority_skip:{run_id}",
+        "trigger_kind": models.TRIGGER_SCHEDULED_FUTURE_COGNITION,
+        "source_calendar_run_id": run_id,
+        "source_calendar_run_due_at": due_at,
+        "source_calendar_skip_reason": reason,
+        "cognition_source": {
+            "source_kind": "scheduler_event",
+            "source_id": run_id,
+            "occurred_at": due_at,
+            "semantic_summary": f"scheduled authority blocked: {reason}",
+        },
+    }
+    return case
+
+
+def _is_scheduled_future_speech_run(run: dict[str, Any]) -> bool:
+    """Identify future-speak scheduler carriers by structural provenance."""
+
+    payload = run.get("payload")
+    if not isinstance(payload, dict):
+        return False
+    raw_source_refs = payload.get("source_refs")
+    if not isinstance(raw_source_refs, list):
+        return False
+    return any(
+        isinstance(source_ref, dict)
+        and source_ref.get("ref_id")
+        == calendar_models.FUTURE_SPEAK_SOURCE_REF_ID
+        for source_ref in raw_source_refs
+    )
 
 
 def _scheduled_future_cognition_source_refs(

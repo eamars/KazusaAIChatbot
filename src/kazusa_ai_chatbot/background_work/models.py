@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 from kazusa_ai_chatbot.cognition_episode import GoalContinuationRefV1
 
@@ -80,6 +80,7 @@ class BackgroundWorkQueueRequest(TypedDict):
     requested_delivery: Literal["send_result_when_done"]
     max_output_chars: int
     storage_timestamp_utc: str
+    scheduled_future_speech_authority: NotRequired[dict[str, Any]]
 
 
 class BackgroundWorkQueueResult(TypedDict):
@@ -153,6 +154,7 @@ class BackgroundWorkJobDoc(TypedDict, total=False):
     delivery_tracking_id: str
     delivered_conversation_message_id: str
     delivered_at: str
+    scheduled_future_speech_authority: NotRequired[dict[str, Any]]
 
 
 def background_work_job_ref(job_id: str) -> str:

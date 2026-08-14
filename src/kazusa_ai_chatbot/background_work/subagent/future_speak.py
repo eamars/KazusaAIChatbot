@@ -6,6 +6,11 @@ from collections.abc import Mapping
 from importlib import import_module
 from typing import TypedDict
 
+from kazusa_ai_chatbot.calendar_scheduler.models import (
+    FUTURE_SPEAK_SOURCE_REF_ID,
+    SCHEDULED_AUTHORITY_PAYLOAD_KEY,
+)
+
 
 class FutureSpeakExecutionResult(TypedDict):
     """Prompt-safe completion facts from deterministic future scheduling."""
@@ -36,6 +41,7 @@ async def execute_future_speak_job(
         job,
         trigger_at=trigger_at,
         continuation_objective=continuation_objective,
+        scheduled_authority=_scheduled_authority(job),
     )
     future_result = await _execute_future_cognition_action(
         action_spec,
@@ -70,6 +76,7 @@ def _future_cognition_action_spec(
     *,
     trigger_at: str,
     continuation_objective: str,
+    scheduled_authority: Mapping[str, object] | None,
 ) -> dict[str, object]:
     """Build the internal deterministic schedule action from trusted job scope."""
 
@@ -92,6 +99,13 @@ def _future_cognition_action_spec(
         "source_message_id": _required_job_text(job, "source_message_id"),
         "episode_type": "self_cognition",
     }
+    params: dict[str, object] = {
+        "episode_type": "self_cognition",
+        "trigger_at": trigger_at,
+        "continuation_objective": continuation_objective,
+    }
+    if scheduled_authority is not None:
+        params[SCHEDULED_AUTHORITY_PAYLOAD_KEY] = dict(scheduled_authority)
     action_spec = {
         "schema_version": "action_spec.v1",
         "kind": "trigger_future_cognition",
@@ -99,7 +113,7 @@ def _future_cognition_action_spec(
         "source_refs": [{
             "schema_version": "action_source_ref.v1",
             "ref_kind": "system_event",
-            "ref_id": "future_speak_background_work",
+            "ref_id": FUTURE_SPEAK_SOURCE_REF_ID,
             "owner": "background_work",
             "relationship": "basis",
             "evidence_refs": [],
@@ -111,11 +125,7 @@ def _future_cognition_action_spec(
             "owner": "orchestrator",
             "scope": source_scope,
         },
-        "params": {
-            "episode_type": "self_cognition",
-            "trigger_at": trigger_at,
-            "continuation_objective": continuation_objective,
-        },
+        "params": params,
         "urgency": "scheduled",
         "visibility": "private",
         "deadline": None,
@@ -152,6 +162,21 @@ def _required_text(payload: Mapping[str, object], field_name: str) -> str:
         )
     text = value.strip()
     return text
+
+
+def _scheduled_authority(
+    job: Mapping[str, object],
+) -> Mapping[str, object] | None:
+    """Return the immutable scheduled authority carried by a future-speak job."""
+
+    value = job.get("scheduled_future_speech_authority")
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise ValueError(
+            "background job scheduled_future_speech_authority is invalid"
+        )
+    return value
 
 
 def _required_job_text(job: Mapping[str, object], field_name: str) -> str:

@@ -35,6 +35,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     TextSurfaceOutputV2,
     validate_text_surface_input,
     validate_text_surface_output,
+    validate_scheduled_speech_semantic_verdict,
 )
 from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
     V2_MODEL_TOTAL_ATTEMPTS,
@@ -1164,6 +1165,265 @@ _dialog_role_direction_llm_config = LLMCallConfig(
         enabled=DIALOG_GENERATOR_LLM_THINKING_ENABLED,
     ),
 )
+
+
+_SCHEDULED_SPEECH_CONTENT_EVALUATOR_PROMPT = '''你负责判断一份定时发言候选是否仍然落在
+已接纳的当前任务授权之内。授权内容只来自输入的 semantic_objective、
+authorized_content_summary 和 authorized_detail_refs；候选不能扩大目标范围、不能依赖历史记忆
+冒充当前承诺，也不能对当前听众做出未授权表述。
+
+# 判定步骤
+1. 先阅读 semantic_objective 和 authorized_content_summary，明确本次定时发言唯一被接纳的目标
+和允许表达的内容。
+2. 逐条阅读 authorized_detail_refs 的 semantic_summary 与 provenance_role。只有 provenance_role
+属于当前事件授权的 detail 才能支撑具体措辞；历史记忆、角色世界背景或一般上下文即使措辞相似，
+也不能作为当前承诺的依据。
+3. 对照 candidate_text，逐项判断五个维度：
+   - time_claim_alignment：候选是否宣称时间已到或提前执行。宣称时间未到或与授权时间矛盾时使用
+   premature 或 contradictory；未涉及时间表述使用 no_claim。
+   - objective_alignment：候选是否扩展目标范围、与目标矛盾或表达目标未包含的内容。扩展授权中
+   不存在的具体细节时使用 scope_expansion；表达与目标相反内容时使用 contradiction；目标未覆盖
+   的新承诺使用 unsupported。
+   - source_grounding：候选的具体措辞是否由当前授权 detail 支撑。只依据历史记忆或角色背景时
+   使用 historical_only；没有任何授权依据时使用 unsupported。
+   - audience_alignment：候选是否针对 audience_kind 的听众表述。对不应获知的内容使用 mismatch。
+   - execution_claim：候选是否宣称已经执行或完成某个动作。宣称未来提前执行使用 premature；
+   宣称虚假完成使用 false。
+4. 只有全部维度都确认一致时才使用 aligned 或 current_authority 的正面取值；无法判断的维度
+使用 unavailable。
+
+# 输出格式
+只返回一个 JSON 对象，字段必须恰好是：
+- schema_version：固定值 scheduled_speech_semantic_verdict.v1；
+- time_claim_alignment：aligned、no_claim、premature、contradictory 或 unavailable；
+- objective_alignment：aligned、scope_expansion、contradiction、unsupported 或 unavailable；
+- source_grounding：current_authority、historical_only、unsupported 或 unavailable；
+- audience_alignment：aligned、mismatch 或 unavailable；
+- execution_claim：aligned、premature、false 或 unavailable。
+JSON 对象之外不添加解释或代码围栏。
+'''
+
+_scheduled_speech_evaluator_llm = LLInterface()
+_scheduled_speech_evaluator_llm_config = LLMCallConfig(
+    stage_name=f"{__name__}.scheduled_speech_content",
+    route_name="DIALOG_GENERATOR_LLM",
+    base_url=DIALOG_GENERATOR_LLM_BASE_URL,
+    api_key=DIALOG_GENERATOR_LLM_API_KEY,
+    model=DIALOG_GENERATOR_LLM_MODEL,
+    temperature=0.1,
+    top_p=0.7,
+    top_k=None,
+    max_completion_tokens=DIALOG_GENERATOR_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=DIALOG_GENERATOR_LLM_THINKING_ENABLED,
+    ),
+)
+
+_SCHEDULED_SPEECH_EVALUATOR_REPAIR_PROMPT = '''上一份定时发言评估没有通过 JSON 结构校验。
+请保留原语义判断，只修复字段名、结构、类型和取值，重新输出一份完整替代 verdict。
+具体 contract_error 是：{contract_error}
+只返回完整 JSON 对象，不附加解释。'''
+
+
+def _scheduled_verdict_repair_message(
+    *,
+    contract_error: str,
+) -> HumanMessage:
+    """Build one bounded structural replacement for the scheduled evaluator."""
+
+    content = _SCHEDULED_SPEECH_EVALUATOR_REPAIR_PROMPT.format(
+        contract_error=contract_error[
+            :DIALOG_VERIFIER_CONTRACT_ERROR_MAX_CHARS
+        ],
+    )
+    repair_message = HumanMessage(content=content)
+    return repair_message
+
+
+async def evaluate_scheduled_future_speech_content(
+    *,
+    candidate_text: str,
+    semantic_objective: str,
+    authorized_content_summary: str,
+    authorized_detail_refs: list[dict[str, Any]],
+    audience_kind: str,
+    local_due_datetime: str,
+    due_identity_facts: dict[str, Any],
+    llm_trace_id: str = "",
+) -> dict[str, Any]:
+    """Evaluate one rendered scheduled candidate against its authority.
+
+    The evaluator runs once per rendered candidate on the existing dialog
+    route with the existing bounded verifier attempt limit for structural
+    repair. Semantic rejection is returned as a typed verdict; deterministic
+    worker code maps the closed dimensions to dispatch or suppression.
+
+    Args:
+        candidate_text: One rendered scheduled speech candidate.
+        semantic_objective: Bounded current-task objective from the authority.
+        authorized_content_summary: Bounded authorized summary.
+        authorized_detail_refs: Bounded authorized detail references.
+        audience_kind: Prompt-safe audience descriptor.
+        local_due_datetime: Configured-local due context.
+        due_identity_facts: Deterministic due and identity facts.
+        llm_trace_id: Optional protected trace correlation id.
+
+    Returns:
+        A result with status ``evaluated`` or ``unavailable``, the validated
+        closed verdict when evaluation succeeded, and the attempt count.
+    """
+
+    system_message = SystemMessage(
+        content=_SCHEDULED_SPEECH_CONTENT_EVALUATOR_PROMPT,
+    )
+    payload = {
+        "candidate_text": candidate_text,
+        "semantic_objective": semantic_objective,
+        "authorized_content_summary": authorized_content_summary,
+        "authorized_detail_refs": [
+            {
+                "semantic_summary": str(
+                    detail_ref.get("semantic_summary") or ""
+                ),
+                "provenance_role": str(
+                    detail_ref.get("provenance_role") or ""
+                ),
+            }
+            for detail_ref in authorized_detail_refs
+            if isinstance(detail_ref, Mapping)
+        ],
+        "audience_kind": audience_kind,
+        "local_due_datetime": local_due_datetime,
+        "due_identity_facts": dict(due_identity_facts),
+    }
+    human_message = HumanMessage(
+        content=json.dumps(payload, ensure_ascii=False)
+    )
+    request_messages = [system_message, human_message]
+    for attempt_index in range(DIALOG_VERIFIER_ATTEMPT_LIMIT):
+        started_at = time.perf_counter()
+        parsed: object = {}
+        response_text = ""
+        failure_kind = ""
+        contract_error = ""
+        try:
+            response = await _scheduled_speech_evaluator_llm.ainvoke(
+                request_messages,
+                config=_scheduled_speech_evaluator_llm_config,
+            )
+            response_text = str(getattr(response, "content", ""))
+            parsed = parse_llm_json_output(response_text)
+            verdict = validate_scheduled_speech_semantic_verdict(parsed)
+        except (
+            OpenAIError,
+            httpx.HTTPError,
+            ConnectionError,
+            OSError,
+            RuntimeError,
+            TimeoutError,
+        ) as exc:
+            failure_kind = "provider_error"
+            contract_error = f"{type(exc).__name__}: {exc}"
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            failure_kind = "contract_error"
+            contract_error = str(exc)
+
+        if failure_kind:
+            await llm_tracing.record_llm_trace_step(
+                trace_id=llm_trace_id,
+                stage_name="scheduled_speech_content_evaluator",
+                route_name="DIALOG_GENERATOR_LLM",
+                model_name=DIALOG_GENERATOR_LLM_MODEL,
+                messages=request_messages,
+                response_text=str(response_text),
+                parsed_output=parsed,
+                parse_status=failure_kind,
+                status="failed",
+                duration_ms=_elapsed_ms(started_at),
+                output_state_fields=[
+                    "scheduled_speech_semantic_verdict",
+                ],
+                sequence=attempt_index,
+                call_config=_scheduled_speech_evaluator_llm_config,
+                attempt_index=attempt_index,
+                validation_error=contract_error,
+                attempt_started_at=started_at,
+            )
+            if attempt_index + 1 >= DIALOG_VERIFIER_ATTEMPT_LIMIT:
+                await event_logging.record_model_contract_event(
+                    component=DIALOG_COMPONENT,
+                    stage_name="scheduled_speech_content",
+                    violation_kind="scheduled_speech_evaluator_unavailable",
+                    missing_fields=[],
+                    invalid_fields=[failure_kind],
+                    repair_used=True,
+                    status="degraded",
+                    correlation_id=llm_trace_id,
+                )
+                return {
+                    "status": "unavailable",
+                    "verdict": None,
+                    "attempt_count": attempt_index + 1,
+                }
+            request_messages = [
+                system_message,
+                human_message,
+                AIMessage(content=(
+                    _bounded_dialog_verifier_rejected_output(
+                        str(response_text)
+                    )
+                )),
+                _scheduled_verdict_repair_message(
+                    contract_error=contract_error,
+                ),
+            ]
+            continue
+
+        await llm_tracing.record_llm_trace_step(
+            trace_id=llm_trace_id,
+            stage_name="scheduled_speech_content_evaluator",
+            route_name="DIALOG_GENERATOR_LLM",
+            model_name=DIALOG_GENERATOR_LLM_MODEL,
+            messages=request_messages,
+            response_text=str(response_text),
+            parsed_output=parsed,
+            parse_status="succeeded",
+            status="succeeded",
+            duration_ms=_elapsed_ms(started_at),
+            output_state_fields=["scheduled_speech_semantic_verdict"],
+            sequence=attempt_index,
+            call_config=_scheduled_speech_evaluator_llm_config,
+            attempt_index=attempt_index,
+            attempt_started_at=started_at,
+        )
+        await event_logging.record_llm_stage_event(
+            component=DIALOG_COMPONENT,
+            stage_name="scheduled_speech_content",
+            route_name="verify",
+            model_name=DIALOG_GENERATOR_LLM_MODEL,
+            status="succeeded",
+            prompt_chars=sum(
+                len(str(message.content))
+                for message in request_messages
+            ),
+            output_chars=len(str(response_text)),
+            parse_status="succeeded",
+            retry_count=attempt_index,
+            json_repair_used=False,
+            duration_ms=_elapsed_ms(started_at),
+            severity="info",
+            correlation_id=llm_trace_id,
+        )
+        return {
+            "status": "evaluated",
+            "verdict": dict(verdict),
+            "attempt_count": attempt_index + 1,
+        }
+
+    raise StateContractError(
+        "scheduled speech evaluator loop invariant failed"
+    )
 
 
 def _required_selection_role_operations(

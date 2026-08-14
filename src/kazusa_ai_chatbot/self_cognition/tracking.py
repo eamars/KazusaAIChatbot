@@ -13,6 +13,7 @@ from kazusa_ai_chatbot.brain_service.delivery_mentions import (
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionContractError,
+    SCHEDULED_SPEECH_GATE_CODES,
     validate_self_cognition_response_decision,
 )
 from kazusa_ai_chatbot.self_cognition import models
@@ -92,6 +93,9 @@ def build_trigger_record(case: models.SelfCognitionCase) -> dict[str, Any]:
         "actionability": _string_field(case, "actionability"),
         "status": "accepted",
     }
+    scheduled_authority_id = _scheduled_authority_id(case)
+    if scheduled_authority_id:
+        trigger_record["scheduled_authority_id"] = scheduled_authority_id
     return trigger_record
 
 
@@ -145,11 +149,92 @@ def build_run_record(
         run_record["response_outcome"] = _bounded_response_outcome(
             response_outcome
         )
+    scheduled_authority_id = _scheduled_authority_id(case)
+    if scheduled_authority_id:
+        run_record["scheduled_authority_id"] = scheduled_authority_id
+        run_record["scheduled_gate_trace"] = build_scheduled_gate_trace(
+            case,
+            gate_result=None,
+            dispatch_status="",
+        )
     for field_name in ("llm_trace_id", "source_calendar_run_id"):
         field_value = _string_field(case, field_name)
         if field_value:
             run_record[field_name] = field_value
     return run_record
+
+
+def build_scheduled_gate_trace(
+    case: models.SelfCognitionCase,
+    *,
+    gate_result: Mapping[str, Any] | None,
+    dispatch_status: str,
+) -> dict[str, Any]:
+    """Build the bounded authority/gate/dispatch correlation record.
+
+    The trace binds the immutable authority identity, source identity,
+    accepted and trigger instants, deterministic gate codes, evaluator attempt
+    count, and dispatch status so an incident can be followed from parent
+    action attempt to delivery or suppression.
+    """
+
+    authority = case.get("scheduled_future_speech_authority")
+    source = authority.get("source") if isinstance(authority, dict) else None
+    accepted_at = (
+        authority.get("accepted_at") if isinstance(authority, dict) else None
+    )
+    trigger = (
+        authority.get("trigger") if isinstance(authority, dict) else None
+    )
+    if isinstance(gate_result, Mapping):
+        disposition = gate_result.get("disposition")
+        if disposition not in models.SCHEDULED_GATE_DISPOSITION_VALUES:
+            disposition = models.SCHEDULED_GATE_DISPOSITION_NOT_EVALUATED
+        raw_gate_codes = gate_result.get("gate_codes")
+        gate_codes = [
+            code
+            for code in raw_gate_codes
+            if isinstance(code, str) and code in SCHEDULED_SPEECH_GATE_CODES
+        ]
+        evaluator_attempt_count = gate_result.get("evaluator_attempt_count")
+        if isinstance(evaluator_attempt_count, bool) or not isinstance(
+            evaluator_attempt_count,
+            int,
+        ):
+            evaluator_attempt_count = 0
+    else:
+        disposition = models.SCHEDULED_GATE_DISPOSITION_NOT_EVALUATED
+        gate_codes = []
+        evaluator_attempt_count = 0
+    trace = {
+        "schema_version": models.SCHEDULED_GATE_TRACE_SCHEMA_VERSION,
+        "authority_id": _string_field(authority, "authority_id")
+        if isinstance(authority, dict)
+        else "",
+        "source_episode_id": _string_field(source, "source_episode_id")
+        if isinstance(source, dict)
+        else "",
+        "source_message_id": _string_field(source, "source_message_id")
+        if isinstance(source, dict)
+        else "",
+        "source_action_attempt_id": _string_field(
+            source,
+            "source_action_attempt_id",
+        )
+        if isinstance(source, dict)
+        else "",
+        "accepted_at_utc": _string_field(accepted_at, "utc")
+        if isinstance(accepted_at, dict)
+        else "",
+        "trigger_utc": _string_field(trigger, "utc")
+        if isinstance(trigger, dict)
+        else "",
+        "gate_disposition": disposition,
+        "gate_codes": gate_codes,
+        "evaluator_attempt_count": evaluator_attempt_count,
+        "dispatch_status": dispatch_status,
+    }
+    return trace
 
 
 def build_route_effect(
@@ -1039,6 +1124,18 @@ def _stable_prefixed_id(prefix: str, value: dict[str, Any]) -> str:
     digest = hashlib.sha256(rendered.encode("utf-8")).hexdigest()
     stable_id = f"{prefix}:{digest[:models.STABLE_ID_DIGEST_PREFIX_LENGTH]}"
     return stable_id
+
+
+def _scheduled_authority_id(case: models.SelfCognitionCase) -> str:
+    """Return the immutable authority id when a case carries one."""
+
+    authority = case.get("scheduled_future_speech_authority")
+    if not isinstance(authority, dict):
+        return ""
+    authority_id = authority.get("authority_id")
+    if not isinstance(authority_id, str):
+        return ""
+    return authority_id
 
 
 def _string_field(case: dict[str, Any], field_name: str) -> str:
