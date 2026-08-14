@@ -178,6 +178,13 @@ contract. Its input includes:
 - exact advisory group-engagement guidance for eligible targetless group
   self-cognition.
 
+`build_scene_context_from_global_state(...)` is the single producer and
+validator for that `SceneContextV2`. The connector passes the child input's
+scene through independent copies under `cognition_scene_context` for resolver
+task execution, local-context/RAG execution, and accepted-coding context. The
+top-level `scene_context` key remains the relevance-owned string and is not a
+resolver or cognition carrier.
+
 At resolver cycle zero, `user_message` and `internal_thought` episodes start
 the existing shared-memory prewarm before independent identity and mutable-state
 preparation. Its confirmed shared rows merge only into

@@ -9,7 +9,10 @@ from kazusa_ai_chatbot.cognition_resolver.capabilities import (
 )
 
 MODULE_PATH = "kazusa_ai_chatbot.cognition_resolver.capabilities"
-EXPECTED_SYMBOLS = ["project_resolver_observation_for_cognition"]
+EXPECTED_SYMBOLS = [
+    "project_resolver_observation_for_cognition",
+    "validate_task_resolution_execution_readiness",
+]
 
 
 def test_capabilities_exposes_owned_contract() -> None:

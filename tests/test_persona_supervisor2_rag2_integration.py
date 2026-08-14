@@ -10,6 +10,9 @@ import pytest
 from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
 from kazusa_ai_chatbot.cognition_resolver import capabilities as capabilities_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as supervisor_module
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
+    build_scene_context_from_global_state,
+)
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_supervisor2 as rag2_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_initializer as rag_initializer_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_evaluator as rag_evaluator_module
@@ -17,6 +20,9 @@ from kazusa_ai_chatbot.local_context_resolver import (
     LOCAL_CONTEXT_GRAPH_VERSION,
     LOCAL_CONTEXT_NODE_VERSION,
     LOCAL_CONTEXT_RESOLUTION_PACKET_VERSION,
+)
+from kazusa_ai_chatbot.conversation_progress.projection import (
+    empty_progress_prompt,
 )
 from kazusa_ai_chatbot.rag.cache2_runtime import RAGCache2Runtime
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
@@ -237,6 +243,7 @@ def _rag_evidence_snapshot_state() -> dict:
         Persona graph state subset with a valid text-chat cognitive episode.
     """
     turn_clock = build_turn_clock("2026-04-27 00:00:00")
+    conversation_progress = _snapshot_conversation_progress()
     episode = canonical_user_message_episode(
         episode_id="episode-rag-snapshot",
         percept_id="percept-rag-snapshot",
@@ -289,11 +296,7 @@ def _rag_evidence_snapshot_state() -> dict:
         "chat_history_wide": [{"role": "assistant", "content": "older turn"}],
         "reply_context": {"platform_message_id": "reply-1"},
         "indirect_speech_context": "No indirect speech.",
-        "conversation_progress": {
-            "status": "active",
-            "continuity": "same_episode",
-            "current_thread": "Pickup plan is active.",
-        },
+        "conversation_progress": conversation_progress,
         "conversation_episode_state": {
             "updated_at": "2026-04-26T23:00:00+00:00",
             "turn_count": 7,
@@ -304,6 +307,17 @@ def _rag_evidence_snapshot_state() -> dict:
         "cognitive_episode": episode,
     }
     return state
+
+
+def _snapshot_conversation_progress() -> dict:
+    """Build the complete prompt progress shape used by RAG snapshots."""
+
+    progress = empty_progress_prompt(interaction_logical_turns=[])
+    progress["status"] = "active"
+    progress["continuity"] = "same_episode"
+    progress["turn_count"] = 7
+    progress["current_thread"] = "Pickup plan is active."
+    return progress
 
 
 def _minimal_text_chat_episode() -> dict:
@@ -1057,7 +1071,14 @@ async def test_rag_evidence_helper_calls_rag3_and_projects_payload(monkeypatch) 
     )
 
     turn_clock = build_turn_clock("2026-04-27 00:00:00")
-    rag_result = await supervisor_module.run_rag_evidence_for_persona_state({
+    conversation_progress = empty_progress_prompt(
+        interaction_logical_turns=[],
+    )
+    conversation_progress["status"] = "active"
+    conversation_progress["continuity"] = "same_episode"
+    conversation_progress["turn_count"] = 7
+    conversation_progress["current_thread"] = "Pickup plan is active."
+    state = {
         "decontextualized_input": "你记得我喜欢什么吗？",
         "referents": [],
         "character_profile": {"name": "Kazusa", "global_user_id": "character-1"},
@@ -1094,16 +1115,16 @@ async def test_rag_evidence_helper_calls_rag3_and_projects_payload(monkeypatch) 
         },
         "indirect_speech_context": "",
         "cognitive_episode": _minimal_text_chat_episode(),
-        "conversation_progress": {
-            "status": "active",
-            "continuity": "same_episode",
-            "current_thread": "Pickup plan is active.",
-        },
+        "conversation_progress": conversation_progress,
         "conversation_episode_state": {
             "updated_at": "2026-04-26T23:00:00+00:00",
             "turn_count": 7,
         },
-    }, agent_name="resolver_rag_evidence")
+    }
+    rag_result = await supervisor_module.run_rag_evidence_for_persona_state(
+        state,
+        agent_name="resolver_rag_evidence",
+    )
 
     assert captured["request"]["objective"] == "你记得我喜欢什么吗？"
     assert captured["request"]["source"] == "l2d"
@@ -1112,6 +1133,9 @@ async def test_rag_evidence_helper_calls_rag3_and_projects_payload(monkeypatch) 
     assert captured["context"]["platform_channel_id"] == "chan-1"
     assert captured["context"]["global_user_id"] == "user-1"
     assert captured["context"]["user_name"] == "User"
+    assert captured["context"]["scene_context"] == (
+        build_scene_context_from_global_state(state)
+    )
     assert captured["context"]["original_user_request"] == "你记得我喜欢什么吗？"
     assert captured["context"]["prompt_message_context"]["body_text"] == "clean body"
     assert captured["context"]["chat_history_recent"] == []
@@ -1174,6 +1198,7 @@ async def test_rag_evidence_request_shape_snapshot(monkeypatch) -> None:
             "platform_channel_id": "chan-1",
             "global_user_id": "user-1",
             "user_name": "User",
+            "scene_context": build_scene_context_from_global_state(state),
             "local_time_context": expected_time_context,
             "prompt_message_context": {
                 "body_text": "Need current evidence.",
@@ -1184,11 +1209,7 @@ async def test_rag_evidence_request_shape_snapshot(monkeypatch) -> None:
             },
             "chat_history_recent": [{"role": "user", "content": "previous turn"}],
             "chat_history_wide": [{"role": "assistant", "content": "older turn"}],
-            "conversation_progress": {
-                "status": "active",
-                "continuity": "same_episode",
-                "current_thread": "Pickup plan is active.",
-            },
+            "conversation_progress": _snapshot_conversation_progress(),
             "original_user_request": "Need current evidence.",
             "current_timestamp_utc": "2026-04-26T12:00:00+00:00",
             "current_platform_message_id": "",

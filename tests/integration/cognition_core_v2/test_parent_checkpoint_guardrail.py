@@ -21,7 +21,10 @@ from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
     reserve_v2_model_attempt,
     snapshot_v2_guarded_attempt_ledger,
 )
-from kazusa_ai_chatbot.cognition_resolver import guardrail
+from kazusa_ai_chatbot.cognition_resolver import (
+    capabilities as resolver_capabilities,
+    guardrail,
+)
 from kazusa_ai_chatbot import service as service_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as connector
 from tests.test_cognition_chain_connector_mapping import (
@@ -29,6 +32,7 @@ from tests.test_cognition_chain_connector_mapping import (
     _core_output,
     _global_state,
 )
+from tests.test_task_resolution_orchestrator import _goal_continuation_ref
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
@@ -267,6 +271,60 @@ async def test_parent_retry_reuses_canonical_input_digest(
     finally:
         _reset_bound_coordinator(ledger_token, coordinator_token)
     assert ledger.cognition_invocation_id == "parent-connector"
+
+
+@pytest.mark.asyncio
+async def test_successful_canonical_handoff_repairs_resolver_context_before_replay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A valid resolver handoff completes before parent replay can claim."""
+
+    state = _global_state()
+    state["local_time_context"] = {}
+    run_cognition = AsyncMock(return_value=_core_output())
+    monkeypatch.setattr(
+        connector,
+        "get_user_cognition_state",
+        AsyncMock(return_value=build_acquaintance_user_state(
+            global_user_id="user-1",
+            updated_at=NOW,
+        )),
+    )
+    monkeypatch.setattr(
+        connector,
+        "get_character_cognition_state",
+        AsyncMock(return_value=build_character_production_state(
+            updated_at=NOW,
+        )),
+    )
+    monkeypatch.setattr(connector, "run_cognition", run_cognition)
+
+    _ledger, ledger_token, coordinator_token = _bound_coordinator()
+    coordinator = guardrail.current_cognition_retry_coordinator()
+    assert coordinator is not None
+    try:
+        update = await connector.call_cognition_subgraph(
+            state,
+            commit=False,
+            retry_coordinator=coordinator,
+        )
+        merged_state = dict(state)
+        merged_state.update(update)
+        task_context = (
+            resolver_capabilities._task_resolution_execution_context_from_state(
+                merged_state,
+                goal_continuation_ref=_goal_continuation_ref(),
+            )
+        )
+        assert task_context["scene_context"] == (
+            update["cognition_scene_context"]
+        )
+        run_cognition.assert_awaited_once()
+        assert coordinator.replay_claimed is False
+        assert coordinator.claimed_by is None
+        assert coordinator.parent_recovery_attempted is False
+    finally:
+        _reset_bound_coordinator(ledger_token, coordinator_token)
 
 
 @pytest.mark.asyncio

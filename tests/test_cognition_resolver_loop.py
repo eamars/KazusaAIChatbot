@@ -194,7 +194,7 @@ def _resolver_state() -> dict:
         },
         "conversation_episode_state": None,
         "promoted_reflection_context": None,
-        "scene_context": _resolver_scene_context(),
+        "cognition_scene_context": _resolver_scene_context(),
         "active_turn_platform_message_ids": ["message-123"],
         "active_turn_conversation_row_ids": ["row-123"],
         "cognitive_episode": episode,
@@ -393,8 +393,38 @@ def test_task_resolution_context_preserves_scene_and_continuation_ref() -> None:
         goal_continuation_ref=continuation_ref,
     )
 
-    assert context["scene_context"] == state["scene_context"]
+    assert context["scene_context"] == state["cognition_scene_context"]
     assert context["goal_continuation_ref"] == continuation_ref
+
+
+@pytest.mark.asyncio
+async def test_task_resolution_handoff_rejects_missing_cognition_scene_before_execution(
+) -> None:
+    """A missing cognition carrier fails before the capability executor."""
+
+    state = _resolver_state()
+    state.pop("cognition_scene_context")
+    request = _resolver_request()
+    call_cognition = AsyncMock(return_value=_cognition_result(
+        internal_monologue="The task requires bounded evidence.",
+        resolver_requests=[request],
+    ))
+    execute_capability = AsyncMock()
+
+    with pytest.raises(
+        ResolverValidationError,
+        match="cognition_scene_context",
+    ):
+        await call_cognition_resolver_loop(
+            state,
+            call_cognition_subgraph_func=call_cognition,
+            execute_capability_func=execute_capability,
+            max_cycles=3,
+            capability_timeout_seconds=1.0,
+        )
+
+    call_cognition.assert_awaited_once()
+    execute_capability.assert_not_awaited()
 
 
 @pytest.mark.asyncio
