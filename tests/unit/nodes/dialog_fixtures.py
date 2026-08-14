@@ -19,6 +19,7 @@ def build_dialog_state() -> dict[str, object]:
             "intention": "answer by inference",
             "target_roles": [],
             "reason": "the current request asks for an inference",
+            "goal_continuation_ref": None,
         },
         "goal_resolution": "answerable_now",
         "supporting_bids": [],

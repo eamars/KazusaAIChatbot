@@ -20,6 +20,10 @@ from kazusa_ai_chatbot.cognition_episode import (
     GoalContinuationRefV1,
     validate_goal_continuation_ref,
 )
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionContractError,
+    validate_scheduled_future_speech_authority,
+)
 from kazusa_ai_chatbot.config import (
     BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
     BACKGROUND_WORK_WORKER_MAX_ATTEMPTS,
@@ -127,8 +131,27 @@ def _validate_queue_request(request: BackgroundWorkQueueRequest) -> None:
         return
     if requested_worker == FUTURE_SPEAK_WORKER:
         _validate_future_speak_payload(worker_payload)
+        _validate_scheduled_authority_carrier(request)
         return
     raise ValueError("requested_worker is not supported")
+
+
+def _validate_scheduled_authority_carrier(
+    request: BackgroundWorkQueueRequest,
+) -> None:
+    """Require and validate the immutable authority on future-speak jobs."""
+
+    authority = request.get("scheduled_future_speech_authority")
+    if authority is None:
+        raise ValueError(
+            "future_speak jobs require scheduled_future_speech_authority"
+        )
+    try:
+        validate_scheduled_future_speech_authority(authority)
+    except (CognitionContractError, ValueError) as exc:
+        raise ValueError(
+            f"scheduled_future_speech_authority is invalid: {exc}"
+        ) from exc
 
 
 def validate_task_orchestrator_worker_payload(
@@ -389,6 +412,7 @@ def _build_job_document(
         context_projection = dict(task_execution_context)
     else:
         context_projection: dict[str, object] = {}
+    scheduled_authority = request.get("scheduled_future_speech_authority")
     job: BackgroundWorkJobDoc = {
         "schema_version": BACKGROUND_WORK_JOB_SCHEMA_VERSION,
         "job_id": job_id,
@@ -436,6 +460,10 @@ def _build_job_document(
         "delivered_conversation_message_id": "",
         "delivered_at": "",
     }
+    if isinstance(scheduled_authority, dict):
+        job["scheduled_future_speech_authority"] = dict(
+            scheduled_authority
+        )
     return job
 
 

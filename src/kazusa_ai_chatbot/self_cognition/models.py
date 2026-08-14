@@ -41,6 +41,24 @@ DUE_STATE_DUE_NOW = "due_now"
 DUE_STATE_PAST_DUE = "past_due"
 CONTACT_DUE_STATES = frozenset((DUE_STATE_DUE_NOW, DUE_STATE_PAST_DUE))
 
+SCHEDULED_GATE_DISPOSITION_ACCEPTED = "accepted"
+SCHEDULED_GATE_DISPOSITION_SUPPRESSED = "suppressed"
+SCHEDULED_GATE_DISPOSITION_NOT_EVALUATED = "not_evaluated"
+SCHEDULED_GATE_DISPOSITION_VALUES = frozenset((
+    SCHEDULED_GATE_DISPOSITION_ACCEPTED,
+    SCHEDULED_GATE_DISPOSITION_SUPPRESSED,
+    SCHEDULED_GATE_DISPOSITION_NOT_EVALUATED,
+))
+SCHEDULED_GATE_RESULT_SCHEMA_VERSION = (
+    "self_cognition_scheduled_gate_result.v1"
+)
+SCHEDULED_GATE_TRACE_SCHEMA_VERSION = (
+    "self_cognition_scheduled_gate_trace.v1"
+)
+SCHEDULED_CANDIDATE_ADMISSION_SCHEMA_VERSION = (
+    "scheduled_candidate_admission.v1"
+)
+
 ROUTE_ACTION_CANDIDATE = "action_candidate"
 ROUTE_PROGRESS_MAINTENANCE = "progress_maintenance"
 ROUTE_AUDIT_ONLY = "audit_only"
@@ -147,6 +165,7 @@ ARTIFACT_ACTION_ATTEMPT = "self_cognition_action_attempt.json"
 ARTIFACT_ACTION_CANDIDATE = "self_cognition_action_candidate.json"
 ARTIFACT_DISPATCH_RESULT = "self_cognition_dispatch_result.json"
 ARTIFACT_RESPONSE_OUTCOME = "self_cognition_response_outcome.json"
+ARTIFACT_SCHEDULED_GATE_RESULT = "self_cognition_scheduled_gate_result.json"
 ARTIFACT_CONSOLIDATION_OUTCOME = "self_cognition_consolidation_outcome.json"
 ARTIFACT_LOOP_TRACE = "self_cognition_loop_trace.md"
 RUNTIME_COGNITIVE_EPISODE = "cognitive_episode"
@@ -163,6 +182,7 @@ TRACKING_ARTIFACT_NAMES = frozenset(
         ARTIFACT_ACTION_CANDIDATE,
         ARTIFACT_DISPATCH_RESULT,
         ARTIFACT_RESPONSE_OUTCOME,
+        ARTIFACT_SCHEDULED_GATE_RESULT,
         ARTIFACT_CONSOLIDATION_OUTCOME,
         ARTIFACT_LOOP_TRACE,
     )
@@ -321,6 +341,16 @@ class SelfCognitionScheduledSourceContext(TypedDict):
     continuation_mode: str
 
 
+class SelfCognitionScheduledGateResult(TypedDict):
+    """Closed deterministic scheduled content-gate result for one case."""
+
+    schema_version: Literal["self_cognition_scheduled_gate_result.v1"]
+    disposition: Literal["accepted", "suppressed", "not_evaluated"]
+    gate_codes: list[str]
+    evaluator_attempt_count: int
+    verdict: NotRequired[dict[str, Any]]
+
+
 SelfCognitionSourceContext = (
     SelfCognitionGroupSourceContext | SelfCognitionScheduledSourceContext
 )
@@ -343,6 +373,7 @@ class SelfCognitionPromptScheduledSourceContext(TypedDict):
     context_kind: Literal["scheduled_future_cognition"]
     continuation_objective: str
     continuation_mode: str
+    scheduled_authority: NotRequired[dict[str, Any]]
 
 
 SelfCognitionPromptSourceContext = (
@@ -421,6 +452,9 @@ class SelfCognitionCase(TypedDict, total=False):
     delivery_target: SelfCognitionDeliveryTarget
     target_binding_status: Literal["bound", "failed"]
     target_binding_failure: SelfCognitionTargetBindingFailure
+    scheduled_future_speech_authority: NotRequired[dict[str, Any]]
+    scheduled_gate_result: NotRequired[SelfCognitionScheduledGateResult]
+    source_calendar_run_due_at: NotRequired[str]
 
 
 class SourcePacket(TypedDict):

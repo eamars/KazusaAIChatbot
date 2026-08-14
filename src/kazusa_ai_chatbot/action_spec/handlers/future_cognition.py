@@ -6,6 +6,10 @@ from typing import Any
 
 from kazusa_ai_chatbot.calendar_scheduler import models as calendar_models
 from kazusa_ai_chatbot.calendar_scheduler import repository as calendar_repository
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionContractError,
+    validate_scheduled_future_speech_authority,
+)
 from kazusa_ai_chatbot.action_spec.models import (
     ACTION_CONTINUATION_VERSION,
     ActionValidationError,
@@ -80,6 +84,7 @@ def build_future_cognition_calendar_documents(
         execute_at = normalized_trigger_at
 
     continuation_objective = str(params["continuation_objective"]).strip()
+    scheduled_authority = _validated_scheduled_authority(params)
     payload = {
         "episode_type": "self_cognition",
         "trigger_at": normalized_trigger_at,
@@ -88,6 +93,10 @@ def build_future_cognition_calendar_documents(
         "source_refs": list(validated["source_refs"]),
         "continuation": dict(validated["continuation"]),
     }
+    if scheduled_authority is not None:
+        payload[calendar_models.SCHEDULED_AUTHORITY_PAYLOAD_KEY] = (
+            scheduled_authority
+        )
     idempotency_key = f"future_cognition:{action_attempt_id}"
     schedule = calendar_models.build_one_time_calendar_schedule(
         trigger_kind=calendar_models.TRIGGER_FUTURE_COGNITION,
@@ -97,6 +106,7 @@ def build_future_cognition_calendar_documents(
         idempotency_key=idempotency_key,
         storage_timestamp_utc=normalized_storage_timestamp_utc,
         source_llm_trace_id=source_llm_trace_id.strip(),
+        scheduled_future_speech_authority=scheduled_authority,
     )
     run = calendar_models.build_calendar_run_from_schedule(
         schedule,
@@ -214,6 +224,27 @@ def _reject_raw_id_params(params: dict[str, Any]) -> None:
             raise ActionValidationError(f"{key}: raw id params are not allowed")
 
 
+def _validated_scheduled_authority(
+    params: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Validate and return one immutable scheduled authority carrier payload."""
+
+    raw_authority = params.get(
+        calendar_models.SCHEDULED_AUTHORITY_PAYLOAD_KEY
+    )
+    if raw_authority is None:
+        return None
+    try:
+        validated_authority = validate_scheduled_future_speech_authority(
+            raw_authority
+        )
+    except (CognitionContractError, ValueError) as exc:
+        raise ActionValidationError(
+            f"scheduled_future_speech_authority is invalid: {exc}"
+        ) from exc
+    return dict(validated_authority)
+
+
 def _source_scope(scope: dict[str, Any]) -> dict[str, str | None]:
     """Return trusted calendar source fields from deterministic target scope."""
 
@@ -225,7 +256,7 @@ def _source_scope(scope: dict[str, Any]) -> dict[str, str | None]:
         "source_user_id": _scope_text(scope, "source_user_id"),
         "source_platform_bot_id": _scope_text(scope, "source_platform_bot_id"),
         "source_character_name": _scope_text(scope, "source_character_name"),
-        "source_message_id": "",
+        "source_message_id": _scope_text(scope, "source_message_id"),
         "guild_id": None,
         "bot_role": "system",
     }

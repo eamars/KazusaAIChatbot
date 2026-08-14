@@ -390,7 +390,21 @@ async def test_group_action_planning_requires_explicit_silence_or_reply_decision
             available_actions=[],
             available_resolvers=[],
             resolver_context="resolver_status=idle",
-            scene_context={"participant_bindings": []},
+            scene_context={
+                "channel_scope": "group",
+                "character_role": "当前角色",
+                "semantic_scene": "The current group scene contains one message.",
+                "public_group_scene": (
+                    "A recent group message is the only public scene fact."
+                ),
+                "conversation_continuity": (
+                    "No earlier character turn is active in this group."
+                ),
+                "semantic_temporal_context": (
+                    "The message arrived moments ago in the current local window."
+                ),
+                "participant_bindings": [],
+            },
             services=services,
         )
 

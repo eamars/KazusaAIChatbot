@@ -244,6 +244,13 @@ async def execute_action_specs_for_trace(
                     queue_kwargs["source_llm_trace_id"] = (
                         source_llm_trace_id.strip()
                     )
+                params = validated_spec.get("params")
+                if isinstance(params, Mapping):
+                    proposal = params.get("scheduled_authority_proposal")
+                    if isinstance(proposal, Mapping):
+                        queue_kwargs["scheduled_authority_proposal"] = dict(
+                            proposal
+                        )
                 queue_result = await enqueue_future_speak_action(
                     validated_spec,
                     **queue_kwargs,

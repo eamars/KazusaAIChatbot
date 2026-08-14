@@ -11,6 +11,10 @@ from kazusa_ai_chatbot.action_spec.models import ActionValidationError
 from kazusa_ai_chatbot.action_spec.registry import (
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
 )
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    build_scheduled_future_speech_authority,
+)
+from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
 
 
 def _source_ref() -> dict:
@@ -56,6 +60,8 @@ def _future_cognition_action_spec() -> dict:
         "visibility": "private",
         "deadline": None,
         "continuation": _continuation(),
+        "surface_role": "ordinary",
+        "goal_continuation_ref": None,
         "reason": "The character wants a later private cognition cycle.",
     }
 
@@ -335,3 +341,68 @@ def test_future_cognition_rejects_offset_aware_llm_trigger_time() -> None:
             storage_timestamp_utc="2026-05-15T21:00:00+00:00",
             action_attempt_id="action_attempt:future-123",
         )
+
+
+def test_future_cognition_preserves_source_message_and_authority_scope() -> None:
+    """Scheduled cognition keeps the source message and authority boundary."""
+
+    from kazusa_ai_chatbot.action_spec.handlers.future_cognition import (
+        build_future_cognition_calendar_documents,
+    )
+
+    authority = build_scheduled_future_speech_authority(
+        source_episode_id="episode-123",
+        source_message_id="227312230",
+        source_action_attempt_id="action_attempt:future-123",
+        accepted_at_utc="2026-05-15T21:00:00+00:00",
+        timezone="Pacific/Auckland",
+        trigger_local="2026-05-16 10:00",
+        platform="qq",
+        channel_type="group",
+        audience_kind="group",
+        semantic_objective="在约定时间开始补偿考核。",
+        authorized_content_summary="在约定时间开始补偿考核。",
+        authorized_detail_refs=[
+            {
+                "evidence_handle": "e1",
+                "semantic_summary": "当前对话明确约定在该时间开始补偿考核。",
+                "provenance_role": "current_event",
+            }
+        ],
+    )
+    action_spec = _future_cognition_action_spec()
+    action_spec["target"]["scope"].update(
+        {
+            "source_platform": "qq",
+            "source_channel_id": "480386272",
+            "source_channel_type": "group",
+            "source_message_id": "227312230",
+            "source_platform_bot_id": "bot-001",
+            "source_character_name": "TestCharacter",
+        }
+    )
+    action_spec["params"][
+        calendar_models.SCHEDULED_AUTHORITY_PAYLOAD_KEY
+    ] = dict(authority)
+
+    documents = build_future_cognition_calendar_documents(
+        action_spec,
+        storage_timestamp_utc="2026-05-15T21:00:00+00:00",
+        action_attempt_id="action_attempt:future-123",
+    )
+    schedule = documents["schedule"]
+    run = documents["run"]
+
+    assert schedule["source_scope"]["source_message_id"] == "227312230"
+    assert run["source_scope"]["source_message_id"] == "227312230"
+    assert (
+        schedule["payload"][calendar_models.SCHEDULED_AUTHORITY_PAYLOAD_KEY]
+        == authority
+    )
+    assert (
+        run["payload"][calendar_models.SCHEDULED_AUTHORITY_PAYLOAD_KEY]
+        == authority
+    )
+    assert parse_storage_utc_datetime(
+        run["due_at"]
+    ) == parse_storage_utc_datetime(authority["trigger"]["utc"])

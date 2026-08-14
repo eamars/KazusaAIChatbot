@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal, Mapping, NotRequired, Sequence, TypedDict
@@ -56,9 +59,15 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     validate_resolver_evidence_state,
 )
 from kazusa_ai_chatbot.config import (
+    CHARACTER_TIME_ZONE,
     L3_INTERACTION_STYLE_GUIDELINES_PER_FIELD_LIMIT,
 )
 from kazusa_ai_chatbot.llm_interface import LLMCallConfig, LLMInvoker
+from kazusa_ai_chatbot.time_boundary import (
+    local_time_context_from_storage_utc,
+    local_llm_datetime_to_storage_utc_iso,
+    parse_storage_utc_datetime,
+)
 
 _CJK_IDEOGRAPH_RE = re.compile(r"[\u4e00-\u9fff]")
 SCENE_PARTICIPANT_HANDLE_RE = re.compile(r"^p[1-9][0-9]*$")
@@ -246,6 +255,79 @@ RELATIONAL_PROVENANCE_ROLE_VALUES = frozenset({
     "contextual_fact_only",
 })
 
+SCHEDULED_AUTHORITY_PROPOSAL_SCHEMA_VERSION = "scheduled_authority_proposal.v1"
+SCHEDULED_FUTURE_SPEECH_AUTHORITY_SCHEMA_VERSION = (
+    "scheduled_future_speech_authority.v1"
+)
+SCHEDULED_AUTHORITY_CARRIER_SCHEMA_VERSION = "scheduled_authority_carrier.v1"
+SCHEDULED_SPEECH_SEMANTIC_VERDICT_SCHEMA_VERSION = (
+    "scheduled_speech_semantic_verdict.v1"
+)
+
+TEMPORAL_ALIGNMENT_VALUES = frozenset({
+    "aligned",
+    "relative_date_mismatch",
+    "past_or_not_future",
+    "timezone_unclear",
+    "unavailable",
+})
+SCHEDULED_AUTHORITY_CURRENT_ROLE_VALUES = frozenset({
+    "current_event",
+    "public_scene",
+})
+SCHEDULED_AUTHORITY_DETAIL_REF_LIMIT = 8
+SCHEDULED_AUTHORITY_SUMMARY_MAX_CHARS = 1000
+SCHEDULED_AUTHORITY_DETAIL_SUMMARY_MAX_CHARS = 1000
+SCHEDULED_AUTHORITY_OBJECTIVE_MAX_CHARS = 2000
+SCHEDULED_AUTHORITY_ID_PREFIX = "sha256-"
+
+SCHEDULED_VERDICT_TIME_CLAIM_VALUES = frozenset({
+    "aligned",
+    "no_claim",
+    "premature",
+    "contradictory",
+    "unavailable",
+})
+SCHEDULED_VERDICT_OBJECTIVE_VALUES = frozenset({
+    "aligned",
+    "scope_expansion",
+    "contradiction",
+    "unsupported",
+    "unavailable",
+})
+SCHEDULED_VERDICT_SOURCE_GROUNDING_VALUES = frozenset({
+    "current_authority",
+    "historical_only",
+    "unsupported",
+    "unavailable",
+})
+SCHEDULED_VERDICT_AUDIENCE_VALUES = frozenset({
+    "aligned",
+    "mismatch",
+    "unavailable",
+})
+SCHEDULED_VERDICT_EXECUTION_VALUES = frozenset({
+    "aligned",
+    "premature",
+    "false",
+    "unavailable",
+})
+
+SCHEDULED_SPEECH_GATE_CODES = frozenset((
+    "scheduled_authority_missing",
+    "scheduled_authority_invalid",
+    "scheduled_trigger_identity_mismatch",
+    "scheduled_due_not_reached",
+    "scheduled_candidate_empty",
+    "scheduled_time_claim_mismatch",
+    "scheduled_objective_mismatch",
+    "scheduled_source_not_current_authority",
+    "scheduled_audience_mismatch",
+    "scheduled_execution_claim_mismatch",
+    "scheduled_evaluator_contract_error",
+    "scheduled_evaluator_unavailable",
+))
+
 CURRENT_EPISODE_EVIDENCE_SOURCE_KINDS = frozenset({
     "episode",
     "scheduler_event",
@@ -396,6 +478,127 @@ class CognitionEvidenceV2(TypedDict):
             "shared_character_or_world",
         ]
     ]
+
+
+class ScheduledAuthorityDetailRefV1(TypedDict):
+    """One bounded authorized-detail reference in a scheduled proposal."""
+
+    evidence_handle: str
+    semantic_summary: str
+    provenance_role: str
+
+
+class ScheduledAuthorityProposalV1(TypedDict):
+    """Closed planner-owned authority proposal for a future-speak action row.
+
+    The proposal is a transient model-authored contract, never a durable
+    record. Deterministic code validates the closed temporal alignment,
+    bounded summaries, evidence-handle coverage, and actual evidence role
+    before the proposal can travel toward persistence.
+    """
+
+    schema_version: Literal["scheduled_authority_proposal.v1"]
+    temporal_alignment: Literal[
+        "aligned",
+        "relative_date_mismatch",
+        "past_or_not_future",
+        "timezone_unclear",
+        "unavailable",
+    ]
+    authorized_content_summary: str
+    authorized_detail_refs: list[ScheduledAuthorityDetailRefV1]
+
+
+class ScheduledAuthoritySourceIdentityV1(TypedDict):
+    """Immutable source identity that the scheduled authority records."""
+
+    source_episode_id: str
+    source_message_id: str
+    source_action_attempt_id: str
+    source_llm_trace_id: NotRequired[str]
+
+
+class ScheduledAuthorityTimestampV1(TypedDict):
+    """Storage UTC plus configured-local wall-clock for one authority instant."""
+
+    utc: str
+    local: str
+    timezone: str
+
+
+class ScheduledAuthorityTargetV1(TypedDict):
+    """Target class carried by the scheduled authority without delivery ids."""
+
+    platform: str
+    channel_type: str
+    audience_kind: Literal["group", "private"]
+
+
+class ScheduledAuthorityAuthorizedContentV1(TypedDict):
+    """Bounded semantic content that the scheduled speech may express."""
+
+    summary: str
+    detail_refs: list[ScheduledAuthorityDetailRefV1]
+
+
+class ScheduledFutureSpeechAuthorityV1(TypedDict):
+    """Immutable pre-persistence authority for one future-speak task.
+
+    The authority is created before accepted-task, job, schedule, or run ids
+    exist. Carrier records copy it unchanged; a changed trigger or objective
+    must create a new authority through the normal deterministic path.
+    """
+
+    schema_version: Literal["scheduled_future_speech_authority.v1"]
+    authority_id: str
+    source: ScheduledAuthoritySourceIdentityV1
+    accepted_at: ScheduledAuthorityTimestampV1
+    trigger: ScheduledAuthorityTimestampV1
+    target: ScheduledAuthorityTargetV1
+    semantic_objective: str
+    authorized_content: ScheduledAuthorityAuthorizedContentV1
+    goal_continuation_ref: GoalContinuationRefV1 | None
+
+
+class ScheduledAuthorityCarrierV1(TypedDict, total=False):
+    """Later persistence envelope carrying the exact authority unchanged."""
+
+    schema_version: Literal["scheduled_authority_carrier.v1"]
+    authority: ScheduledFutureSpeechAuthorityV1
+    accepted_task_id: str
+    background_job_id: str
+    calendar_schedule_id: str
+    calendar_run_id: str
+    child_llm_trace_id: str
+    delivery_tracking_id: str
+
+
+class ScheduledSpeechSemanticVerdictV1(TypedDict):
+    """Closed semantic dimensions returned by the scheduled content evaluator."""
+
+    schema_version: Literal["scheduled_speech_semantic_verdict.v1"]
+    time_claim_alignment: Literal[
+        "aligned",
+        "no_claim",
+        "premature",
+        "contradictory",
+        "unavailable",
+    ]
+    objective_alignment: Literal[
+        "aligned",
+        "scope_expansion",
+        "contradiction",
+        "unsupported",
+        "unavailable",
+    ]
+    source_grounding: Literal[
+        "current_authority",
+        "historical_only",
+        "unsupported",
+        "unavailable",
+    ]
+    audience_alignment: Literal["aligned", "mismatch", "unavailable"]
+    execution_claim: Literal["aligned", "premature", "false", "unavailable"]
 
 
 class RelationalWillingnessV2(TypedDict):
@@ -741,6 +944,7 @@ class SemanticActionRequestV2(TypedDict):
     reason: str
     target_roles: list[RoleRefV2]
     evidence_handles: list[str]
+    scheduled_authority_proposal: NotRequired[ScheduledAuthorityProposalV1]
 
 
 class ResolverCapabilityRequestV2(TypedDict):
@@ -2161,6 +2365,784 @@ def validate_relational_willingness(
             "relational willingness must cite current episode evidence"
         )
     return dict(value)  # type: ignore[return-value]
+
+
+def validate_scheduled_authority_proposal(
+    value: object,
+    *,
+    evidence: Sequence[Mapping[str, Any]] | None = None,
+) -> ScheduledAuthorityProposalV1:
+    """Validate the closed planner-owned authority proposal for future speak.
+
+    Args:
+        value: Model-authored proposal attached to a future-speak action row.
+        evidence: Optional complete current evidence set. When supplied, every
+            detail handle must exist and its declared provenance role must
+            match the actual evidence authority; only current-episode roles
+            admitted by the parent cognition may authorize scheduled content.
+
+    Returns:
+        A shallow validated copy of the proposal.
+
+    Raises:
+        CognitionContractError: When any field, enum, bound, handle, or
+            provenance rule is violated.
+    """
+
+    if not isinstance(value, Mapping):
+        raise CognitionContractError(
+            "scheduled authority proposal must be an object"
+        )
+    _require_exact_keys(
+        value,
+        {
+            "schema_version",
+            "temporal_alignment",
+            "authorized_content_summary",
+            "authorized_detail_refs",
+        },
+        "scheduled authority proposal",
+    )
+    if (
+        value["schema_version"]
+        != SCHEDULED_AUTHORITY_PROPOSAL_SCHEMA_VERSION
+    ):
+        raise CognitionContractError(
+            "scheduled authority proposal schema is invalid"
+        )
+    temporal_alignment = value["temporal_alignment"]
+    if (
+        not isinstance(temporal_alignment, str)
+        or temporal_alignment not in TEMPORAL_ALIGNMENT_VALUES
+    ):
+        raise CognitionContractError(
+            "scheduled authority temporal alignment is invalid"
+        )
+    _require_bounded_text(
+        value["authorized_content_summary"],
+        "scheduled authority proposal.authorized_content_summary",
+        maximum=SCHEDULED_AUTHORITY_SUMMARY_MAX_CHARS,
+    )
+    detail_refs = _validate_scheduled_authority_detail_refs(
+        value["authorized_detail_refs"],
+        evidence=evidence,
+    )
+    validated_proposal: ScheduledAuthorityProposalV1 = {
+        "schema_version": SCHEDULED_AUTHORITY_PROPOSAL_SCHEMA_VERSION,
+        "temporal_alignment": temporal_alignment,
+        "authorized_content_summary": value[
+            "authorized_content_summary"
+        ].strip(),
+        "authorized_detail_refs": detail_refs,
+    }
+    return validated_proposal
+
+
+def validate_scheduled_future_speech_authority(
+    value: object,
+) -> ScheduledFutureSpeechAuthorityV1:
+    """Validate one immutable scheduled future-speech authority.
+
+    The validator re-derives the deterministic authority id from the canonical
+    payload and rejects any mutation, including carrier-local id changes.
+
+    Args:
+        value: Candidate authority carried by a durable record.
+
+    Returns:
+        A shallow validated copy of the authority.
+
+    Raises:
+        CognitionContractError: When any field, enum, bound, time relation, or
+            identity digest is violated.
+    """
+
+    if not isinstance(value, Mapping):
+        raise CognitionContractError(
+            "scheduled future-speech authority must be an object"
+        )
+    _require_exact_keys(
+        value,
+        {
+            "schema_version",
+            "authority_id",
+            "source",
+            "accepted_at",
+            "trigger",
+            "target",
+            "semantic_objective",
+            "authorized_content",
+            "goal_continuation_ref",
+        },
+        "scheduled future-speech authority",
+    )
+    if (
+        value["schema_version"]
+        != SCHEDULED_FUTURE_SPEECH_AUTHORITY_SCHEMA_VERSION
+    ):
+        raise CognitionContractError(
+            "scheduled future-speech authority schema is invalid"
+        )
+    source = _validate_scheduled_authority_source(value["source"])
+    accepted_at = _validate_scheduled_authority_timestamp(
+        value["accepted_at"],
+        "accepted_at",
+    )
+    trigger = _validate_scheduled_authority_timestamp(
+        value["trigger"],
+        "trigger",
+    )
+    target = _validate_scheduled_authority_target(value["target"])
+    _require_bounded_text(
+        value["semantic_objective"],
+        "scheduled future-speech authority.semantic_objective",
+        maximum=SCHEDULED_AUTHORITY_OBJECTIVE_MAX_CHARS,
+    )
+    authorized_content = _validate_scheduled_authorized_content(
+        value["authorized_content"],
+    )
+    goal_continuation_ref = value["goal_continuation_ref"]
+    if goal_continuation_ref is not None:
+        try:
+            validate_goal_continuation_ref(goal_continuation_ref)
+        except CognitiveEpisodeValidationError as exc:
+            raise CognitionContractError(
+                "scheduled future-speech authority continuation ref is "
+                f"invalid: {exc}"
+            ) from exc
+    _require_utc_timestamp(accepted_at["utc"], "authority.accepted_at.utc")
+    _require_utc_timestamp(trigger["utc"], "authority.trigger.utc")
+    accepted_time = parse_storage_utc_datetime(accepted_at["utc"])
+    trigger_time = parse_storage_utc_datetime(trigger["utc"])
+    if trigger_time <= accepted_time:
+        raise CognitionContractError(
+            "scheduled trigger must be strictly later than accepted time"
+        )
+    authority_id = value["authority_id"]
+    if (
+        not isinstance(authority_id, str)
+        or not authority_id.startswith(SCHEDULED_AUTHORITY_ID_PREFIX)
+    ):
+        raise CognitionContractError(
+            "scheduled authority id is invalid"
+        )
+    canonical_payload = _canonical_scheduled_authority_payload(
+        source=source,
+        accepted_at=accepted_at,
+        trigger=trigger,
+        target=target,
+        semantic_objective=value["semantic_objective"].strip(),
+        authorized_content=authorized_content,
+    )
+    expected_authority_id = _scheduled_authority_id(canonical_payload)
+    if authority_id != expected_authority_id:
+        raise CognitionContractError(
+            "scheduled authority id does not match its canonical payload"
+        )
+    validated_authority: ScheduledFutureSpeechAuthorityV1 = {
+        "schema_version": SCHEDULED_FUTURE_SPEECH_AUTHORITY_SCHEMA_VERSION,
+        "authority_id": authority_id,
+        "source": source,
+        "accepted_at": accepted_at,
+        "trigger": trigger,
+        "target": target,
+        "semantic_objective": value["semantic_objective"].strip(),
+        "authorized_content": authorized_content,
+        "goal_continuation_ref": goal_continuation_ref,
+    }
+    return validated_authority
+
+
+def build_scheduled_future_speech_authority(
+    *,
+    source_episode_id: str,
+    source_message_id: str,
+    source_action_attempt_id: str,
+    source_llm_trace_id: str = "",
+    accepted_at_utc: str,
+    timezone: str,
+    trigger_local: str,
+    platform: str,
+    channel_type: str,
+    audience_kind: str,
+    semantic_objective: str,
+    authorized_content_summary: str,
+    authorized_detail_refs: Sequence[Mapping[str, Any]],
+    goal_continuation_ref: GoalContinuationRefV1 | None = None,
+) -> ScheduledFutureSpeechAuthorityV1:
+    """Build the immutable pre-persistence authority for one future-speak task.
+
+    The builder validates source identity, timestamp parseability, the strict
+    future relation, target class, bounded fields, and the deterministic
+    authority id. It must run before accepted-task, job, schedule, or run ids
+    exist.
+
+    Args:
+        source_episode_id: Episode that accepted the future speech.
+        source_message_id: Source platform message identity.
+        source_action_attempt_id: Deterministic action-attempt identity.
+        source_llm_trace_id: Optional protected trace identity, diagnostic
+            only and excluded from the deterministic authority id.
+        accepted_at_utc: Storage UTC instant when the task was accepted.
+        timezone: Configured IANA timezone label used by local projections.
+        trigger_local: Exact configured-local ``YYYY-MM-DD HH:MM`` trigger.
+        platform: Target platform key.
+        channel_type: Target channel type.
+        audience_kind: Closed prompt-safe audience descriptor.
+        semantic_objective: Bounded current-task semantic objective.
+        authorized_content_summary: Bounded authorized summary.
+        authorized_detail_refs: Bounded authorized detail references.
+        goal_continuation_ref: Optional deterministic continuation reference.
+
+    Returns:
+        The validated immutable authority document.
+
+    Raises:
+        CognitionContractError: When any required identity, time, target, or
+            content constraint is violated.
+    """
+
+    if not isinstance(audience_kind, str) or audience_kind not in {
+        "group",
+        "private",
+    }:
+        raise CognitionContractError(
+            "scheduled audience kind is invalid"
+        )
+    normalized_accepted_at_utc = _canonical_utc_z_iso(accepted_at_utc)
+    trigger_at_utc = _canonical_utc_z_iso(
+        local_llm_datetime_to_storage_utc_iso(trigger_local)
+    )
+    proposal_source = {
+        "source_episode_id": _required_authority_text(
+            source_episode_id,
+            "source_episode_id",
+        ),
+        "source_message_id": _required_authority_text(
+            source_message_id,
+            "source_message_id",
+        ),
+        "source_action_attempt_id": _required_authority_text(
+            source_action_attempt_id,
+            "source_action_attempt_id",
+        ),
+    }
+    if source_llm_trace_id.strip():
+        proposal_source["source_llm_trace_id"] = source_llm_trace_id.strip()
+    source = _validate_scheduled_authority_source(proposal_source)
+    accepted_at = {
+        "utc": normalized_accepted_at_utc,
+        "local": _configured_local_text(normalized_accepted_at_utc),
+        "timezone": timezone.strip(),
+    }
+    trigger = {
+        "utc": trigger_at_utc,
+        "local": trigger_local.strip(),
+        "timezone": timezone.strip(),
+    }
+    target = {
+        "platform": _required_authority_text(platform, "platform"),
+        "channel_type": _required_authority_text(
+            channel_type,
+            "channel_type",
+        ),
+        "audience_kind": audience_kind,
+    }
+    detail_refs = _validate_scheduled_authority_detail_refs(
+        authorized_detail_refs,
+        evidence=None,
+    )
+    authorized_content = {
+        "summary": _required_bounded_authority_text(
+            authorized_content_summary,
+            "authorized_content.summary",
+            maximum=SCHEDULED_AUTHORITY_SUMMARY_MAX_CHARS,
+        ),
+        "detail_refs": detail_refs,
+    }
+    objective = _required_bounded_authority_text(
+        semantic_objective,
+        "semantic_objective",
+        maximum=SCHEDULED_AUTHORITY_OBJECTIVE_MAX_CHARS,
+    )
+    canonical_payload = _canonical_scheduled_authority_payload(
+        source=source,
+        accepted_at=accepted_at,
+        trigger=trigger,
+        target=target,
+        semantic_objective=objective,
+        authorized_content=authorized_content,
+    )
+    authority_id = _scheduled_authority_id(canonical_payload)
+    authority = {
+        "schema_version": SCHEDULED_FUTURE_SPEECH_AUTHORITY_SCHEMA_VERSION,
+        "authority_id": authority_id,
+        "source": source,
+        "accepted_at": accepted_at,
+        "trigger": trigger,
+        "target": target,
+        "semantic_objective": objective,
+        "authorized_content": authorized_content,
+        "goal_continuation_ref": goal_continuation_ref,
+    }
+    validated_authority = validate_scheduled_future_speech_authority(
+        authority,
+    )
+    return validated_authority
+
+
+def validate_scheduled_authority_carrier(
+    value: object,
+) -> ScheduledAuthorityCarrierV1:
+    """Validate one later persistence envelope around the exact authority."""
+
+    if not isinstance(value, Mapping):
+        raise CognitionContractError(
+            "scheduled authority carrier must be an object"
+        )
+    if "schema_version" in value:
+        if value["schema_version"] != SCHEDULED_AUTHORITY_CARRIER_SCHEMA_VERSION:
+            raise CognitionContractError(
+                "scheduled authority carrier schema is invalid"
+            )
+    if "authority" not in value:
+        raise CognitionContractError(
+            "scheduled authority carrier requires the authority"
+        )
+    validate_scheduled_future_speech_authority(value["authority"])
+    for field_name in (
+        "accepted_task_id",
+        "background_job_id",
+        "calendar_schedule_id",
+        "calendar_run_id",
+        "child_llm_trace_id",
+        "delivery_tracking_id",
+    ):
+        if field_name not in value:
+            continue
+        field_value = value[field_name]
+        if not isinstance(field_value, str) or not field_value.strip():
+            raise CognitionContractError(
+                f"scheduled authority carrier {field_name} is invalid"
+            )
+    return dict(value)  # type: ignore[return-value]
+
+
+def validate_scheduled_speech_semantic_verdict(
+    value: object,
+) -> ScheduledSpeechSemanticVerdictV1:
+    """Validate the closed scheduled content-evaluator verdict.
+
+    The model returns only the five semantic dimensions. Decision, attempt,
+    free-form reason, and open issue fields are rejected by exact-key
+    validation; deterministic code owns the disposition mapping.
+
+    Args:
+        value: Candidate verdict produced by the scheduled content evaluator.
+
+    Returns:
+        A shallow validated copy of the verdict.
+
+    Raises:
+        CognitionContractError: When any field, enum, or schema value is
+            invalid.
+    """
+
+    if not isinstance(value, Mapping):
+        raise CognitionContractError(
+            "scheduled speech semantic verdict must be an object"
+        )
+    _require_exact_keys(
+        value,
+        {
+            "schema_version",
+            "time_claim_alignment",
+            "objective_alignment",
+            "source_grounding",
+            "audience_alignment",
+            "execution_claim",
+        },
+        "scheduled speech semantic verdict",
+    )
+    if (
+        value["schema_version"]
+        != SCHEDULED_SPEECH_SEMANTIC_VERDICT_SCHEMA_VERSION
+    ):
+        raise CognitionContractError(
+            "scheduled speech semantic verdict schema is invalid"
+        )
+    if value["time_claim_alignment"] not in SCHEDULED_VERDICT_TIME_CLAIM_VALUES:
+        raise CognitionContractError(
+            "scheduled speech time claim alignment is invalid"
+        )
+    if value["objective_alignment"] not in SCHEDULED_VERDICT_OBJECTIVE_VALUES:
+        raise CognitionContractError(
+            "scheduled speech objective alignment is invalid"
+        )
+    if (
+        value["source_grounding"]
+        not in SCHEDULED_VERDICT_SOURCE_GROUNDING_VALUES
+    ):
+        raise CognitionContractError(
+            "scheduled speech source grounding is invalid"
+        )
+    if value["audience_alignment"] not in SCHEDULED_VERDICT_AUDIENCE_VALUES:
+        raise CognitionContractError(
+            "scheduled speech audience alignment is invalid"
+        )
+    if value["execution_claim"] not in SCHEDULED_VERDICT_EXECUTION_VALUES:
+        raise CognitionContractError(
+            "scheduled speech execution claim is invalid"
+        )
+    return dict(value)  # type: ignore[return-value]
+
+
+def copy_scheduled_authority_immutable(
+    authority: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return a deep copy of one immutable scheduled authority.
+
+    Carrier records must never share mutable references with each other or
+    with the pre-persistence authority.
+    """
+
+    copied_authority = deepcopy(dict(authority))
+    return copied_authority
+
+
+def _validate_scheduled_authority_detail_refs(
+    value: object,
+    *,
+    evidence: Sequence[Mapping[str, Any]] | None,
+) -> list[ScheduledAuthorityDetailRefV1]:
+    """Validate bounded authorized detail references and their roles."""
+
+    if (
+        not isinstance(value, list)
+        or not value
+        or len(value) > SCHEDULED_AUTHORITY_DETAIL_REF_LIMIT
+    ):
+        raise CognitionContractError(
+            "scheduled authority detail refs must contain 1-8 items"
+        )
+    evidence_by_handle = (
+        {
+            row["evidence_handle"]: row
+            for row in evidence
+            if isinstance(row, Mapping)
+        }
+        if evidence is not None
+        else {}
+    )
+    seen_handles: set[str] = set()
+    detail_refs: list[ScheduledAuthorityDetailRefV1] = []
+    for index, raw_ref in enumerate(value):
+        if not isinstance(raw_ref, Mapping) or set(raw_ref) != {
+            "evidence_handle",
+            "semantic_summary",
+            "provenance_role",
+        }:
+            raise CognitionContractError(
+                f"scheduled authority detail ref[{index}] fields are not exact"
+            )
+        evidence_handle = raw_ref["evidence_handle"]
+        if (
+            not isinstance(evidence_handle, str)
+            or not evidence_handle.strip()
+        ):
+            raise CognitionContractError(
+                f"scheduled authority detail ref[{index}] handle is invalid"
+            )
+        if evidence_handle in seen_handles:
+            raise CognitionContractError(
+                "scheduled authority detail refs contain duplicate handles"
+            )
+        seen_handles.add(evidence_handle)
+        _require_bounded_text(
+            raw_ref["semantic_summary"],
+            f"scheduled authority detail ref[{index}].semantic_summary",
+            maximum=SCHEDULED_AUTHORITY_DETAIL_SUMMARY_MAX_CHARS,
+        )
+        provenance_role = raw_ref["provenance_role"]
+        if not isinstance(provenance_role, str) or not provenance_role.strip():
+            raise CognitionContractError(
+                f"scheduled authority detail ref[{index}] role is invalid"
+            )
+        if evidence is not None:
+            evidence_row = evidence_by_handle.get(evidence_handle)
+            if not isinstance(evidence_row, Mapping):
+                raise CognitionContractError(
+                    "scheduled authority detail handle is unavailable"
+                )
+            actual_authority = evidence_row["authority"]
+            if provenance_role != actual_authority:
+                raise CognitionContractError(
+                    "scheduled authority detail role does not match "
+                    "evidence authority"
+                )
+            if actual_authority not in SCHEDULED_AUTHORITY_CURRENT_ROLE_VALUES:
+                raise CognitionContractError(
+                    "scheduled authority detail does not carry "
+                    "current-episode authority"
+                )
+        detail_refs.append({
+            "evidence_handle": evidence_handle.strip(),
+            "semantic_summary": raw_ref["semantic_summary"].strip(),
+            "provenance_role": provenance_role.strip(),
+        })
+    return detail_refs
+
+
+def _validate_scheduled_authority_source(
+    value: object,
+) -> ScheduledAuthoritySourceIdentityV1:
+    """Validate the required immutable source identity fields."""
+
+    if not isinstance(value, Mapping):
+        raise CognitionContractError(
+            "scheduled authority source must be an object"
+        )
+    required = {
+        "source_episode_id",
+        "source_message_id",
+        "source_action_attempt_id",
+    }
+    optional = (
+        {"source_llm_trace_id"}
+        if isinstance(value.get("source_llm_trace_id"), str)
+        else set()
+    )
+    _require_exact_keys(
+        value,
+        required | optional,
+        "scheduled authority source",
+    )
+    for field_name in (
+        "source_episode_id",
+        "source_message_id",
+        "source_action_attempt_id",
+    ):
+        _required_authority_text(value[field_name], field_name)
+    source: ScheduledAuthoritySourceIdentityV1 = {
+        "source_episode_id": value["source_episode_id"].strip(),
+        "source_message_id": value["source_message_id"].strip(),
+        "source_action_attempt_id": value["source_action_attempt_id"].strip(),
+    }
+    trace_id = value.get("source_llm_trace_id")
+    if isinstance(trace_id, str) and trace_id.strip():
+        source["source_llm_trace_id"] = trace_id.strip()
+    return source
+
+
+def _validate_scheduled_authority_timestamp(
+    value: object,
+    label: str,
+) -> ScheduledAuthorityTimestampV1:
+    """Validate one storage-UTC and configured-local authority timestamp."""
+
+    if not isinstance(value, Mapping) or set(value) != {
+        "utc",
+        "local",
+        "timezone",
+    }:
+        raise CognitionContractError(
+            f"scheduled authority {label} fields are not exact"
+        )
+    _require_utc_timestamp(value["utc"], f"authority.{label}.utc")
+    _require_bounded_text(
+        value["local"],
+        f"authority.{label}.local",
+        maximum=40,
+    )
+    _require_bounded_text(
+        value["timezone"],
+        f"authority.{label}.timezone",
+        maximum=80,
+    )
+    timestamp: ScheduledAuthorityTimestampV1 = {
+        "utc": _canonical_utc_z_iso(value["utc"]),
+        "local": value["local"].strip(),
+        "timezone": value["timezone"].strip(),
+    }
+    _require_scheduled_authority_local_consistency(timestamp, label)
+    return timestamp
+
+
+def _require_scheduled_authority_local_consistency(
+    timestamp: ScheduledAuthorityTimestampV1,
+    label: str,
+) -> None:
+    """Require the configured-local wall clock to match the storage UTC instant.
+
+    The authority's local and timezone fields are bound to the configured IANA
+    timezone. A mutated wall clock or zone label fails closed and also changes
+    the deterministic authority identity because the local and timezone fields
+    are part of the canonical identity payload.
+    """
+
+    if timestamp["timezone"] != CHARACTER_TIME_ZONE:
+        raise CognitionContractError(
+            f"scheduled authority {label} timezone is inconsistent"
+        )
+    try:
+        expected_utc = _canonical_utc_z_iso(
+            local_llm_datetime_to_storage_utc_iso(timestamp["local"])
+        )
+    except ValueError as exc:
+        raise CognitionContractError(
+            f"scheduled authority {label} local time is invalid"
+        ) from exc
+    if expected_utc != timestamp["utc"]:
+        raise CognitionContractError(
+            f"scheduled authority {label} local time does not match utc"
+        )
+
+
+def _validate_scheduled_authority_target(
+    value: object,
+) -> ScheduledAuthorityTargetV1:
+    """Validate the closed target class without delivery identifiers."""
+
+    if not isinstance(value, Mapping) or set(value) != {
+        "platform",
+        "channel_type",
+        "audience_kind",
+    }:
+        raise CognitionContractError(
+            "scheduled authority target fields are not exact"
+        )
+    platform = _required_authority_text(value["platform"], "platform")
+    channel_type = _required_authority_text(
+        value["channel_type"],
+        "channel_type",
+    )
+    audience_kind = value["audience_kind"]
+    if audience_kind not in {"group", "private"}:
+        raise CognitionContractError(
+            "scheduled authority audience kind is invalid"
+        )
+    target: ScheduledAuthorityTargetV1 = {
+        "platform": platform,
+        "channel_type": channel_type,
+        "audience_kind": audience_kind,
+    }
+    return target
+
+
+def _validate_scheduled_authorized_content(
+    value: object,
+) -> ScheduledAuthorityAuthorizedContentV1:
+    """Validate the bounded authorized semantic content block."""
+
+    if not isinstance(value, Mapping) or set(value) != {
+        "summary",
+        "detail_refs",
+    }:
+        raise CognitionContractError(
+            "scheduled authority authorized content fields are not exact"
+        )
+    summary = _required_bounded_authority_text(
+        value["summary"],
+        "authorized_content.summary",
+        maximum=SCHEDULED_AUTHORITY_SUMMARY_MAX_CHARS,
+    )
+    detail_refs = _validate_scheduled_authority_detail_refs(
+        value["detail_refs"],
+        evidence=None,
+    )
+    authorized_content: ScheduledAuthorityAuthorizedContentV1 = {
+        "summary": summary,
+        "detail_refs": detail_refs,
+    }
+    return authorized_content
+
+
+def _canonical_scheduled_authority_payload(
+    *,
+    source: Mapping[str, Any],
+    accepted_at: Mapping[str, Any],
+    trigger: Mapping[str, Any],
+    target: Mapping[str, Any],
+    semantic_objective: str,
+    authorized_content: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Build the identity payload that excludes trace and carrier ids.
+
+    The configured-local wall clock and timezone label are identity truth
+    together with canonical UTC: mutating any of them changes the authority id.
+    """
+
+    canonical_payload = {
+        "source_episode_id": source["source_episode_id"],
+        "source_message_id": source["source_message_id"],
+        "source_action_attempt_id": source["source_action_attempt_id"],
+        "accepted_at_utc": accepted_at["utc"],
+        "accepted_at_local": accepted_at["local"],
+        "accepted_at_timezone": accepted_at["timezone"],
+        "trigger_utc": trigger["utc"],
+        "trigger_local": trigger["local"],
+        "trigger_timezone": trigger["timezone"],
+        "target_platform": target["platform"],
+        "target_channel_type": target["channel_type"],
+        "audience_kind": target["audience_kind"],
+        "semantic_objective": semantic_objective,
+        "authorized_content": {
+            "summary": authorized_content["summary"],
+            "detail_refs": list(authorized_content["detail_refs"]),
+        },
+    }
+    return canonical_payload
+
+
+def _scheduled_authority_id(canonical_payload: Mapping[str, Any]) -> str:
+    """Return the deterministic SHA-256 identity for a canonical payload."""
+
+    serialized = json.dumps(
+        canonical_payload,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    digest = hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+    authority_id = f"{SCHEDULED_AUTHORITY_ID_PREFIX}{digest}"
+    return authority_id
+
+
+def _configured_local_text(storage_utc_iso: str) -> str:
+    """Project one storage instant to configured-local minute text."""
+
+    local_time_context = local_time_context_from_storage_utc(storage_utc_iso)
+    local_text = local_time_context["current_local_datetime"]
+    return local_text
+
+
+def _required_authority_text(value: object, label: str) -> str:
+    """Require one non-empty authority identity or target text field."""
+
+    if not isinstance(value, str) or not value.strip():
+        raise CognitionContractError(
+            f"scheduled authority {label} is required"
+        )
+    text = value.strip()
+    return text
+
+
+def _required_bounded_authority_text(
+    value: object,
+    label: str,
+    *,
+    maximum: int,
+) -> str:
+    """Require one bounded non-empty authority semantic text field."""
+
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or len(value) > maximum
+    ):
+        raise CognitionContractError(f"scheduled authority {label} is invalid")
+    text = value.strip()
+    return text
 
 
 def _validate_persistent_state(state: Mapping[str, Any]) -> None:
@@ -4098,6 +5080,32 @@ def _require_utc_timestamp(value: Any, label: str) -> None:
         raise CognitionContractError(f"{label} is invalid") from exc
     if parsed.tzinfo is None:
         raise CognitionContractError(f"{label} is invalid")
+
+
+def _canonical_utc_z_iso(value: str) -> str:
+    """Canonicalize one storage UTC instant to native UTC ``Z`` text.
+
+    The canonical authority timestamps must use the strict ``Z`` suffix both
+    before identity hashing and in every validated authority output. Parsing
+    through ``parse_storage_utc_datetime`` accepts both ``Z`` and ``+00:00``
+    input forms and yields the same canonical instant either way.
+
+    Args:
+        value: Storage UTC timestamp string accepted by
+            ``parse_storage_utc_datetime``.
+
+    Returns:
+        The canonical UTC timestamp ending in ``Z`` with no offset suffix.
+
+    Raises:
+        ValueError: When the value is not a parseable storage UTC timestamp.
+    """
+
+    storage_datetime_utc = parse_storage_utc_datetime(value)
+    canonical_iso = storage_datetime_utc.isoformat()
+    if canonical_iso.endswith("+00:00"):
+        canonical_iso = f"{canonical_iso[:-6]}Z"
+    return canonical_iso
 
 
 def _require_exact_keys(

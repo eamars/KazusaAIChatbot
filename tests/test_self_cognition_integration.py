@@ -12,6 +12,9 @@ import pytest
 
 from kazusa_ai_chatbot.calendar_scheduler import models as calendar_models
 from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    build_scheduled_future_speech_authority,
+)
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
@@ -253,7 +256,34 @@ def _target_binding_failed_case() -> dict[str, Any]:
     return case
 
 
-def _future_cognition_run() -> dict[str, Any]:
+def _future_cognition_run(
+    *,
+    platform: str = "qq",
+    channel_id: str = "480386272",
+    channel_type: str = "group",
+    audience_kind: str = "group",
+) -> dict[str, Any]:
+    authority = build_scheduled_future_speech_authority(
+        source_episode_id="episode-123",
+        source_message_id="227312230",
+        source_action_attempt_id="action_attempt:future-123",
+        source_llm_trace_id="llmtrace_source-1",
+        accepted_at_utc="2026-05-16T09:00:00+00:00",
+        timezone="Pacific/Auckland",
+        trigger_local="2026-05-16 22:00",
+        platform=platform,
+        channel_type=channel_type,
+        audience_kind=audience_kind,
+        semantic_objective="Re-check whether a natural pause appeared.",
+        authorized_content_summary="在约定时间开始补偿考核。",
+        authorized_detail_refs=[
+            {
+                "evidence_handle": "e1",
+                "semantic_summary": "当前对话明确约定在该时间开始补偿考核。",
+                "provenance_role": "current_event",
+            }
+        ],
+    )
     run = {
         "run_id": "calendar_run_future_123",
         "schedule_id": "calendar_schedule_future_123",
@@ -266,10 +296,11 @@ def _future_cognition_run() -> dict[str, Any]:
             "trigger_at": "2026-05-16T10:00:00+00:00",
             "continuation_objective": "Re-check whether a natural pause appeared.",
             "source_action_attempt_id": "action_attempt:future-123",
+            "scheduled_future_speech_authority": dict(authority),
             "source_refs": [
                 {
                     "ref_kind": "cognitive_episode",
-                    "ref_id": "episode-123",
+                    "ref_id": calendar_models.FUTURE_SPEAK_SOURCE_REF_ID,
                     "owner": "cognition",
                     "relationship": "basis",
                     "evidence_refs": [],
@@ -283,11 +314,11 @@ def _future_cognition_run() -> dict[str, Any]:
             },
         },
         "source_scope": {
-            "source_platform": "orchestrator",
-            "source_channel_id": "",
-            "source_channel_type": "internal",
+            "source_platform": platform,
+            "source_channel_id": channel_id,
+            "source_channel_type": channel_type,
             "source_user_id": "self_cognition",
-            "source_message_id": "action_attempt:future-123",
+            "source_message_id": "227312230",
             "source_platform_bot_id": "",
             "source_character_name": "",
             "guild_id": None,
@@ -316,6 +347,27 @@ def _commitment_due_run() -> dict[str, Any]:
 
 
 def _future_cognition_case() -> dict[str, Any]:
+    authority = build_scheduled_future_speech_authority(
+        source_episode_id="episode-123",
+        source_message_id="227312230",
+        source_action_attempt_id="action_attempt:future-123",
+        source_llm_trace_id="llmtrace_source-1",
+        accepted_at_utc="2026-05-16T09:00:00+00:00",
+        timezone="Pacific/Auckland",
+        trigger_local="2026-05-16 22:00",
+        platform="qq",
+        channel_type="group",
+        audience_kind="group",
+        semantic_objective="Re-check whether a natural pause appeared.",
+        authorized_content_summary="在约定时间开始补偿考核。",
+        authorized_detail_refs=[
+            {
+                "evidence_handle": "e1",
+                "semantic_summary": "当前对话明确约定在该时间开始补偿考核。",
+                "provenance_role": "current_event",
+            }
+        ],
+    )
     case = {
         "case_name": models.CASE_SCHEDULED_FUTURE_COGNITION,
         "case_id": "scheduled_future_cognition_slot:2026-05-16T10:00:00+00:00",
@@ -347,6 +399,10 @@ def _future_cognition_case() -> dict[str, Any]:
             "continuation_mode": "observe_then_decide",
         },
         "source_calendar_run_id": "calendar_run_future_123",
+        "source_calendar_run_due_at": "2026-05-16T10:00:00+00:00",
+        "scheduled_future_speech_authority": dict(authority),
+        "source_action_attempt_id": "action_attempt:future-123",
+        "character_profile": {"name": "Character"},
         "target_binding_status": "bound",
         "delivery_target": _delivery_target(
             channel_id="group-1",
@@ -521,6 +577,8 @@ def _speak_action_spec() -> dict[str, Any]:
             "max_depth": 0,
             "include_result_as": None,
         },
+        "surface_role": "ordinary",
+        "goal_continuation_ref": None,
         "reason": "A bounded scheduled follow-up may be useful.",
     }
     return spec
@@ -842,6 +900,30 @@ async def test_collect_scheduled_future_cognition_cases_keeps_same_due_runs_dist
     second_run["payload"]["source_action_attempt_id"] = (
         "action_attempt:future-456"
     )
+    second_authority = build_scheduled_future_speech_authority(
+        source_episode_id="episode-123",
+        source_message_id="227312230",
+        source_action_attempt_id="action_attempt:future-456",
+        source_llm_trace_id="llmtrace_source-1",
+        accepted_at_utc="2026-05-16T09:00:00+00:00",
+        timezone="Pacific/Auckland",
+        trigger_local="2026-05-16 22:00",
+        platform="qq",
+        channel_type="group",
+        audience_kind="group",
+        semantic_objective="Re-check whether a natural pause appeared.",
+        authorized_content_summary="在约定时间开始补偿考核。",
+        authorized_detail_refs=[
+            {
+                "evidence_handle": "e1",
+                "semantic_summary": "当前对话明确约定在该时间开始补偿考核。",
+                "provenance_role": "current_event",
+            }
+        ],
+    )
+    second_run["payload"]["scheduled_future_speech_authority"] = dict(
+        second_authority
+    )
 
     async def list_due_runs(**kwargs: Any) -> list[dict[str, Any]]:
         del kwargs
@@ -949,7 +1031,10 @@ async def test_scheduled_future_cognition_real_user_missing_profile_is_not_defau
     """A real scheduled source user must not receive a placeholder profile."""
 
     now = datetime(2026, 5, 16, 10, 0, tzinfo=timezone.utc)
-    run = _future_cognition_run()
+    run = _future_cognition_run(
+        channel_type="private",
+        audience_kind="private",
+    )
     run["source_scope"].update(
         {
             "source_platform": "qq",
@@ -1492,16 +1577,18 @@ async def test_collect_self_cognition_cases_keeps_scheduled_future_slots_during_
 async def test_worker_tick_marks_future_cognition_run_completed(
     tmp_path: Path,
 ) -> None:
-    """A processed calendar cognition run should not stay pending forever."""
+    """Generic authority-free cognition runs through the worker normally."""
 
     del tmp_path
     claimed_run_ids: list[str] = []
     completed_run_ids: list[str] = []
     published_artifacts: list[dict[str, Any]] = []
+    generic_case = _future_cognition_case()
+    generic_case.pop("scheduled_future_speech_authority")
 
     async def collect_cases(**kwargs: Any) -> list[dict[str, Any]]:
         del kwargs
-        return [_future_cognition_case()]
+        return [generic_case]
 
     async def run_case(case: dict[str, Any]) -> dict[str, Any]:
         assert case["trigger_kind"] == models.TRIGGER_SCHEDULED_FUTURE_COGNITION
@@ -1564,6 +1651,43 @@ async def test_worker_tick_marks_future_cognition_run_completed(
         published_artifacts[0][models.ARTIFACT_RUN_RECORD]["run_id"]
         == "self_cognition_run:future-123"
     )
+    assert models.ARTIFACT_SCHEDULED_GATE_RESULT not in published_artifacts[0]
+
+
+@pytest.mark.asyncio
+async def test_default_runner_allows_generic_future_cognition_without_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The default runner does not apply the future-speech authority guard."""
+
+    case = _future_cognition_case()
+    case.pop("scheduled_future_speech_authority")
+
+    async def load_residue(_case: dict[str, Any]) -> str:
+        return ""
+
+    monkeypatch.setattr(
+        runner,
+        "_load_residue_context_for_case",
+        load_residue,
+    )
+    monkeypatch.setattr(
+        runner,
+        "build_interaction_style_context",
+        lambda **kwargs: _test_interaction_style_snapshot(),
+    )
+    cognition_client = AsyncMock(return_value=_progress_cognition_output())
+
+    artifact_payloads = (
+        await runner.build_self_cognition_case_artifacts_async(
+            case,
+            cognition_client=cognition_client,
+        )
+    )
+
+    cognition_client.assert_awaited_once()
+    assert models.ARTIFACT_COGNITION_OUTPUT in artifact_payloads
+    assert models.ARTIFACT_SCHEDULED_GATE_RESULT not in artifact_payloads
 
 
 @pytest.mark.asyncio
@@ -3220,3 +3344,578 @@ async def test_active_commitment_query_prioritizes_due_work(
     assert pipeline[5] == {"$limit": 3}
     assert pipeline[6]["$project"]["_self_cognition_due_at"] == 0
     assert pipeline[6]["$project"]["_self_cognition_due_bucket"] == 0
+
+
+@pytest.mark.asyncio
+async def test_scheduled_case_carries_authority_and_source_identity() -> None:
+    """Collected scheduled cases keep the authority and source identity."""
+
+    now = datetime(2026, 5, 16, 10, 0, tzinfo=timezone.utc)
+    run = _future_cognition_run()
+
+    async def list_due_runs(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return [run]
+
+    cases = await sources.collect_scheduled_future_cognition_cases(
+        now=now,
+        character_profile={"name": "TestCharacter"},
+        max_cases=3,
+        list_due_calendar_runs_func=list_due_runs,
+        get_latest_private_channel_func=lambda **kwargs: None,
+    )
+
+    assert len(cases) == 1
+    case = cases[0]
+    authority = case["scheduled_future_speech_authority"]
+    assert authority["authority_id"].startswith("sha256-")
+    assert authority["source"]["source_episode_id"] == "episode-123"
+    assert authority["source"]["source_message_id"] == "227312230"
+    assert authority["source"]["source_action_attempt_id"] == (
+        "action_attempt:future-123"
+    )
+    assert case["source_calendar_run_due_at"] == run["due_at"]
+    assert case["source_action_attempt_id"] == "action_attempt:future-123"
+
+
+@pytest.mark.asyncio
+async def test_scheduled_case_rejects_mismatched_source_attempt_objective_target_and_trigger() -> None:
+    """Scheduled runs contradicting their authority become typed skip cases."""
+
+    now = datetime(2026, 5, 16, 10, 0, tzinfo=timezone.utc)
+
+    async def collect(run: dict[str, Any]) -> list[dict[str, Any]]:
+        async def list_due_runs(**kwargs: Any) -> list[dict[str, Any]]:
+            del kwargs
+            return [run]
+
+        cases = await sources.collect_scheduled_future_cognition_cases(
+            now=now,
+            character_profile={"name": "TestCharacter"},
+            max_cases=3,
+            list_due_calendar_runs_func=list_due_runs,
+            get_latest_private_channel_func=lambda **kwargs: None,
+        )
+        return cases
+
+    base_run = _future_cognition_run()
+    cases = await collect(base_run)
+    assert len(cases) == 1
+    assert cases[0]["source_calendar_run_id"] == "calendar_run_future_123"
+
+    mismatched_attempt = _future_cognition_run()
+    mismatched_attempt["payload"]["source_action_attempt_id"] = (
+        "action_attempt:other"
+    )
+    cases = await collect(mismatched_attempt)
+    assert cases[0]["source_calendar_skip_reason"] == (
+        "scheduled_authority_invalid"
+    )
+    assert "scheduled_future_speech_authority" not in cases[0]
+
+    mismatched_objective = _future_cognition_run()
+    mismatched_objective["payload"]["continuation_objective"] = "另一个目标。"
+    cases = await collect(mismatched_objective)
+    assert cases[0]["source_calendar_skip_reason"] == (
+        "scheduled_authority_invalid"
+    )
+
+    mismatched_trigger = _future_cognition_run()
+    mismatched_trigger["due_at"] = "2026-05-16T09:30:00+00:00"
+    cases = await collect(mismatched_trigger)
+    assert cases[0]["source_calendar_skip_reason"] == (
+        "scheduled_authority_invalid"
+    )
+
+    mismatched_platform = _future_cognition_run()
+    mismatched_platform["source_scope"]["source_platform"] = "debug"
+    cases = await collect(mismatched_platform)
+    assert cases[0]["source_calendar_skip_reason"] == (
+        "scheduled_authority_invalid"
+    )
+
+    mismatched_channel = _future_cognition_run()
+    mismatched_channel["source_scope"]["source_channel_type"] = "private"
+    cases = await collect(mismatched_channel)
+    assert cases[0]["source_calendar_skip_reason"] == (
+        "scheduled_authority_invalid"
+    )
+
+    audience_mismatch = _future_cognition_run(audience_kind="private")
+    cases = await collect(audience_mismatch)
+    assert cases[0]["source_calendar_skip_reason"] == (
+        "scheduled_authority_invalid"
+    )
+
+
+@pytest.mark.asyncio
+async def test_scheduled_case_never_renders_before_due() -> None:
+    """An early scheduled case stops before cognition and dialog."""
+
+    case = _future_cognition_case()
+    case["idle_timestamp_utc"] = "2026-05-16T09:30:00+00:00"
+    case["last_evidence_timestamp_utc"] = "2026-05-16T09:30:00+00:00"
+    cognition_client = AsyncMock(return_value=_progress_cognition_output())
+    dialog_client = AsyncMock(return_value={"final_dialog": ["too early"]})
+
+    artifact_payloads = (
+        await runner.build_self_cognition_case_artifacts_async(
+            case,
+            cognition_client=cognition_client,
+            dialog_client=dialog_client,
+        )
+    )
+
+    gate_result = artifact_payloads[models.ARTIFACT_SCHEDULED_GATE_RESULT]
+    assert gate_result["disposition"] == "suppressed"
+    assert gate_result["gate_codes"] == ["scheduled_due_not_reached"]
+    run_record = artifact_payloads[models.ARTIFACT_RUN_RECORD]
+    assert run_record["selected_route"] == models.ROUTE_AUDIT_ONLY
+    cognition_client.assert_not_awaited()
+    dialog_client.assert_not_awaited()
+    assert models.ARTIFACT_ACTION_CANDIDATE not in artifact_payloads
+
+
+@pytest.mark.asyncio
+async def test_scheduled_worker_dispatches_only_gate_accepted_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A gate-accepted scheduled candidate dispatches exactly once."""
+
+    _patch_dispatcher_persistence(monkeypatch)
+    adapter = _FakeMessagingAdapter()
+    case = _future_cognition_case()
+    recorded_attempts: list[dict[str, Any]] = []
+
+    async def collect_cases(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return [case]
+
+    async def run_case(next_case: dict[str, Any]) -> dict[str, Any]:
+        return _selected_speak_artifacts(next_case)
+
+    async def record_attempt(attempt: dict[str, Any]) -> None:
+        recorded_attempts.append(dict(attempt))
+
+    aligned_verdict = {
+        "schema_version": "scheduled_speech_semantic_verdict.v1",
+        "time_claim_alignment": "aligned",
+        "objective_alignment": "aligned",
+        "source_grounding": "current_authority",
+        "audience_alignment": "aligned",
+        "execution_claim": "aligned",
+    }
+
+    async def evaluate_content(**kwargs: Any) -> dict[str, Any]:
+        del kwargs
+        return {
+            "status": "evaluated",
+            "verdict": aligned_verdict,
+            "attempt_count": 1,
+        }
+
+    monkeypatch.setattr(
+        worker,
+        "evaluate_scheduled_future_speech_content",
+        evaluate_content,
+    )
+
+    result = await worker.run_self_cognition_worker_tick(
+        now=datetime(2026, 5, 16, 10, 0, tzinfo=timezone.utc),
+        is_primary_interaction_busy=lambda: False,
+        collect_cases_func=collect_cases,
+        run_case_func=run_case,
+        read_attempts_func=lambda **kwargs: [],
+        record_attempt_func=record_attempt,
+        claim_calendar_run_func=lambda run_id, **kwargs: True,
+        complete_calendar_run_func=AsyncMock(),
+        adapter_registry_provider=lambda: _adapter_registry(adapter),
+        max_cases=1,
+    )
+
+    assert result.processed_count == 1
+    assert adapter.calls[0]["text"] == "Checking in now."
+    assert recorded_attempts[-1]["status"] == models.ACTION_ATTEMPT_STATUS_SENT
+
+
+@pytest.mark.asyncio
+async def test_scheduled_worker_scrubs_gate_accepted_candidate_after_delivery_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """An accepted candidate that fails delivery never reaches consolidation."""
+
+    del tmp_path
+    monkeypatch.setattr(
+        worker.db,
+        "upsert_post_turn_lifecycle_record",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        worker,
+        "record_completed_episode_residue",
+        AsyncMock(return_value={"status": "skipped"}),
+    )
+    case = _future_cognition_case()
+    candidate_text = "今晚十点开始补偿考核。"
+    captured_consolidation_state: dict[str, Any] = {}
+    recorded_attempts: list[dict[str, Any]] = []
+
+    async def collect_cases(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return [case]
+
+    async def run_case(next_case: dict[str, Any]) -> dict[str, Any]:
+        payloads = _selected_speak_artifacts(
+            next_case,
+            text=candidate_text,
+        )
+        payloads[models.RUNTIME_COGNITIVE_EPISODE] = {
+            "schema_version": "cognitive_episode.v1",
+            "episode_id": "scheduled-tick:test-delivery-failure",
+            "trigger_source": "scheduled_tick",
+            "created_at": "2026-05-16T10:00:00+00:00",
+            "target_scope": {"channel_type": "group"},
+            "origin_metadata": {},
+            "percepts": [],
+            "evidence_refs": [],
+            "privacy_scope": "private",
+            "continuation_depth": 0,
+        }
+        visible_surface = {
+            "schema_version": "surface_output.v1",
+            "visibility": "user_visible",
+            "delivery_intent": "deliver_now",
+            "surface_role": "ordinary",
+            "goal_continuation_ref": None,
+            "text": candidate_text,
+        }
+        private_surface = {
+            "schema_version": "surface_output.v1",
+            "visibility": "private",
+            "delivery_intent": "do_not_deliver",
+            "surface_role": "ordinary",
+            "goal_continuation_ref": None,
+            "summary": "episode audit retained",
+        }
+        payloads[models.ARTIFACT_COGNITION_OUTPUT] = {
+            "cognition_core_output": {
+                "state_update": {"state_scope": "user"},
+            },
+            "cognition_state_committed": True,
+            "surface_outputs": [visible_surface, private_surface],
+        }
+        payloads[models.ARTIFACT_COGNITION_INPUT] = {
+            "state_scope": "user",
+        }
+        trigger_record = tracking.build_trigger_record(next_case)
+        payloads[models.ARTIFACT_RUN_RECORD] = tracking.build_run_record(
+            next_case,
+            trigger_record,
+            models.ROUTE_ACTION_CANDIDATE,
+            {
+                "rag_calls": 0,
+                "cognition_calls": 1,
+                "dialog_calls": 1,
+                "topic_limit": models.TOPIC_LIMIT,
+            },
+        )
+        payloads[models.RUNTIME_CONSOLIDATION_STATE] = {
+            "cognitive_episode": dict(
+                payloads[models.RUNTIME_COGNITIVE_EPISODE]
+            ),
+            "final_dialog": [candidate_text],
+            "surface_outputs": [dict(visible_surface), dict(private_surface)],
+            "decontextualized_input": "来源：其他有效认知证据。",
+        }
+        return payloads
+
+    async def record_attempt(attempt: dict[str, Any]) -> None:
+        recorded_attempts.append(dict(attempt))
+
+    async def run_consolidation(state: dict[str, Any]) -> dict[str, Any]:
+        captured_consolidation_state.update(state)
+        return _consolidation_result()
+
+    async def evaluate_content(**kwargs: Any) -> dict[str, Any]:
+        del kwargs
+        return {
+            "status": "evaluated",
+            "verdict": {
+                "schema_version": "scheduled_speech_semantic_verdict.v1",
+                "time_claim_alignment": "aligned",
+                "objective_alignment": "aligned",
+                "source_grounding": "current_authority",
+                "audience_alignment": "aligned",
+                "execution_claim": "aligned",
+            },
+            "attempt_count": 1,
+        }
+
+    async def fail_delivery(**kwargs: Any) -> dict[str, Any]:
+        del kwargs
+        return {
+            "status": "delivery_failed",
+            "conversation_message_id": None,
+            "delivery_tracking_id": None,
+            "adapter_message_id": None,
+            "failure_reason": "adapter_unavailable",
+        }
+
+    monkeypatch.setattr(
+        worker,
+        "evaluate_scheduled_future_speech_content",
+        evaluate_content,
+    )
+    monkeypatch.setattr(worker, "deliver_selected_speak", fail_delivery)
+    monkeypatch.setattr(
+        worker.runner,
+        "run_self_cognition_consolidation_async",
+        run_consolidation,
+    )
+
+    result = await worker.run_self_cognition_worker_tick(
+        now=datetime(2026, 5, 16, 10, 0, tzinfo=timezone.utc),
+        is_primary_interaction_busy=lambda: False,
+        collect_cases_func=collect_cases,
+        run_case_func=run_case,
+        read_attempts_func=lambda **kwargs: [],
+        record_attempt_func=record_attempt,
+        claim_calendar_run_func=lambda run_id, **kwargs: True,
+        complete_calendar_run_func=AsyncMock(),
+        max_cases=1,
+    )
+
+    assert result.processed_count == 1
+    assert recorded_attempts[-1]["status"] == (
+        models.ACTION_ATTEMPT_STATUS_DELIVERY_FAILED
+    )
+    consolidation_state = captured_consolidation_state
+    assert consolidation_state["final_dialog"] == []
+    assert all(
+        output.get("delivery_intent") != "deliver_now"
+        for output in consolidation_state["surface_outputs"]
+    )
+    assert candidate_text not in str(consolidation_state)
+    assert (
+        consolidation_state["decontextualized_input"]
+        == "来源：其他有效认知证据。"
+    )
+    admission = consolidation_state["scheduled_candidate_admission"]
+    assert admission["disposition"] == "suppressed"
+    assert admission["dispatch_status"] == "delivery_failed"
+
+
+@pytest.mark.asyncio
+async def test_scheduled_worker_suppression_preserves_other_episode_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Rejected candidate text is scrubbed while other evidence survives."""
+
+    monkeypatch.setattr(
+        worker.db,
+        "upsert_post_turn_lifecycle_record",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        worker,
+        "record_completed_episode_residue",
+        AsyncMock(return_value={"status": "skipped"}),
+    )
+    case = _future_cognition_case()
+    captured_consolidation_state: dict[str, Any] = {}
+    recorded_attempts: list[dict[str, Any]] = []
+
+    async def collect_cases(**kwargs: Any) -> list[dict[str, Any]]:
+        del kwargs
+        return [case]
+
+    async def run_case(next_case: dict[str, Any]) -> dict[str, Any]:
+        payloads = _selected_speak_artifacts(
+            next_case,
+            text="厕所隔间的检查已经准备好了。",
+        )
+        payloads[models.RUNTIME_COGNITIVE_EPISODE] = {
+            "schema_version": "cognitive_episode.v1",
+            "episode_id": "scheduled-tick:test-suppression",
+            "trigger_source": "scheduled_tick",
+            "created_at": "2026-05-16T10:00:00+00:00",
+            "target_scope": {"channel_type": "group"},
+            "origin_metadata": {},
+            "percepts": [],
+            "evidence_refs": [],
+            "privacy_scope": "private",
+            "continuation_depth": 0,
+        }
+        visible_surface = {
+            "schema_version": "surface_output.v1",
+            "visibility": "user_visible",
+            "delivery_intent": "deliver_now",
+            "surface_role": "ordinary",
+            "goal_continuation_ref": None,
+            "text": "厕所隔间的检查已经准备好了。",
+        }
+        private_surface = {
+            "schema_version": "surface_output.v1",
+            "visibility": "private",
+            "delivery_intent": "do_not_deliver",
+            "surface_role": "ordinary",
+            "goal_continuation_ref": None,
+            "summary": "episode audit retained",
+        }
+        payloads[models.ARTIFACT_COGNITION_OUTPUT] = {
+            "cognition_core_output": {
+                "state_update": {"state_scope": "user"},
+            },
+            "cognition_state_committed": True,
+            "surface_outputs": [visible_surface, private_surface],
+        }
+        payloads[models.ARTIFACT_COGNITION_INPUT] = {
+            "state_scope": "user",
+        }
+        trigger_record = tracking.build_trigger_record(next_case)
+        payloads[models.ARTIFACT_RUN_RECORD] = tracking.build_run_record(
+            next_case,
+            trigger_record,
+            models.ROUTE_ACTION_CANDIDATE,
+            {
+                "rag_calls": 0,
+                "cognition_calls": 1,
+                "dialog_calls": 1,
+                "topic_limit": models.TOPIC_LIMIT,
+            },
+        )
+        payloads[models.RUNTIME_CONSOLIDATION_STATE] = {
+            "cognitive_episode": dict(
+                payloads[models.RUNTIME_COGNITIVE_EPISODE]
+            ),
+            "final_dialog": ["厕所隔间的检查已经准备好了。"],
+            "surface_outputs": [dict(visible_surface), dict(private_surface)],
+            "decontextualized_input": "来源：其他有效认知证据仍然保留。",
+        }
+        return payloads
+
+    async def record_attempt(attempt: dict[str, Any]) -> None:
+        recorded_attempts.append(dict(attempt))
+
+    async def run_consolidation(state: dict[str, Any]) -> dict[str, Any]:
+        captured_consolidation_state.update(state)
+        return _consolidation_result()
+
+    async def evaluate_content(**kwargs: Any) -> dict[str, Any]:
+        del kwargs
+        return {
+            "status": "evaluated",
+            "verdict": {
+                "schema_version": "scheduled_speech_semantic_verdict.v1",
+                "time_claim_alignment": "aligned",
+                "objective_alignment": "scope_expansion",
+                "source_grounding": "unsupported",
+                "audience_alignment": "aligned",
+                "execution_claim": "aligned",
+            },
+            "attempt_count": 1,
+        }
+
+    monkeypatch.setattr(
+        worker,
+        "evaluate_scheduled_future_speech_content",
+        evaluate_content,
+    )
+    monkeypatch.setattr(
+        worker.runner,
+        "run_self_cognition_consolidation_async",
+        run_consolidation,
+    )
+
+    result = await worker.run_self_cognition_worker_tick(
+        now=datetime(2026, 5, 16, 10, 0, tzinfo=timezone.utc),
+        is_primary_interaction_busy=lambda: False,
+        collect_cases_func=collect_cases,
+        run_case_func=run_case,
+        read_attempts_func=lambda **kwargs: [],
+        record_attempt_func=record_attempt,
+        claim_calendar_run_func=lambda run_id, **kwargs: True,
+        complete_calendar_run_func=AsyncMock(),
+        max_cases=1,
+    )
+
+    assert result.processed_count == 1
+    assert recorded_attempts[-1]["status"] == (
+        models.ACTION_ATTEMPT_STATUS_CLOSED_NO_ACTION
+    )
+    consolidation_state = captured_consolidation_state
+    assert consolidation_state["final_dialog"] == []
+    assert all(
+        output.get("delivery_intent") != "deliver_now"
+        for output in consolidation_state["surface_outputs"]
+    )
+    assert "厕所隔间的检查" not in str(consolidation_state)
+    assert (
+        consolidation_state["decontextualized_input"]
+        == "来源：其他有效认知证据仍然保留。"
+    )
+    admission = consolidation_state["scheduled_candidate_admission"]
+    assert admission["disposition"] == "suppressed"
+    assert admission["gate_codes"] == ["scheduled_objective_mismatch"]
+    assert admission["dispatch_status"] == "scheduled_content_suppressed"
+
+
+def test_rejected_scheduled_candidate_is_removed_before_consolidation() -> None:
+    """The worker scrub strips candidate text before consolidation input."""
+
+    artifact_payloads = {
+        models.ARTIFACT_ACTION_CANDIDATE: {
+            "text": "厕所隔间的检查已经准备好了。",
+        },
+        models.ARTIFACT_COGNITION_OUTPUT: {
+            "surface_outputs": [
+                {
+                    "schema_version": "surface_output.v1",
+                    "visibility": "user_visible",
+                    "delivery_intent": "deliver_now",
+                    "text": "厕所隔间的检查已经准备好了。",
+                },
+                {
+                    "schema_version": "surface_output.v1",
+                    "visibility": "private",
+                    "delivery_intent": "do_not_deliver",
+                    "summary": "audit retained",
+                },
+            ]
+        },
+        models.RUNTIME_CONSOLIDATION_STATE: {
+            "final_dialog": ["厕所隔间的检查已经准备好了。"],
+            "surface_outputs": [
+                {
+                    "schema_version": "surface_output.v1",
+                    "visibility": "user_visible",
+                    "delivery_intent": "deliver_now",
+                    "text": "厕所隔间的检查已经准备好了。",
+                }
+            ],
+            "decontextualized_input": "来源：其他有效认知证据。",
+        },
+    }
+
+    worker._scrub_scheduled_candidate_from_consolidation(artifact_payloads)
+
+    consolidation_state = artifact_payloads[
+        models.RUNTIME_CONSOLIDATION_STATE
+    ]
+    assert consolidation_state["final_dialog"] == []
+    assert consolidation_state["surface_outputs"] == []
+    assert (
+        consolidation_state["decontextualized_input"]
+        == "来源：其他有效认知证据。"
+    )
+    cognition_output = artifact_payloads[
+        models.ARTIFACT_COGNITION_OUTPUT
+    ]
+    assert all(
+        output.get("delivery_intent") != "deliver_now"
+        for output in cognition_output["surface_outputs"]
+    )
+    assert models.ARTIFACT_ACTION_CANDIDATE not in artifact_payloads

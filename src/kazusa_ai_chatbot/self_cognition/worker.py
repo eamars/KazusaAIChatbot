@@ -21,6 +21,11 @@ from kazusa_ai_chatbot.brain_service.post_turn import (
 )
 from kazusa_ai_chatbot.calendar_scheduler import models as calendar_models
 from kazusa_ai_chatbot.calendar_scheduler import repository as calendar_repository
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionContractError,
+    validate_scheduled_future_speech_authority,
+    validate_scheduled_speech_semantic_verdict,
+)
 from kazusa_ai_chatbot.config import (
     CALENDAR_SCHEDULER_LEASE_SECONDS,
     CALENDAR_SCHEDULER_MAX_ATTEMPTS,
@@ -31,7 +36,10 @@ from kazusa_ai_chatbot.dispatcher.adapter_iface import AdapterRegistry
 from kazusa_ai_chatbot.internal_monologue_residue import (
     record_completed_episode_residue,
 )
-from kazusa_ai_chatbot.nodes.dialog_agent import StateContractError
+from kazusa_ai_chatbot.nodes.dialog_agent import (
+    StateContractError,
+    evaluate_scheduled_future_speech_content,
+)
 from kazusa_ai_chatbot.runtime_coordination import (
     PipelineCancelled,
     PipelineCoordinator,
@@ -45,6 +53,7 @@ from kazusa_ai_chatbot.self_cognition.delivery import (
     deliver_selected_speak,
 )
 from kazusa_ai_chatbot.time_boundary import (
+    format_storage_utc_for_llm,
     storage_utc_now,
     storage_utc_now_iso,
 )
@@ -342,6 +351,19 @@ async def run_self_cognition_worker_tick(
                     reason="target_binding_failed",
                 )
                 continue
+            scheduled_guard_codes = _scheduled_authority_due_guard_codes(
+                case,
+                now,
+            )
+            if scheduled_guard_codes:
+                result.skipped_count += 1
+                await _skip_source_calendar_run(
+                    case,
+                    now=now,
+                    skip_calendar_run_func=active_skip_calendar_run,
+                    reason=scheduled_guard_codes[0],
+                )
+                continue
             enter_run_phase = True
         except Exception as exc:
             logger.exception(
@@ -408,14 +430,49 @@ async def run_self_cognition_worker_tick(
                 active_pipeline_handle.raise_if_cancelled(
                     "before_action_outputs",
                 )
-            dispatch_status = await _handle_case_action_outputs(
+            gate_result = await _apply_scheduled_content_gate(
                 case=case_for_run,
                 artifact_payloads=artifact_payloads,
                 now=now,
-                record_attempt_func=active_record_attempt,
-                adapter_registry=adapter_registry,
-                pipeline_run_handle=active_pipeline_handle,
             )
+            scheduled_future_speech = (
+                runner.is_scheduled_future_speech_case(case_for_run)
+            )
+            if gate_result["accepted"]:
+                dispatch_status = await _handle_case_action_outputs(
+                    case=case_for_run,
+                    artifact_payloads=artifact_payloads,
+                    now=now,
+                    record_attempt_func=active_record_attempt,
+                    adapter_registry=adapter_registry,
+                    pipeline_run_handle=active_pipeline_handle,
+                )
+                if (
+                    dispatch_status == "delivery_failed"
+                    and scheduled_future_speech
+                ):
+                    _scrub_scheduled_candidate_from_consolidation(
+                        artifact_payloads
+                    )
+                if scheduled_future_speech:
+                    _record_scheduled_gate_outcome(
+                        case=case_for_run,
+                        artifact_payloads=artifact_payloads,
+                        gate_codes=[],
+                        disposition=models.SCHEDULED_GATE_DISPOSITION_ACCEPTED,
+                        evaluator_attempt_count=gate_result["attempt_count"],
+                        dispatch_status=dispatch_status,
+                    )
+            else:
+                dispatch_status = "scheduled_content_suppressed"
+                await _settle_scheduled_suppression(
+                    case=case_for_run,
+                    artifact_payloads=artifact_payloads,
+                    now=now,
+                    record_attempt_func=active_record_attempt,
+                    gate_codes=gate_result["gate_codes"],
+                    evaluator_attempt_count=gate_result["attempt_count"],
+                )
             self_trace_dialog_count = 1 if dispatch_status == "sent" else 0
             await _settle_and_finish_self_cognition_episode(
                 artifact_payloads=artifact_payloads,
@@ -578,6 +635,320 @@ def _validate_worker_v2_cognition_result(
         raise StateContractError(
             "self-cognition V2 state was not committed before delivery"
         )
+
+
+def _scheduled_authority_due_guard_codes(
+    case: models.SelfCognitionCase,
+    now: datetime,
+) -> list[str]:
+    """Return closed gate codes when a scheduled case cannot run yet."""
+
+    if not runner.is_scheduled_future_speech_case(case):
+        return []
+    guard_passed, guard_codes = runner.enforce_scheduled_authority_due_guard(
+        case,
+        now,
+    )
+    if guard_passed:
+        return []
+    return list(guard_codes)
+
+
+def evaluate_scheduled_content_gate(
+    *,
+    authority_missing: bool,
+    authority_invalid: bool,
+    trigger_identity_ok: bool,
+    due_reached: bool,
+    candidate_present: bool,
+    verdict: Mapping[str, Any] | None,
+) -> tuple[bool, list[str]]:
+    """Map deterministic prerequisites and evaluator dimensions to disposition.
+
+    The worker derives the closed gate codes and final disposition from this
+    deterministic truth table. The evaluator owns semantic judgment only.
+
+    Args:
+        authority_missing: No authority exists on the scheduled case.
+        authority_invalid: The authority is structurally invalid.
+        trigger_identity_ok: Run due time matches the authority trigger.
+        due_reached: Current time is at or after the authority trigger.
+        candidate_present: A non-empty rendered candidate exists.
+        verdict: Validated scheduled semantic verdict, or ``None`` after
+            bounded structural repair exhaustion.
+
+    Returns:
+        A boolean accept flag and the bounded closed gate codes.
+    """
+
+    if authority_missing:
+        return False, ["scheduled_authority_missing"]
+    if authority_invalid:
+        return False, ["scheduled_authority_invalid"]
+    if not trigger_identity_ok:
+        return False, ["scheduled_trigger_identity_mismatch"]
+    if not due_reached:
+        return False, ["scheduled_due_not_reached"]
+    if not candidate_present:
+        return False, ["scheduled_candidate_empty"]
+    if verdict is None:
+        return False, ["scheduled_evaluator_contract_error"]
+    try:
+        validate_scheduled_speech_semantic_verdict(verdict)
+    except (CognitionContractError, ValueError):
+        return False, ["scheduled_evaluator_contract_error"]
+    unavailable_dimensions = [
+        dimension
+        for dimension in (
+            "time_claim_alignment",
+            "objective_alignment",
+            "source_grounding",
+            "audience_alignment",
+            "execution_claim",
+        )
+        if verdict.get(dimension) == "unavailable"
+    ]
+    if unavailable_dimensions:
+        return False, ["scheduled_evaluator_unavailable"]
+    if verdict["time_claim_alignment"] not in {"aligned", "no_claim"}:
+        return False, ["scheduled_time_claim_mismatch"]
+    if verdict["objective_alignment"] != "aligned":
+        return False, ["scheduled_objective_mismatch"]
+    if verdict["source_grounding"] != "current_authority":
+        return False, ["scheduled_source_not_current_authority"]
+    if verdict["audience_alignment"] != "aligned":
+        return False, ["scheduled_audience_mismatch"]
+    if verdict["execution_claim"] != "aligned":
+        return False, ["scheduled_execution_claim_mismatch"]
+    return True, []
+
+
+async def _apply_scheduled_content_gate(
+    *,
+    case: models.SelfCognitionCase,
+    artifact_payloads: dict[str, Any],
+    now: datetime,
+) -> dict[str, Any]:
+    """Run the one-pass scheduled content evaluator before dispatch.
+
+    The gate applies only to rendered scheduled candidates. A case that never
+    proposed visible speech is accepted without an evaluator call.
+    """
+
+    if not runner.is_scheduled_future_speech_case(case):
+        return {
+            "accepted": True,
+            "gate_codes": [],
+            "attempt_count": 0,
+        }
+    action_candidate = artifact_payloads.get(models.ARTIFACT_ACTION_CANDIDATE)
+    if not isinstance(action_candidate, dict):
+        return {
+            "accepted": True,
+            "gate_codes": [],
+            "attempt_count": 0,
+        }
+    candidate_text = action_candidate.get("text")
+    if not isinstance(candidate_text, str) or not candidate_text.strip():
+        return {
+            "accepted": False,
+            "gate_codes": ["scheduled_candidate_empty"],
+            "attempt_count": 0,
+        }
+    authority = case.get("scheduled_future_speech_authority")
+    guard_passed, guard_codes = runner.enforce_scheduled_authority_due_guard(
+        case,
+        now,
+    )
+    if not guard_passed:
+        return {
+            "accepted": False,
+            "gate_codes": list(guard_codes),
+            "attempt_count": 0,
+        }
+    if not isinstance(authority, dict):
+        return {
+            "accepted": False,
+            "gate_codes": ["scheduled_authority_missing"],
+            "attempt_count": 0,
+        }
+    attempt_count = 0
+    verdict: dict[str, Any] | None = None
+    try:
+        evaluator_result = await evaluate_scheduled_future_speech_content(
+            candidate_text=candidate_text.strip(),
+            semantic_objective=str(authority["semantic_objective"]),
+            authorized_content_summary=str(
+                authority["authorized_content"]["summary"]
+            ),
+            authorized_detail_refs=authority["authorized_content"][
+                "detail_refs"
+            ],
+            audience_kind=str(authority["target"]["audience_kind"]),
+            local_due_datetime=format_storage_utc_for_llm(
+                authority["trigger"]["utc"]
+            ),
+            due_identity_facts={
+                "due_reached": True,
+                "run_due_matches_authority": True,
+            },
+            llm_trace_id=str(case.get("llm_trace_id") or ""),
+        )
+        verdict = evaluator_result.get("verdict")
+        if isinstance(verdict, dict):
+            verdict = dict(verdict)
+        attempt_count = int(evaluator_result.get("attempt_count") or 0)
+    except Exception as exc:
+        logger.exception(
+            f"Scheduled content evaluator failed: {exc}"
+        )
+        return {
+            "accepted": False,
+            "gate_codes": ["scheduled_evaluator_unavailable"],
+            "attempt_count": attempt_count,
+        }
+    accepted, gate_codes = evaluate_scheduled_content_gate(
+        authority_missing=False,
+        authority_invalid=False,
+        trigger_identity_ok=True,
+        due_reached=True,
+        candidate_present=True,
+        verdict=verdict,
+    )
+    return {
+        "accepted": accepted,
+        "gate_codes": gate_codes,
+        "attempt_count": attempt_count,
+        "verdict": verdict,
+    }
+
+
+async def _settle_scheduled_suppression(
+    *,
+    case: models.SelfCognitionCase,
+    artifact_payloads: dict[str, Any],
+    now: datetime,
+    record_attempt_func: Callable[..., Any],
+    gate_codes: list[str],
+    evaluator_attempt_count: int,
+) -> None:
+    """Settle a suppressed scheduled candidate without dispatch or memory."""
+
+    action_attempt = artifact_payloads.get(models.ARTIFACT_ACTION_ATTEMPT)
+    if isinstance(action_attempt, dict):
+        action_attempt["status"] = (
+            models.ACTION_ATTEMPT_STATUS_CLOSED_NO_ACTION
+        )
+        action_attempt["dispatch_status"] = "scheduled_content_suppressed"
+        attempt_state = _attempt_state(action_attempt, now=now)
+        await _call_maybe_async(record_attempt_func, attempt_state)
+    _scrub_scheduled_candidate_from_consolidation(artifact_payloads)
+    artifact_payloads[models.ARTIFACT_DISPATCH_RESULT] = {
+        "status": "scheduled_content_suppressed",
+        "gate_codes": list(gate_codes),
+        "evaluator_attempt_count": evaluator_attempt_count,
+    }
+    _record_scheduled_gate_outcome(
+        case=case,
+        artifact_payloads=artifact_payloads,
+        gate_codes=gate_codes,
+        disposition=models.SCHEDULED_GATE_DISPOSITION_SUPPRESSED,
+        evaluator_attempt_count=evaluator_attempt_count,
+        dispatch_status="scheduled_content_suppressed",
+    )
+
+
+def _record_scheduled_gate_outcome(
+    *,
+    case: models.SelfCognitionCase,
+    artifact_payloads: dict[str, Any],
+    gate_codes: list[str],
+    disposition: str,
+    evaluator_attempt_count: int,
+    dispatch_status: str,
+) -> None:
+    """Record authority, gate, dispatch, and admission correlation metadata."""
+
+    gate_result: models.SelfCognitionScheduledGateResult = {
+        "schema_version": models.SCHEDULED_GATE_RESULT_SCHEMA_VERSION,
+        "disposition": disposition,
+        "gate_codes": list(gate_codes),
+        "evaluator_attempt_count": evaluator_attempt_count,
+    }
+    artifact_payloads[models.ARTIFACT_SCHEDULED_GATE_RESULT] = dict(
+        gate_result
+    )
+    run_record = artifact_payloads.get(models.ARTIFACT_RUN_RECORD)
+    if isinstance(run_record, dict):
+        run_record["scheduled_gate_result"] = dict(gate_result)
+        run_record["scheduled_dispatch_status"] = dispatch_status
+        run_record["scheduled_gate_trace"] = tracking.build_scheduled_gate_trace(
+            case,
+            gate_result=gate_result,
+            dispatch_status=dispatch_status,
+        )
+    authority = case.get("scheduled_future_speech_authority")
+    authority_id = (
+        str(authority.get("authority_id") or "")
+        if isinstance(authority, dict)
+        else ""
+    )
+    consolidation_state = artifact_payloads.get(
+        models.RUNTIME_CONSOLIDATION_STATE
+    )
+    if isinstance(consolidation_state, dict):
+        admission_disposition = (
+            disposition
+            if dispatch_status == "sent"
+            else models.SCHEDULED_GATE_DISPOSITION_SUPPRESSED
+        )
+        consolidation_state["scheduled_candidate_admission"] = {
+            "schema_version": models.SCHEDULED_CANDIDATE_ADMISSION_SCHEMA_VERSION,
+            "disposition": admission_disposition,
+            "gate_codes": list(gate_codes),
+            "authority_id": authority_id,
+            "dispatch_status": dispatch_status,
+        }
+
+
+def _scrub_scheduled_candidate_from_consolidation(
+    artifact_payloads: dict[str, Any],
+) -> None:
+    """Remove rejected candidate text from every consolidation source view."""
+
+    cognition_output = artifact_payloads.get(
+        models.ARTIFACT_COGNITION_OUTPUT
+    )
+    if isinstance(cognition_output, dict):
+        cognition_output["surface_outputs"] = _private_surface_outputs(
+            cognition_output.get("surface_outputs")
+        )
+    consolidation_state = artifact_payloads.get(
+        models.RUNTIME_CONSOLIDATION_STATE
+    )
+    if isinstance(consolidation_state, dict):
+        consolidation_state["final_dialog"] = []
+        consolidation_state["surface_outputs"] = _private_surface_outputs(
+            consolidation_state.get("surface_outputs")
+        )
+    artifact_payloads.pop(models.ARTIFACT_ACTION_CANDIDATE, None)
+
+
+def _private_surface_outputs(value: object) -> list[dict[str, Any]]:
+    """Keep only non-deliverable surface outputs for consolidation."""
+
+    if not isinstance(value, list):
+        return []
+    outputs: list[dict[str, Any]] = []
+    for row in value:
+        if not isinstance(row, dict):
+            continue
+        if row.get("visibility") == "user_visible" and row.get(
+            "delivery_intent"
+        ) == "deliver_now":
+            continue
+        outputs.append(dict(row))
+    return outputs
 
 
 async def _settle_and_finish_self_cognition_episode(
@@ -777,6 +1148,8 @@ def _append_delivery_action_result(
 ) -> list[dict[str, Any]]:
     """Append the worker-owned visible speak outcome when it is absent."""
 
+    if dispatch_status == "scheduled_content_suppressed":
+        return action_results
     attempt_id = action_attempt.get("attempt_id")
     if not isinstance(attempt_id, str) or not attempt_id:
         return action_results
@@ -816,6 +1189,8 @@ def _append_delivery_action_result(
         ),
         "result_refs": [],
         "continuation": continuation,
+        "surface_role": "ordinary",
+        "goal_continuation_ref": None,
         "completed_at": settled_at if status == "executed" else None,
     }
     return [*action_results, result]

@@ -1230,16 +1230,22 @@ def _materialize_v2_action_requests(
             raise CognitionExecutionError(
                 "V2 action request failed deterministic validation"
             )
-        if request["action_kind"] == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY:
+        validated_request = dict(evaluation["request"])
+        if (
+            validated_request["action_kind"]
+            == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY
+        ):
             continuation_ref = _coding_continuation_ref(output)
             requests.append({
-                "capability": request["action_kind"],
-                "decision": request["decision"],
-                "context_ref": request["context_ref"],
-                "detail": request["semantic_goal"],
-                "reason": request["reason"],
-                "target_roles": list(request["target_roles"]),
-                "evidence_handles": list(request["evidence_handles"]),
+                "capability": validated_request["action_kind"],
+                "decision": validated_request["decision"],
+                "context_ref": validated_request["context_ref"],
+                "detail": validated_request["semantic_goal"],
+                "reason": validated_request["reason"],
+                "target_roles": list(validated_request["target_roles"]),
+                "evidence_handles": list(
+                    validated_request["evidence_handles"]
+                ),
                 "surface_role": "task_acknowledgement",
                 "goal_continuation_ref": continuation_ref,
                 "task_execution_context": (
@@ -1250,17 +1256,25 @@ def _materialize_v2_action_requests(
                 ),
             })
             continue
-        requests.append({
-            "capability": request["action_kind"],
-            "decision": request["decision"],
-            "context_ref": request["context_ref"],
-            "detail": request["semantic_goal"],
-            "reason": request["reason"],
-            "target_roles": list(request["target_roles"]),
-            "evidence_handles": list(request["evidence_handles"]),
+        materialized_request = {
+            "capability": validated_request["action_kind"],
+            "decision": validated_request["decision"],
+            "context_ref": validated_request["context_ref"],
+            "detail": validated_request["semantic_goal"],
+            "reason": validated_request["reason"],
+            "target_roles": list(validated_request["target_roles"]),
+            "evidence_handles": list(
+                validated_request["evidence_handles"]
+            ),
             "surface_role": "ordinary",
             "goal_continuation_ref": None,
-        })
+        }
+        proposal = validated_request.get("scheduled_authority_proposal")
+        if isinstance(proposal, dict):
+            materialized_request["scheduled_authority_proposal"] = dict(
+                proposal
+            )
+        requests.append(materialized_request)
     materialization_state = dict(state)
     action_specs = materialize_semantic_action_requests(
         requests,

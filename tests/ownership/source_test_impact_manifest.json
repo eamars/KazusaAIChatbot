@@ -14,6 +14,7 @@
     "src/kazusa_ai_chatbot/conversation_progress/recorder.py",
     "src/kazusa_ai_chatbot/conversation_progress/runtime.py",
     "src/kazusa_ai_chatbot/db/__init__.py",
+    "src/kazusa_ai_chatbot/db/accepted_tasks.py",
     "src/kazusa_ai_chatbot/db/internal_monologue_residue.py",
     "src/kazusa_ai_chatbot/db/schemas.py",
     "src/kazusa_ai_chatbot/llm_tracing",
@@ -41,9 +42,47 @@
     "src/kazusa_ai_chatbot/local_context_resolver/service.py",
     "src/kazusa_ai_chatbot/local_context_resolver/stages.py",
     "src/kazusa_ai_chatbot/service.py",
-    "src/scripts/export_trace_correlation_manifest.py"
+    "src/scripts/export_trace_correlation_manifest.py",
+    "src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_actions.py",
+    "src/kazusa_ai_chatbot/action_spec/models.py",
+    "src/kazusa_ai_chatbot/action_spec/execution.py",
+    "src/kazusa_ai_chatbot/action_spec/handlers/background_work.py",
+    "src/kazusa_ai_chatbot/action_spec/handlers/future_cognition.py",
+    "src/kazusa_ai_chatbot/accepted_task/models.py",
+    "src/kazusa_ai_chatbot/accepted_task/lifecycle.py",
+    "src/kazusa_ai_chatbot/background_work/models.py",
+    "src/kazusa_ai_chatbot/background_work/jobs.py",
+    "src/kazusa_ai_chatbot/background_work/subagent/future_speak.py",
+    "src/kazusa_ai_chatbot/calendar_scheduler/models.py",
+    "src/kazusa_ai_chatbot/self_cognition/projection.py",
+    "src/kazusa_ai_chatbot/self_cognition/sources.py",
+    "src/kazusa_ai_chatbot/consolidation/schema.py",
+    "scripts/preflight_scheduled_future_speech_contract.py"
   ],
   "entries": [
+    {
+      "source": "src/kazusa_ai_chatbot/db/accepted_tasks.py",
+      "owner": "accepted-task repository owner",
+      "contract": "atomic active-duplicate authority comparison before provenance mutation",
+      "required_unit_tests": [
+        "tests/test_accepted_task_lifecycle.py::test_future_speak_duplicate_authority_mismatch_fails_before_related_source_mutation",
+        "tests/test_accepted_task_lifecycle.py::test_repository_duplicate_ref_mismatch_preserves_provenance",
+        "tests/test_accepted_task_lifecycle.py::test_repository_rejects_v1_task_document"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "scripts/preflight_scheduled_future_speech_contract.py",
+      "owner": "scheduled future-speech cutover preflight owner",
+      "contract": "read-only active legacy-record check using the production payload path",
+      "required_unit_tests": [
+        "tests/test_scheduled_future_speech_preflight.py::test_preflight_blocks_active_legacy_future_speak_records",
+        "tests/test_scheduled_future_speech_preflight.py::test_preflight_passes_when_active_records_carry_authority",
+        "tests/test_scheduled_future_speech_preflight.py::test_preflight_performs_no_writes",
+        "tests/test_scheduled_future_speech_preflight.py::test_preflight_reads_calendar_authority_from_payload"
+      ],
+      "supplemental_tests": []
+    },
     {
       "source": "src/control_console/__init__.py",
       "owner": "product release owner",
@@ -114,6 +153,7 @@
       "owner": "self-cognition tracking contract owner",
       "contract": "semantic policy execution outcome dimensions",
       "required_unit_tests": [
+        "tests/test_scheduled_future_speech_contract.py::test_self_cognition_scheduled_models_reject_open_gate_fields",
         "tests/test_self_cognition_group_visible_reply_boundary.py::test_response_outcome_values_are_closed"
       ],
       "supplemental_tests": []
@@ -123,11 +163,14 @@
       "owner": "self-cognition episode runner owner",
       "contract": "pre-dialog policy and atomic reservation ordering",
       "required_unit_tests": [
-        "tests/test_self_cognition_group_visible_reply_boundary.py::test_eligible_group_proposal_calls_dialog_once"
+        "tests/test_scheduled_future_speech_contract.py::test_due_guard_rejects_early_run",
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_eligible_group_proposal_calls_dialog_once",
+        "tests/test_self_cognition_integration.py::test_default_runner_allows_generic_future_cognition_without_authority"
       ],
       "supplemental_tests": [
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_dialog_runs_only_after_atomic_duplicate_reservation",
         "tests/test_self_cognition_group_visible_reply_boundary.py::test_policy_rejection_skips_action_attempt_dialog_and_dispatch",
-        "tests/test_self_cognition_group_visible_reply_boundary.py::test_dialog_runs_only_after_atomic_duplicate_reservation"
+        "tests/test_self_cognition_integration.py::test_scheduled_case_never_renders_before_due"
       ]
     },
     {
@@ -135,25 +178,32 @@
       "owner": "self-cognition policy owner",
       "contract": "structured group response policy gates",
       "required_unit_tests": [
-        "tests/test_self_cognition_group_visible_reply_boundary.py::test_group_proposal_requires_structured_participation_grounding",
-        "tests/test_self_cognition_group_visible_reply_boundary.py::test_missing_group_response_is_a_contract_failure",
-        "tests/test_self_cognition_group_visible_reply_boundary.py::test_high_risk_label_alone_does_not_reject_grounded_proposal",
-        "tests/test_self_cognition_group_visible_reply_boundary.py::test_recent_grounded_group_proposal_is_eligible",
-        "tests/test_self_cognition_group_visible_reply_boundary.py::test_group_proposal_requires_window_provenance_and_channel_only_target",
+        "tests/test_scheduled_future_speech_contract.py::test_tracking_projection_is_deterministic",
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_duplicate_group_window_remains_suppressed",
         "tests/test_self_cognition_group_visible_reply_boundary.py::test_failed_group_delivery_remains_duplicate_suppressed",
-        "tests/test_self_cognition_group_visible_reply_boundary.py::test_duplicate_group_window_remains_suppressed"
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_group_proposal_requires_structured_participation_grounding",
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_group_proposal_requires_window_provenance_and_channel_only_target",
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_high_risk_label_alone_does_not_reject_grounded_proposal",
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_missing_group_response_is_a_contract_failure",
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_recent_grounded_group_proposal_is_eligible"
       ],
-      "supplemental_tests": []
+      "supplemental_tests": [
+        "tests/test_self_cognition_tracking.py::test_scheduled_gate_trace_contains_authority_and_disposition"
+      ]
     },
     {
       "source": "src/kazusa_ai_chatbot/self_cognition/worker.py",
       "owner": "self-cognition worker observability owner",
       "contract": "bounded event projection of response outcomes",
       "required_unit_tests": [
-        "tests/test_self_cognition_group_visible_reply_boundary.py::test_worker_event_contains_three_dispositions_and_gate_codes_without_raw_content"
+        "tests/test_scheduled_future_speech_contract.py::test_scheduled_gate_truth_table_is_deterministic",
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_worker_event_contains_three_dispositions_and_gate_codes_without_raw_content",
+        "tests/test_consolidation_lifecycle_diagnostics.py::test_undelivered_scheduled_candidate_is_not_candidate_memory_input"
       ],
       "supplemental_tests": [
-        "tests/test_self_cognition_group_visible_reply_boundary.py::test_worker_event_does_not_infer_response_failure_without_response_outcome"
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_worker_event_does_not_infer_response_failure_without_response_outcome",
+        "tests/test_self_cognition_integration.py::test_scheduled_worker_dispatches_only_gate_accepted_candidate",
+        "tests/test_self_cognition_integration.py::test_scheduled_worker_scrubs_gate_accepted_candidate_after_delivery_failure"
       ]
     },
     {
@@ -190,15 +240,19 @@
       "owner": "action selection owner",
       "contract": "selected-intention and stance-to-effect propagation",
       "required_unit_tests": [
+        "tests/test_cognition_core_v2_action_planning_bugfix.py::test_future_speak_temporal_mismatch_uses_existing_planner_replacement_budget",
+        "tests/test_cognition_core_v2_action_planning_bugfix.py::test_future_speak_plan_actions_preserves_authority_proposal_to_runtime_output",
+        "tests/test_cognition_core_v2_action_planning_bugfix.py::test_future_speak_relative_time_prompt_uses_accepted_event_local_context",
         "tests/test_self_cognition_group_visible_reply_boundary.py::test_group_action_planning_requires_explicit_silence_or_reply_decision",
-        "tests/unit/cognition_core_v2/test_action_selection.py::test_non_accepting_stance_suppresses_downstream_effects",
-        "tests/unit/cognition_core_v2/test_action_selection.py::test_selected_intention_preserves_selected_response_operation",
+        "tests/unit/cognition_core_v2/test_action_selection.py::test_action_planning_keeps_confidence_descriptor_advisory",
         "tests/unit/cognition_core_v2/test_action_selection.py::test_action_selection_exposes_owned_contract",
-        "tests/unit/cognition_core_v2/test_action_selection.py::test_action_planning_keeps_confidence_descriptor_advisory"
+        "tests/unit/cognition_core_v2/test_action_selection.py::test_non_accepting_stance_suppresses_downstream_effects",
+        "tests/unit/cognition_core_v2/test_action_selection.py::test_selected_intention_preserves_selected_response_operation"
       ],
       "supplemental_tests": [
-        "tests/test_self_cognition_group_visible_reply_live_llm.py::test_live_group_self_cognition_latest_case_stays_silent",
-        "tests/test_self_cognition_group_visible_reply_live_llm.py::test_live_group_self_cognition_eligible_case_can_propose_reply"
+        "tests/test_cognition_core_v2_action_planning_bugfix.py::test_future_speak_authority_exhaustion_returns_no_action",
+        "tests/test_self_cognition_group_visible_reply_live_llm.py::test_live_group_self_cognition_eligible_case_can_propose_reply",
+        "tests/test_self_cognition_group_visible_reply_live_llm.py::test_live_group_self_cognition_latest_case_stays_silent"
       ]
     },
     {
@@ -224,18 +278,22 @@
       "owner": "cognition contract validator",
       "contract": "cognition contract and selected response-operation validation",
       "required_unit_tests": [
+        "tests/test_scheduled_future_speech_contract.py::test_authority_id_binds_local_time_and_timezone",
+        "tests/test_scheduled_future_speech_contract.py::test_authority_rejects_local_timezone_utc_inconsistency",
+        "tests/test_scheduled_future_speech_contract.py::test_scheduled_authority_builder_emits_native_utc_z",
+        "tests/test_scheduled_future_speech_contract.py::test_scheduled_authority_proposal_contract_is_closed",
         "tests/test_self_cognition_group_visible_reply_boundary.py::test_group_self_cognition_response_contract_requires_exact_decision_shape",
         "tests/test_self_cognition_group_visible_reply_boundary.py::test_group_self_cognition_response_proposal_requires_current_episode_evidence",
         "tests/test_self_cognition_group_visible_reply_boundary.py::test_group_self_cognition_response_proposal_requires_target_and_goal",
-        "tests/unit/cognition_core_v2/test_contracts.py::test_sensitive_relational_willingness_accepts_all_real_states_and_stances",
-        "tests/unit/cognition_core_v2/test_contracts.py::test_selected_response_operation_has_exact_contract",
-        "tests/unit/cognition_core_v2/test_contracts.py::test_selected_response_operation_rejects_missing_required_fields",
+        "tests/unit/cognition_core_v2/test_contracts.py::test_cognition_evidence_requires_closed_typed_authority",
         "tests/unit/cognition_core_v2/test_contracts.py::test_contracts_exposes_owned_contract",
         "tests/unit/cognition_core_v2/test_contracts.py::test_goal_and_action_confidence_reject_numeric_values",
         "tests/unit/cognition_core_v2/test_contracts.py::test_group_confidence_rejects_numeric_values",
-        "tests/unit/cognition_core_v2/test_contracts.py::test_cognition_evidence_requires_closed_typed_authority",
         "tests/unit/cognition_core_v2/test_contracts.py::test_promoted_reflection_projects_conditional_guidance_authority",
-        "tests/unit/cognition_core_v2/test_contracts.py::test_semantic_question_v2_requires_role_assignment_handles"
+        "tests/unit/cognition_core_v2/test_contracts.py::test_selected_response_operation_has_exact_contract",
+        "tests/unit/cognition_core_v2/test_contracts.py::test_selected_response_operation_rejects_missing_required_fields",
+        "tests/unit/cognition_core_v2/test_contracts.py::test_semantic_question_v2_requires_role_assignment_handles",
+        "tests/unit/cognition_core_v2/test_contracts.py::test_sensitive_relational_willingness_accepts_all_real_states_and_stances"
       ],
       "supplemental_tests": []
     },
@@ -814,10 +872,11 @@
       "owner": "nodes owner",
       "contract": "persona_supervisor2_cognition public contract",
       "required_unit_tests": [
+        "tests/test_persona_supervisor2_cognition_prewarm.py::test_omitted_coordinator_does_not_use_ambient_guardrail",
+        "tests/test_persona_supervisor2_cognition_prewarm.py::test_parent_retry_does_not_repeat_shared_memory_prewarm",
+        "tests/unit/nodes/test_persona_supervisor2_cognition.py::test_future_speak_v2_bridge_preserves_validated_authority_proposal",
         "tests/unit/nodes/test_persona_supervisor2_cognition.py::test_group_self_cognition_proposal_materializes_existing_speak_surface",
         "tests/unit/nodes/test_persona_supervisor2_cognition.py::test_persona_supervisor2_cognition_exposes_owned_contract",
-        "tests/test_persona_supervisor2_cognition_prewarm.py::test_parent_retry_does_not_repeat_shared_memory_prewarm",
-        "tests/test_persona_supervisor2_cognition_prewarm.py::test_omitted_coordinator_does_not_use_ambient_guardrail",
         "tests/unit/nodes/test_persona_supervisor2_cognition.py::test_promoted_reflection_preserves_source_updated_at",
         "tests/unit/nodes/test_persona_supervisor2_cognition.py::test_promoted_self_guidance_is_goal_only_conditional_context"
       ],
@@ -857,30 +916,34 @@
       "owner": "dialog verifier owner",
       "contract": "selected-operation role authority and numeric dialog verifier fallback",
       "required_unit_tests": [
-        "tests/unit/nodes/test_dialog_agent.py::test_terminal_candidate_opposite_polarity_is_withheld",
-        "tests/unit/nodes/test_dialog_agent.py::test_dialog_role_direction_uses_selected_response_operation",
-        "tests/unit/nodes/test_dialog_agent.py::test_dialog_role_direction_rejects_selected_actor_target_reversal",
-        "tests/unit/nodes/test_dialog_agent.py::test_role_direction_prompt_allows_compatible_nested_request_actions",
-        "tests/unit/nodes/test_dialog_agent.py::test_dialog_agent_exposes_owned_contract",
-        "tests/unit/nodes/test_dialog_agent.py::test_dialog_score_is_numeric_quality_signal",
-        "tests/unit/nodes/test_dialog_agent.py::test_numeric_score_rejects_boolean_and_out_of_range_values",
-        "tests/test_dialog_agent.py::test_dialog_score_validation_rejects_non_finite_or_out_of_range[True]",
+        "tests/test_dialog_agent.py::test_dialog_exhaustion_all_unavailable_selects_latest_valid_candidate",
+        "tests/test_dialog_agent.py::test_dialog_exhaustion_selects_highest_score_not_latest",
+        "tests/test_dialog_agent.py::test_dialog_exhaustion_ties_select_latest_attempt",
+        "tests/test_dialog_agent.py::test_dialog_score_aggregate_uses_available_dimensions",
         "tests/test_dialog_agent.py::test_dialog_score_validation_rejects_non_finite_or_out_of_range[-0.01]",
         "tests/test_dialog_agent.py::test_dialog_score_validation_rejects_non_finite_or_out_of_range[1.01]",
         "tests/test_dialog_agent.py::test_dialog_score_validation_rejects_non_finite_or_out_of_range[10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000]",
-        "tests/test_dialog_agent.py::test_dialog_score_validation_rejects_non_finite_or_out_of_range[nan]",
+        "tests/test_dialog_agent.py::test_dialog_score_validation_rejects_non_finite_or_out_of_range[True]",
         "tests/test_dialog_agent.py::test_dialog_score_validation_rejects_non_finite_or_out_of_range[inf]",
-        "tests/test_dialog_agent.py::test_dialog_score_aggregate_uses_available_dimensions",
-        "tests/test_dialog_agent.py::test_dialog_exhaustion_selects_highest_score_not_latest",
-        "tests/test_dialog_agent.py::test_dialog_exhaustion_ties_select_latest_attempt",
-        "tests/test_dialog_agent.py::test_dialog_exhaustion_all_unavailable_selects_latest_valid_candidate"
+        "tests/test_dialog_agent.py::test_dialog_score_validation_rejects_non_finite_or_out_of_range[nan]",
+        "tests/test_scheduled_future_speech_content_gate.py::test_gate_verdict_schema_has_only_closed_semantic_dimensions",
+        "tests/unit/nodes/test_dialog_agent.py::test_dialog_agent_exposes_owned_contract",
+        "tests/unit/nodes/test_dialog_agent.py::test_dialog_role_direction_rejects_selected_actor_target_reversal",
+        "tests/unit/nodes/test_dialog_agent.py::test_dialog_role_direction_uses_selected_response_operation",
+        "tests/unit/nodes/test_dialog_agent.py::test_dialog_score_is_numeric_quality_signal",
+        "tests/unit/nodes/test_dialog_agent.py::test_numeric_score_rejects_boolean_and_out_of_range_values",
+        "tests/unit/nodes/test_dialog_agent.py::test_role_direction_prompt_allows_compatible_nested_request_actions",
+        "tests/unit/nodes/test_dialog_agent.py::test_terminal_candidate_opposite_polarity_is_withheld"
       ],
       "supplemental_tests": [
-        "tests/integration/cognition_core_v2/test_terminal_dialog_candidate.py::test_terminal_dialog_candidate_opposite_polarity_is_withheld",
         "tests/integration/cognition_core_v2/test_terminal_dialog_candidate.py::test_reward_offer_required_selection_delivers_visible_dialog",
-        "tests/test_dialog_visible_speech_and_semantic_fidelity.py::test_role_direction_score_accepts_character_owned_deflection",
+        "tests/integration/cognition_core_v2/test_terminal_dialog_candidate.py::test_terminal_dialog_candidate_opposite_polarity_is_withheld",
         "tests/test_dialog_visible_speech_and_semantic_fidelity.py::test_dialog_semantic_exhaustion_withholds_unverified_candidates",
-        "tests/test_dialog_visible_speech_and_semantic_fidelity_live_llm.py::test_live_reward_request_preserves_user_actor_character_target"
+        "tests/test_dialog_visible_speech_and_semantic_fidelity.py::test_role_direction_score_accepts_character_owned_deflection",
+        "tests/test_dialog_visible_speech_and_semantic_fidelity_live_llm.py::test_live_reward_request_preserves_user_actor_character_target",
+        "tests/test_scheduled_future_speech_content_gate_live_llm.py::test_current_authority_detail_is_accepted",
+        "tests/test_scheduled_future_speech_content_gate_live_llm.py::test_historical_only_grounding_is_suppressed",
+        "tests/test_scheduled_future_speech_content_gate_live_llm.py::test_incident_unsupported_detail_is_suppressed"
       ]
     },
     {
@@ -923,6 +986,146 @@
         "tests/unit/nodes/test_persona_supervisor2_schema.py::test_persona_supervisor2_schema_exposes_owned_contract"
       ],
       "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_actions.py",
+      "owner": "action materialization owner",
+      "contract": "future-speak authority materialization bridge",
+      "required_unit_tests": [
+        "tests/test_scheduled_future_speech_contract.py::test_persona_materializer_carries_validated_authority"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/action_spec/models.py",
+      "owner": "action request contract owner",
+      "contract": "discriminated V2 future-speak authority proposal field",
+      "required_unit_tests": [
+        "tests/test_scheduled_future_speech_contract.py::test_future_speak_v2_request_requires_and_preserves_closed_authority_proposal"
+      ],
+      "supplemental_tests": [
+        "tests/test_scheduled_future_speech_contract.py::test_v2_evaluator_returns_future_speak_authority_proposal_unchanged"
+      ]
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/action_spec/execution.py",
+      "owner": "action execution owner",
+      "contract": "future-speak authority execution payload without carrier ids",
+      "required_unit_tests": [
+        "tests/test_scheduled_future_speech_contract.py::test_action_execution_passes_authority_without_carrier_ids"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/action_spec/handlers/background_work.py",
+      "owner": "future-speak persistence owner",
+      "contract": "authority validation and active-duplicate authority mismatch rejection",
+      "required_unit_tests": [
+        "tests/test_background_work_future_speak.py::test_future_speak_rejects_invalid_authority_before_persistence",
+        "tests/test_background_work_future_speak.py::test_future_speak_active_duplicate_rejects_authority_mismatch_before_enqueue",
+        "tests/test_background_work_future_speak.py::test_future_speak_authority_uses_action_accepted_at_not_execution_time",
+        "tests/test_background_work_future_speak.py::test_future_speak_source_message_param_matches_trusted_scope"
+      ],
+      "supplemental_tests": [
+        "tests/test_background_work_future_speak.py::test_future_speak_copies_immutable_authority_to_carriers",
+        "tests/test_background_work_future_speak.py::test_future_speak_subagent_does_not_author_dialog_text"
+      ]
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/action_spec/handlers/future_cognition.py",
+      "owner": "future cognition handler owner",
+      "contract": "trusted source scope and authority carrier projection",
+      "required_unit_tests": [
+        "tests/test_action_spec_future_cognition.py::test_future_cognition_preserves_source_message_and_authority_scope"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/accepted_task/models.py",
+      "owner": "accepted-task contract owner",
+      "contract": "accepted-task authority carrier field",
+      "required_unit_tests": [
+        "tests/test_scheduled_future_speech_contract.py::test_accepted_task_carrier_keeps_authority_immutable"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/accepted_task/lifecycle.py",
+      "owner": "accepted-task lifecycle owner",
+      "contract": "durable independent authority document copy",
+      "required_unit_tests": [
+        "tests/test_scheduled_future_speech_contract.py::test_future_speak_creation_persists_independent_authority_copy"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/background_work/models.py",
+      "owner": "background-work job contract owner",
+      "contract": "job authority and source identity fields",
+      "required_unit_tests": [
+        "tests/test_background_work_jobs.py::test_future_speak_job_preserves_authority_identity"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/background_work/jobs.py",
+      "owner": "background-work job serialization owner",
+      "contract": "job authority round trip without mutation",
+      "required_unit_tests": [
+        "tests/test_background_work_jobs.py::test_future_speak_job_round_trip_preserves_authority"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/background_work/subagent/future_speak.py",
+      "owner": "future-speak subagent owner",
+      "contract": "scheduled subagent input boundary without dialog authorship",
+      "required_unit_tests": [
+        "tests/test_background_work_future_speak.py::test_future_speak_subagent_does_not_author_dialog_text"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/calendar_scheduler/models.py",
+      "owner": "calendar scheduler contract owner",
+      "contract": "schedule and run authority carrier",
+      "required_unit_tests": [
+        "tests/test_scheduled_future_speech_contract.py::test_calendar_run_carries_authority_identity"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/self_cognition/projection.py",
+      "owner": "self-cognition projection owner",
+      "contract": "prompt-safe scheduled authority packet",
+      "required_unit_tests": [
+        "tests/test_scheduled_future_speech_contract.py::test_source_packet_projects_authority_without_delivery_ids"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/self_cognition/sources.py",
+      "owner": "self-cognition source collector owner",
+      "contract": "scheduled case authority and source identity binding",
+      "required_unit_tests": [
+        "tests/test_scheduled_future_speech_contract.py::test_source_collector_rejects_missing_authority",
+        "tests/test_scheduled_future_speech_contract.py::test_source_collector_rejects_mismatched_authority_carrier_fields"
+      ],
+      "supplemental_tests": [
+        "tests/test_self_cognition_integration.py::test_scheduled_case_carries_authority_and_source_identity",
+        "tests/test_self_cognition_integration.py::test_scheduled_case_rejects_mismatched_source_attempt_objective_target_and_trigger"
+      ]
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/consolidation/schema.py",
+      "owner": "consolidation schema owner",
+      "contract": "scheduled candidate admission metadata",
+      "required_unit_tests": [
+        "tests/test_scheduled_future_speech_contract.py::test_consolidation_admission_filters_rejected_candidate"
+      ],
+      "supplemental_tests": [
+        "tests/test_consolidation_lifecycle_diagnostics.py::test_rejected_scheduled_candidate_is_not_candidate_memory_input"
+      ]
     }
   ]
 }

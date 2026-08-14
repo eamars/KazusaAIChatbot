@@ -275,6 +275,87 @@ async def test_repository_duplicate_ref_mismatch_preserves_provenance(
 
 
 @pytest.mark.asyncio
+async def test_future_speak_duplicate_authority_mismatch_fails_before_related_source_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An active future-speak duplicate with a different authority is rejected."""
+
+    from kazusa_ai_chatbot.accepted_task import lifecycle
+    from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+        build_scheduled_future_speech_authority,
+    )
+    from kazusa_ai_chatbot.db import accepted_tasks as repository
+    from kazusa_ai_chatbot.db.errors import DatabaseOperationError
+
+    fake_db = _FakeDb()
+    monkeypatch.setattr(repository, "get_db", _fake_get_db(fake_db))
+
+    def build_authority(*, trigger_local: str) -> dict[str, Any]:
+        authority = build_scheduled_future_speech_authority(
+            source_episode_id="episode-2026-05-15-001",
+            source_message_id="message-001",
+            source_action_attempt_id="action_attempt:future-speak-001",
+            source_llm_trace_id="llmtrace_source-1",
+            accepted_at_utc="2026-05-15T21:00:00+00:00",
+            timezone="Pacific/Auckland",
+            trigger_local=trigger_local,
+            platform="debug",
+            channel_type="private",
+            audience_kind="private",
+            semantic_objective="Remind the user to drink water.",
+            authorized_content_summary="在约定时间提醒用户喝水。",
+            authorized_detail_refs=[
+                {
+                    "evidence_handle": "e1",
+                    "semantic_summary": "当前对话明确约定在约定时间提醒喝水。",
+                    "provenance_role": "current_event",
+                }
+            ],
+        )
+        return dict(authority)
+
+    request = _create_request(
+        scheduled_future_speech_authority=build_authority(
+            trigger_local="2026-05-16 10:00",
+        ),
+    )
+    task_identity_key = lifecycle.build_task_identity_key(request)
+    first_task = lifecycle._build_enqueueing_task_doc(
+        request,
+        task_identity_key=task_identity_key,
+    )
+
+    created = await repository.insert_or_get_active_accepted_task(
+        first_task,
+        source_message_id="message-001",
+        observed_at="2026-05-15T21:00:00+00:00",
+    )
+    assert created["status"] == "created"
+
+    before_mismatch = deepcopy(fake_db.accepted_tasks.documents[0])
+
+    mismatching_duplicate = deepcopy(first_task)
+    mismatching_duplicate["accepted_task_id"] = "task-mismatching-duplicate"
+    mismatching_duplicate["scheduled_future_speech_authority"] = (
+        build_authority(trigger_local="2026-05-16 11:00")
+    )
+    with pytest.raises(
+        DatabaseOperationError,
+        match="different goal_continuation_ref or scheduled authority",
+    ):
+        await repository.insert_or_get_active_accepted_task(
+            mismatching_duplicate,
+            source_message_id="message-999",
+            observed_at="2026-05-15T21:05:00+00:00",
+        )
+
+    current = fake_db.accepted_tasks.documents[0]
+    assert current == before_mismatch
+    assert current["related_source_message_ids"] == ["message-001"]
+    assert current["updated_at"] == "2026-05-15T21:00:00+00:00"
+
+
+@pytest.mark.asyncio
 async def test_repository_rejects_v1_task_document() -> None:
     """The big-bang persistence boundary accepts only v2 task rows."""
 
@@ -828,7 +909,9 @@ def _fake_get_db(fake_db: _FakeDb):
 def _matches(row: dict[str, Any], query: dict[str, Any]) -> bool:
     for field_name, expected in query.items():
         actual = row.get(field_name)
-        if isinstance(expected, dict):
+        if isinstance(expected, dict) and (
+            "$in" in expected or "$lte" in expected
+        ):
             if "$in" in expected and actual not in expected["$in"]:
                 return False
             if "$lte" in expected and not (str(actual) <= str(expected["$lte"])):

@@ -9,6 +9,10 @@ from kazusa_ai_chatbot.cognition_episode import (
     GoalContinuationRefV1,
     validate_goal_continuation_ref,
 )
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionContractError,
+    validate_scheduled_authority_proposal,
+)
 
 if TYPE_CHECKING:
     from kazusa_ai_chatbot.cognition_core_v2.contracts import RoleRefV2
@@ -478,9 +482,17 @@ def validate_semantic_action_request_v2(
     *,
     available_action_kinds: set[str],
 ) -> SemanticActionRequestV2:
-    """Validate a V2 route request without selecting an executable handler."""
+    """Validate a V2 route request without selecting an executable handler.
 
-    if not isinstance(value, dict) or set(value) != {
+    The request is discriminated by action kind: ``future_speak`` must carry
+    a closed scheduled authority proposal, and unrelated action kinds must not
+    carry the proposal field at all.
+    """
+
+    if not isinstance(value, dict):
+        raise ActionValidationError("V2 action request fields are not exact")
+    action_kind = value.get("action_kind")
+    expected_fields = {
         "action_kind",
         "decision",
         "context_ref",
@@ -488,7 +500,10 @@ def validate_semantic_action_request_v2(
         "reason",
         "target_roles",
         "evidence_handles",
-    }:
+    }
+    if action_kind == "future_speak":
+        expected_fields.add("scheduled_authority_proposal")
+    if set(value) != expected_fields:
         raise ActionValidationError("V2 action request fields are not exact")
     action_kind = value["action_kind"]
     decision = value["decision"]
@@ -525,7 +540,20 @@ def validate_semantic_action_request_v2(
         raise ActionValidationError("V2 evidence handles are invalid")
     if len(evidence_handles) != len(set(evidence_handles)):
         raise ActionValidationError("V2 evidence handles are duplicated")
-    return dict(value)  # type: ignore[return-value]
+    validated_proposal = None
+    if action_kind == "future_speak":
+        try:
+            validated_proposal = validate_scheduled_authority_proposal(
+                value["scheduled_authority_proposal"]
+            )
+        except (CognitionContractError, ValueError) as exc:
+            raise ActionValidationError(
+                f"scheduled_authority_proposal: invalid: {exc}"
+            ) from exc
+    return_value = dict(value)
+    if validated_proposal is not None:
+        return_value["scheduled_authority_proposal"] = dict(validated_proposal)
+    return return_value  # type: ignore[return-value]
 
 
 def _require_mapping(value: object, label: str) -> dict:

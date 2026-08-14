@@ -15,6 +15,9 @@ from kazusa_ai_chatbot.action_spec.registry import (
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
 )
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    build_scheduled_future_speech_authority,
+)
 from kazusa_ai_chatbot.nodes.dialog_agent import StateContractError
 from kazusa_ai_chatbot.self_cognition import (
     models,
@@ -325,6 +328,27 @@ def _topic_followup_case() -> dict[str, Any]:
 
 
 def _scheduled_future_cognition_case() -> dict[str, Any]:
+    authority = build_scheduled_future_speech_authority(
+        source_episode_id="episode-future-001",
+        source_message_id="227312230",
+        source_action_attempt_id="action_attempt:future-001",
+        source_llm_trace_id="llmtrace_source-1",
+        accepted_at_utc="2026-05-09T23:00:00+00:00",
+        timezone="Pacific/Auckland",
+        trigger_local="2026-05-10 12:30",
+        platform="qq",
+        channel_type="group",
+        audience_kind="group",
+        semantic_objective="Re-check the open topic.",
+        authorized_content_summary="在约定时间开始补偿考核。",
+        authorized_detail_refs=[
+            {
+                "evidence_handle": "e1",
+                "semantic_summary": "当前对话明确约定在该时间开始补偿考核。",
+                "provenance_role": "current_event",
+            }
+        ],
+    )
     case = {
         "case_name": models.CASE_SCHEDULED_FUTURE_COGNITION,
         "case_id": "future-cognition-001",
@@ -359,6 +383,9 @@ def _scheduled_future_cognition_case() -> dict[str, Any]:
             "continuation_mode": "observe_then_decide",
         },
         "source_calendar_run_id": "calendar_run_future_001",
+        "source_calendar_run_due_at": "2026-05-10T00:30:00+00:00",
+        "scheduled_future_speech_authority": dict(authority),
+        "source_action_attempt_id": "action_attempt:future-001",
     }
     return case
 
@@ -2100,3 +2127,57 @@ def test_cognition_state_disables_visual_and_does_not_suppress_memory(
         "no_visual_directives": True,
     }
     assert "no_remember" not in state_debug_modes
+
+
+def test_scheduled_gate_trace_contains_authority_and_disposition() -> None:
+    """Run records bind authority, gate disposition, and dispatch outcome."""
+
+    case = _scheduled_future_cognition_case()
+    trigger_record = tracking.build_trigger_record(case)
+    run_record = tracking.build_run_record(
+        case,
+        trigger_record,
+        models.ROUTE_ACTION_CANDIDATE,
+        {
+            "rag_calls": 0,
+            "cognition_calls": 1,
+            "dialog_calls": 1,
+            "topic_limit": models.TOPIC_LIMIT,
+        },
+    )
+
+    authority = case["scheduled_future_speech_authority"]
+    assert trigger_record["scheduled_authority_id"] == (
+        authority["authority_id"]
+    )
+    assert run_record["scheduled_authority_id"] == authority["authority_id"]
+    initial_trace = run_record["scheduled_gate_trace"]
+    assert initial_trace["gate_disposition"] == "not_evaluated"
+    assert initial_trace["dispatch_status"] == ""
+
+    gate_result: models.SelfCognitionScheduledGateResult = {
+        "schema_version": models.SCHEDULED_GATE_RESULT_SCHEMA_VERSION,
+        "disposition": models.SCHEDULED_GATE_DISPOSITION_SUPPRESSED,
+        "gate_codes": ["scheduled_source_not_current_authority"],
+        "evaluator_attempt_count": 1,
+    }
+    settled_trace = tracking.build_scheduled_gate_trace(
+        case,
+        gate_result=gate_result,
+        dispatch_status="scheduled_content_suppressed",
+    )
+
+    assert settled_trace["authority_id"] == authority["authority_id"]
+    assert settled_trace["source_episode_id"] == "episode-future-001"
+    assert settled_trace["source_message_id"] == "227312230"
+    assert settled_trace["source_action_attempt_id"] == (
+        "action_attempt:future-001"
+    )
+    assert settled_trace["accepted_at_utc"] == authority["accepted_at"]["utc"]
+    assert settled_trace["trigger_utc"] == authority["trigger"]["utc"]
+    assert settled_trace["gate_disposition"] == "suppressed"
+    assert settled_trace["gate_codes"] == [
+        "scheduled_source_not_current_authority"
+    ]
+    assert settled_trace["evaluator_attempt_count"] == 1
+    assert settled_trace["dispatch_status"] == "scheduled_content_suppressed"

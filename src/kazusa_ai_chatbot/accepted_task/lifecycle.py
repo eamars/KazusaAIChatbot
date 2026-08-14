@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
+from copy import deepcopy
 from uuid import uuid4
 
 from kazusa_ai_chatbot.accepted_task.models import (
@@ -356,6 +357,9 @@ def _build_enqueueing_task_doc(
         "last_progress_reported_at": "",
         "coding_run_context": {},
     }
+    authority = request.get("scheduled_future_speech_authority")
+    if isinstance(authority, dict):
+        task["scheduled_future_speech_authority"] = deepcopy(authority)
     return task
 
 

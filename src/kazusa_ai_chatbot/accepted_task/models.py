@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 from kazusa_ai_chatbot.cognition_episode import GoalContinuationRefV1
 
@@ -92,6 +92,7 @@ class AcceptedTaskCreateRequest(TypedDict):
     requester_platform_user_id: str
     requester_display_name: str
     storage_timestamp_utc: str
+    scheduled_future_speech_authority: NotRequired[dict[str, Any]]
 
 
 class AcceptedTaskStatusCheckRequest(TypedDict, total=False):
@@ -148,6 +149,7 @@ class AcceptedTaskDoc(TypedDict, total=False):
     delivered_conversation_message_id: str
     last_progress_reported_at: str
     coding_run_context: dict[str, object]
+    scheduled_future_speech_authority: NotRequired[dict[str, Any]]
 
 
 class AcceptedTaskCreateResult(TypedDict):

@@ -13,6 +13,9 @@ from tests.test_task_resolution_orchestrator import (
     _goal_continuation_ref,
 )
 from kazusa_ai_chatbot.cognition_episode import build_goal_continuation_ref
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    build_scheduled_future_speech_authority,
+)
 from kazusa_ai_chatbot.db.errors import DatabaseOperationError
 from kazusa_ai_chatbot.task_resolution.contracts import (
     TaskResolutionContractError,
@@ -52,6 +55,43 @@ def _resume_queue_request() -> dict[str, object]:
         "max_output_chars": 3000,
         "storage_timestamp_utc": "2026-06-06T00:00:00+00:00",
     }
+
+
+def _future_speak_queue_request() -> dict[str, object]:
+    """Build one deterministic future-speak queue request with authority."""
+
+    authority = build_scheduled_future_speech_authority(
+        source_episode_id="episode-future-speak-001",
+        source_message_id="message-001",
+        source_action_attempt_id="action_attempt:future-speak-001",
+        source_llm_trace_id="llmtrace_source-1",
+        accepted_at_utc="2026-06-06T00:00:00+00:00",
+        timezone="Pacific/Auckland",
+        trigger_local="2026-06-06 13:00",
+        platform="debug",
+        channel_type="private",
+        audience_kind="private",
+        semantic_objective="Deliver the scheduled reminder.",
+        authorized_content_summary="在约定时间提醒用户喝水。",
+        authorized_detail_refs=[
+            {
+                "evidence_handle": "e1",
+                "semantic_summary": "当前对话明确约定在约定时间提醒喝水。",
+                "provenance_role": "current_event",
+            }
+        ],
+    )
+    request = _resume_queue_request()
+    request["requested_worker"] = "future_speak"
+    request["worker_payload"] = {
+        "trigger_at": "2026-06-06 13:00",
+        "continuation_objective": "Deliver the scheduled reminder.",
+    }
+    request.pop("task_execution_context")
+    request["goal_continuation_ref"] = None
+    request["source_action_attempt_id"] = "action_attempt:future-speak-001"
+    request["scheduled_future_speech_authority"] = dict(authority)
+    return request
 
 
 def test_background_work_public_entrypoints_are_v2_only() -> None:
@@ -209,14 +249,7 @@ def test_future_speak_payload_remains_deterministic() -> None:
     """The retained scheduler worker accepts only its exact closed payload."""
 
     jobs = importlib.import_module("kazusa_ai_chatbot.background_work.jobs")
-    request = _resume_queue_request()
-    request["requested_worker"] = "future_speak"
-    request["worker_payload"] = {
-        "trigger_at": "2026-08-02T03:00:00+00:00",
-        "continuation_objective": "Deliver the scheduled reminder.",
-    }
-    request.pop("task_execution_context")
-    request["goal_continuation_ref"] = None
+    request = _future_speak_queue_request()
     jobs._validate_queue_request(request)
 
     invalid = dict(request)
@@ -226,6 +259,63 @@ def test_future_speak_payload_remains_deterministic() -> None:
     }
     with pytest.raises(ValueError, match="fields"):
         jobs._validate_queue_request(invalid)
+
+
+def test_future_speak_job_preserves_authority_identity() -> None:
+    """Job loading cannot drop the scheduled authority."""
+
+    jobs = importlib.import_module("kazusa_ai_chatbot.background_work.jobs")
+    request = _future_speak_queue_request()
+    authority = request["scheduled_future_speech_authority"]
+
+    job = jobs._build_job_document(
+        request,
+        job_id="job-future-speak-001",
+        storage_timestamp_utc="2026-06-06T00:00:00+00:00",
+    )
+
+    assert job["scheduled_future_speech_authority"] == authority
+    assert job["scheduled_future_speech_authority"]["authority_id"] == (
+        authority["authority_id"]
+    )
+    assert job["source_message_id"] == "message-001"
+    assert job["source_action_attempt_id"] == (
+        "action_attempt:future-speak-001"
+    )
+
+
+def test_future_speak_job_round_trip_preserves_authority() -> None:
+    """Serialization cannot alter authority or source identity."""
+
+    jobs = importlib.import_module("kazusa_ai_chatbot.background_work.jobs")
+    request = _future_speak_queue_request()
+    authority = request["scheduled_future_speech_authority"]
+
+    stored_job = jobs._build_job_document(
+        request,
+        job_id="job-future-speak-001",
+        storage_timestamp_utc="2026-06-06T00:00:00+00:00",
+    )
+    reloaded_request = dict(request)
+    reloaded_request["job_id"] = stored_job["job_id"]
+    reloaded_request["source_action_attempt_id"] = stored_job[
+        "source_action_attempt_id"
+    ]
+    reloaded_request["source_message_id"] = stored_job["source_message_id"]
+    reloaded_request["scheduled_future_speech_authority"] = stored_job[
+        "scheduled_future_speech_authority"
+    ]
+    reloaded_request["worker_payload"] = stored_job["worker_payload"]
+
+    reloaded_job = jobs._build_job_document(
+        reloaded_request,
+        job_id="job-future-speak-001",
+        storage_timestamp_utc="2026-06-06T00:00:00+00:00",
+    )
+
+    assert reloaded_job["scheduled_future_speech_authority"] == authority
+    assert reloaded_job["source_message_id"] == "message-001"
+    assert reloaded_job["worker_payload"] == request["worker_payload"]
 
 
 def test_job_document_keeps_accepted_task_audit_identity() -> None:

@@ -98,6 +98,7 @@ def _text_surface_input() -> dict[str, object]:
             "intention": "acknowledge the greeting",
             "target_roles": [],
             "reason": "the greeting is directly observed",
+            "goal_continuation_ref": None,
         },
         "goal_resolution": "answerable_now",
         "supporting_bids": [],

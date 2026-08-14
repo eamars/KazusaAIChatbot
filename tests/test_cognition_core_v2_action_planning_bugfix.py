@@ -17,6 +17,7 @@ from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
     GOAL_COGNITION_PROMPT,
 )
 from kazusa_ai_chatbot.cognition_core_v2.action_selection import (
+    ACTION_PLANNING_ATTEMPT_LIMIT,
     ACTION_PLANNING_PROMPT,
     _validate_action_plan_decision,
     plan_actions,
@@ -982,6 +983,24 @@ def test_action_plan_rejects_invalid_registry_decision_format() -> None:
                     "decision": "2026-07-15 08:00 | remind me",
                     "semantic_goal": "schedule the accepted reminder",
                     "reason": "the user requested a future reminder",
+                    "scheduled_authority_proposal": {
+                        "schema_version": (
+                            "scheduled_authority_proposal.v1"
+                        ),
+                        "temporal_alignment": "aligned",
+                        "authorized_content_summary": (
+                            "在约定时间开始补偿考核。"
+                        ),
+                        "authorized_detail_refs": [
+                            {
+                                "evidence_handle": "e1",
+                                "semantic_summary": (
+                                    "当前对话明确约定在该时间开始补偿考核。"
+                                ),
+                                "provenance_role": "current_event",
+                            }
+                        ],
+                    },
                 }],
             ),
             bid_handles={"b1": _bid("ordinary_response")},
@@ -1544,3 +1563,347 @@ async def test_action_planning_evidence_projection_is_authority_labeled() -> Non
     serialized = json.dumps(projected, ensure_ascii=False)
     assert "source_id" not in serialized
     assert "occurred_at" not in serialized
+
+
+def _future_speak_affordance() -> dict[str, object]:
+    """Build the registry-projected future-speak affordance."""
+
+    affordance = _action("future_speak")
+    affordance.update({
+        "decision_mode": "required_text",
+        "decision_pattern": r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}",
+    })
+    return affordance
+
+
+def _future_speak_row(
+    *,
+    decision: str = "2026-05-16 10:00",
+    temporal_alignment: str = "aligned",
+) -> dict[str, object]:
+    """Build one future-speak action row with a closed authority proposal."""
+
+    return {
+        "bid_handle": "b1",
+        "action_handle": "a1",
+        "decision": decision,
+        "semantic_goal": "在约定时间开始补偿考核。",
+        "reason": "用户要求在未来时间开始补偿考核。",
+        "scheduled_authority_proposal": {
+            "schema_version": "scheduled_authority_proposal.v1",
+            "temporal_alignment": temporal_alignment,
+            "authorized_content_summary": "在约定时间开始补偿考核。",
+            "authorized_detail_refs": [
+                {
+                    "evidence_handle": "e1",
+                    "semantic_summary": (
+                        "当前对话明确约定在该时间开始补偿考核。"
+                    ),
+                    "provenance_role": "current_event",
+                }
+            ],
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_future_speak_temporal_mismatch_uses_existing_planner_replacement_budget() -> None:
+    """A stale relative-time candidate repairs inside the existing budget."""
+
+    captured_repairs: list[str] = []
+    responses = [
+        _planner_response(
+            actions=[_future_speak_row(temporal_alignment="relative_date_mismatch")]
+        ),
+        _planner_response(actions=[_future_speak_row()]),
+        {"decisions": {"c1": True}},
+    ]
+    calls = 0
+
+    class _LLM:
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            nonlocal calls
+            del config
+            if calls == 1:
+                captured_repairs.append(str(messages[-1].content))
+            response = responses[calls]
+            calls += 1
+            return SimpleNamespace(content=json.dumps(response))
+
+    result = await plan_actions(
+        primary_bid=_bid("ordinary_response"),
+        supporting_bids=[],
+        episode={
+            "episode_id": "episode-future-speak",
+            "trigger_source": "user_message",
+            "output_mode": "visible_reply",
+            "created_at": "2026-05-15T21:00:00Z",
+        },
+        evidence=[{
+            "evidence_handle": "e1",
+            "evidence_ref": {
+                "source_kind": "episode",
+                "source_id": "episode-future-speak",
+                "occurred_at": "2026-05-15T21:00:00Z",
+                "semantic_summary": "当前对话明确约定在该时间开始补偿考核。",
+            },
+            "semantic_text": "当前对话明确约定在该时间开始补偿考核。",
+            "visible_to": ["q:event_agency"],
+            "authority": "current_event",
+        }],
+        available_actions=[_future_speak_affordance()],
+        available_resolvers=[],
+        resolver_context="resolver_status=idle",
+        services=SimpleNamespace(
+            llm=_LLM(),
+            action_planning_config=object(),
+            action_authorization_config=object(),
+            resolver_authorization_config=object(),
+        ),
+    )
+
+    assert calls == 3
+    assert len(captured_repairs) == 1
+    assert "scheduled_authority_contract" in captured_repairs[0]
+    assert "relative_date_mismatch" in captured_repairs[0]
+    assert result["action_requests"] == [{
+        "action_kind": "future_speak",
+        "decision": "2026-05-16 10:00",
+        "context_ref": "",
+        "semantic_goal": "在约定时间开始补偿考核。",
+        "reason": "用户要求在未来时间开始补偿考核。",
+        "target_roles": _bid("ordinary_response")["target_roles"],
+        "evidence_handles": ["e1"],
+        "scheduled_authority_proposal": _future_speak_row()[
+            "scheduled_authority_proposal"
+        ],
+    }]
+
+
+@pytest.mark.asyncio
+async def test_future_speak_authority_exhaustion_returns_no_action() -> None:
+    """Planner exhaustion produces no future-speak action."""
+
+    responses = [
+        _planner_response(
+            actions=[_future_speak_row(temporal_alignment="past_or_not_future")]
+        )
+        for _ in range(ACTION_PLANNING_ATTEMPT_LIMIT)
+    ]
+    calls = 0
+
+    class _LLM:
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            nonlocal calls
+            del messages, config
+            response = responses[calls]
+            calls += 1
+            return SimpleNamespace(content=json.dumps(response))
+
+    result = await plan_actions(
+        primary_bid=_bid("ordinary_response"),
+        supporting_bids=[],
+        episode={
+            "episode_id": "episode-future-speak-exhausted",
+            "trigger_source": "user_message",
+            "output_mode": "visible_reply",
+            "created_at": "2026-05-15T21:00:00Z",
+        },
+        evidence=[{
+            "evidence_handle": "e1",
+            "evidence_ref": {
+                "source_kind": "episode",
+                "source_id": "episode-future-speak-exhausted",
+                "occurred_at": "2026-05-15T21:00:00Z",
+                "semantic_summary": "当前对话明确约定在该时间开始补偿考核。",
+            },
+            "semantic_text": "当前对话明确约定在该时间开始补偿考核。",
+            "visible_to": ["q:event_agency"],
+            "authority": "current_event",
+        }],
+        available_actions=[_future_speak_affordance()],
+        available_resolvers=[],
+        resolver_context="resolver_status=idle",
+        services=SimpleNamespace(
+            llm=_LLM(),
+            action_planning_config=object(),
+            action_authorization_config=object(),
+            resolver_authorization_config=object(),
+        ),
+    )
+
+    assert calls == ACTION_PLANNING_ATTEMPT_LIMIT
+    assert result["action_requests"] == []
+    assert result["goal_resolution"] == "blocked"
+
+
+def _future_speak_evidence() -> list[dict[str, object]]:
+    """Build the current-episode evidence row used by planner tests."""
+
+    return [{
+        "evidence_handle": "e1",
+        "evidence_ref": {
+            "source_kind": "episode",
+            "source_id": "episode-future-speak",
+            "occurred_at": "2026-05-15T21:00:00Z",
+            "semantic_summary": "当前对话明确约定在该时间开始补偿考核。",
+        },
+        "semantic_text": "当前对话明确约定在该时间开始补偿考核。",
+        "visible_to": ["q:event_agency"],
+        "authority": "current_event",
+    }]
+
+
+def _future_speak_episode(
+    *,
+    episode_id: str = "episode-future-speak",
+    created_at: str = "2026-05-15T21:00:00Z",
+    expression: str = "今晚十点提醒我。",
+) -> dict[str, object]:
+    """Build the user-message episode with the original relative expression."""
+
+    return {
+        "episode_id": episode_id,
+        "trigger_source": "user_message",
+        "output_mode": "visible_reply",
+        "created_at": created_at,
+        "percepts": [{
+            "percept_kind": "dialog",
+            "source_kind": "dialog",
+            "source_id": f"{episode_id}:dialog",
+            "content": {
+                "semantic_text": expression,
+                "text": expression,
+            },
+            "observed_at": created_at,
+        }],
+    }
+
+
+@pytest.mark.asyncio
+async def test_future_speak_plan_actions_preserves_authority_proposal_to_runtime_output() -> None:
+    """The real plan_actions materialization keeps the validated proposal."""
+
+    responses = [
+        _planner_response(actions=[_future_speak_row()]),
+        {"decisions": {"c1": True}},
+    ]
+    calls = 0
+
+    class _LLM:
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            nonlocal calls
+            del messages, config
+            response = responses[calls]
+            calls += 1
+            return SimpleNamespace(content=json.dumps(response))
+
+    result = await plan_actions(
+        primary_bid=_bid("ordinary_response"),
+        supporting_bids=[],
+        episode=_future_speak_episode(),
+        evidence=_future_speak_evidence(),
+        available_actions=[_future_speak_affordance()],
+        available_resolvers=[],
+        resolver_context="resolver_status=idle",
+        services=SimpleNamespace(
+            llm=_LLM(),
+            action_planning_config=object(),
+            action_authorization_config=object(),
+            resolver_authorization_config=object(),
+        ),
+    )
+
+    assert calls == 2
+    assert len(result["action_requests"]) == 1
+    action_request = result["action_requests"][0]
+    assert action_request["action_kind"] == "future_speak"
+    assert action_request["decision"] == "2026-05-16 10:00"
+    assert action_request["scheduled_authority_proposal"] == (
+        _future_speak_row()["scheduled_authority_proposal"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_future_speak_relative_time_prompt_uses_accepted_event_local_context() -> None:
+    """The planner receives the original expression and accepted local context."""
+
+    captured_payloads: list[dict[str, object]] = []
+    captured_repairs: list[str] = []
+    responses = [
+        _planner_response(
+            actions=[_future_speak_row(decision="2025-05-23 22:00")],
+            goal_resolution="answerable_now",
+        ),
+        _planner_response(
+            actions=[_future_speak_row()],
+            goal_resolution="answerable_now",
+        ),
+        {"decisions": {"c1": True}},
+    ]
+    calls = 0
+
+    class _LLM:
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            nonlocal calls
+            del config
+            if calls == 0:
+                captured_payloads.append(
+                    json.loads(str(messages[-1].content))
+                )
+            if calls == 1:
+                captured_repairs.append(str(messages[-1].content))
+            response = responses[calls]
+            calls += 1
+            return SimpleNamespace(content=json.dumps(response))
+
+    result = await plan_actions(
+        primary_bid=_bid("ordinary_response"),
+        supporting_bids=[],
+        episode=_future_speak_episode(),
+        evidence=_future_speak_evidence(),
+        available_actions=[_future_speak_affordance()],
+        available_resolvers=[],
+        resolver_context="resolver_status=idle",
+        services=SimpleNamespace(
+            llm=_LLM(),
+            action_planning_config=object(),
+            action_authorization_config=object(),
+            resolver_authorization_config=object(),
+        ),
+    )
+
+    assert calls == 3
+    assert len(captured_repairs) == 1
+    scheduled_context = captured_payloads[0]["scheduled_authority_context"]
+    assert captured_payloads[0]["evidence"][0]["provenance_role"] == (
+        "current_event"
+    )
+    assert scheduled_context["original_relative_expression"] == "今晚十点提醒我。"
+    assert scheduled_context["accepted_local_datetime"] == "2026-05-16 09:00"
+    assert scheduled_context["accepted_timezone"] == "Pacific/Auckland"
+    assert "2025-05-23 22:00" in captured_repairs[0]
+    assert result["action_requests"][0]["decision"] == "2026-05-16 10:00"
+    assert result["action_requests"][0]["scheduled_authority_proposal"] == (
+        _future_speak_row()["scheduled_authority_proposal"]
+    )
