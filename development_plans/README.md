@@ -65,6 +65,7 @@ recorded evidence.
 | [cognition_v2_group_ownership_terminalization_bugfix_plan.md](archive/completed/cognition_v2_group_ownership_terminalization_bugfix_plan.md) | Cognition V2 group ownership terminalization and role-domain bugfix | completed |
 | [cognition_v2_relational_carrier_recurrence_binding_plan.md](archive/completed/cognition_v2_relational_carrier_recurrence_binding_plan.md) | Cognition V2 relational-carrier recurrence binding regression hardening | completed |
 | [task_resolution_duplicate_visible_delivery_plan.md](archive/completed/task_resolution_duplicate_visible_delivery_plan.md) | Task-resolution semantic duplicate visible delivery and evidence-contract repair | completed |
+| [required_selection_prompt_contract_and_evaluator_relaxation_plan.md](archive/completed/required_selection_prompt_contract_and_evaluator_relaxation_plan.md) | Required-selection prompt contract and evaluator relaxation | completed |
 
 ## Working-Tree Policy
 

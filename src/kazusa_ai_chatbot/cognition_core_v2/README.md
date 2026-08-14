@@ -58,6 +58,22 @@ fixed by the current input. Required-selection goal cognition emits a separate
 `selected_response_operation` after the character chooses the concrete action.
 Both use the canonical `DialogResponseOperation` shape.
 
+The model-visible contract has exact per-input `writable_fields`. `operation` is always writable.
+`embedded_actor_role` and `embedded_target_role` are
+writable only when their authoritative input value is `无`; otherwise they
+are code-owned and omitted from `writable_fields`. `response_owner_role`,
+`selection_owner_role`, `selection_required`, and known endpoint values are
+listed in `code_owned_fields` and are bound canonically by deterministic code.
+Matching known endpoint values are accepted as redundant facts and
+canonicalized to the authoritative value. A conflicting known endpoint is
+rejected with a field-specific expected/actual error, and unknown fields or
+malformed values remain structural failures.
+
+The LLM retains semantic ownership of the selected action. It may use the
+same wording as the authoritative `operation` when that wording is already a
+usable concrete action; deterministic code does not rewrite, extract verbs,
+or infer semantic roles.
+
 `response_owner_role` and `selection_owner_role` own the agreement, selection,
 telling, request, and confirmation wrappers; they do not by themselves fix the
 actor or target of the nested action. The `selected_response_operation.operation`

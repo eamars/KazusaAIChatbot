@@ -9,15 +9,11 @@ from types import SimpleNamespace
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
-    DEFAULT_BRANCH_DEFINITIONS,
-)
-from kazusa_ai_chatbot.cognition_episode import (
-    CURRENT_CHARACTER_ROLE,
-    CURRENT_USER_ROLE,
-)
 from kazusa_ai_chatbot.cognition_core_v2.action_selection import (
     ACTION_PLANNING_PROMPT,
+)
+from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
+    DEFAULT_BRANCH_DEFINITIONS,
 )
 from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
     _ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT,
@@ -33,9 +29,6 @@ from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
     _fit_goal_prompt_payload,
     run_goal_cognition,
 )
-from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
-    project_state_for_prompt,
-)
 from kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal import (
     SEMANTIC_APPRAISAL_PROMPT,
     _appraisal_repair_messages,
@@ -43,10 +36,18 @@ from kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal import (
     _compact_semantic_contract_error,
     _fit_appraisal_payload,
 )
+from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+    project_state_for_prompt,
+)
 from kazusa_ai_chatbot.cognition_core_v2.surface_stages import (
     CONTENT_PLAN_SYSTEM_PROMPT,
     DIALOG_COMPLIANCE_REPAIR_SYSTEM_PROMPT,
     PREFERENCE_SYSTEM_PROMPT,
+)
+from kazusa_ai_chatbot.cognition_episode import (
+    CURRENT_CHARACTER_ROLE,
+    CURRENT_USER_ROLE,
+    NO_ROLE,
 )
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from tests.cognition_core_v2_test_helpers import canonical_identity_context
@@ -86,6 +87,14 @@ def test_selected_response_operation_contract_is_documented() -> None:
     assert "`selected_response_operation` after the character chooses" in (
         cognition_readme
     )
+    for required_text in (
+        "`operation` is always writable",
+        "exact per-input `writable_fields`",
+        "Matching known endpoint values",
+        "same wording",
+        "LLM retains semantic ownership",
+    ):
+        assert required_text in cognition_readme
     assert (
         "nested role and response ownership are resolved once before goal cognition"
         not in cognition_readme
@@ -585,6 +594,14 @@ def test_goal_repair_feedback_preserves_cross_namespace_authority() -> None:
         selection_required=True,
         require_relational_willingness=True,
         maximum_evidence_handles=4,
+        authoritative_operation={
+            "operation": "the character chooses a reward",
+            "response_owner_role": CURRENT_CHARACTER_ROLE,
+            "selection_owner_role": CURRENT_CHARACTER_ROLE,
+            "selection_required": True,
+            "embedded_actor_role": CURRENT_CHARACTER_ROLE,
+            "embedded_target_role": NO_ROLE,
+        },
     )
 
     assert feedback["allowed_evidence_handles"] == ["e1", "e2"]
@@ -593,6 +610,16 @@ def test_goal_repair_feedback_preserves_cross_namespace_authority() -> None:
     assert feedback["allowed_role_handles"] == ["r1"]
     assert feedback["role_handles_forbidden_in_evidence_handles"] == ["r1"]
     assert feedback["invalid_draft"] == '{"evidence_handles": ["r1"]}'
+    assert feedback["selected_response_operation"]["writable_fields"] == [
+        "operation",
+        "embedded_target_role",
+    ]
+    assert feedback["selected_response_operation"]["code_owned_fields"] == {
+        "response_owner_role": CURRENT_CHARACTER_ROLE,
+        "selection_owner_role": CURRENT_CHARACTER_ROLE,
+        "selection_required": True,
+        "embedded_actor_role": CURRENT_CHARACTER_ROLE,
+    }
     assert "schema_version" not in feedback[
         "relational_willingness_contract"
     ]
@@ -605,6 +632,50 @@ def test_goal_repair_feedback_preserves_cross_namespace_authority() -> None:
     assert "三个真实状态都可配合五种敏感立场" in " ".join(
         GENERIC_GOAL_REPAIR_INSTRUCTIONS
     )
+
+
+def test_required_selection_contract_projects_exact_fields_and_retry_facts() -> None:
+    """Keep retry facts identical to the current per-input contract."""
+
+    authoritative_operation = {
+        "operation": "the character chooses a reward",
+        "response_owner_role": CURRENT_CHARACTER_ROLE,
+        "selection_owner_role": CURRENT_CHARACTER_ROLE,
+        "selection_required": True,
+        "embedded_actor_role": CURRENT_CHARACTER_ROLE,
+        "embedded_target_role": NO_ROLE,
+    }
+    feedback = _build_goal_repair_feedback(
+        validation_error="selected response operation contains unknown fields",
+        parsed={"selected_response_operation": {"extra": "value"}},
+        response_text='{"selected_response_operation": {"extra": "value"}}',
+        evidence_handles={"e1"},
+        episode_evidence_handles={"e1"},
+        role_bindings={"self": {"semantic_text": "当前角色"}},
+        required_evidence_handles={"e1"},
+        selection_required=True,
+        require_relational_willingness=False,
+        maximum_evidence_handles=4,
+        authoritative_operation=authoritative_operation,
+    )
+
+    selected_contract = feedback["selected_response_operation"]
+    assert selected_contract == feedback["goal_output_contract"][
+        "selected_response_operation"
+    ]
+    assert feedback["goal_output_contract"]["field_types"][
+        "selected_response_operation"
+    ] == "per_input_writable_selected_response_operation"
+    assert selected_contract["writable_fields"] == [
+        "operation",
+        "embedded_target_role",
+    ]
+    assert selected_contract["code_owned_fields"] == {
+        "response_owner_role": CURRENT_CHARACTER_ROLE,
+        "selection_owner_role": CURRENT_CHARACTER_ROLE,
+        "selection_required": True,
+        "embedded_actor_role": CURRENT_CHARACTER_ROLE,
+    }
 
 
 def test_nonordinary_exact_field_repair_uses_key_facts_without_draft() -> None:

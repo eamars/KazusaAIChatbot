@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Mapping
 from dataclasses import replace
-import json
 from typing import Any
 
 import pytest
@@ -18,6 +18,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
 )
 from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
     MAX_GOAL_BID_EVIDENCE_HANDLES,
+    _build_goal_output_contract,
     _required_selection_operations,
     run_goal_cognition,
     validate_selection_goal_draft,
@@ -31,6 +32,11 @@ from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
 )
+from kazusa_ai_chatbot.cognition_episode import (
+    CURRENT_CHARACTER_ROLE,
+    CURRENT_USER_ROLE,
+    NO_ROLE,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     build_cognition_core_services,
 )
@@ -40,20 +46,12 @@ from tests.cognition_core_v2_test_helpers import (
 )
 from tests.llm_trace import write_llm_trace
 
-
 _TRACE_SUITE = 'cognition_core_v2_required_selection_live_llm'
-
-
-_SELECTED_RESPONSE_OPERATION_FIELDS = {
-    'operation',
-    'embedded_actor_role',
-    'embedded_target_role',
-}
 
 
 _REQUIRED_SELECTION_AGENT_RUBRIC = (
     '1. 当前角色是否仍然是 response_owner_role 和 selection_owner_role？',
-    '2. selected_response_operation.operation 是否描述一个具体的嵌入行动，而不是只重复选择、告诉或决定？',
+    '2. selected_response_operation.operation 是否描述一个具体的嵌入行动；权威 wording 已经可用时允许相同 wording？',
     '3. 去掉选择、告诉、要求等 wrapper verbs 后，嵌入行动是否与当前用户对当前角色执行的方向一致？',
     '4. 是否出现明确的行动者或目标反转，或把选择权转移给其他角色？',
     '只有四项均满足时才给出 PASS；结构上明确但语义存在唯一反转时给出 FAIL。',
@@ -214,30 +212,96 @@ def _inspect_goal_output_contract(
             f'required-selection schema: expected={sorted(expected_fields)} '
             f'observed={actual_fields!r}'
         )
-    operation_fields = contract.get('selected_response_operation_fields')
-    if not isinstance(operation_fields, list) or set(operation_fields) != (
-        _SELECTED_RESPONSE_OPERATION_FIELDS
+    top_level_field_types = contract.get('field_types')
+    if (
+        not isinstance(top_level_field_types, Mapping)
+        or top_level_field_types.get('selected_response_operation')
+        != 'per_input_writable_selected_response_operation'
     ):
         diagnostics['errors'].append(
-            'selected response operation contract does not expose exactly '
-            f'the model-owned fields: observed={operation_fields!r}'
+            'selected_response_operation top-level type must point to the '
+            'per-input writable contract'
         )
-    optional_operation_fields = contract.get(
-        'selected_response_operation_optional_fields'
-    )
-    if not isinstance(optional_operation_fields, list) or set(
-        optional_operation_fields
-    ) != {'embedded_actor_role', 'embedded_target_role'}:
+    required_operations = _required_selection_operations(evidence)
+    if not required_operations:
         diagnostics['errors'].append(
-            'selected response operation optional fields are not the '
-            f'unresolved endpoint fields: '
-            f'observed={optional_operation_fields!r}'
+            'required-selection contract inspection has no authoritative '
+            'operation'
         )
+        return diagnostics
+    authoritative_operation = required_operations[0]['response_operation']
+    expected_writable_fields = ['operation']
+    expected_optional_fields: list[str] = []
+    expected_code_owned_fields = {
+        'response_owner_role': authoritative_operation['response_owner_role'],
+        'selection_owner_role': authoritative_operation['selection_owner_role'],
+        'selection_required': authoritative_operation['selection_required'],
+    }
+    for endpoint_field in (
+        'embedded_actor_role',
+        'embedded_target_role',
+    ):
+        endpoint_value = authoritative_operation[endpoint_field]
+        if endpoint_value == NO_ROLE:
+            expected_writable_fields.append(endpoint_field)
+            expected_optional_fields.append(endpoint_field)
+        else:
+            expected_code_owned_fields[endpoint_field] = endpoint_value
+    selected_contract = contract.get('selected_response_operation')
+    if not isinstance(selected_contract, Mapping):
+        diagnostics['errors'].append(
+            'selected_response_operation contract is missing its exact '
+            f'per-input projection: observed={selected_contract!r}'
+        )
+    else:
+        if selected_contract.get('writable_fields') != (
+            expected_writable_fields
+        ):
+            diagnostics['errors'].append(
+                'selected response operation writable fields are not exact: '
+                f'expected={expected_writable_fields!r} '
+                f'observed={selected_contract.get("writable_fields")!r}'
+            )
+        if selected_contract.get('required_fields') != ['operation']:
+            diagnostics['errors'].append(
+                'selected response operation required fields are not exact'
+            )
+        if selected_contract.get('optional_fields') != (
+            expected_optional_fields
+        ):
+            diagnostics['errors'].append(
+                'selected response operation optional fields are not exact: '
+                f'expected={expected_optional_fields!r} '
+                f'observed={selected_contract.get("optional_fields")!r}'
+            )
+        if set(selected_contract.get('field_types', {})) != set(
+            expected_writable_fields
+        ):
+            diagnostics['errors'].append(
+                'selected response operation field types do not match '
+                'writable fields'
+            )
+        if selected_contract.get('code_owned_fields') != (
+            expected_code_owned_fields
+        ):
+            diagnostics['errors'].append(
+                'selected response operation code-owned fields are not exact: '
+                f'expected={expected_code_owned_fields!r} '
+                f'observed={selected_contract.get("code_owned_fields")!r}'
+            )
+        if set(selected_contract.get('role_values', [])) != {
+            CURRENT_CHARACTER_ROLE,
+            CURRENT_USER_ROLE,
+            '其他参与者',
+            NO_ROLE,
+        }:
+            diagnostics['errors'].append(
+                'selected response operation role values are not exact'
+            )
     if contract.get('selection_required') is not True:
         diagnostics['errors'].append(
             'goal output contract does not preserve selection_required=true'
         )
-    required_operations = _required_selection_operations(evidence)
     expected_evidence_handles = {
         row['evidence_handle']
         for row in evidence
@@ -293,14 +357,18 @@ def _inspect_selected_operation(
             'selected_response_operation is missing from the bid'
         )
         return diagnostics
-    for field_name in (
-        'response_owner_role',
-        'selection_owner_role',
-        'embedded_actor_role',
-        'embedded_target_role',
-    ):
+    for field_name in ('response_owner_role', 'selection_owner_role'):
         if selected_operation.get(field_name) != response_operation.get(
             field_name
+        ):
+            diagnostics['errors'].append(
+                f'{field_name} changed from the authoritative input operation'
+            )
+    for field_name in ('embedded_actor_role', 'embedded_target_role'):
+        authoritative_value = response_operation.get(field_name)
+        if (
+            authoritative_value != NO_ROLE
+            and selected_operation.get(field_name) != authoritative_value
         ):
             diagnostics['errors'].append(
                 f'{field_name} changed from the authoritative input operation'
@@ -313,10 +381,6 @@ def _inspect_selected_operation(
     if not isinstance(selected_text, str) or not selected_text.strip():
         diagnostics['errors'].append(
             'selected operation text is empty'
-        )
-    elif selected_text == response_operation.get('operation'):
-        diagnostics['errors'].append(
-            'selected operation only repeats the outer selection wrapper'
         )
     diagnostics['passed'] = not diagnostics['errors']
     return diagnostics
@@ -514,6 +578,98 @@ async def _run_live_required_selection_case(
     )
     result = bid, failure, capturing_llm.calls, trace_path
     return result
+
+
+def test_live_harness_contract_inspection_is_exact() -> None:
+    """Keep the live harness aligned with the per-input contract owner."""
+
+    authoritative_operation = {
+        'operation': '当前角色选择并说明下一步',
+        'response_owner_role': CURRENT_CHARACTER_ROLE,
+        'selection_owner_role': CURRENT_CHARACTER_ROLE,
+        'selection_required': True,
+        'embedded_actor_role': CURRENT_CHARACTER_ROLE,
+        'embedded_target_role': NO_ROLE,
+    }
+    semantic_text = json.dumps({
+        'response_operation': authoritative_operation,
+    }, ensure_ascii=False)
+    evidence = [{
+        'evidence_handle': 'e1',
+        'evidence_ref': {
+            'source_kind': 'episode',
+            'source_id': 'episode:harness-contract-inspection',
+        },
+        'semantic_text': semantic_text,
+    }]
+    contract = _build_goal_output_contract(
+        evidence_handles={'e1'},
+        episode_evidence_handles={'e1'},
+        required_evidence_handles={'e1'},
+        role_bindings={'self': {}},
+        selection_required=True,
+        require_relational_willingness=False,
+        maximum_evidence_handles=9,
+        authoritative_operation=authoritative_operation,
+    )
+    calls = [{
+        'messages': [{
+            'content': json.dumps({
+                'goal_output_contract': contract,
+            }, ensure_ascii=False),
+        }],
+    }]
+
+    diagnostics = _inspect_goal_output_contract(
+        calls,
+        evidence=evidence,
+        role_handles={'self'},
+        branch_id='autonomy_boundary',
+    )
+
+    assert diagnostics['passed'], diagnostics['errors']
+    assert diagnostics['contract']['selected_response_operation'][
+        'writable_fields'
+    ] == ['operation', 'embedded_target_role']
+
+
+@pytest.mark.live_llm
+@pytest.mark.asyncio
+async def test_live_required_selection_projects_exact_writable_fields() -> None:
+    """Run one production-shaped case with a concrete authoritative action."""
+
+    authoritative_operation = {
+        'operation': '当前角色与当前用户一起去安静的地方散步并聊最近的心情',
+        'response_owner_role': CURRENT_CHARACTER_ROLE,
+        'selection_owner_role': CURRENT_CHARACTER_ROLE,
+        'selection_required': True,
+        'embedded_actor_role': CURRENT_CHARACTER_ROLE,
+        'embedded_target_role': NO_ROLE,
+    }
+    bid, failure, _, trace_path = await _run_live_required_selection_case(
+        case_id='known_actor_unresolved_target_contract',
+        role_explicit_content=(
+            '当前用户请当前角色决定是否一起去安静的地方散步并聊最近的心情。'
+        ),
+        response_operation=authoritative_operation,
+        semantic_context_updates={
+            'current_event': (
+                '请当前角色决定是否和当前用户去安静的地方散步并聊最近的心情。'
+            ),
+        },
+        extra_evidence=[],
+    )
+
+    assert authoritative_operation['operation'] == (
+        '当前角色与当前用户一起去安静的地方散步并聊最近的心情'
+    )
+    assert failure is None, (
+        f'required-selection producer failed; trace={trace_path}'
+    )
+    assert bid is not None
+    assert bid['selected_response_operation'][
+        'embedded_actor_role'
+    ] == CURRENT_CHARACTER_ROLE
 
 
 def _third_party_reply_case_args() -> dict[str, Any]:

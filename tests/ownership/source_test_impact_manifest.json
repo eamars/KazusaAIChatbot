@@ -310,7 +310,11 @@
       "required_unit_tests": [
         "tests/unit/cognition_core_v2/test_goal_cognition.py::test_goal_cognition_exposes_owned_contract",
         "tests/unit/cognition_core_v2/test_goal_cognition.py::test_required_selection_emits_selected_response_operation",
-        "tests/unit/cognition_core_v2/test_goal_cognition.py::test_required_selection_rejects_fixed_role_conflict",
+        "tests/unit/cognition_core_v2/test_goal_cognition.py::test_required_selection_prompt_projects_exact_writable_endpoint_fields",
+        "tests/unit/cognition_core_v2/test_goal_cognition.py::test_required_selection_accepts_matching_known_endpoint_and_canonicalizes",
+        "tests/unit/cognition_core_v2/test_goal_cognition.py::test_required_selection_rejects_conflicting_known_endpoint_with_field_error",
+        "tests/unit/cognition_core_v2/test_goal_cognition.py::test_required_selection_accepts_authoritative_operation_text",
+        "tests/unit/cognition_core_v2/test_goal_cognition.py::test_required_selection_rejects_unknown_operation_field",
         "tests/unit/cognition_core_v2/test_goal_cognition.py::test_required_selection_prompt_separates_wrapper_and_embedded_action_roles",
         "tests/unit/cognition_core_v2/test_goal_cognition.py::test_goal_prompt_labels_confidence_as_descriptor",
         "tests/unit/cognition_core_v2/test_goal_cognition.py::test_conversation_progress_evidence_preserves_temporal_provenance",
@@ -322,7 +326,10 @@
       "supplemental_tests": [
         "tests/test_cognition_core_v2_quoted_message_post_fix.py::test_post_fix_goal_branch_recurrence_live_llm",
         "tests/test_cognition_core_v2_relational_carrier_failure_live_llm.py::test_live_f408_carrier_failure_without_episode_binding",
-        "tests/test_cognition_core_v2_relational_carrier_failure_live_llm.py::test_live_fdd_carrier_failure_without_episode_binding"
+        "tests/test_cognition_core_v2_relational_carrier_failure_live_llm.py::test_live_fdd_carrier_failure_without_episode_binding",
+        "tests/test_cognition_core_v2_prompt_contract_guidance.py::test_required_selection_contract_projects_exact_fields_and_retry_facts",
+        "tests/test_cognition_core_v2_required_selection_live_llm.py::test_live_harness_contract_inspection_is_exact",
+        "tests/test_cognition_core_v2_required_selection_live_llm.py::test_live_required_selection_projects_exact_writable_fields"
       ]
     },
     {

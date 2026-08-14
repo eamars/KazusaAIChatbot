@@ -176,17 +176,21 @@ def test_required_selection_emits_selected_response_operation() -> None:
     }
 
 
-def test_required_selection_rejects_fixed_role_conflict() -> None:
+def test_required_selection_rejects_conflicting_known_endpoint_with_field_error() -> None:
     """Selection validation rejects reversal of a known input endpoint."""
 
     selected_operation = {
-        **_input_operation(),
         "operation": "the character gives the selected reward to the user",
-        "embedded_actor_role": CURRENT_CHARACTER_ROLE,
-        "embedded_target_role": CURRENT_USER_ROLE,
+        "embedded_actor_role": CURRENT_USER_ROLE,
     }
 
-    with pytest.raises(ValueError, match="known input role"):
+    with pytest.raises(
+        ValueError,
+        match=(
+            "embedded_actor_role conflicts with known input role: "
+            "expected='当前角色'; actual='当前用户'"
+        ),
+    ):
         validate_selection_goal_draft(
             _selection_draft(selected_operation),
             evidence_handles={"e1"},
@@ -196,7 +200,7 @@ def test_required_selection_rejects_fixed_role_conflict() -> None:
                 "evidence_handle": "e1",
                 "response_operation": {
                     **_input_operation(),
-                    "embedded_actor_role": CURRENT_USER_ROLE,
+                    "embedded_actor_role": CURRENT_CHARACTER_ROLE,
                 },
             }],
             maximum_evidence_handles=4,
@@ -213,11 +217,11 @@ def test_required_selection_prompt_separates_wrapper_and_embedded_action_roles()
         _ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT,
     )
     for instruction in governing_instructions:
-        assert "外层选择包装" in instruction
-        assert "决策性嵌套动作" in instruction
-        assert "当前用户是 X 的行动者" in instruction
-        assert "当前角色是 X 的对象" in instruction
-        assert "多分句" in instruction or "多个分句" in instruction
+        assert "回应包装" in instruction
+        assert "具体嵌入行动" in instruction
+        assert "writable_fields" in instruction
+        assert "code_owned_fields" in instruction
+        assert "相同 wording" in instruction
 
     selection_contract = _build_goal_output_contract(
         evidence_handles={"e1"},
@@ -227,11 +231,148 @@ def test_required_selection_prompt_separates_wrapper_and_embedded_action_roles()
         selection_required=True,
         require_relational_willingness=False,
         maximum_evidence_handles=9,
+        authoritative_operation=_input_operation(),
     )
-    operation_rule = selection_contract["selected_response_operation_rule"]
-    assert "wrappers" in operation_rule
-    assert "nested action" in operation_rule
-    assert "multiple clauses" in operation_rule
+    assert selection_contract["field_types"]["selected_response_operation"] == (
+        "per_input_writable_selected_response_operation"
+    )
+    operation_contract = selection_contract["selected_response_operation"]
+    assert operation_contract["writable_fields"] == [
+        "operation",
+        "embedded_actor_role",
+        "embedded_target_role",
+    ]
+    assert operation_contract["code_owned_fields"] == {
+        "response_owner_role": CURRENT_CHARACTER_ROLE,
+        "selection_owner_role": CURRENT_CHARACTER_ROLE,
+        "selection_required": True,
+    }
+    assert "selected_response_operation_fields" not in selection_contract
+
+
+def test_required_selection_prompt_projects_exact_writable_endpoint_fields() -> None:
+    """Project only unresolved endpoints into the model-owned field set."""
+
+    cases = (
+        (
+            _input_operation(),
+            ["operation", "embedded_actor_role", "embedded_target_role"],
+            {},
+        ),
+        (
+            {
+                **_input_operation(),
+                "embedded_actor_role": CURRENT_CHARACTER_ROLE,
+            },
+            ["operation", "embedded_target_role"],
+            {"embedded_actor_role": CURRENT_CHARACTER_ROLE},
+        ),
+        (
+            {
+                **_input_operation(),
+                "embedded_actor_role": CURRENT_CHARACTER_ROLE,
+                "embedded_target_role": CURRENT_USER_ROLE,
+            },
+            ["operation"],
+            {
+                "embedded_actor_role": CURRENT_CHARACTER_ROLE,
+                "embedded_target_role": CURRENT_USER_ROLE,
+            },
+        ),
+    )
+    for authoritative_operation, writable_fields, known_fields in cases:
+        contract = _build_goal_output_contract(
+            evidence_handles={"e1"},
+            episode_evidence_handles={"e1"},
+            required_evidence_handles={"e1"},
+            role_bindings={},
+            selection_required=True,
+            require_relational_willingness=False,
+            maximum_evidence_handles=9,
+            authoritative_operation=authoritative_operation,
+        )
+        assert contract["field_types"]["selected_response_operation"] == (
+            "per_input_writable_selected_response_operation"
+        )
+        contract = contract["selected_response_operation"]
+        assert contract["writable_fields"] == writable_fields
+        assert contract["required_fields"] == ["operation"]
+        assert contract["optional_fields"] == writable_fields[1:]
+        assert contract["code_owned_fields"] == {
+            "response_owner_role": CURRENT_CHARACTER_ROLE,
+            "selection_owner_role": CURRENT_CHARACTER_ROLE,
+            "selection_required": True,
+            **known_fields,
+        }
+
+
+def test_required_selection_accepts_matching_known_endpoint_and_canonicalizes() -> None:
+    """Matching redundant known endpoints are accepted and code-bound."""
+
+    authoritative_operation = {
+        **_input_operation(),
+        "embedded_actor_role": CURRENT_CHARACTER_ROLE,
+        "embedded_target_role": CURRENT_USER_ROLE,
+    }
+    validated = validate_selection_goal_draft(
+        _selection_draft({
+            "operation": authoritative_operation["operation"],
+            "embedded_actor_role": CURRENT_CHARACTER_ROLE,
+            "embedded_target_role": CURRENT_USER_ROLE,
+        }),
+        evidence_handles={"e1"},
+        role_handles=set(),
+        required_evidence_handles={"e1"},
+        required_operations=[{
+            "evidence_handle": "e1",
+            "response_operation": authoritative_operation,
+        }],
+        maximum_evidence_handles=4,
+    )
+
+    assert validated["selected_response_operation"] == authoritative_operation
+
+
+def test_required_selection_accepts_authoritative_operation_text() -> None:
+    """Usable authoritative wording remains acceptable selected wording."""
+
+    authoritative_operation = _input_operation()
+    validated = validate_selection_goal_draft(
+        _selection_draft({"operation": authoritative_operation["operation"]}),
+        evidence_handles={"e1"},
+        role_handles=set(),
+        required_evidence_handles={"e1"},
+        required_operations=[{
+            "evidence_handle": "e1",
+            "response_operation": authoritative_operation,
+        }],
+        maximum_evidence_handles=4,
+    )
+
+    assert validated["selected_response_operation"] == authoritative_operation
+
+
+def test_required_selection_rejects_unknown_operation_field() -> None:
+    """Unknown selected-operation fields remain a structural contract error."""
+
+    with pytest.raises(
+        ValueError,
+        match=r"selected response operation contains unknown fields: \['extra'\]",
+    ):
+        validate_selection_goal_draft(
+            _selection_draft({
+                "operation": "the character chooses a reward",
+                "extra": "unexpected",
+            }),
+            evidence_handles={"e1"},
+            role_handles=set(),
+            required_evidence_handles={"e1"},
+            required_operations=[{
+                "evidence_handle": "e1",
+                "response_operation": _input_operation(),
+            }],
+            maximum_evidence_handles=4,
+        )
 
 
 def test_goal_prompt_labels_confidence_as_descriptor() -> None:
@@ -363,6 +504,7 @@ def test_goal_output_contract_keeps_existing_schema() -> None:
         selection_required=True,
         require_relational_willingness=False,
         maximum_evidence_handles=9,
+        authoritative_operation=_input_operation(),
     )
     relational_contract = _build_goal_output_contract(
         evidence_handles={'e1'},

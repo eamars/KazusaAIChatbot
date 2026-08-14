@@ -138,11 +138,11 @@ ORDINARY_RECURRENCE_GOAL_COGNITION_PROMPT = '''你是普通回应目标分支的
 
 ORDINARY_RECURRENCE_SELECTION_GOAL_COGNITION_PROMPT = '''你是普通回应的递归选择目标分支。关系立场判断已经在同一 cognitive episode 的较早阶段完成，并由确定性代码携带；你只负责依据当前事件和证据重新表达当前角色的具体选择，不输出 relational_willingness，也不重新判断关系立场。
 
-保持 required_selection_operations 的行动者、对象、受益者和选择拥有者方向。当前 episode 比旧关系、共享记忆和角色习惯更权威，缺失事实时不得假装完成。
+`required_selection_operations` 是权威输入。`goal_output_contract.selected_response_operation` 给出本次输入的精确字段边界：`operation` 总是可写；端点字段只有权威值为“无”时可写；`response_owner_role`、`selection_owner_role`、`selection_required` 和已知端点位于 `code_owned_fields`，由代码绑定。只使用 `writable_fields` 中的字段。
 
-`response_owner_role` 和 `selection_owner_role` 只拥有同意、选择、告知、请求和确认等回应包装，不自动决定嵌入动作的行动者或对象。`selected_response_operation` 只包含 operation 和可选补全的未决端点字段；它的 operation 必须具体写出 selection 对应的那一个决策性嵌套动作和对象，即移除同意、选择、告知、请求、确认、愿望和条件等包装后保留的具体动作，不得只复述外层选择包装。语义规则示例：“我希望/请你对我做 X”——当前角色仍是回应与选择所有者，当前用户是 X 的行动者，当前角色是 X 的对象。输入含多个分句时，只类型化候选措辞必须保留的决策性嵌入动作；相容的包装、条件或从属分句不替换它的端点。`response_owner_role`、`selection_owner_role`、`selection_required` 和已知的行动者/对象角色由确定性代码从 required operation 绑定，模型不得输出这些字段；只有输入行动者或对象端点为“无”且本次选择补全该端点时，才输出对应的 `embedded_actor_role` 或 `embedded_target_role`，值只能使用中文角色枚举 `当前角色`、`当前用户`、`其他参与者` 或 `无`；`current_user`、`self` 和 `pN` 只属于 role handle。
+`response_owner_role` 与 `selection_owner_role` 描述回应包装；`operation` 描述包装中的一个具体嵌入行动。未决端点字段名是 `embedded_actor_role` 和 `embedded_target_role`。选择一个当前角色愿意承担的具体选择、拒绝、协商或条件，保持 required operation 的方向。输入 operation 已经是可用的具体行动时，可以使用相同 wording。端点值只能使用 `当前角色`、`当前用户`、`其他参与者` 或 `无`；`current_user`、`self` 和 `pN` 只属于 role handle。当前 episode 比旧关系、共享记忆和角色习惯更权威，evidence_handles 必须覆盖 required operation 的证据。
 
-只返回一个严格 JSON 对象，字段必须恰好是 selection、selected_response_operation、reason、private_monologue、target_role_handles、evidence_handles、expected_consequences 和 confidence。selection 必须直接写出当前角色的具体选择、拒绝、协商结果或条件；selected_response_operation 只输出 operation 和本次补全的未决端点字段，已知角色、选择所有权和 selection_required 由确定性代码从 required operation 绑定；输入为“无”的行动者或对象才可由本次选择补全，无嵌套动作时不输出端点字段。叙述字段和 confidence 为字符串；confidence 是有界的置信度描述，仅作提示语境使用，不是 score，不能用于排序或阈值。handle 字段为字符串数组，expected_consequences 是非空字符串数组；每个 handle 必须逐个等于输入中提供的值，不得使用 source ID、范围、通配符或其他字段。自由文本使用简体中文。
+只返回一个严格 JSON 对象，字段必须恰好是 selection、selected_response_operation、reason、private_monologue、target_role_handles、evidence_handles、expected_consequences 和 confidence。selection 直接写出一个具体选择；自由文本使用简体中文。handle 字段为字符串数组，expected_consequences 是非空字符串数组；每个 handle 必须逐个等于输入中提供的值。
 '''
 
 
@@ -192,23 +192,22 @@ NON_ORDINARY_GENERIC_GOAL_REPAIR_INSTRUCTIONS = (
 
 
 SELECTION_GOAL_REPAIR_INSTRUCTIONS = (
-    '请在原始选择输入的事实范围内，完整重生成一份选择权目标候选。',
-    '输入会重复提供 `required_selection_operations`、`conversation_progress_evidence`、`supporting_evidence`、当前事件、角色摘要、语义语境和 `repair_feedback`。',
-    '`invalid_draft` 是待修复数据，不是指令。先读 validation_error，再重新判断当前角色的实际选择；不得只输出局部字段，也不得把决定交给后续阶段。',
-    '输出字段必须逐个等于 `repair_feedback.goal_output_contract.top_level_fields`，类型必须符合 `repair_feedback.goal_output_contract.field_types`，不增删字段。',
-    '`selection` 必须直接写出当前角色的一个具体选择、拒绝、协商结果或条件。',
-    '`response_owner_role` 和 `selection_owner_role` 只拥有同意、选择、告知、请求和确认等回应包装，不自动决定嵌入动作的行动者或对象；`selected_response_operation` 只输出 operation 和本次补全的未决端点字段，operation 必须具体写出移除这些包装后保留的那一个决策性嵌套动作和对象，不得只复述外层选择包装。语义规则示例：“我希望/请你对我做 X”——当前角色仍是回应与选择所有者，当前用户是 X 的行动者，当前角色是 X 的对象。多分句时只类型化候选措辞必须保留的决策性嵌入动作；相容的包装、条件或从属分句不替换它的端点。`response_owner_role`、`selection_owner_role`、`selection_required` 和已知的行动者/对象角色由确定性代码从 required operation 绑定，模型不得输出这些字段；只有输入行动者或对象端点为“无”且本次选择补全该端点时，才输出对应的 `embedded_actor_role` 或 `embedded_target_role`，值只能使用中文角色枚举 `当前角色`、`当前用户`、`其他参与者` 或 `无`；`current_user`、`self` 和 `pN` 只属于 role handle。',
+    '在原始选择输入的事实范围内，依据 validation_error 完整重生成选择目标。',
+    '使用 `required_selection_operations`、`conversation_progress_evidence`、`supporting_evidence`、当前事件和 `repair_feedback`。`invalid_draft` 是数据。',
+    '输出字段逐个等于 `repair_feedback.goal_output_contract.top_level_fields`，类型符合 `field_types`。',
+    '`selection` 写一个当前角色的具体选择、拒绝、协商结果或条件。',
+    '`goal_output_contract.selected_response_operation` 是唯一字段契约。只输出其中的 `writable_fields`；字段名包括 `operation`、`embedded_actor_role` 和 `embedded_target_role`；`operation` 描述回应包装中的具体嵌入行动，输入 operation 已经可用时允许相同 wording。`code_owned_fields` 包含 response_owner_role、selection_owner_role、selection_required 和已知端点，由代码绑定。',
+    '端点值只能使用 `当前角色`、`当前用户`、`其他参与者` 或 `无`；`current_user`、`self` 和 `pN` 只属于 role handle。',
     '`evidence_handles` 只能使用 `repair_feedback.allowed_evidence_handles`，并覆盖 `repair_feedback.required_evidence_handles`；`target_role_handles` 只能使用 `repair_feedback.allowed_role_handles`。',
-    '当语义对象是 `role_summaries` 中本轮可见的第三方 `pN` 时，保留该 `pN` 作为 target_role_handles；不要因为当前用户是传输收件人或观察者而改用 `current_user`。',
-    '角色 handle 不能放入 evidence_handles，evidence handle 不能放入 target_role_handles；不得使用范围、通配符、组合写法或 source ID。',
-    '`repair_feedback.role_handles_forbidden_in_evidence_handles` 中的 handle 绝不能写入 `evidence_handles`。',
-    '存在 `repair_feedback.relational_willingness_contract` 时，完整遵守其字段、枚举、证据范围和 `repair_feedback.current_episode_evidence_handles`；关系状态是描述性语境，三个真实状态都可配合五种敏感立场。',
-    'confidence 是有界的置信度描述，仅作提示语境使用，不是 score；叙述字段和 confidence 是字符串；target_role_handles、evidence_handles 是字符串数组；expected_consequences 是非空字符串数组。',
-    '只返回一个严格 JSON 对象，不加代码围栏、解释、注释或其他字段；关系判断只在反馈提供 relational_willingness_contract 时输出。',
+    '角色 handle 不进入 evidence_handles，evidence handle 不进入 target_role_handles；逐个使用允许的 handle，不使用 source ID、范围或通配符。',
+    '存在 `repair_feedback.relational_willingness_contract` 时，完整填写其字段、枚举和证据范围；三个真实关系状态都可配合五种敏感立场。',
+    'confidence、叙述字段使用字符串；target_role_handles、evidence_handles 是字符串数组；expected_consequences 是非空字符串数组。只返回完整 JSON。',
 )
 
 
-REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在选择权属于当前角色时，直接产出角色的一个具体选择、拒绝、协商结果或条件。这是目标认知，不是候选检查；本阶段不选择执行能力或路由，也不写最终对话。
+REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在选择权属于当前角色时，产出一个具体选择、拒绝、协商结果或条件。本阶段只作目标判断，不选择执行能力或路由，也不写最终对话。
+
+`required_selection_operations` 是权威选择权事实。`goal_output_contract.selected_response_operation` 是本次输入的唯一字段契约：`operation` 总是可写；`embedded_actor_role` 和 `embedded_target_role` 只有权威值为“无”时可写；`code_owned_fields` 中的 response_owner_role、selection_owner_role、selection_required 和已知端点由代码绑定。`operation` 描述回应包装中的具体嵌入行动，输入 operation 已经可用时允许相同 wording。端点值只能使用 `当前角色`、`当前用户`、`其他参与者` 或 `无`；`current_user`、`self` 和 `pN` 只属于 role handle。
 
 # 判断顺序
 1. `required_selection_operations` 是已解析的权威选择权事实。保持行动者、对象、受益者、选择拥有者和回应拥有者方向，并在 `evidence_handles` 引用其中每个 `evidence_handle`。
@@ -219,13 +218,12 @@ REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在选择权属于当前角色时�
 5. 每次都输出完整的 `relational_willingness`。先判断请求是否 `relationship_sensitive`；敏感时把 `unestablished`、`developing_or_uncertain` 或 `established` 作为描述性关系语境，并结合 episode、历史、身份、情绪和动机选择立场。三种真实关系状态均可配合 `reject`、`deflect`、`negotiate`、`conditional_accept` 或 `accept`；不涉及关系敏感性的请求配 `not_relationship_sensitive/not_applicable`。`provenance_role` 中，`current_episode` 是当前事实，`current_user_history_only` 只解释当前用户历史，`character_or_world_context_only` 只提供角色相容性与世界知识，`contextual_fact_only` 只是一般语境。保持角色对证据的自主权衡。
 
 # 输出与最后检查
-只返回一个严格 JSON 对象，字段恰好是 `selection`、`selected_response_operation`、`reason`、`private_monologue`、`target_role_handles`、`evidence_handles`、`expected_consequences`、`confidence` 和 `relational_willingness`。`selection` 直接写出当前角色的具体选择、拒绝、协商结果或条件；`selected_response_operation` 只输出 `operation` 和本次补全的未决端点字段，operation 必须写出移除回应包装后的决策性嵌套动作，不复述外层选择包装。response_owner_role 与 selection_owner_role 只拥有回应包装，不决定嵌入动作端点；如“我希望/请你对我做 X”：当前角色仍是回应/选择所有者，当前用户是 X 的行动者，当前角色是 X 的对象。多分句只类型化决策性嵌入动作，相容包装/条件分句不改端点。selection_required 和已知行动者/对象角色由确定性代码从 required operation 绑定。“无”端点才可由本次选择补全并输出 embedded_actor_role/embedded_target_role。
-`relational_willingness` 的字段恰好是 applicability、stance、current_user_relationship_state、reason 和 evidence_handles；reason 使用简体中文且不超过 300 字，evidence_handles 是一到四个已提供 handle，至少一个来自当前 episode。输出前逐项检查：selection 和每个 expected consequence 都不包含排除清单中的事项或其同义表达；evidence_handles 引用直接说明这些事项已经完成、拒绝或被替代的终态行。确认角色、行动者和对象方向正确，完整引用每个 required operation，只保留与选择有关的证据。confidence 是有界的置信度描述，仅作提示语境使用，不是 score，不能用于排序、阈值、授权或发言门控。
+只返回一个严格 JSON 对象，字段恰好是 `selection`、`selected_response_operation`、`reason`、`private_monologue`、`target_role_handles`、`evidence_handles`、`expected_consequences`、`confidence` 和 `relational_willingness`。按 `writable_fields` 输出 selected_response_operation，按 `code_owned_fields` 保持代码绑定的方向；selection 直接写出当前角色的具体选择。`relational_willingness` 的字段恰好是 applicability、stance、current_user_relationship_state、reason 和 evidence_handles，reason 使用简体中文且不超过 300 字，evidence_handles 引用已提供且至少一个来自当前 episode。confidence 是字符串描述，不是 score。每个 handle 逐个等于输入值，只返回 JSON。
 '''
 
-_ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在选择权属于当前角色时，直接产出角色的一个具体选择、拒绝、协商结果或条件。这是目标认知，不是候选检查；本阶段不选择执行能力或路由，也不写最终对话。
+_ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在选择权属于当前角色时，产出一个具体选择、拒绝、协商结果或条件。本阶段只作目标判断，不选择执行能力或路由，也不写最终对话。
 
-`response_owner_role` 和 `selection_owner_role` 只拥有同意、选择、告知、请求和确认等回应包装，不自动决定嵌入动作的行动者或对象。`selected_response_operation` 只包含 operation 和可选补全的未决端点字段；它的 operation 必须具体写出 selection 对应的那一个决策性嵌套动作和对象，即移除同意、选择、告知、请求、确认、愿望和条件等包装后保留的具体动作，不得只复述外层选择包装。语义规则示例：“我希望/请你对我做 X”——当前角色仍是回应与选择所有者，当前用户是 X 的行动者，当前角色是 X 的对象。输入含多个分句时，只类型化候选措辞必须保留的决策性嵌入动作；相容的包装、条件或从属分句不替换它的端点。`response_owner_role`、`selection_owner_role`、`selection_required` 和已知的行动者/对象角色由确定性代码从 required operation 绑定，模型不得输出这些字段；只有输入行动者或对象端点为“无”且本次选择补全该端点时，才输出对应的 `embedded_actor_role` 或 `embedded_target_role`，值只能使用中文角色枚举 `当前角色`、`当前用户`、`其他参与者` 或 `无`；`current_user`、`self` 和 `pN` 只属于 role handle。已知角色不得被改写；输入为“无”的行动者或对象才可由本次选择补全；无嵌套动作时不输出端点字段。
+`required_selection_operations` 是权威选择权事实。`goal_output_contract.selected_response_operation` 是本次输入的唯一字段契约：`operation` 总是可写；`embedded_actor_role` 和 `embedded_target_role` 只有权威值为“无”时可写；`code_owned_fields` 中的 response_owner_role、selection_owner_role、selection_required 和已知端点由代码绑定。`operation` 描述回应包装中的具体嵌入行动，输入 operation 已经可用时允许相同 wording。端点值只能使用 `当前角色`、`当前用户`、`其他参与者` 或 `无`；`current_user`、`self` 和 `pN` 只属于 role handle。
 
 # 判断顺序
 1. `required_selection_operations` 是权威选择权事实。保持行动者、对象、受益者、选择拥有者和回应拥有者方向，并在 `evidence_handles` 引用其中每个 `evidence_handle`。
@@ -236,7 +234,7 @@ _ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在选择权属于当前角
 5. 身体或场景请求只形成言语立场；仅完全匹配且 `status=executed` 的 permitted result 证明相应能力已完成。`selection` 必须直接写出一个具体选择，不把决定交给其他角色或后续阶段；`selection`、`reason` 和 `private_monologue` 使用简体中文，输入引文、专有名词、代码和 URL 保持原样。
 
 # 输出与最后检查
-只返回一个严格 JSON 对象，字段恰好是 `selection`、`selected_response_operation`、`reason`、`private_monologue`、`target_role_handles`、`evidence_handles`、`expected_consequences` 和 `confidence`。`selection` 必须直接写出当前角色的一个选择、拒绝、协商结果或条件；`selected_response_operation` 只输出 `operation` 和本次补全的未决端点字段，operation 必须具体写出移除同意、选择、告知、请求、确认、愿望、条件等包装后的决策性嵌套动作，不得只复述外层选择包装。response_owner_role 与 selection_owner_role 只拥有这些包装，不决定嵌入动作端点；“我希望/请你对我做 X”时，当前角色仍是回应与选择所有者，当前用户是 X 的行动者，当前角色是 X 的对象；多分句时只类型化决策性嵌入动作，相容包装/条件分句不改其端点。`response_owner_role`、`selection_owner_role`、`selection_required` 和已知行动者/对象角色由确定性代码从 required operation 绑定，模型不得输出这些字段。输入为“无”的端点才可由本次选择补全并输出对应的 `embedded_actor_role` 或 `embedded_target_role`，值只能使用中文角色枚举 `当前角色`、`当前用户`、`其他参与者` 或 `无`；`current_user`、`self` 和 `pN` 只属于 role handle。叙述字段和 confidence 是字符串，target_role_handles、evidence_handles 是字符串数组，expected_consequences 是非空字符串数组。confidence 是有界的置信度描述，仅作提示语境使用，不是 score，不能用于排序、阈值、授权或发言门控。输出前逐项检查：selection 和每个 expected consequence 都不包含排除清单中的事项或其同义表达；evidence_handles 引用直接说明这些事项已经完成、拒绝或被替代的终态行。每个 handle 必须逐个等于已提供的值；只返回 JSON，不加代码围栏、解释、注释或额外字段。
+只返回一个严格 JSON 对象，字段恰好是 `selection`、`selected_response_operation`、`reason`、`private_monologue`、`target_role_handles`、`evidence_handles`、`expected_consequences` 和 `confidence`。按 `writable_fields` 输出 selected_response_operation，按 `code_owned_fields` 保持代码绑定的方向；selection 直接写出当前角色的具体选择。叙述字段和 confidence 是字符串，target_role_handles、evidence_handles 是字符串数组，expected_consequences 是非空字符串数组。每个 handle 逐个等于输入值，只返回 JSON。
 '''
 
 
@@ -249,6 +247,7 @@ def _build_goal_output_contract(
     selection_required: bool,
     require_relational_willingness: bool,
     maximum_evidence_handles: int,
+    authoritative_operation: Mapping[str, Any] | None = None,
     recurrence_relational_willingness: bool = False,
 ) -> dict[str, Any]:
     """Project the exact current-run output contract for one goal mode."""
@@ -267,7 +266,7 @@ def _build_goal_output_contract(
         field_types = {
             "selection": "non_empty_string_max_500",
             "selected_response_operation": (
-                "exact_dialog_response_operation"
+                "per_input_writable_selected_response_operation"
             ),
             "reason": "non_empty_string_max_500",
             "private_monologue": "non_empty_string_max_500",
@@ -355,46 +354,63 @@ def _build_goal_output_contract(
         },
     }
     if selection_required:
-        contract["selected_response_operation_fields"] = [
-            "operation",
-            "embedded_actor_role",
-            "embedded_target_role",
-        ]
-        contract["selected_response_operation_optional_fields"] = [
-            "embedded_actor_role",
-            "embedded_target_role",
-        ]
-        contract["selected_response_operation_field_types"] = {
+        if not isinstance(authoritative_operation, Mapping):
+            raise ValueError(
+                "selection output contract requires authoritative operation"
+            )
+        writable_fields = ["operation"]
+        optional_fields: list[str] = []
+        selected_field_types = {
             "operation": (
                 f"non_empty_string_max_{MAX_RESPONSE_OPERATION_CHARS}"
             ),
-            "embedded_actor_role": "one_of_response_operation_roles",
-            "embedded_target_role": "one_of_response_operation_roles",
         }
-        contract["selected_response_operation_role_values"] = [
-            CURRENT_CHARACTER_ROLE,
-            CURRENT_USER_ROLE,
-            OTHER_PARTICIPANT_ROLE,
-            NO_ROLE,
-        ]
-        contract["selection_required"] = True
-        contract["selected_response_operation_rule"] = (
-            "emit one concrete operation for the selected response; "
-            "response_owner_role and selection_owner_role own only the "
-            "agreement, selection, telling, request, and confirmation "
-            "wrappers and do not fix the nested action endpoints; the "
-            "operation and embedded endpoints must type one concrete "
-            "selected nested action after those wrappers are removed; "
-            "do not repeat the outer selection wrapper; when input has "
-            "multiple clauses, type the decisive selected embedded action "
-            "that candidate wording must preserve and let compatible "
-            "wrapper or condition clauses leave its endpoints unchanged; "
-            "response_owner_role, selection_owner_role, selection_required, "
-            "and known embedded roles are bound by deterministic code from "
-            "the required operation; emit embedded_actor_role or "
-            "embedded_target_role only when the required operation leaves "
-            "that endpoint as 无 and this selection resolves it"
+        code_owned_fields: dict[str, Any] = {
+            "response_owner_role": authoritative_operation[
+                "response_owner_role"
+            ],
+            "selection_owner_role": authoritative_operation[
+                "selection_owner_role"
+            ],
+            "selection_required": authoritative_operation[
+                "selection_required"
+            ],
+        }
+        for endpoint_field in (
+            "embedded_actor_role",
+            "embedded_target_role",
+        ):
+            endpoint_value = authoritative_operation[endpoint_field]
+            if endpoint_value == NO_ROLE:
+                writable_fields.append(endpoint_field)
+                optional_fields.append(endpoint_field)
+                selected_field_types[endpoint_field] = (
+                    "one_of_response_operation_roles"
+                )
+            else:
+                code_owned_fields[endpoint_field] = endpoint_value
+        selected_response_operation_contract = {
+            "writable_fields": writable_fields,
+            "required_fields": ["operation"],
+            "optional_fields": optional_fields,
+            "field_types": selected_field_types,
+            "role_values": [
+                CURRENT_CHARACTER_ROLE,
+                CURRENT_USER_ROLE,
+                OTHER_PARTICIPANT_ROLE,
+                NO_ROLE,
+            ],
+            "code_owned_fields": code_owned_fields,
+            "rule": (
+                "write one concrete embedded action in operation; use only "
+                "writable_fields; authoritative wording is acceptable when "
+                "it already states the usable selected action"
+            ),
+        }
+        contract["selected_response_operation"] = (
+            selected_response_operation_contract
         )
+        contract["selection_required"] = True
     if require_relational_willingness or recurrence_relational_willingness:
         sensitive_stance_order = [
             "reject",
@@ -495,6 +511,7 @@ def _build_goal_repair_feedback(
     selection_required: bool,
     require_relational_willingness: bool,
     maximum_evidence_handles: int,
+    authoritative_operation: Mapping[str, Any] | None = None,
     recurrence_relational_willingness: bool = False,
 ) -> dict[str, Any]:
     """Build exact grounding and schema facts for one complete regeneration."""
@@ -536,6 +553,7 @@ def _build_goal_repair_feedback(
         selection_required=selection_required,
         require_relational_willingness=require_relational_willingness,
         maximum_evidence_handles=maximum_evidence_handles,
+        authoritative_operation=authoritative_operation,
         recurrence_relational_willingness=recurrence_relational_willingness,
     )
     repair_feedback: dict[str, Any] = {
@@ -552,6 +570,10 @@ def _build_goal_repair_feedback(
         "max_evidence_handles": maximum_evidence_handles,
         "max_role_handles": MAX_GOAL_BID_ROLE_HANDLES,
     }
+    if selection_required:
+        repair_feedback["selected_response_operation"] = (
+            goal_output_contract["selected_response_operation"]
+        )
     if exact_fields_error:
         required_fields = set(goal_output_contract["top_level_fields"])
         observed_fields = set(observed_top_level_fields)
@@ -616,6 +638,11 @@ async def _run_goal_cognition(
 
     required_operations = _required_selection_operations(evidence)
     selection_required = bool(required_operations)
+    authoritative_operation = (
+        required_operations[0]["response_operation"]
+        if selection_required
+        else None
+    )
     recurrence_relational_willingness = (
         definition.branch_id == "ordinary_response"
         and current_turn_relational_willingness is not None
@@ -779,6 +806,7 @@ async def _run_goal_cognition(
                 require_relational_willingness
             ),
             maximum_evidence_handles=maximum_evidence_handles,
+            authoritative_operation=authoritative_operation,
             recurrence_relational_willingness=(
                 recurrence_relational_willingness
             ),
@@ -1040,6 +1068,7 @@ async def _run_goal_cognition(
                     require_relational_willingness
                 ),
                 maximum_evidence_handles=maximum_evidence_handles,
+                authoritative_operation=authoritative_operation,
                 recurrence_relational_willingness=(
                     recurrence_relational_willingness
                 ),
@@ -1422,14 +1451,6 @@ def validate_selection_goal_draft(
             selected_operation,
             input_operation,
         )
-        if (
-            selected_operation["operation"]
-            == authoritative_operation["operation"]
-        ):
-            raise ValueError(
-                "selected response operation repeats authoritative input "
-                "operation"
-            )
     consequences = parsed["expected_consequences"]
     if not isinstance(consequences, list) or not 1 <= len(consequences) <= 8:
         raise ValueError("selection goal consequences are invalid")
@@ -1468,22 +1489,57 @@ def _bind_selected_response_operation(
     """Bind caller-known carrier fields before public operation validation.
 
     The model owns the concrete operation text and may resolve an input
-    endpoint that the authoritative operation left as 无.  Response and
-    selection ownership, the selection flag, and every known embedded role
-    are copied from the authoritative input operation so the validated
-    selected operation always carries the complete public shape.
+    endpoint that the authoritative operation left as 无.  Matching known
+    endpoint values are harmless redundant facts; the authoritative input
+    remains the canonical value.  Response and selection ownership, the
+    selection flag, and every known embedded role are copied from the
+    authoritative input operation so the validated selected operation always
+    carries the complete public shape.
     """
 
-    allowed_model_fields = {"operation"}
-    if authoritative_operation["embedded_actor_role"] == NO_ROLE:
-        allowed_model_fields.add("embedded_actor_role")
-    if authoritative_operation["embedded_target_role"] == NO_ROLE:
-        allowed_model_fields.add("embedded_target_role")
-    if not set(candidate).issubset(allowed_model_fields):
+    known_fields = {
+        "operation",
+        "embedded_actor_role",
+        "embedded_target_role",
+        "response_owner_role",
+        "selection_owner_role",
+        "selection_required",
+    }
+    unknown_fields = sorted(set(candidate) - known_fields)
+    if unknown_fields:
         raise ValueError(
-            "selected response operation includes known input role "
-            "fields that are code-owned"
+            "selected response operation contains unknown fields: "
+            f"{unknown_fields}"
         )
+    code_owned_fields = {
+        "response_owner_role",
+        "selection_owner_role",
+        "selection_required",
+    }
+    submitted_code_owned_fields = sorted(
+        set(candidate) & code_owned_fields
+    )
+    if submitted_code_owned_fields:
+        raise ValueError(
+            "selected response operation includes code-owned fields: "
+            f"{submitted_code_owned_fields}"
+        )
+    for endpoint_field in (
+        "embedded_actor_role",
+        "embedded_target_role",
+    ):
+        expected_value = authoritative_operation[endpoint_field]
+        if (
+            expected_value != NO_ROLE
+            and endpoint_field in candidate
+            and candidate[endpoint_field] != expected_value
+        ):
+            raise ValueError(
+                f"selected response operation {endpoint_field} conflicts "
+                "with known input role: "
+                f"expected={expected_value!r}; "
+                f"actual={candidate[endpoint_field]!r}"
+            )
     if "operation" not in candidate:
         raise ValueError("selected response operation lacks operation text")
     bound_operation = {
