@@ -12,6 +12,7 @@ import httpx
 import pytest
 from fastapi import BackgroundTasks
 from pymongo.errors import PyMongoError
+from starlette.requests import Request
 
 from kazusa_ai_chatbot import service as brain_service
 from kazusa_ai_chatbot.background_work.delivery import (
@@ -192,7 +193,17 @@ async def test_live_rtx5090_research_survives_background_delivery(
             display_name=display_name,
         )
         background_tasks = BackgroundTasks()
-        chat_response = await brain_service.chat(request, background_tasks)
+        http_request = Request({
+            "type": "http",
+            "method": "POST",
+            "path": "/chat",
+            "headers": [],
+        })
+        chat_response = await brain_service.chat(
+            request,
+            background_tasks,
+            http_request,
+        )
         for task in background_tasks.tasks:
             await task()
         evidence["chat_request"] = request.model_dump()

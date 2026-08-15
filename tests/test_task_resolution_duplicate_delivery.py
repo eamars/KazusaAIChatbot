@@ -20,9 +20,13 @@ from kazusa_ai_chatbot.cognition_core_v2.action_authorization import (
     derive_action_route,
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import CognitionExecutionError
+from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+    validate_prompt_projection,
+)
 from kazusa_ai_chatbot.cognition_episode import (
     build_goal_continuation_ref,
     build_tool_result_episode,
+    project_model_visible_percepts,
 )
 from kazusa_ai_chatbot.brain_service.post_turn import (
     settle_runtime_episode_trace,
@@ -232,6 +236,31 @@ def test_goal_continuation_ref_survives_tool_result_episode() -> None:
         continuation_ref
     )
     assert continuation_ref["source_episode_id"] == "episode-task-001"
+
+
+def test_tool_result_model_projection_hides_lineage_metadata() -> None:
+    """Model-visible result content excludes typed lineage and source state."""
+
+    episode = result_source.build_result_ready_episode_from_job(
+        _accepted_task_completed_job()
+    )
+    canonical_content = episode["percepts"][0]["content"]
+    assert "goal_continuation_ref" in canonical_content
+    assert "cognition_source" in canonical_content
+
+    visible_percepts = project_model_visible_percepts(episode)
+
+    assert visible_percepts[0] == {
+        "input_source": "tool_result",
+        "content": {
+            "semantic_summary": "A public source resolved the requested fact.",
+            "artifact_text": "",
+            "failure_text": "",
+        },
+    }
+    validate_prompt_projection({
+        "episode": {"visible_percepts": visible_percepts},
+    })
 
 
 def test_mixed_pending_resolver_and_factual_surface_fails_contract() -> None:

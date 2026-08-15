@@ -35,6 +35,12 @@ TriggerSource = Literal[
     "tool_result",
 ]
 
+_MODEL_VISIBLE_TOOL_RESULT_FIELDS = (
+    "semantic_summary",
+    "artifact_text",
+    "failure_text",
+)
+
 GOAL_CONTINUATION_REF_VERSION = "goal_continuation_ref.v1"
 GOAL_CONTINUATION_ID_PREFIX = "goal-continuation:"
 GOAL_CONTINUATION_SCOPE_VALUES = frozenset(("user", "character"))
@@ -1143,6 +1149,8 @@ def _project_canonical_model_visible_percepts(
     rows: list[dict[str, Any]] = []
     for percept in episode["percepts"]:
         content = percept["content"]
+        if percept["source_kind"] == "tool_result":
+            content = _project_tool_result_content(content)
         if percept["percept_kind"] == "local_time_context":
             rows.append({
                 "input_source": "local_time_context",
@@ -1162,6 +1170,17 @@ def _project_canonical_model_visible_percepts(
             })
         rows.append(row)
     return rows
+
+
+def _project_tool_result_content(
+    content: Mapping[str, object],
+) -> dict[str, object]:
+    """Keep wording fields while hiding typed result lineage metadata."""
+
+    return {
+        field_name: content[field_name]
+        for field_name in _MODEL_VISIBLE_TOOL_RESULT_FIELDS
+    }
 
 
 def attach_dialog_semantic_projection(
