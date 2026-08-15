@@ -203,3 +203,21 @@ def test_numeric_score_rejects_boolean_and_out_of_range_values() -> None:
                 value,
                 label="dialog",
             )
+
+
+def test_validated_dialog_messages_collapses_blank_line_runs() -> None:
+    """Collapse internal blank lines while preserving message boundaries."""
+
+    value = {
+        "final_dialog": [
+            "first\n\nsecond\n\nthird\n\nfourth\n\nfifth",
+            "single\nline",
+        ],
+    }
+
+    validated_messages = dialog_module._validated_dialog_messages(value)
+
+    assert validated_messages == [
+        "first\nsecond\nthird\nfourth\nfifth",
+        "single\nline",
+    ]

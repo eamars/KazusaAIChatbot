@@ -2687,7 +2687,7 @@ def _validate_role_direction_verdict(
 
 
 def _validated_dialog_messages(value: object) -> list[str]:
-    """Validate the single repair result without adding semantic judgment."""
+    """Validate and normalize generated dialog without semantic judgment."""
 
     if not isinstance(value, dict) or set(value) != {"final_dialog"}:
         raise StateContractError("dialog repair fields are not exact")
@@ -2701,7 +2701,14 @@ def _validated_dialog_messages(value: object) -> list[str]:
         raise StateContractError("dialog repair message text is invalid")
     if sum(len(message) for message in messages) > DIALOG_CANDIDATE_MAX_CHARS:
         raise StateContractError("dialog repair messages exceed text bound")
-    validated_messages = list(messages)
+    validated_messages = [
+        re.sub(
+            r"(?:\r?\n)[ \t]*(?:(?:\r?\n)[ \t]*)+",
+            "\n",
+            message,
+        )
+        for message in messages
+    ]
     return validated_messages
 
 
