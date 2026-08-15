@@ -40,10 +40,6 @@
       "total_attempt_limit": 3,
       "exhausted_disposition": "accepted_degraded"
     },
-    "surface_dialog_compliance_repair": {
-      "total_attempt_limit": 3,
-      "exhausted_disposition": "accepted_degraded"
-    },
     "surface_visual": {
       "total_attempt_limit": 3,
       "exhausted_disposition": "skipped"
@@ -51,42 +47,6 @@
     "dialog_generator": {
       "total_attempt_limit": 3,
       "exhausted_disposition": "accepted_degraded"
-    },
-    "dialog_semantic_fidelity_verifier": {
-      "total_attempt_limit": 3,
-      "exhausted_disposition": "accepted_degraded"
-    },
-    "dialog_role_direction_verifier": {
-      "total_attempt_limit": 3,
-      "exhausted_disposition": "accepted_degraded"
-    },
-    "dialog_surface_integrity_verifier": {
-      "total_attempt_limit": 3,
-      "exhausted_disposition": "accepted_degraded"
     }
-  },
-  "role_direction_cases": [
-    {
-      "case_id": "information_request_preserves_selection_owner",
-      "candidate": "Tell me which option you want me to take.",
-      "expected_status": "aligned"
-    },
-    {
-      "case_id": "character_commanded_user_action_preserves_selection_owner",
-      "candidate": "Next, hold my hand and stay close to me.",
-      "expected_status": "aligned"
-    },
-    {
-      "case_id": "explicit_selection_owner_transfer",
-      "candidate": "You decide what I want you to do; I will follow your choice.",
-      "expected_status": "misaligned",
-      "expected_violation_kind": "selection_owner_transfer"
-    },
-    {
-      "case_id": "typed_operation_role_reversal",
-      "candidate": "I will perform the action that the user was explicitly assigned.",
-      "expected_status": "misaligned",
-      "expected_violation_kind": "typed_operation_role_reversal"
-    }
-  ]
+  }
 }

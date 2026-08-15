@@ -77,7 +77,7 @@ canonical conversation rows
   -> active packet load
   -> factual prompt projection
   -> cognition chooses the next response goal
-  -> dialog produces and verifies the visible response
+  -> dialog produces the visible response
   -> scene observer + event reconciler (two concurrent post-turn calls)
   -> deterministic handle/identity/source mapping
   -> deterministic merge and optional compaction

@@ -108,28 +108,6 @@ def test_live_character_prompts_fit_local_model_attention_caps() -> None:
     assert len(CONTENT_PLAN_SYSTEM_PROMPT) <= 2400
     assert len(PREFERENCE_SYSTEM_PROMPT) <= 1200
     assert len(dialog_module._V2_DIALOG_GENERATOR_PROMPT) <= 2700
-    repair_prompt = getattr(
-        dialog_module,
-        "_V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT",
-        "",
-    )
-    assert repair_prompt
-    assert len(repair_prompt) <= 1800
-    semantic_prompt = getattr(
-        dialog_module,
-        "_V2_DIALOG_SEMANTIC_FIDELITY_PROMPT",
-        "",
-    )
-    assert semantic_prompt
-    assert len(semantic_prompt) <= 2000
-    role_prompt = getattr(
-        dialog_module,
-        "_V2_DIALOG_ROLE_DIRECTION_PROMPT",
-        "",
-    )
-    assert role_prompt
-    assert len(role_prompt) <= 1500
-    assert len(dialog_module._V2_DIALOG_SURFACE_INTEGRITY_PROMPT) <= 1800
 
 
 def test_goal_prompt_owns_present_character_judgment() -> None:
@@ -167,78 +145,6 @@ def test_surface_prompts_support_creativity_and_absent_boundaries() -> None:
     assert "相应约束为空时返回空列表" in preference_prompt
 
 
-def test_dialog_verifier_uses_only_the_hard_failure_taxonomy() -> None:
-    """The verifier protects hard failures without suppressing novelty."""
-
-    generator_prompt = _normalized(
-        dialog_module._V2_DIALOG_GENERATOR_PROMPT
-    )
-    repair_prompt = _normalized(getattr(
-        dialog_module,
-        "_V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT",
-        "",
-    ))
-    verifier_prompt = _normalized(
-        dialog_module._V2_DIALOG_SURFACE_INTEGRITY_PROMPT
-    )
-    semantic_prompt = _normalized(getattr(
-        dialog_module,
-        "_V2_DIALOG_SEMANTIC_FIDELITY_PROMPT",
-        "",
-    ))
-
-    for required_text in (
-        "内部存在冲突",
-        "当前用户输入",
-        "行动者",
-        "对象",
-        "主语",
-        "candidate_role_frame",
-        "response_operation",
-        "selection_owner",
-    ):
-        assert required_text in semantic_prompt
-    assert "executed" in verifier_prompt
-    assert "false_execution" in verifier_prompt
-    assert "action description" not in verifier_prompt
-    assert "动作描写" not in verifier_prompt
-    assert "零到四" in semantic_prompt
-    assert "零到四" in verifier_prompt
-    for ambiguity_text in (
-        "唯一明确的颠倒",
-        "双关",
-        "多种合理角色读法",
-    ):
-        assert ambiguity_text in semantic_prompt
-    for permitted_text in (
-        "合理虚构",
-        "创造性语言",
-        "aligned true",
-    ):
-        assert permitted_text in "\n".join((
-            semantic_prompt,
-            verifier_prompt,
-        ))
-    for required_text in (
-        "自然",
-        "角色辨识度",
-        "创造",
-        "实际会说出或发送",
-    ):
-        assert required_text in generator_prompt
-    assert "action description" not in generator_prompt
-    assert "动作描写" not in generator_prompt
-    for required_text in (
-            "verified_hard_issues",
-            "text_surface_output_v2",
-            "delivery_profile",
-            "permitted_action_results",
-    ):
-        assert required_text in repair_prompt
-    assert "current_visible_percepts" not in repair_prompt
-    assert "original_final_dialog" not in repair_prompt
-
-
 def test_retired_blanket_suppression_is_absent() -> None:
     """Remove accumulated wording that made guarded minimalism cheapest."""
 
@@ -247,9 +153,6 @@ def test_retired_blanket_suppression_is_absent() -> None:
         REQUIRED_SELECTION_GOAL_PROMPT,
         CONTENT_PLAN_SYSTEM_PROMPT,
         dialog_module._V2_DIALOG_GENERATOR_PROMPT,
-        getattr(dialog_module, "_V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT", ""),
-        getattr(dialog_module, "_V2_DIALOG_SEMANTIC_FIDELITY_PROMPT", ""),
-        dialog_module._V2_DIALOG_SURFACE_INTEGRITY_PROMPT,
     )))
 
     for retired_text in (
@@ -273,9 +176,6 @@ def test_runtime_prompts_contain_no_frozen_case_material() -> None:
         CONTENT_PLAN_SYSTEM_PROMPT,
         PREFERENCE_SYSTEM_PROMPT,
         dialog_module._V2_DIALOG_GENERATOR_PROMPT,
-        getattr(dialog_module, "_V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT", ""),
-        getattr(dialog_module, "_V2_DIALOG_SEMANTIC_FIDELITY_PROMPT", ""),
-        dialog_module._V2_DIALOG_SURFACE_INTEGRITY_PROMPT,
     )))
 
     for captured_material in (

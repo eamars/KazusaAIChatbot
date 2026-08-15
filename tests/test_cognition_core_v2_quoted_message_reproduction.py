@@ -524,55 +524,6 @@ def _dialog_state(
     }
 
 
-async def _aligned_verifier(**kwargs: object) -> dict[str, Any]:
-    """Preserve the captured structural verifier success in the unit replay."""
-
-    del kwargs
-    return {
-        "semantic_fidelity": {
-            "status": "scored",
-            "score": 1.0,
-            "issues": [],
-        },
-        "role_direction": {
-            "status": "scored",
-            "score": 1.0,
-            "violations": [],
-        },
-        "surface_integrity": {
-            "status": "scored",
-            "score": 1.0,
-            "issues": [],
-        },
-        "lexical_avoidance": {
-            "status": "scored",
-            "score": 1.0,
-            "issues": [],
-        },
-    }
-
-
-def _write_review(
-    case_id: str,
-    *,
-    status: str,
-    body: str,
-) -> Path:
-    """Write the human-readable review companion before and after live calls."""
-
-    _REVIEW_ROOT.mkdir(parents=True, exist_ok=True)
-    path = _REVIEW_ROOT / f"{case_id}.md"
-    path.write_text(
-        "# Quoted-message failure reconstruction\n\n"
-        f"- status: `{status}`\n"
-        f"- fixture: `{_FIXTURE_PATH}`\n\n"
-        f"{body}\n",
-        encoding="utf-8",
-    )
-    return path
-
-
-@pytest.mark.asyncio
 async def test_rebuilt_case_reproduces_goal_branch_exhaustion() -> None:
     """Recurrence consumes the ordinary branch's cumulative third attempt."""
 
@@ -716,11 +667,6 @@ async def test_rebuilt_case_reproduces_answer_loss_after_false_resolver_success(
         "final_dialog": case["captured_final_dialog"],
     }])
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", dialog_llm)
-    monkeypatch.setattr(
-        dialog_module,
-        "_verify_dialog_compliance",
-        _aligned_verifier,
-    )
     dialog_output = await dialog_module.dialog_generator(
         _dialog_state(case, surface_input, surface_output)
     )
@@ -745,7 +691,7 @@ async def test_rebuilt_case_reproduces_answer_loss_after_false_resolver_success(
                 "direct_facts": case["direct_facts"],
                 "goal_resolution": action_plan["goal_resolution"],
                 "final_dialog_answers_quoted_question": False,
-                "structural_verifiers": "scored",
+                "semantic_verifiers": "none",
             },
         },
     )
@@ -912,32 +858,10 @@ async def test_rebuilt_false_success_handoff_downstream_live_llm(
     surface_llm = _CapturingLLM(surface_services.llm)
     surface_services = replace(surface_services, llm=surface_llm)
     dialog_generator_llm = _CapturingLLM(dialog_module._dialog_generator_llm)
-    dialog_semantic_llm = _CapturingLLM(
-        dialog_module._dialog_semantic_fidelity_llm
-    )
-    dialog_role_llm = _CapturingLLM(dialog_module._dialog_role_direction_llm)
-    dialog_surface_llm = _CapturingLLM(
-        dialog_module._dialog_surface_integrity_llm
-    )
     monkeypatch.setattr(
         dialog_module,
         "_dialog_generator_llm",
         dialog_generator_llm,
-    )
-    monkeypatch.setattr(
-        dialog_module,
-        "_dialog_semantic_fidelity_llm",
-        dialog_semantic_llm,
-    )
-    monkeypatch.setattr(
-        dialog_module,
-        "_dialog_role_direction_llm",
-        dialog_role_llm,
-    )
-    monkeypatch.setattr(
-        dialog_module,
-        "_dialog_surface_integrity_llm",
-        dialog_surface_llm,
     )
 
     text_output = await run_text_surface_planning(
@@ -959,9 +883,6 @@ async def test_rebuilt_false_success_handoff_downstream_live_llm(
             "surface_calls": surface_llm.calls,
             "surface_output": text_output,
             "dialog_generator_calls": dialog_generator_llm.calls,
-            "dialog_semantic_fidelity_calls": dialog_semantic_llm.calls,
-            "dialog_role_direction_calls": dialog_role_llm.calls,
-            "dialog_surface_integrity_calls": dialog_surface_llm.calls,
             "final_dialog": final_dialog,
             "judgment": {
                 "resolver_status": "succeeded",

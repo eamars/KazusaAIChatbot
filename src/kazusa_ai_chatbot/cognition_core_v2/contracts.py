@@ -260,9 +260,6 @@ SCHEDULED_FUTURE_SPEECH_AUTHORITY_SCHEMA_VERSION = (
     "scheduled_future_speech_authority.v1"
 )
 SCHEDULED_AUTHORITY_CARRIER_SCHEMA_VERSION = "scheduled_authority_carrier.v1"
-SCHEDULED_SPEECH_SEMANTIC_VERDICT_SCHEMA_VERSION = (
-    "scheduled_speech_semantic_verdict.v1"
-)
 
 TEMPORAL_ALIGNMENT_VALUES = frozenset({
     "aligned",
@@ -281,51 +278,12 @@ SCHEDULED_AUTHORITY_DETAIL_SUMMARY_MAX_CHARS = 1000
 SCHEDULED_AUTHORITY_OBJECTIVE_MAX_CHARS = 2000
 SCHEDULED_AUTHORITY_ID_PREFIX = "sha256-"
 
-SCHEDULED_VERDICT_TIME_CLAIM_VALUES = frozenset({
-    "aligned",
-    "no_claim",
-    "premature",
-    "contradictory",
-    "unavailable",
-})
-SCHEDULED_VERDICT_OBJECTIVE_VALUES = frozenset({
-    "aligned",
-    "scope_expansion",
-    "contradiction",
-    "unsupported",
-    "unavailable",
-})
-SCHEDULED_VERDICT_SOURCE_GROUNDING_VALUES = frozenset({
-    "current_authority",
-    "historical_only",
-    "unsupported",
-    "unavailable",
-})
-SCHEDULED_VERDICT_AUDIENCE_VALUES = frozenset({
-    "aligned",
-    "mismatch",
-    "unavailable",
-})
-SCHEDULED_VERDICT_EXECUTION_VALUES = frozenset({
-    "aligned",
-    "premature",
-    "false",
-    "unavailable",
-})
-
 SCHEDULED_SPEECH_GATE_CODES = frozenset((
     "scheduled_authority_missing",
     "scheduled_authority_invalid",
     "scheduled_trigger_identity_mismatch",
     "scheduled_due_not_reached",
     "scheduled_candidate_empty",
-    "scheduled_time_claim_mismatch",
-    "scheduled_objective_mismatch",
-    "scheduled_source_not_current_authority",
-    "scheduled_audience_mismatch",
-    "scheduled_execution_claim_mismatch",
-    "scheduled_evaluator_contract_error",
-    "scheduled_evaluator_unavailable",
 ))
 
 CURRENT_EPISODE_EVIDENCE_SOURCE_KINDS = frozenset({
@@ -571,34 +529,6 @@ class ScheduledAuthorityCarrierV1(TypedDict, total=False):
     calendar_run_id: str
     child_llm_trace_id: str
     delivery_tracking_id: str
-
-
-class ScheduledSpeechSemanticVerdictV1(TypedDict):
-    """Closed semantic dimensions returned by the scheduled content evaluator."""
-
-    schema_version: Literal["scheduled_speech_semantic_verdict.v1"]
-    time_claim_alignment: Literal[
-        "aligned",
-        "no_claim",
-        "premature",
-        "contradictory",
-        "unavailable",
-    ]
-    objective_alignment: Literal[
-        "aligned",
-        "scope_expansion",
-        "contradiction",
-        "unsupported",
-        "unavailable",
-    ]
-    source_grounding: Literal[
-        "current_authority",
-        "historical_only",
-        "unsupported",
-        "unavailable",
-    ]
-    audience_alignment: Literal["aligned", "mismatch", "unavailable"]
-    execution_claim: Literal["aligned", "premature", "false", "unavailable"]
 
 
 class RelationalWillingnessV2(TypedDict):
@@ -2725,75 +2655,6 @@ def validate_scheduled_authority_carrier(
             raise CognitionContractError(
                 f"scheduled authority carrier {field_name} is invalid"
             )
-    return dict(value)  # type: ignore[return-value]
-
-
-def validate_scheduled_speech_semantic_verdict(
-    value: object,
-) -> ScheduledSpeechSemanticVerdictV1:
-    """Validate the closed scheduled content-evaluator verdict.
-
-    The model returns only the five semantic dimensions. Decision, attempt,
-    free-form reason, and open issue fields are rejected by exact-key
-    validation; deterministic code owns the disposition mapping.
-
-    Args:
-        value: Candidate verdict produced by the scheduled content evaluator.
-
-    Returns:
-        A shallow validated copy of the verdict.
-
-    Raises:
-        CognitionContractError: When any field, enum, or schema value is
-            invalid.
-    """
-
-    if not isinstance(value, Mapping):
-        raise CognitionContractError(
-            "scheduled speech semantic verdict must be an object"
-        )
-    _require_exact_keys(
-        value,
-        {
-            "schema_version",
-            "time_claim_alignment",
-            "objective_alignment",
-            "source_grounding",
-            "audience_alignment",
-            "execution_claim",
-        },
-        "scheduled speech semantic verdict",
-    )
-    if (
-        value["schema_version"]
-        != SCHEDULED_SPEECH_SEMANTIC_VERDICT_SCHEMA_VERSION
-    ):
-        raise CognitionContractError(
-            "scheduled speech semantic verdict schema is invalid"
-        )
-    if value["time_claim_alignment"] not in SCHEDULED_VERDICT_TIME_CLAIM_VALUES:
-        raise CognitionContractError(
-            "scheduled speech time claim alignment is invalid"
-        )
-    if value["objective_alignment"] not in SCHEDULED_VERDICT_OBJECTIVE_VALUES:
-        raise CognitionContractError(
-            "scheduled speech objective alignment is invalid"
-        )
-    if (
-        value["source_grounding"]
-        not in SCHEDULED_VERDICT_SOURCE_GROUNDING_VALUES
-    ):
-        raise CognitionContractError(
-            "scheduled speech source grounding is invalid"
-        )
-    if value["audience_alignment"] not in SCHEDULED_VERDICT_AUDIENCE_VALUES:
-        raise CognitionContractError(
-            "scheduled speech audience alignment is invalid"
-        )
-    if value["execution_claim"] not in SCHEDULED_VERDICT_EXECUTION_VALUES:
-        raise CognitionContractError(
-            "scheduled speech execution claim is invalid"
-        )
     return dict(value)  # type: ignore[return-value]
 
 

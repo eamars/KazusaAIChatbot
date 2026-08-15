@@ -401,28 +401,10 @@ async def _run_live_case(
             'dialog_generator',
             dialog_module._dialog_generator_llm,
         )
-        semantic_llm = _CapturingLiveLLM(
-            'dialog_semantic_fidelity',
-            dialog_module._dialog_semantic_fidelity_llm,
-        )
-        integrity_llm = _CapturingLiveLLM(
-            'dialog_surface_integrity',
-            dialog_module._dialog_surface_integrity_llm,
-        )
         monkeypatch.setattr(
             dialog_module,
             '_dialog_generator_llm',
             generator_llm,
-        )
-        monkeypatch.setattr(
-            dialog_module,
-            '_dialog_semantic_fidelity_llm',
-            semantic_llm,
-        )
-        monkeypatch.setattr(
-            dialog_module,
-            '_dialog_surface_integrity_llm',
-            integrity_llm,
         )
         dialog_output = await dialog_module.dialog_generator(
             _dialog_state(
@@ -455,8 +437,6 @@ async def _run_live_case(
             'surface_model_calls': text_llm.calls,
             'text_surface_output': text_output,
             'dialog_generator_calls': generator_llm.calls,
-            'dialog_semantic_fidelity_calls': semantic_llm.calls,
-            'dialog_surface_integrity_calls': integrity_llm.calls,
             'dialog_output': dialog_output,
             'final_dialog_metrics': _dialog_metrics(final_dialog),
             'human_review_contract': {

@@ -93,10 +93,6 @@ def _branch_modified_prompt_fragments() -> tuple[str, ...]:
         reflection._CHARACTER_STATE_REVIEW_PROMPT,
         reflection._RELATIONSHIP_PROFILE_REVIEW_PROMPT,
         dialog_agent._V2_DIALOG_GENERATOR_PROMPT,
-        dialog_agent._V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT,
-        dialog_agent._V2_DIALOG_SEMANTIC_FIDELITY_PROMPT,
-        dialog_agent._V2_DIALOG_ROLE_DIRECTION_PROMPT,
-        dialog_agent._V2_DIALOG_SURFACE_INTEGRITY_PROMPT,
         *frontline_fragments,
         *settled_fragments,
     )
@@ -180,12 +176,6 @@ def test_text_prompts_organically_favor_spoken_or_typed_dialog() -> None:
     planning_and_rendering = "\n".join((
         CONTENT_PLAN_SYSTEM_PROMPT,
         dialog_agent._V2_DIALOG_GENERATOR_PROMPT,
-        dialog_agent._V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT,
-    ))
-    verifier_prompts = "\n".join((
-        dialog_agent._V2_DIALOG_SEMANTIC_FIDELITY_PROMPT,
-        dialog_agent._V2_DIALOG_ROLE_DIRECTION_PROMPT,
-        dialog_agent._V2_DIALOG_SURFACE_INTEGRITY_PROMPT,
     ))
 
     assert "实际会说出或发送" in planning_and_rendering
@@ -197,8 +187,6 @@ def test_text_prompts_organically_favor_spoken_or_typed_dialog() -> None:
         "方括号",
     ):
         assert retired_guidance not in planning_and_rendering.casefold()
-        assert retired_guidance not in verifier_prompts.casefold()
-    assert "false_execution" in dialog_agent._V2_DIALOG_SURFACE_INTEGRITY_PROMPT
 
 
 def test_semantic_appraisal_prompt_limits_model_authority() -> None:

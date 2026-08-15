@@ -173,9 +173,9 @@ def build_scheduled_gate_trace(
     """Build the bounded authority/gate/dispatch correlation record.
 
     The trace binds the immutable authority identity, source identity,
-    accepted and trigger instants, deterministic gate codes, evaluator attempt
-    count, and dispatch status so an incident can be followed from parent
-    action attempt to delivery or suppression.
+    accepted and trigger instants, deterministic gate codes, and dispatch
+    status so an incident can be followed from parent action attempt to
+    delivery or suppression.
     """
 
     authority = case.get("scheduled_future_speech_authority")
@@ -196,16 +196,9 @@ def build_scheduled_gate_trace(
             for code in raw_gate_codes
             if isinstance(code, str) and code in SCHEDULED_SPEECH_GATE_CODES
         ]
-        evaluator_attempt_count = gate_result.get("evaluator_attempt_count")
-        if isinstance(evaluator_attempt_count, bool) or not isinstance(
-            evaluator_attempt_count,
-            int,
-        ):
-            evaluator_attempt_count = 0
     else:
         disposition = models.SCHEDULED_GATE_DISPOSITION_NOT_EVALUATED
         gate_codes = []
-        evaluator_attempt_count = 0
     trace = {
         "schema_version": models.SCHEDULED_GATE_TRACE_SCHEMA_VERSION,
         "authority_id": _string_field(authority, "authority_id")
@@ -231,7 +224,6 @@ def build_scheduled_gate_trace(
         else "",
         "gate_disposition": disposition,
         "gate_codes": gate_codes,
-        "evaluator_attempt_count": evaluator_attempt_count,
         "dispatch_status": dispatch_status,
     }
     return trace

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import json
 import logging
 from dataclasses import fields
@@ -161,47 +160,6 @@ def _dialog_state() -> dict[str, object]:
     }
 
 
-def _dialog_verifier_aggregate(
-    *,
-    aligned: bool,
-    semantic_issues: list[str],
-) -> dict[str, object]:
-    """Build the exact owner-preserving dialog verifier aggregate.
-
-    Args:
-        aligned: Whether semantic fidelity accepts the candidate.
-        semantic_issues: Bounded semantic errors for a rejected candidate.
-
-    Returns:
-        Three-owner verifier state with role and surface checks aligned.
-    """
-
-    semantic_status = "scored"
-    semantic_score = 1.0 if aligned else 0.1
-    return {
-        "semantic_fidelity": {
-            "status": semantic_status,
-            "score": semantic_score,
-            "issues": list(semantic_issues),
-        },
-        "role_direction": {
-            "status": "scored",
-            "score": 1.0,
-            "violations": [],
-        },
-        "surface_integrity": {
-            "status": "scored",
-            "score": 1.0,
-            "issues": [],
-        },
-        "lexical_avoidance": {
-            "status": "scored",
-            "score": 1.0,
-            "issues": [],
-        },
-    }
-
-
 def test_v2_surface_services_have_no_independent_style_owner() -> None:
     """Normal V2 text planning exposes only content and preference configs."""
 
@@ -305,7 +263,6 @@ def test_surface_prompts_use_contextual_stance_and_boundary_scope() -> None:
 
     for prompt in (
         surface_stages.CONTENT_PLAN_SYSTEM_PROMPT,
-        surface_stages.DIALOG_COMPLIANCE_REPAIR_SYSTEM_PROMPT,
     ):
         compact_prompt = "".join(prompt.split())
         assert "selectedintention及intention.reason为语义锚点" in (
@@ -331,7 +288,6 @@ def test_surface_prompts_use_contextual_stance_and_boundary_scope() -> None:
     )
     for prompt in (
         surface_stages.PREFERENCE_SYSTEM_PROMPT,
-        surface_stages.DIALOG_COMPLIANCE_REPAIR_SYSTEM_PROMPT,
     ):
         compact_prompt = "".join(prompt.split())
         assert "普通场景事实、时间、情绪、关系状态和已选回应立场分别归入" in (
@@ -341,32 +297,8 @@ def test_surface_prompts_use_contextual_stance_and_boundary_scope() -> None:
             compact_prompt
         )
 
-    surface_repair_prompt = "".join(
-        surface_stages.DIALOG_COMPLIANCE_REPAIR_SYSTEM_PROMPT.split()
-    )
-    assert "verified_hard_issues中的内容冲突对应content_plan和content_requirements中的正向修复目标" in (
-        surface_repair_prompt
-    )
-    assert "visible_boundaries保持为空，并保留权威语境中的称呼安排" in (
-        surface_repair_prompt
-    )
-    assert "当前版本没有typedsource-boundvisible-boundarycontract，visible_boundaries必须返回空列表" in (
-        surface_repair_prompt
-    )
-    assert "addressee_plan逐字保留输入提供的结构化参与者、语义角色和wording_policy" in (
-        surface_repair_prompt
-    )
-    assert "亲密感、语气词、词汇、句式和节奏由delivery_profile表达" in (
-        surface_repair_prompt
-    )
-    assert "不要自行添加未绑定来源的通用边界" in surface_repair_prompt
-    assert "主题、比喻和已选立场进入content_plan或content_requirements" in (
-        surface_repair_prompt
-    )
-
     for prompt in (
         dialog_agent._V2_DIALOG_GENERATOR_PROMPT,
-        dialog_agent._V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT,
     ):
         compact_prompt = "".join(prompt.split())
         assert "selected_surface_intent是本轮语义锚点" in (
@@ -389,46 +321,9 @@ def test_surface_prompts_use_contextual_stance_and_boundary_scope() -> None:
         in dialog_prompt
     )
     assert "判断规划中的开场反应指向行动或关系本身" in dialog_prompt
-    repair_prompt = "".join(
-        dialog_agent._V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT.split()
-    )
-    assert "先阅读text_surface_output_v2中的selected_surface_intent" in (
-        repair_prompt
-    )
-
-    semantic_prompt = "".join(
-        dialog_agent._V2_DIALOG_SEMANTIC_FIDELITY_PROMPT.split()
-    )
-    assert "依次阅读当前输入、权威语义和候选中的全部消息" in (
-        semantic_prompt
-    )
-    assert "判断每句话回应的对象以及前后句如何承接" in semantic_prompt
-    assert "先判断候选是否构成一条与selected_surface_intent一致的完整语义弧线" in (
-        semantic_prompt
-    )
-    assert "分别提取开场与收尾的主体、行动或关系对象、肯定或否定极性" in (
-        semantic_prompt
-    )
-    assert "针对提问时机、直接程度、标签或情绪的反应，按其真实对象判断" in (
-        semantic_prompt
-    )
-    assert "惊讶、羞赧、防御、调侃、嘴硬、表面勉强、间接表达以及其他角色化情绪" in (
-        semantic_prompt
-    )
-    assert "当这些表达的对象是时机、直接程度、标签或情绪" in (
-        semantic_prompt
-    )
-    assert "且行动或关系极性与收尾一致时，给出高分" in semantic_prompt
-    assert "不论位于同一消息或多条消息" in semantic_prompt
-    assert "对同一主体、同一行动或关系先明确拒绝或不愿，后明确接受或愿意" in (
-        semantic_prompt
-    )
-
     generation_prompts = (
         surface_stages.CONTENT_PLAN_SYSTEM_PROMPT,
-        surface_stages.DIALOG_COMPLIANCE_REPAIR_SYSTEM_PROMPT,
         dialog_agent._V2_DIALOG_GENERATOR_PROMPT,
-        dialog_agent._V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT,
     )
     for prompt in generation_prompts:
         compact_prompt = "".join(prompt.split())
@@ -441,202 +336,6 @@ def test_surface_prompts_use_contextual_stance_and_boundary_scope() -> None:
             assert overbroad_constraint not in compact_prompt
 
 
-def test_surface_repair_uses_canonical_input_without_rejected_surface() -> None:
-    """The repair API cannot echo rejected surface semantics or delivery."""
-
-    signature = inspect.signature(surface.repair_text_surface_planning)
-
-    assert list(signature.parameters) == [
-        "input_payload",
-        "verified_hard_issues",
-        "services",
-    ]
-
-
-def test_semantic_fidelity_receives_surface_authority_and_exact_caps() -> None:
-    """The focused semantic verifier owns bounded authoritative semantics."""
-
-    signature = inspect.signature(
-        dialog_agent._verify_dialog_semantic_fidelity
-    )
-
-    assert "surface_output" in signature.parameters
-    assert dialog_agent.DIALOG_SEMANTIC_AUTHORITY_MAX_CHARS == 11000
-    assert dialog_agent.DIALOG_CANDIDATE_MAX_CHARS == 12000
-    assert dialog_agent.DIALOG_SEMANTIC_PAYLOAD_MAX_CHARS == 50000
-
-
-@pytest.mark.asyncio
-async def test_semantic_fidelity_payload_uses_only_surface_semantics(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Delivery and action truth stay outside semantic verifier authority."""
-
-    semantic_llm = MagicMock()
-    semantic_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
-        content='{"score": 1.0, "hard_errors": []}',
-    ))
-    monkeypatch.setattr(
-        dialog_agent,
-        "_dialog_semantic_fidelity_llm",
-        semantic_llm,
-    )
-    monkeypatch.setattr(
-        dialog_agent.llm_tracing,
-        "record_llm_trace_step",
-        AsyncMock(),
-    )
-    monkeypatch.setattr(
-        dialog_agent.event_logging,
-        "record_llm_stage_event",
-        AsyncMock(),
-    )
-
-    await dialog_agent._verify_dialog_semantic_fidelity(
-        surface_output=_surface_output(),
-        generated_dialog=["We are in this together."],
-        current_visible_percepts=[],
-        llm_trace_id="semantic-authority",
-    )
-
-    payload = json.loads(
-        semantic_llm.ainvoke.await_args.args[0][1].content
-    )
-    assert payload["authoritative_surface_semantics"] == {
-        "selected_surface_intent": "confirm shared participation",
-        "content_plan": "Confirm shared participation clearly and consistently.",
-        "content_requirements": [
-            "Keep one accepting stance throughout the response.",
-        ],
-        "lexical_avoidances": [],
-        "visible_boundaries": [],
-        "addressee_plan": [{
-            "handle": "current_user",
-            "display_name": "Current User",
-            "semantic_role": "direct_recipient",
-            "wording_policy": "second_person_allowed",
-        }],
-    }
-    serialized_authority = json.dumps(
-        payload["authoritative_surface_semantics"],
-        ensure_ascii=False,
-    )
-    assert "delivery_profile" not in serialized_authority
-    assert "permitted_action_results" not in serialized_authority
-
-
-@pytest.mark.asyncio
-async def test_semantic_fidelity_candidate_limit_degrades_before_call(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """An oversized candidate records typed verifier unavailability."""
-
-    semantic_llm = MagicMock()
-    semantic_llm.ainvoke = AsyncMock()
-    trace_recorder = AsyncMock()
-    contract_recorder = AsyncMock()
-    monkeypatch.setattr(
-        dialog_agent,
-        "_dialog_semantic_fidelity_llm",
-        semantic_llm,
-    )
-    monkeypatch.setattr(
-        dialog_agent.llm_tracing,
-        "record_llm_trace_step",
-        trace_recorder,
-    )
-    monkeypatch.setattr(
-        dialog_agent.event_logging,
-        "record_model_contract_event",
-        contract_recorder,
-    )
-
-    verdict = await dialog_agent._verify_dialog_semantic_fidelity(
-        surface_output=_surface_output(),
-        generated_dialog=[
-            "x" * (dialog_agent.DIALOG_CANDIDATE_MAX_CHARS + 1)
-        ],
-        current_visible_percepts=[],
-        llm_trace_id="semantic-context-limit",
-    )
-
-    assert verdict == {"status": "unavailable", "hard_errors": []}
-    semantic_llm.ainvoke.assert_not_awaited()
-    assert trace_recorder.await_args.kwargs["parse_status"] == (
-        "not_called_context_limit"
-    )
-    assert trace_recorder.await_args.kwargs["status"] == "failed"
-    assert contract_recorder.await_args.kwargs["violation_kind"] == (
-        "semantic_verifier_context_limit"
-    )
-
-
-@pytest.mark.asyncio
-async def test_dialog_repair_payload_excludes_rejected_candidates(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The second renderer receives canonical replacement authority only."""
-
-    replacement = _surface_output()
-    replacement["content_plan"] = "State one coherent accepting position."
-    surface_repair = AsyncMock(return_value=replacement)
-    generator_llm = MagicMock()
-    generator_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
-        content='{"final_dialog": ["We are in this together."]}',
-    ))
-    monkeypatch.setattr(
-        dialog_agent,
-        "repair_text_surface_for_dialog",
-        surface_repair,
-    )
-    monkeypatch.setattr(
-        dialog_agent,
-        "_dialog_generator_llm",
-        generator_llm,
-    )
-    monkeypatch.setattr(
-        dialog_agent.llm_tracing,
-        "record_llm_trace_step",
-        AsyncMock(),
-    )
-
-    repaired_dialog, repaired_surface = (
-        await dialog_agent._repair_dialog_hard_failure(
-            repair_issues=["The response reverses stance without a cause."],
-            surface_input=_surface_input(),
-            user_name="Current User",
-            llm_trace_id="candidate-exclusion",
-        )
-    )
-
-    assert repaired_dialog == ["We are in this together."]
-    assert repaired_surface == replacement
-    surface_repair.assert_awaited_once_with(
-        surface_input=_surface_input(),
-        verified_hard_issues=[
-            "The response reverses stance without a cause.",
-        ],
-    )
-    repair_payload = json.loads(
-        generator_llm.ainvoke.await_args.args[0][1].content
-    )
-    assert repair_payload == {
-        "candidate_role_frame": {
-            "speaker_role": "当前角色",
-            "first_person_role": "当前角色",
-            "second_person_role": "当前用户",
-        },
-        "text_surface_output_v2": replacement,
-        "user_name": "Current User",
-        "repair_context": {
-            "verified_hard_issues": [
-                "The response reverses stance without a cause.",
-            ],
-        },
-    }
-
-
-@pytest.mark.asyncio
 async def test_dialog_generator_returns_first_pass_surface(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -650,14 +349,6 @@ async def test_dialog_generator_returns_first_pass_surface(
         dialog_agent,
         "_dialog_generator_llm",
         generator_llm,
-    )
-    monkeypatch.setattr(
-        dialog_agent,
-        "_verify_dialog_compliance",
-        AsyncMock(return_value=_dialog_verifier_aggregate(
-            aligned=True,
-            semantic_issues=[],
-        )),
     )
     monkeypatch.setattr(
         dialog_agent.llm_tracing,
@@ -675,76 +366,10 @@ async def test_dialog_generator_returns_first_pass_surface(
     assert result["text_surface_output_v2"] == _surface_output()
 
 
-@pytest.mark.asyncio
-async def test_dialog_generator_returns_repaired_surface(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A repaired dialog returns its replacement semantic surface."""
-
-    replacement = _surface_output()
-    replacement["content_plan"] = "State one coherent accepting position."
-    generator_llm = MagicMock()
-    generator_llm.ainvoke = AsyncMock(side_effect=[
-        SimpleNamespace(
-            content='{"final_dialog": ["Initial candidate."]}',
-        ),
-        SimpleNamespace(
-            content='{"final_dialog": ["We are in this together."]}',
-        ),
-    ])
-    surface_repair = AsyncMock(return_value=replacement)
-    monkeypatch.setattr(
-        dialog_agent,
-        "_dialog_generator_llm",
-        generator_llm,
-    )
-    monkeypatch.setattr(
-        dialog_agent,
-        "_verify_dialog_compliance",
-        AsyncMock(side_effect=[
-            _dialog_verifier_aggregate(
-                aligned=False,
-                semantic_issues=["Unsupported stance reversal."],
-            ),
-            _dialog_verifier_aggregate(
-                aligned=True,
-                semantic_issues=[],
-            ),
-        ]),
-    )
-    monkeypatch.setattr(
-        dialog_agent,
-        "repair_text_surface_for_dialog",
-        surface_repair,
-    )
-    monkeypatch.setattr(
-        dialog_agent.llm_tracing,
-        "record_llm_trace_step",
-        AsyncMock(),
-    )
-    monkeypatch.setattr(
-        dialog_agent.event_logging,
-        "record_llm_stage_event",
-        AsyncMock(),
-    )
-    monkeypatch.setattr(
-        dialog_agent.event_logging,
-        "record_model_contract_event",
-        AsyncMock(),
-    )
-
-    result = await dialog_agent.dialog_generator(_dialog_state())
-
-    assert result["final_dialog"] == ["We are in this together."]
-    assert result["text_surface_output_v2"] == replacement
-    surface_repair.assert_awaited_once()
-
-
-@pytest.mark.asyncio
 async def test_persona_graph_stores_dialog_accepted_surface(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The persona update replaces the initial surface after dialog repair."""
+    """The persona update stores the surface accepted by dialog rendering."""
 
     initial_surface = _surface_output()
     replacement = _surface_output()

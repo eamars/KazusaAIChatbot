@@ -802,7 +802,6 @@ async def test_c03_dialog_renderer_preserves_recalled_fact(
         ],
     }
     generator_calls: list[dict[str, Any]] = []
-    verifier_calls: list[dict[str, Any]] = []
 
     for attribute_name in (
         "record_llm_stage_event",
@@ -836,18 +835,11 @@ async def test_c03_dialog_renderer_preserves_recalled_fact(
             "raw_model_output": str(response.content),
             "config_stage_name": str(getattr(config, "stage_name", "")),
         }
-        if stage_name == "dialog_generator":
-            generator_calls.append(call)
-        else:
-            verifier_calls.append(call)
+        generator_calls.append(call)
         return response
 
     real_generator = dialog_module._dialog_generator_llm
     real_generator_invoke = real_generator.ainvoke
-    real_semantic = dialog_module._dialog_semantic_fidelity_llm
-    real_semantic_invoke = real_semantic.ainvoke
-    real_integrity = dialog_module._dialog_surface_integrity_llm
-    real_integrity_invoke = real_integrity.ainvoke
 
     async def capture_generator(
         messages: list[object],
@@ -861,33 +853,7 @@ async def test_c03_dialog_renderer_preserves_recalled_fact(
             config=config,
         )
 
-    async def capture_semantic(
-        messages: list[object],
-        *,
-        config: object,
-    ) -> object:
-        return await capture_llm_call(
-            "dialog_semantic_fidelity",
-            real_semantic_invoke,
-            messages,
-            config=config,
-        )
-
-    async def capture_integrity(
-        messages: list[object],
-        *,
-        config: object,
-    ) -> object:
-        return await capture_llm_call(
-            "dialog_surface_integrity",
-            real_integrity_invoke,
-            messages,
-            config=config,
-        )
-
     monkeypatch.setattr(real_generator, "ainvoke", capture_generator)
-    monkeypatch.setattr(real_semantic, "ainvoke", capture_semantic)
-    monkeypatch.setattr(real_integrity, "ainvoke", capture_integrity)
 
     dialog_state = {
         "text_surface_output_v2": surface_output,
@@ -912,7 +878,6 @@ async def test_c03_dialog_renderer_preserves_recalled_fact(
             "role_projection": role_projection,
             "surface_output": surface_output,
             "dialog_generator_calls": generator_calls,
-            "dialog_verifier_calls": verifier_calls,
             "dialog_output": result,
             "error": error_text,
             "semantic_judgment": {

@@ -20,7 +20,6 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     validate_visual_surface_output,
 )
 from kazusa_ai_chatbot.cognition_core_v2.surface_stages import (
-    run_dialog_compliance_repair_stage,
     run_content_plan_stage,
     run_preference_stage,
     run_visual_stage,
@@ -199,129 +198,6 @@ def build_degraded_text_surface(
             for row in payload["permitted_action_results"]
         ],
         "lexical_avoidances": [],
-    }
-    if "runtime_capability_limits" in payload:
-        output["runtime_capability_limits"] = list(
-            payload["runtime_capability_limits"]
-        )
-    if "resolver_result" in payload:
-        output["resolver_result"] = dict(payload["resolver_result"])
-    if "relational_willingness" in payload:
-        output["relational_willingness"] = dict(
-            payload["relational_willingness"]
-        )
-    validated_output = validate_text_surface_output(output)
-    return validated_output
-
-
-async def repair_text_surface_planning(
-    input_payload: TextSurfaceInputV2,
-    verified_hard_issues: list[str],
-    services: TextSurfaceServicesV2,
-) -> TextSurfaceOutputV2:
-    """Repair text planning with exact multi-argument failure capture."""
-
-    capsule_input = {
-        "input_payload": input_payload,
-        "verified_hard_issues": verified_hard_issues,
-    }
-    session = failure_capsule.begin_failure_capsule(
-        trace_id=llm_tracing.current_trace_id(),
-        entrypoint="repair_text_surface_planning",
-        input_payload=capsule_input,
-    )
-    try:
-        output = await _repair_text_surface_planning(
-            input_payload,
-            verified_hard_issues,
-            services,
-        )
-    except Exception as exc:
-        failure_capsule.mark_failure(
-            session,
-            failure_kind="terminal_failure",
-            stage_name="repair_text_surface_planning",
-            details={},
-        )
-        failure_capsule.finish_failure_capsule(
-            session,
-            outcome="terminal_failure",
-            exception=exc,
-        )
-        raise
-
-    failure_capsule.finish_failure_capsule(session, outcome=None)
-    return output
-
-
-async def _repair_text_surface_planning(
-    input_payload: TextSurfaceInputV2,
-    verified_hard_issues: list[str],
-    services: TextSurfaceServicesV2,
-) -> TextSurfaceOutputV2:
-    """Replace every producer-owned field from canonical cognition truth.
-
-    Args:
-        input_payload: Canonical cognition-owned surface input.
-        verified_hard_issues: Bounded verifier findings to resolve.
-        services: Configured text-surface model and route settings.
-
-    Returns:
-        A validated replacement surface derived without rejected candidates.
-    """
-
-    payload = validate_text_surface_input(input_payload)
-    if (
-        not isinstance(verified_hard_issues, list)
-        or not 1 <= len(verified_hard_issues) <= 8
-        or len(verified_hard_issues) != len(set(verified_hard_issues))
-    ):
-        raise ValueError("verified dialog hard issues are invalid")
-    if any(
-        not isinstance(issue, str)
-        or not issue.strip()
-        or len(issue) > 300
-        for issue in verified_hard_issues
-    ):
-        raise ValueError("verified dialog hard issue text is invalid")
-
-    stage_payload = _project_surface_payload(payload)
-    stage_payload["character_expression_context"] = dict(
-        payload["character_expression_context"]
-    )
-    stage_payload["dialog_compliance_repair"] = {
-        "verified_hard_issues": list(verified_hard_issues),
-    }
-    validate_prompt_projection(stage_payload)
-    replacement = await run_dialog_compliance_repair_stage(
-        stage_payload,
-        services,
-    )
-    output: TextSurfaceOutputV2 = {
-        "schema_version": "text_surface_output.v2",
-        "content_plan": replacement["content_plan"],
-        "content_requirements": list(
-            replacement["content_requirements"]
-        ),
-        "visible_boundaries": list(replacement["visible_boundaries"]),
-        "addressee_plan": _authoritative_addressee_plan(
-            payload,
-            replacement["addressee_plan"],
-        ),
-        "delivery_profile": dict(replacement["delivery_profile"]),
-        "selected_surface_intent": payload["intention"]["intention"],
-        "permitted_action_results": [
-            {
-                **row,
-                "target_roles": [
-                    dict(role) for role in row["target_roles"]
-                ],
-            }
-            for row in payload["permitted_action_results"]
-        ],
-        "lexical_avoidances": list(
-            replacement["lexical_avoidances"]
-        ),
     }
     if "runtime_capability_limits" in payload:
         output["runtime_capability_limits"] = list(

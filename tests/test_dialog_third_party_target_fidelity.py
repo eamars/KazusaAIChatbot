@@ -326,7 +326,7 @@ def test_l3_target_projection_distinguishes_p1_from_current_user() -> None:
 def _surface_output(
     addressee_plan: list[dict[str, str]],
 ) -> dict[str, object]:
-    """Build the dialog verifier's complete surface contract."""
+    """Build the complete dialog surface contract."""
 
     return {
         'schema_version': 'text_surface_output.v2',
@@ -349,7 +349,7 @@ def _surface_output(
 def _surface_input(
     addressee_plan: list[dict[str, str]],
 ) -> dict[str, object]:
-    """Build the retained input required by bounded dialog repair."""
+    """Build the dialog surface input for rendering state."""
 
     content_plan = 'Address the named participant in the control clause.'
     return {
@@ -420,161 +420,6 @@ def test_dialog_role_frame_lists_only_pn_non_current_targets() -> None:
     ]
 
 
-@pytest.mark.asyncio
-async def test_role_verifier_receives_typed_p1_and_can_reject_second_person(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The existing role owner receives p1 evidence for a wrong second person."""
-
-    surface_output = _surface_output([{
-        'handle': 'p1',
-        'display_name': '蚝爹油',
-        'semantic_role': 'embedded_target',
-        'wording_policy': 'named_or_third_person_required',
-    }])
-    role_llm = MagicMock()
-    role_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
-        content=json.dumps({
-            'score': 0.1,
-            'violations': [{
-                'kind': 'typed_operation_role_reversal',
-                'evidence': '你',
-                'explanation': '该句把第三方目标错误地写成了当前用户。',
-            }],
-        }, ensure_ascii=False),
-    ))
-    monkeypatch.setattr(dialog_module, '_dialog_role_direction_llm', role_llm)
-    monkeypatch.setattr(
-        dialog_module.llm_tracing,
-        'record_llm_trace_step',
-        AsyncMock(),
-    )
-    monkeypatch.setattr(
-        dialog_module.event_logging,
-        'record_llm_stage_event',
-        AsyncMock(),
-    )
-
-    verdict = await dialog_module._verify_dialog_role_direction(
-        surface_output=surface_output,
-        generated_dialog=['哈哈，快让我看看你现在是不是缩成一团？'],
-        current_visible_percepts=[],
-        llm_trace_id='typed-target-test',
-    )
-
-    assert verdict['score'] == 0.1
-    payload = json.loads(role_llm.ainvoke.await_args.args[0][1].content)
-    assert payload['typed_addressee_plan'] == [surface_output['addressee_plan'][0]]
-    assert payload['candidate_role_frame']['typed_non_current_targets'] == [{
-        'handle': 'p1',
-        'display_name': '蚝爹油',
-        'semantic_role': 'embedded_target',
-        'wording_policy': 'named_or_third_person_required',
-    }]
-    assert 'current-global-id' not in json.dumps(payload, ensure_ascii=False)
-
-
-@pytest.mark.asyncio
-async def test_dialog_repair_handoff_carries_p1_role_violation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A rejected p1 second-person candidate reaches bounded regeneration."""
-
-    addressee_plan = [{
-        'handle': 'p1',
-        'display_name': '蚝爹油',
-        'semantic_role': 'embedded_target',
-        'wording_policy': 'named_or_third_person_required',
-    }]
-    surface_output = _surface_output(addressee_plan)
-    surface_input = _surface_input(addressee_plan)
-    generator_llm = MagicMock()
-    generator_llm.ainvoke = AsyncMock(side_effect=[
-        AIMessage(content=json.dumps({
-            'final_dialog': ['哈哈，快让我看看你现在是不是缩成一团？'],
-        }, ensure_ascii=False)),
-        AIMessage(content=json.dumps({
-            'final_dialog': ['哈哈，快让我看看蚝爹油现在是不是缩成一团？'],
-        }, ensure_ascii=False)),
-    ])
-    role_llm = MagicMock()
-    role_llm.ainvoke = AsyncMock(side_effect=[
-        AIMessage(content=json.dumps({
-            'score': 0.1,
-            'violations': [{
-                'kind': 'typed_operation_role_reversal',
-                'evidence': '你',
-                'explanation': '该句把第三方目标错误地写成了当前用户。',
-            }],
-        }, ensure_ascii=False)),
-        AIMessage(content=json.dumps({
-            'score': 1.0,
-            'violations': [],
-        }, ensure_ascii=False)),
-    ])
-    semantic_llm = MagicMock()
-    semantic_llm.ainvoke = AsyncMock(return_value=AIMessage(
-        content='{"score": 1.0, "hard_errors": []}',
-    ))
-    integrity_llm = MagicMock()
-    integrity_llm.ainvoke = AsyncMock(return_value=AIMessage(
-        content='{"score": 1.0, "issues": []}',
-    ))
-    repair_calls: list[dict[str, object]] = []
-
-    async def repair_surface(**kwargs: object) -> dict[str, object]:
-        repair_calls.append(kwargs)
-        return surface_output
-
-    monkeypatch.setattr(dialog_module, '_dialog_generator_llm', generator_llm)
-    monkeypatch.setattr(dialog_module, '_dialog_role_direction_llm', role_llm)
-    monkeypatch.setattr(
-        dialog_module,
-        '_dialog_semantic_fidelity_llm',
-        semantic_llm,
-    )
-    monkeypatch.setattr(
-        dialog_module,
-        '_dialog_surface_integrity_llm',
-        integrity_llm,
-    )
-    monkeypatch.setattr(
-        dialog_module,
-        'repair_text_surface_for_dialog',
-        repair_surface,
-    )
-
-    state = {
-        'dialog_usage_mode': 'unit_test',
-        'text_surface_input_v2': surface_input,
-        'text_surface_output_v2': surface_output,
-        'cognitive_episode': surface_input['episode'],
-        'user_name': 'YCHDDZZ',
-        'llm_trace_id': 'typed-target-repair',
-    }
-    result = await dialog_module.dialog_generator(state)
-
-    assert result['final_dialog'] == [
-        '哈哈，快让我看看蚝爹油现在是不是缩成一团？',
-    ]
-    assert generator_llm.ainvoke.await_count == 2
-    assert role_llm.ainvoke.await_count == 2
-    assert len(repair_calls) == 1
-    assert any(
-        'typed_operation_role_reversal' in issue
-        for issue in repair_calls[0]['verified_hard_issues']
-    )
-    repair_payload = json.loads(
-        generator_llm.ainvoke.await_args_list[1].args[0][1].content,
-    )
-    assert repair_payload['repair_context']['verified_hard_issues']
-    assert 'typed_operation_role_reversal' in json.dumps(
-        repair_payload['repair_context'],
-        ensure_ascii=False,
-    )
-
-
-@pytest.mark.asyncio
 async def test_dialog_transport_stays_addressed_to_current_user(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

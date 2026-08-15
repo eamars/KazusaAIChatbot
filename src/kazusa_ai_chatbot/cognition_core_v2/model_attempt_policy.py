@@ -9,7 +9,6 @@ from uuid import uuid4
 
 
 V2_MODEL_TOTAL_ATTEMPTS = 3
-V2_VERIFIER_TOTAL_ATTEMPTS = 3
 V2_APPRAISAL_TOTAL_ATTEMPTS = 2
 
 V2AttemptFailureKind = Literal[
@@ -17,7 +16,6 @@ V2AttemptFailureKind = Literal[
     "parse",
     "structure",
     "semantic",
-    "verifier_unavailable",
 ]
 V2AttemptDisposition = Literal[
     "started",
@@ -183,28 +181,12 @@ V2_MODEL_OWNER_POLICIES: dict[str, V2ModelOwnerPolicy] = {
         "total_attempt_limit": V2_MODEL_TOTAL_ATTEMPTS,
         "exhausted_disposition": "accepted_degraded",
     },
-    "surface_dialog_compliance_repair": {
-        "total_attempt_limit": V2_MODEL_TOTAL_ATTEMPTS,
-        "exhausted_disposition": "accepted_degraded",
-    },
     "surface_visual": {
         "total_attempt_limit": V2_MODEL_TOTAL_ATTEMPTS,
         "exhausted_disposition": "skipped",
     },
     "dialog_generator": {
         "total_attempt_limit": V2_MODEL_TOTAL_ATTEMPTS,
-        "exhausted_disposition": "accepted_degraded",
-    },
-    "dialog_semantic_fidelity_verifier": {
-        "total_attempt_limit": V2_VERIFIER_TOTAL_ATTEMPTS,
-        "exhausted_disposition": "accepted_degraded",
-    },
-    "dialog_role_direction_verifier": {
-        "total_attempt_limit": V2_VERIFIER_TOTAL_ATTEMPTS,
-        "exhausted_disposition": "accepted_degraded",
-    },
-    "dialog_surface_integrity_verifier": {
-        "total_attempt_limit": V2_VERIFIER_TOTAL_ATTEMPTS,
         "exhausted_disposition": "accepted_degraded",
     },
 }
@@ -223,7 +205,6 @@ _FAILURE_KINDS = frozenset({
     "parse",
     "structure",
     "semantic",
-    "verifier_unavailable",
 })
 _DISPOSITIONS = frozenset({
     "started",

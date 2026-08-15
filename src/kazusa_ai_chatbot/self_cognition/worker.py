@@ -21,11 +21,6 @@ from kazusa_ai_chatbot.brain_service.post_turn import (
 )
 from kazusa_ai_chatbot.calendar_scheduler import models as calendar_models
 from kazusa_ai_chatbot.calendar_scheduler import repository as calendar_repository
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
-    CognitionContractError,
-    validate_scheduled_future_speech_authority,
-    validate_scheduled_speech_semantic_verdict,
-)
 from kazusa_ai_chatbot.config import (
     CALENDAR_SCHEDULER_LEASE_SECONDS,
     CALENDAR_SCHEDULER_MAX_ATTEMPTS,
@@ -38,7 +33,6 @@ from kazusa_ai_chatbot.internal_monologue_residue import (
 )
 from kazusa_ai_chatbot.nodes.dialog_agent import (
     StateContractError,
-    evaluate_scheduled_future_speech_content,
 )
 from kazusa_ai_chatbot.runtime_coordination import (
     PipelineCancelled,
@@ -53,7 +47,6 @@ from kazusa_ai_chatbot.self_cognition.delivery import (
     deliver_selected_speak,
 )
 from kazusa_ai_chatbot.time_boundary import (
-    format_storage_utc_for_llm,
     storage_utc_now,
     storage_utc_now_iso,
 )
@@ -460,7 +453,6 @@ async def run_self_cognition_worker_tick(
                         artifact_payloads=artifact_payloads,
                         gate_codes=[],
                         disposition=models.SCHEDULED_GATE_DISPOSITION_ACCEPTED,
-                        evaluator_attempt_count=gate_result["attempt_count"],
                         dispatch_status=dispatch_status,
                     )
             else:
@@ -471,7 +463,6 @@ async def run_self_cognition_worker_tick(
                     now=now,
                     record_attempt_func=active_record_attempt,
                     gate_codes=gate_result["gate_codes"],
-                    evaluator_attempt_count=gate_result["attempt_count"],
                 )
             self_trace_dialog_count = 1 if dispatch_status == "sent" else 0
             await _settle_and_finish_self_cognition_episode(
@@ -661,12 +652,11 @@ def evaluate_scheduled_content_gate(
     trigger_identity_ok: bool,
     due_reached: bool,
     candidate_present: bool,
-    verdict: Mapping[str, Any] | None,
 ) -> tuple[bool, list[str]]:
-    """Map deterministic prerequisites and evaluator dimensions to disposition.
+    """Map deterministic scheduled prerequisites to the admission disposition.
 
     The worker derives the closed gate codes and final disposition from this
-    deterministic truth table. The evaluator owns semantic judgment only.
+    deterministic truth table; no semantic evaluator participates.
 
     Args:
         authority_missing: No authority exists on the scheduled case.
@@ -674,8 +664,6 @@ def evaluate_scheduled_content_gate(
         trigger_identity_ok: Run due time matches the authority trigger.
         due_reached: Current time is at or after the authority trigger.
         candidate_present: A non-empty rendered candidate exists.
-        verdict: Validated scheduled semantic verdict, or ``None`` after
-            bounded structural repair exhaustion.
 
     Returns:
         A boolean accept flag and the bounded closed gate codes.
@@ -691,35 +679,6 @@ def evaluate_scheduled_content_gate(
         return False, ["scheduled_due_not_reached"]
     if not candidate_present:
         return False, ["scheduled_candidate_empty"]
-    if verdict is None:
-        return False, ["scheduled_evaluator_contract_error"]
-    try:
-        validate_scheduled_speech_semantic_verdict(verdict)
-    except (CognitionContractError, ValueError):
-        return False, ["scheduled_evaluator_contract_error"]
-    unavailable_dimensions = [
-        dimension
-        for dimension in (
-            "time_claim_alignment",
-            "objective_alignment",
-            "source_grounding",
-            "audience_alignment",
-            "execution_claim",
-        )
-        if verdict.get(dimension) == "unavailable"
-    ]
-    if unavailable_dimensions:
-        return False, ["scheduled_evaluator_unavailable"]
-    if verdict["time_claim_alignment"] not in {"aligned", "no_claim"}:
-        return False, ["scheduled_time_claim_mismatch"]
-    if verdict["objective_alignment"] != "aligned":
-        return False, ["scheduled_objective_mismatch"]
-    if verdict["source_grounding"] != "current_authority":
-        return False, ["scheduled_source_not_current_authority"]
-    if verdict["audience_alignment"] != "aligned":
-        return False, ["scheduled_audience_mismatch"]
-    if verdict["execution_claim"] != "aligned":
-        return False, ["scheduled_execution_claim_mismatch"]
     return True, []
 
 
@@ -729,33 +688,29 @@ async def _apply_scheduled_content_gate(
     artifact_payloads: dict[str, Any],
     now: datetime,
 ) -> dict[str, Any]:
-    """Run the one-pass scheduled content evaluator before dispatch.
+    """Run the deterministic scheduled authority, due, and candidate gate.
 
     The gate applies only to rendered scheduled candidates. A case that never
-    proposed visible speech is accepted without an evaluator call.
+    proposed visible speech is accepted without a semantic evaluator call.
     """
 
     if not runner.is_scheduled_future_speech_case(case):
         return {
             "accepted": True,
             "gate_codes": [],
-            "attempt_count": 0,
         }
     action_candidate = artifact_payloads.get(models.ARTIFACT_ACTION_CANDIDATE)
     if not isinstance(action_candidate, dict):
         return {
             "accepted": True,
             "gate_codes": [],
-            "attempt_count": 0,
         }
     candidate_text = action_candidate.get("text")
     if not isinstance(candidate_text, str) or not candidate_text.strip():
         return {
             "accepted": False,
             "gate_codes": ["scheduled_candidate_empty"],
-            "attempt_count": 0,
         }
-    authority = case.get("scheduled_future_speech_authority")
     guard_passed, guard_codes = runner.enforce_scheduled_authority_due_guard(
         case,
         now,
@@ -764,48 +719,6 @@ async def _apply_scheduled_content_gate(
         return {
             "accepted": False,
             "gate_codes": list(guard_codes),
-            "attempt_count": 0,
-        }
-    if not isinstance(authority, dict):
-        return {
-            "accepted": False,
-            "gate_codes": ["scheduled_authority_missing"],
-            "attempt_count": 0,
-        }
-    attempt_count = 0
-    verdict: dict[str, Any] | None = None
-    try:
-        evaluator_result = await evaluate_scheduled_future_speech_content(
-            candidate_text=candidate_text.strip(),
-            semantic_objective=str(authority["semantic_objective"]),
-            authorized_content_summary=str(
-                authority["authorized_content"]["summary"]
-            ),
-            authorized_detail_refs=authority["authorized_content"][
-                "detail_refs"
-            ],
-            audience_kind=str(authority["target"]["audience_kind"]),
-            local_due_datetime=format_storage_utc_for_llm(
-                authority["trigger"]["utc"]
-            ),
-            due_identity_facts={
-                "due_reached": True,
-                "run_due_matches_authority": True,
-            },
-            llm_trace_id=str(case.get("llm_trace_id") or ""),
-        )
-        verdict = evaluator_result.get("verdict")
-        if isinstance(verdict, dict):
-            verdict = dict(verdict)
-        attempt_count = int(evaluator_result.get("attempt_count") or 0)
-    except Exception as exc:
-        logger.exception(
-            f"Scheduled content evaluator failed: {exc}"
-        )
-        return {
-            "accepted": False,
-            "gate_codes": ["scheduled_evaluator_unavailable"],
-            "attempt_count": attempt_count,
         }
     accepted, gate_codes = evaluate_scheduled_content_gate(
         authority_missing=False,
@@ -813,13 +726,10 @@ async def _apply_scheduled_content_gate(
         trigger_identity_ok=True,
         due_reached=True,
         candidate_present=True,
-        verdict=verdict,
     )
     return {
         "accepted": accepted,
         "gate_codes": gate_codes,
-        "attempt_count": attempt_count,
-        "verdict": verdict,
     }
 
 
@@ -830,7 +740,6 @@ async def _settle_scheduled_suppression(
     now: datetime,
     record_attempt_func: Callable[..., Any],
     gate_codes: list[str],
-    evaluator_attempt_count: int,
 ) -> None:
     """Settle a suppressed scheduled candidate without dispatch or memory."""
 
@@ -846,14 +755,12 @@ async def _settle_scheduled_suppression(
     artifact_payloads[models.ARTIFACT_DISPATCH_RESULT] = {
         "status": "scheduled_content_suppressed",
         "gate_codes": list(gate_codes),
-        "evaluator_attempt_count": evaluator_attempt_count,
     }
     _record_scheduled_gate_outcome(
         case=case,
         artifact_payloads=artifact_payloads,
         gate_codes=gate_codes,
         disposition=models.SCHEDULED_GATE_DISPOSITION_SUPPRESSED,
-        evaluator_attempt_count=evaluator_attempt_count,
         dispatch_status="scheduled_content_suppressed",
     )
 
@@ -864,7 +771,6 @@ def _record_scheduled_gate_outcome(
     artifact_payloads: dict[str, Any],
     gate_codes: list[str],
     disposition: str,
-    evaluator_attempt_count: int,
     dispatch_status: str,
 ) -> None:
     """Record authority, gate, dispatch, and admission correlation metadata."""
@@ -873,7 +779,6 @@ def _record_scheduled_gate_outcome(
         "schema_version": models.SCHEDULED_GATE_RESULT_SCHEMA_VERSION,
         "disposition": disposition,
         "gate_codes": list(gate_codes),
-        "evaluator_attempt_count": evaluator_attempt_count,
     }
     artifact_payloads[models.ARTIFACT_SCHEDULED_GATE_RESULT] = dict(
         gate_result

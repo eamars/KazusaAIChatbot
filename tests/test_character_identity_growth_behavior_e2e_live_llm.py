@@ -106,9 +106,6 @@ _SAMPLE_COUNT = 3
 _FIXED_TIMESTAMP = "2026-07-28T12:00:00+00:00"
 _DIALOG_LLM_FIELDS = (
     "_dialog_generator_llm",
-    "_dialog_semantic_fidelity_llm",
-    "_dialog_role_direction_llm",
-    "_dialog_surface_integrity_llm",
 )
 _JUDGE_KEYS = frozenset({
     "category_effect_observed",
@@ -762,7 +759,7 @@ def _state_for_sample(
 
 @contextmanager
 def _capture_dialog_llms() -> Any:
-    """Temporarily capture all dialog generator and verifier calls."""
+    """Temporarily capture dialog generator calls."""
 
     originals = {
         field_name: getattr(dialog_module, field_name)

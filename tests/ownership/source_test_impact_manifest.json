@@ -151,10 +151,11 @@
     {
       "source": "src/kazusa_ai_chatbot/self_cognition/models.py",
       "owner": "self-cognition tracking contract owner",
-      "contract": "semantic policy execution outcome dimensions",
+      "contract": "closed scheduled gate-result and response outcome dimensions",
       "required_unit_tests": [
-        "tests/test_scheduled_future_speech_contract.py::test_self_cognition_scheduled_models_reject_open_gate_fields",
-        "tests/test_self_cognition_group_visible_reply_boundary.py::test_response_outcome_values_are_closed"
+        "tests/test_scheduled_future_speech_contract.py::test_tracking_projection_is_deterministic",
+        "tests/test_self_cognition_group_visible_reply_boundary.py::test_response_outcome_values_are_closed",
+        "tests/test_self_cognition_tracking.py::test_scheduled_gate_trace_contains_authority_and_disposition"
       ],
       "supplemental_tests": []
     },
@@ -920,37 +921,19 @@
     },
     {
       "source": "src/kazusa_ai_chatbot/nodes/dialog_agent.py",
-      "owner": "dialog verifier owner",
-      "contract": "selected-operation role authority and numeric dialog verifier fallback",
+      "owner": "dialog generator owner",
+      "contract": "final dialog generator over the validated V2 surface with canonical JSON, structural, and required-source-URL checks",
       "required_unit_tests": [
-        "tests/test_dialog_agent.py::test_dialog_exhaustion_all_unavailable_selects_latest_valid_candidate",
-        "tests/test_dialog_agent.py::test_dialog_exhaustion_selects_highest_score_not_latest",
-        "tests/test_dialog_agent.py::test_dialog_exhaustion_ties_select_latest_attempt",
-        "tests/test_dialog_agent.py::test_dialog_score_aggregate_uses_available_dimensions",
-        "tests/test_dialog_agent.py::test_dialog_score_validation_rejects_non_finite_or_out_of_range[-0.01]",
-        "tests/test_dialog_agent.py::test_dialog_score_validation_rejects_non_finite_or_out_of_range[1.01]",
-        "tests/test_dialog_agent.py::test_dialog_score_validation_rejects_non_finite_or_out_of_range[10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000]",
-        "tests/test_dialog_agent.py::test_dialog_score_validation_rejects_non_finite_or_out_of_range[True]",
-        "tests/test_dialog_agent.py::test_dialog_score_validation_rejects_non_finite_or_out_of_range[inf]",
-        "tests/test_dialog_agent.py::test_dialog_score_validation_rejects_non_finite_or_out_of_range[nan]",
-        "tests/test_scheduled_future_speech_content_gate.py::test_gate_verdict_schema_has_only_closed_semantic_dimensions",
+        "tests/test_dialog_agent.py::test_dialog_agent_returns_final_dialog_and_target",
+        "tests/test_dialog_agent.py::test_dialog_generator_requires_native_surface_before_llm_call",
+        "tests/test_dialog_agent.py::test_dialog_agent_rejects_missing_surface_before_llm_call",
+        "tests/test_dialog_agent.py::test_dialog_agent_rejects_total_empty_candidate_exhaustion",
         "tests/unit/nodes/test_dialog_agent.py::test_dialog_agent_exposes_owned_contract",
-        "tests/unit/nodes/test_dialog_agent.py::test_dialog_role_direction_rejects_selected_actor_target_reversal",
-        "tests/unit/nodes/test_dialog_agent.py::test_dialog_role_direction_uses_selected_response_operation",
-        "tests/unit/nodes/test_dialog_agent.py::test_dialog_score_is_numeric_quality_signal",
-        "tests/unit/nodes/test_dialog_agent.py::test_numeric_score_rejects_boolean_and_out_of_range_values",
-        "tests/unit/nodes/test_dialog_agent.py::test_role_direction_prompt_allows_compatible_nested_request_actions",
-        "tests/unit/nodes/test_dialog_agent.py::test_terminal_candidate_opposite_polarity_is_withheld"
+        "tests/unit/nodes/test_dialog_agent.py::test_validated_dialog_messages_collapses_blank_line_runs"
       ],
       "supplemental_tests": [
-        "tests/integration/cognition_core_v2/test_terminal_dialog_candidate.py::test_reward_offer_required_selection_delivers_visible_dialog",
-        "tests/integration/cognition_core_v2/test_terminal_dialog_candidate.py::test_terminal_dialog_candidate_opposite_polarity_is_withheld",
-        "tests/test_dialog_visible_speech_and_semantic_fidelity.py::test_dialog_semantic_exhaustion_withholds_unverified_candidates",
-        "tests/test_dialog_visible_speech_and_semantic_fidelity.py::test_role_direction_score_accepts_character_owned_deflection",
-        "tests/test_dialog_visible_speech_and_semantic_fidelity_live_llm.py::test_live_reward_request_preserves_user_actor_character_target",
-        "tests/test_scheduled_future_speech_content_gate_live_llm.py::test_current_authority_detail_is_accepted",
-        "tests/test_scheduled_future_speech_content_gate_live_llm.py::test_historical_only_grounding_is_suppressed",
-        "tests/test_scheduled_future_speech_content_gate_live_llm.py::test_incident_unsupported_detail_is_suppressed"
+        "tests/test_dialog_mention_target_user.py::test_dialog_agent_returns_no_mention_flag",
+        "tests/test_dialog_third_party_target_fidelity.py::test_dialog_transport_stays_addressed_to_current_user"
       ]
     },
     {

@@ -3498,29 +3498,6 @@ async def test_scheduled_worker_dispatches_only_gate_accepted_candidate(
     async def record_attempt(attempt: dict[str, Any]) -> None:
         recorded_attempts.append(dict(attempt))
 
-    aligned_verdict = {
-        "schema_version": "scheduled_speech_semantic_verdict.v1",
-        "time_claim_alignment": "aligned",
-        "objective_alignment": "aligned",
-        "source_grounding": "current_authority",
-        "audience_alignment": "aligned",
-        "execution_claim": "aligned",
-    }
-
-    async def evaluate_content(**kwargs: Any) -> dict[str, Any]:
-        del kwargs
-        return {
-            "status": "evaluated",
-            "verdict": aligned_verdict,
-            "attempt_count": 1,
-        }
-
-    monkeypatch.setattr(
-        worker,
-        "evaluate_scheduled_future_speech_content",
-        evaluate_content,
-    )
-
     result = await worker.run_self_cognition_worker_tick(
         now=datetime(2026, 5, 16, 10, 0, tzinfo=timezone.utc),
         is_primary_interaction_busy=lambda: False,
@@ -3638,21 +3615,6 @@ async def test_scheduled_worker_scrubs_gate_accepted_candidate_after_delivery_fa
         captured_consolidation_state.update(state)
         return _consolidation_result()
 
-    async def evaluate_content(**kwargs: Any) -> dict[str, Any]:
-        del kwargs
-        return {
-            "status": "evaluated",
-            "verdict": {
-                "schema_version": "scheduled_speech_semantic_verdict.v1",
-                "time_claim_alignment": "aligned",
-                "objective_alignment": "aligned",
-                "source_grounding": "current_authority",
-                "audience_alignment": "aligned",
-                "execution_claim": "aligned",
-            },
-            "attempt_count": 1,
-        }
-
     async def fail_delivery(**kwargs: Any) -> dict[str, Any]:
         del kwargs
         return {
@@ -3663,11 +3625,6 @@ async def test_scheduled_worker_scrubs_gate_accepted_candidate_after_delivery_fa
             "failure_reason": "adapter_unavailable",
         }
 
-    monkeypatch.setattr(
-        worker,
-        "evaluate_scheduled_future_speech_content",
-        evaluate_content,
-    )
     monkeypatch.setattr(worker, "deliver_selected_speak", fail_delivery)
     monkeypatch.setattr(
         worker.runner,
@@ -3708,161 +3665,6 @@ async def test_scheduled_worker_scrubs_gate_accepted_candidate_after_delivery_fa
 
 
 @pytest.mark.asyncio
-async def test_scheduled_worker_suppression_preserves_other_episode_evidence(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """Rejected candidate text is scrubbed while other evidence survives."""
-
-    monkeypatch.setattr(
-        worker.db,
-        "upsert_post_turn_lifecycle_record",
-        AsyncMock(),
-    )
-    monkeypatch.setattr(
-        worker,
-        "record_completed_episode_residue",
-        AsyncMock(return_value={"status": "skipped"}),
-    )
-    case = _future_cognition_case()
-    captured_consolidation_state: dict[str, Any] = {}
-    recorded_attempts: list[dict[str, Any]] = []
-
-    async def collect_cases(**kwargs: Any) -> list[dict[str, Any]]:
-        del kwargs
-        return [case]
-
-    async def run_case(next_case: dict[str, Any]) -> dict[str, Any]:
-        payloads = _selected_speak_artifacts(
-            next_case,
-            text="厕所隔间的检查已经准备好了。",
-        )
-        payloads[models.RUNTIME_COGNITIVE_EPISODE] = {
-            "schema_version": "cognitive_episode.v1",
-            "episode_id": "scheduled-tick:test-suppression",
-            "trigger_source": "scheduled_tick",
-            "created_at": "2026-05-16T10:00:00+00:00",
-            "target_scope": {"channel_type": "group"},
-            "origin_metadata": {},
-            "percepts": [],
-            "evidence_refs": [],
-            "privacy_scope": "private",
-            "continuation_depth": 0,
-        }
-        visible_surface = {
-            "schema_version": "surface_output.v1",
-            "visibility": "user_visible",
-            "delivery_intent": "deliver_now",
-            "surface_role": "ordinary",
-            "goal_continuation_ref": None,
-            "text": "厕所隔间的检查已经准备好了。",
-        }
-        private_surface = {
-            "schema_version": "surface_output.v1",
-            "visibility": "private",
-            "delivery_intent": "do_not_deliver",
-            "surface_role": "ordinary",
-            "goal_continuation_ref": None,
-            "summary": "episode audit retained",
-        }
-        payloads[models.ARTIFACT_COGNITION_OUTPUT] = {
-            "cognition_core_output": {
-                "state_update": {"state_scope": "user"},
-            },
-            "cognition_state_committed": True,
-            "surface_outputs": [visible_surface, private_surface],
-        }
-        payloads[models.ARTIFACT_COGNITION_INPUT] = {
-            "state_scope": "user",
-        }
-        trigger_record = tracking.build_trigger_record(next_case)
-        payloads[models.ARTIFACT_RUN_RECORD] = tracking.build_run_record(
-            next_case,
-            trigger_record,
-            models.ROUTE_ACTION_CANDIDATE,
-            {
-                "rag_calls": 0,
-                "cognition_calls": 1,
-                "dialog_calls": 1,
-                "topic_limit": models.TOPIC_LIMIT,
-            },
-        )
-        payloads[models.RUNTIME_CONSOLIDATION_STATE] = {
-            "cognitive_episode": dict(
-                payloads[models.RUNTIME_COGNITIVE_EPISODE]
-            ),
-            "final_dialog": ["厕所隔间的检查已经准备好了。"],
-            "surface_outputs": [dict(visible_surface), dict(private_surface)],
-            "decontextualized_input": "来源：其他有效认知证据仍然保留。",
-        }
-        return payloads
-
-    async def record_attempt(attempt: dict[str, Any]) -> None:
-        recorded_attempts.append(dict(attempt))
-
-    async def run_consolidation(state: dict[str, Any]) -> dict[str, Any]:
-        captured_consolidation_state.update(state)
-        return _consolidation_result()
-
-    async def evaluate_content(**kwargs: Any) -> dict[str, Any]:
-        del kwargs
-        return {
-            "status": "evaluated",
-            "verdict": {
-                "schema_version": "scheduled_speech_semantic_verdict.v1",
-                "time_claim_alignment": "aligned",
-                "objective_alignment": "scope_expansion",
-                "source_grounding": "unsupported",
-                "audience_alignment": "aligned",
-                "execution_claim": "aligned",
-            },
-            "attempt_count": 1,
-        }
-
-    monkeypatch.setattr(
-        worker,
-        "evaluate_scheduled_future_speech_content",
-        evaluate_content,
-    )
-    monkeypatch.setattr(
-        worker.runner,
-        "run_self_cognition_consolidation_async",
-        run_consolidation,
-    )
-
-    result = await worker.run_self_cognition_worker_tick(
-        now=datetime(2026, 5, 16, 10, 0, tzinfo=timezone.utc),
-        is_primary_interaction_busy=lambda: False,
-        collect_cases_func=collect_cases,
-        run_case_func=run_case,
-        read_attempts_func=lambda **kwargs: [],
-        record_attempt_func=record_attempt,
-        claim_calendar_run_func=lambda run_id, **kwargs: True,
-        complete_calendar_run_func=AsyncMock(),
-        max_cases=1,
-    )
-
-    assert result.processed_count == 1
-    assert recorded_attempts[-1]["status"] == (
-        models.ACTION_ATTEMPT_STATUS_CLOSED_NO_ACTION
-    )
-    consolidation_state = captured_consolidation_state
-    assert consolidation_state["final_dialog"] == []
-    assert all(
-        output.get("delivery_intent") != "deliver_now"
-        for output in consolidation_state["surface_outputs"]
-    )
-    assert "厕所隔间的检查" not in str(consolidation_state)
-    assert (
-        consolidation_state["decontextualized_input"]
-        == "来源：其他有效认知证据仍然保留。"
-    )
-    admission = consolidation_state["scheduled_candidate_admission"]
-    assert admission["disposition"] == "suppressed"
-    assert admission["gate_codes"] == ["scheduled_objective_mismatch"]
-    assert admission["dispatch_status"] == "scheduled_content_suppressed"
-
-
 def test_rejected_scheduled_candidate_is_removed_before_consolidation() -> None:
     """The worker scrub strips candidate text before consolidation input."""
 

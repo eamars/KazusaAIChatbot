@@ -41,7 +41,6 @@ from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
 )
 from kazusa_ai_chatbot.cognition_core_v2.surface_stages import (
     CONTENT_PLAN_SYSTEM_PROMPT,
-    DIALOG_COMPLIANCE_REPAIR_SYSTEM_PROMPT,
     PREFERENCE_SYSTEM_PROMPT,
 )
 from kazusa_ai_chatbot.cognition_episode import (
@@ -137,12 +136,7 @@ def test_static_prompt_policy_audit_removes_application_owned_policy() -> None:
         ACTION_PLANNING_PROMPT,
         CONTENT_PLAN_SYSTEM_PROMPT,
         PREFERENCE_SYSTEM_PROMPT,
-        DIALOG_COMPLIANCE_REPAIR_SYSTEM_PROMPT,
         dialog_module._V2_DIALOG_GENERATOR_PROMPT,
-        dialog_module._V2_DIALOG_HARD_FAILURE_REPAIR_PROMPT,
-        dialog_module._V2_DIALOG_SEMANTIC_FIDELITY_PROMPT,
-        dialog_module._V2_DIALOG_ROLE_DIRECTION_PROMPT,
-        dialog_module._V2_DIALOG_SURFACE_INTEGRITY_PROMPT,
     )
     removed_policy_fragments = (
         "当前 episode 明确写出的角色拒绝、排斥或边界条件优先于",

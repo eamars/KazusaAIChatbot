@@ -38,7 +38,7 @@ only real visible boundaries. `dialog_agent.py` owns final visible wording.
 | Persona graph | `persona_supervisor2.py` | Resolver recurrence, final commit ordering, action/surface routing, no-response handling, and episode trace assembly. |
 | V2 connector | `persona_supervisor2_cognition.py`, `persona_supervisor2_cognition_actions.py` | Exact `CognitionCoreInputV2` construction, state loading, V2 service binding, output projection, final state replacement, and semantic action-request materialization. |
 | Text and terminal visual connector | `persona_supervisor2_l3_surface.py` | Prompt-safe interaction-style loading, exact `TextSurfaceInputV2` construction, two-call unified-content/preference planning, and independent one-call visual planning. |
-| Dialog | `dialog_agent.py` | Literal spoken or typed text from `TextSurfaceOutputV2`, bounded current-visible-percept and authoritative-surface verification, accepted-surface return, and one full repair maximum. |
+| Dialog | `dialog_agent.py` | Literal spoken or typed text from the validated `TextSurfaceOutputV2`, structural JSON/source validation, and accepted-surface return. |
 | Specialist action handling | `persona_supervisor2_memory_lifecycle.py`, action-spec packages | Deterministic validation and execution of admitted semantic action requests. |
 | Consolidation handoff | `persona_supervisor2.py` | Completed persona state is handed to `kazusa_ai_chatbot.consolidation`, which owns extraction helpers, origin projection, target validation, and durable write routing. |
 
@@ -57,10 +57,10 @@ For a required-selection turn, `persona_supervisor2_msg_decontextualizer.py`
 owns the input-level `response_operation`. Cognition V2 owns the concrete
 `selected_response_operation` emitted by required-selection goal cognition.
 The carrier passes through the complete bid, selected intention, and
-`TextSurfaceInputV2`; the surface model does not rewrite it, and
-`dialog_agent.py` uses it for role-direction verification. Known non-`无`
-roles are preserved deterministically, while missing or conflicting selected
-operations fail closed before dialog consumes its bounded candidate attempts.
+`TextSurfaceInputV2`; the surface model does not rewrite it, and dialog
+receives only the validated surface projection. Known non-`无` roles are
+preserved deterministically, while missing or conflicting selected operations
+fail closed before surface planning.
 
 ## Canonical Live Flow
 
@@ -93,7 +93,6 @@ stage_0_msg_decontextualizer
          -> run one terminal visual stage as a sibling when enabled
          -> retain the validated text input and output for dialog
          -> dialog_agent renders the text output
-         -> one L3 semantic replacement and second render after hard rejection
          -> text surface, private image evidence, and action-result trace
        non-speech
          -> private terminal handling
@@ -203,8 +202,8 @@ When Stage 0 supplied a valid semantic projection, the connector forwards its
 `role_explicit_content` and input-level `response_operation` unchanged as
 current episode evidence and semantic scene. Goal cognition emits the concrete
 `selected_response_operation`; surface planning carries it without rewriting
-it, and dialog verification uses that selected operation as required-selection
-role authority instead of independently interpreting nested direct pronouns.
+it, and dialog renders the resulting surface without independently interpreting
+nested direct pronouns.
 
 The V2 core performs deterministic preparation, scoped semantic appraisal,
 state reduction, dependency-ready goal cognition, complete-bid collapse, and
@@ -328,14 +327,13 @@ only; they cannot override the cognition-selected stance.
 `lexical_avoidances` is a bounded surface-owned list of concrete current-turn
 wording fragments, such as a repeated recent opening or stale address. It is
 used for literal expression-continuity checking and never classifies topics or
-selects a character stance. The list flows through normal, degraded, repaired,
-and dialog-verifier surfaces; a literal hit enters the existing bounded repair
-path.
+selects a character stance. The dialog generator preserves the selected
+semantics while avoiding those fragments; the check is deterministic and
+bounded.
 
-Surface quality ranking is evidence-gated. `surface_content_plan` and
-`surface_dialog_compliance_repair` remain research candidates, but the current
-blocked calibration artifact keeps production on the existing first-valid and
-degraded paths. The V2 `confidence` field remains advisory descriptor context,
+Surface quality ranking is evidence-gated. `surface_content_plan` remains a
+research candidate, but the current blocked calibration artifact keeps
+production on the existing first-valid and degraded paths. The V2 `confidence` field remains advisory descriptor context,
 not a quality score; it is excluded from workspace quality comparison and
 cannot change cognition truth, action authorization, role direction,
 addressee, persistence, queue, delivery, or state. Future activation requires
@@ -358,90 +356,23 @@ interaction without supplying staging forms; dialog carries emotion,
 personality, and interaction posture through wording, sentence shape, and
 cadence. Action narration remains an ungated model variation: the prompts do
 not request it, and generated instances are neither rejected nor rewritten.
-Three bounded model-owned hard-error checks run in parallel on the existing
-dialog-model route. Semantic fidelity receives current percepts, the candidate
-role frame, candidate dialog, and authoritative surface semantics containing selected
-intent, content plan, requirements, visible boundaries, lexical avoidances, and the exact
-relational stance when present. It checks internal
-contradiction, direct current-input conflict, actor/target/subject reversal,
-and unsupported within-turn opposite-stance transitions. Delivery profile,
-permitted action results, and selection-owned role fields are excluded from
-this semantic authority. Surface integrity receives only permitted action
-results and candidate dialog; it checks false claims of character-brain action
-execution. Source percepts and generated character speech use separate typed
-pronoun frames before actor/action/target comparison. Semantic fidelity owns
-non-selection role direction. The selection-only role verifier receives the
-five authoritative fields from `selected_response_operation` and compares
-them to the same selected embedded action in the candidate, not to every
-grammatical verb. It owns strict selection-owner transfer plus unambiguous
-actor/target reversal of that same embedded action. Character-owned agreement,
-desire, request, imperative, negotiation, deflection, condition, consequence,
-or secondary compatible action may keep a wrapper actor distinct from the
-nested action without becoming a reversal; ambiguous or multi-action readings
-remain high score unless the candidate unambiguously assigns the same selected
-action to the opposite actor/target. The input-level `response_operation`
-remains provenance; the selected-operation fields are removed from the
-semantic-fidelity projection while the raw current-input meaning remains.
-Deterministic code merges the three numeric verdicts and the literal
-expression-continuity verdict without rewriting dialog semantics. The aggregate
-is the equal-weight geometric mean of available focused scores; clean lexical
-continuity contributes `1.0`. `DIALOG_PASS_SCORE_THRESHOLD` is currently `0.50`.
-Each owner returns at most four issues and the duplicate-free merged result
-returns at most eight. None of the checks treats novelty or personality
-strength as failure. Refusal, negotiation, and conditions chosen by the
-character remain valid responses unless typed actor, target, response-owner,
-or selection-owner direction is reversed.
-
-Each semantic-fidelity, role-direction, and surface-integrity producer gets
-three structural attempts. An exact-shape failure retains the original system
-and human semantic packet, places the latest bounded rejected verdict in an
-assistant message, and supplies the exact contract error in a human
-correction. This does not re-render dialog or add another semantic owner.
-Protected traces retain every attempt. Exhaustion marks that focused owner
-`unavailable`; available focused scores can still rank a structurally valid
-candidate. If all focused owners are unavailable, the aggregate is `0.0` and
-the latest eligible candidate can be delivered as explicit degraded output
-after the candidate attempt cap. Explicit semantic `hard_errors`, typed role
-violations, false-execution issues, lexical violations, empty candidates, and
-state or delivery failures remain ineligible or fail closed.
-
-The semantic-fidelity producer returns exact `score` and `hard_errors` fields.
-The role-direction producer returns exact `score` and typed `violations`.
-Surface integrity returns exact `score` and evidence-bearing `issues`.
-Deterministic validation accepts no boolean `aligned` alias, rejects non-finite
-or out-of-range scores, and regenerates malformed verdicts within the bounded
-owner attempts. A candidate with no hard issue but an aggregate below the
-threshold remains comparable for degraded fallback; the highest eligible bid
-is selected after exhaustion, with the latest attempt winning exact ties.
-
-A negative merged verdict returns the retained canonical
-`TextSurfaceInputV2` and bounded verified issues to the L3 owner. Rejected
-surface fields and rejected dialog remain protected trace evidence only. L3
-replaces content, requirements, delivery profile, lexical avoidances, visible
-boundaries, and addressee together, then reconstructs selected intent, permitted action
-results, the exact relational stance, and runtime limits from canonical input.
-If surface replacement exhausts, dialog retains the latest validated surface.
-Every dialog candidate, including the terminal candidate, runs all three
-focused checks and the expression-continuity check. Bounded exhaustion selects
-the highest eligible comparable candidate and marks it degraded; when no
-eligible candidate remains it produces a typed delivery failure, so no
-hard-invalid or unverified candidate reaches the persona graph.
+The generator receives the validated `TextSurfaceOutputV2` and emits the
+visible `final_dialog`. Canonical JSON parsing, structural message validation,
+and deterministic required-source-URL checks remain in the generator boundary.
+No semantic verifier, score gate, or evaluator-driven repair follows
+generation. Action narration remains an ungated model variation: the prompts
+do not request it, and generated instances are neither rejected nor rewritten.
 
 Before this dialog boundary, a typed character-owned required selection routes
 the selected goal branch to one specialized producer in place of its generic
 goal prompt. The producer emits one authoritative selection and accounts for
 every required-selection handle while retaining complete progress evidence for
 its own relevance judgment. Structural retries reuse that same goal owner; no
-semantic evaluator or replacement owner is added. Dialog's corresponding
-focused check reads the canonical `selected_response_operation` carrier from
-`TextSurfaceInputV2` and owns only explicit selection-owner transfer and
-unambiguous reversal of the same selected embedded action. The episode-level
-`response_operation` remains input provenance. Semantic completeness, brevity,
-and specificity remain with semantic fidelity and the L3 surface owner. A
-character-owned desire, request, or imperative can name the selected action
-with a wrapper actor distinct from the nested actor, and speaking or sending
-content counts as an action when the typed operation requires it. Turns without
-the structural flag use the generic goal producer.
+replacement owner is added. The episode-level
+`response_operation` remains input provenance, while the selected operation
+remains cognition-owned semantic context. Dialog receives only the validated
+surface projection and renders its wording. Turns without the structural flag
+use the generic goal producer.
 
 Dialog does not receive raw V2 mutable state, private branch payloads,
 suppressed bids, persistent handles, relationship scalars, or obsolete
@@ -496,8 +427,8 @@ actions, deliver messages, schedule work, or reopen cognition.
   the service graph retry; an orchestration replay cannot reset them.
 - Degradable exhaustion finishes with the owner fallback: normalized original
   input, omitted optional appraisal or visual output, already-valid bid,
-  empty or denied control work, validated neutral text surface, unavailable
-  verifier, or retained bounded dialog.
+  empty or denied control work, validated neutral text surface, or retained
+  bounded dialog.
 - Invalid canonical episodes, mutable state, bids, routes, required zero-valid
   cognition after the complete-sibling policy, commit failures, and
   zero-candidate total model unavailability remain unrecoverable at their

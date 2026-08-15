@@ -347,8 +347,6 @@ class SelfCognitionScheduledGateResult(TypedDict):
     schema_version: Literal["self_cognition_scheduled_gate_result.v1"]
     disposition: Literal["accepted", "suppressed", "not_evaluated"]
     gate_codes: list[str]
-    evaluator_attempt_count: int
-    verdict: NotRequired[dict[str, Any]]
 
 
 SelfCognitionSourceContext = (

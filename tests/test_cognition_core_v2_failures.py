@@ -371,18 +371,12 @@ async def test_clean_text_surface_output_has_no_capsule_write(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "entrypoint",
-    [
-        "repair_text_surface_planning",
-        "run_visual_surface_planning",
-    ],
-)
+@pytest.mark.parametrize("entrypoint", ["run_visual_surface_planning"])
 async def test_remaining_surface_entrypoints_capture_terminal_failure(
     monkeypatch,
     entrypoint: str,
 ) -> None:
-    """Repair and visual entrypoints capture before input validation."""
+    """The visual entrypoint captures before input validation."""
 
     written: list[dict[str, Any]] = []
     persisted = asyncio.Event()
@@ -410,22 +404,13 @@ async def test_remaining_surface_entrypoints_capture_terminal_failure(
     )
     monkeypatch.setattr(tracing.db_llm_tracing, "insert_trace_step", insert_step)
     trace_token = tracing.bind_trace_id(f"trace-{entrypoint}")
-    repair_input = {"exact": "repair input"}
-    verified_issues = ["preserve the verified issue"]
     visual_input = {"exact": "visual input"}
     try:
         with pytest.raises(ValueError) as exc_info:
-            if entrypoint == "repair_text_surface_planning":
-                await surface_module.repair_text_surface_planning(
-                    cast(Any, repair_input),
-                    verified_issues,
-                    cast(Any, None),
-                )
-            else:
-                await surface_module.run_visual_surface_planning(
-                    cast(Any, visual_input),
-                    cast(Any, None),
-                )
+            await surface_module.run_visual_surface_planning(
+                cast(Any, visual_input),
+                cast(Any, None),
+            )
     finally:
         tracing.reset_trace_id(trace_token)
     await asyncio.wait_for(persisted.wait(), timeout=1)
@@ -435,13 +420,7 @@ async def test_remaining_surface_entrypoints_capture_terminal_failure(
     capsule = written[0]["capsule"]
     assert capsule["entrypoint"] == entrypoint
     assert capsule["outcome"] == "terminal_failure"
-    if entrypoint == "repair_text_surface_planning":
-        assert capsule["input_payload"] == {
-            "input_payload": repair_input,
-            "verified_hard_issues": verified_issues,
-        }
-    else:
-        assert capsule["input_payload"] == visual_input
+    assert capsule["input_payload"] == visual_input
 
 
 def test_unsupported_appraisal_can_select_no_evidence() -> None:

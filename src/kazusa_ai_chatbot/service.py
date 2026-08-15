@@ -250,8 +250,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer import (
     select_media_for_turn,
 )
 from kazusa_ai_chatbot.nodes.dialog_agent import (
-    DialogComplianceContractError,
-    DialogVerifierContractError,
+    DialogGenerationContractError,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2 import persona_supervisor2
 from kazusa_ai_chatbot.nodes.persona_supervisor2_memory_lifecycle import (
@@ -512,8 +511,7 @@ def _operational_failure_metadata(
         exc,
         (
             CognitionExecutionError,
-            DialogComplianceContractError,
-            DialogVerifierContractError,
+            DialogGenerationContractError,
             SettledRelevanceContractError,
         ),
     ):

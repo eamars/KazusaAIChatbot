@@ -38,7 +38,6 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     validate_text_surface_input,
 )
 from kazusa_ai_chatbot.cognition_core_v2.surface import (
-    repair_text_surface_planning,
     run_text_surface_planning,
     run_visual_surface_planning,
 )
@@ -195,30 +194,6 @@ async def call_l3_text_surface_handler(state: GlobalPersonaState) -> dict[str, A
         raise visual_result
     return_value["visual_surface_output_v2"] = visual_result
     return return_value
-
-
-async def repair_text_surface_for_dialog(
-    *,
-    surface_input: TextSurfaceInputV2,
-    verified_hard_issues: list[str],
-) -> TextSurfaceOutputV2:
-    """Bind dialog hard-error recovery to the text-surface semantic owner.
-
-    Args:
-        surface_input: Retained canonical input used by the original surface.
-        verified_hard_issues: Bounded semantic issues confirmed by verifiers.
-
-    Returns:
-        The validated semantic replacement produced by the surface owner.
-    """
-
-    repaired_output = await repair_text_surface_planning(
-        surface_input,
-        verified_hard_issues,
-        _build_text_surface_services(),
-    )
-    _assert_relational_willingness_preserved(surface_input, repaired_output)
-    return repaired_output
 
 
 def _assert_relational_willingness_preserved(

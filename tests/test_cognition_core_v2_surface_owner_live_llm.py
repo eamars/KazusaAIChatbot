@@ -769,70 +769,10 @@ async def test_live_degraded_surface_preserves_character_dialog(
     )
     degraded_surface = build_degraded_text_surface(surface_input)
     capturing_llm = _CapturingLLM(dialog_module._dialog_generator_llm)
-    verifier_outcomes: list[dict[str, Any]] = []
-
-    async def _accept_degraded_candidate(
-        *,
-        surface_output: dict[str, Any],
-        generated_dialog: list[str],
-        current_visible_percepts: list[dict[str, Any]],
-        llm_trace_id: str,
-        post_repair: bool = False,
-    ) -> dict[str, Any]:
-        """Record the controlled aligned verdict for real dialog rendering.
-
-        Args:
-            surface_output: Degraded surface authority for the candidate.
-            generated_dialog: Real-model dialog being accepted.
-            current_visible_percepts: Bounded scene input visible to verifiers.
-            llm_trace_id: Protected trace correlation identifier.
-            post_repair: Whether the candidate followed a repair.
-
-        Returns:
-            An aligned typed aggregate for the isolated rendering check.
-        """
-
-        aggregate = {
-            'semantic_fidelity': {
-                'status': 'scored',
-                'score': 1.0,
-                'issues': [],
-            },
-            'role_direction': {
-                'status': 'scored',
-                'score': 1.0,
-                'violations': [],
-            },
-            'surface_integrity': {
-                'status': 'scored',
-                'score': 1.0,
-                'issues': [],
-            },
-            'lexical_avoidance': {
-                'status': 'scored',
-                'score': 1.0,
-                'issues': [],
-            },
-        }
-        verifier_outcomes.append({
-            'candidate_final_dialog': list(generated_dialog),
-            'post_repair': post_repair,
-            'typed_verifier_outcome': aggregate,
-            'surface_intent': surface_output['selected_surface_intent'],
-            'visible_percept_count': len(current_visible_percepts),
-            'trace_id': llm_trace_id,
-        })
-        return aggregate
-
     monkeypatch.setattr(
         dialog_module,
         '_dialog_generator_llm',
         capturing_llm,
-    )
-    monkeypatch.setattr(
-        dialog_module,
-        '_verify_dialog_compliance',
-        _accept_degraded_candidate,
     )
     monkeypatch.setattr(
         dialog_module.llm_tracing,
@@ -884,7 +824,6 @@ async def test_live_degraded_surface_preserves_character_dialog(
             'degraded_surface': degraded_surface,
             'attempt_count': len(capturing_llm.calls),
             'dialog_generator_calls': capturing_llm.calls,
-            'typed_verifier_outcomes': verifier_outcomes,
             'selected_candidate': final_dialog,
             'disposition': 'delivered_degraded_surface_dialog',
             'quality_review': quality_review,
@@ -900,7 +839,6 @@ async def test_live_degraded_surface_preserves_character_dialog(
         'trace_path': str(trace_path),
         'attempt_count': len(capturing_llm.calls),
         'candidate_text': final_dialog,
-        'typed_verifier_outcomes': verifier_outcomes,
         'selected_candidate': final_dialog,
         'disposition': 'delivered_degraded_surface_dialog',
         'quality_review': quality_review,
@@ -908,6 +846,5 @@ async def test_live_degraded_surface_preserves_character_dialog(
 
     assert trace_path.exists()
     assert len(capturing_llm.calls) == 1
-    assert len(verifier_outcomes) == 1
     assert result['text_surface_output_v2'] == degraded_surface
     assert quality_review['passed']

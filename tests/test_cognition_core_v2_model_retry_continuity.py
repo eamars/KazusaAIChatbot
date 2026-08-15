@@ -121,86 +121,6 @@ def _dialog_state() -> dict[str, object]:
     }
 
 
-def _compliance_result(
-    *,
-    aligned: bool,
-    semantic_hard_error: bool = False,
-) -> dict[str, object]:
-    """Build one scored focused-verifier aggregate for dialog ledger tests."""
-
-    score = 1.0 if aligned else 0.1
-
-    return {
-        "semantic_fidelity": {
-            "status": (
-                "hard_ineligible"
-                if semantic_hard_error
-                else "scored"
-            ),
-            "score": score,
-            "issues": (
-                ["semantic hard error"]
-                if semantic_hard_error
-                else []
-            ),
-        },
-        "role_direction": {
-            "status": "scored",
-            "score": score,
-            "violations": [],
-        },
-        "surface_integrity": {
-            "status": "scored",
-            "score": score,
-            "issues": [],
-        },
-        "lexical_avoidance": {
-            "status": "scored",
-            "score": 1.0,
-            "issues": [],
-        },
-    }
-
-
-def _patch_dialog_sequence(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    candidates: list[object],
-    compliance_results: list[dict[str, object]],
-) -> tuple[MagicMock, AsyncMock]:
-    """Install one deterministic generator and compliance sequence."""
-
-    generator_llm = MagicMock()
-    generator_llm.ainvoke = AsyncMock(side_effect=[
-        SimpleNamespace(content=json.dumps(candidate))
-        for candidate in candidates
-    ])
-    compliance = AsyncMock(side_effect=compliance_results)
-    monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
-    monkeypatch.setattr(dialog_module, "_verify_dialog_compliance", compliance)
-    monkeypatch.setattr(
-        dialog_module,
-        "repair_text_surface_for_dialog",
-        AsyncMock(return_value=_surface_output()),
-    )
-    monkeypatch.setattr(
-        dialog_module.llm_tracing,
-        "record_llm_trace_step",
-        AsyncMock(),
-    )
-    monkeypatch.setattr(
-        dialog_module.event_logging,
-        "record_llm_stage_event",
-        AsyncMock(),
-    )
-    monkeypatch.setattr(
-        dialog_module.event_logging,
-        "record_model_contract_event",
-        AsyncMock(),
-    )
-    return generator_llm, compliance
-
-
 def test_v2_attempt_policy_matches_exact_owner_matrix() -> None:
     """Every scoped model call has one bounded owner and terminal disposition."""
 
@@ -210,7 +130,6 @@ def test_v2_attempt_policy_matches_exact_owner_matrix() -> None:
     fixture_owners = _fixture()["owners"]
 
     assert policy.V2_MODEL_TOTAL_ATTEMPTS == 3
-    assert policy.V2_VERIFIER_TOTAL_ATTEMPTS == 3
     assert policy.V2_MODEL_OWNER_POLICIES == fixture_owners
 
 
@@ -285,7 +204,6 @@ def test_appraisal_uses_two_attempts_while_other_short_owners_use_three() -> Non
         surface_stages.SURFACE_STAGE_ATTEMPT_LIMIT,
         decontextualizer_module.IMAGE_DESCRIPTOR_ATTEMPT_LIMIT,
         decontextualizer_module.MSG_DECONTEXTUALIZER_ATTEMPT_LIMIT,
-        dialog_module.DIALOG_VERIFIER_ATTEMPT_LIMIT,
         dialog_module.DIALOG_GENERATOR_TOTAL_ATTEMPTS,
     }
 
@@ -320,259 +238,36 @@ def test_degraded_text_surface_projects_only_validated_v2_truth() -> None:
     }
 
 
-def test_role_direction_verdict_requires_typed_violation_kinds() -> None:
-    """Role rejection is limited to the two approved typed conditions."""
-
-    fixture_cases = _fixture()["role_direction_cases"]
-    violation_kinds = {
-        case["expected_violation_kind"]
-        for case in fixture_cases
-        if "expected_violation_kind" in case
-    }
-    assert violation_kinds == {
-        "selection_owner_transfer",
-        "typed_operation_role_reversal",
-    }
-
-    valid = {
-        "score": 0.1,
-        "violations": [{
-            "kind": "selection_owner_transfer",
-            "evidence": "I will follow your choice.",
-            "explanation": "The candidate transfers the required selection.",
-        }],
-    }
-    assert dialog_module._validate_role_direction_verdict(
-        valid,
-        generated_dialog=["I will follow your choice."],
-    ) == valid
-
-    invalid = {
-        "score": 0.1,
-        "violations": [{
-            **valid["violations"][0],
-            "kind": "information_request",
-        }],
-    }
-    with pytest.raises(ValueError):
-        dialog_module._validate_role_direction_verdict(
-            invalid,
-            generated_dialog=["I will follow your choice."],
-        )
-
-    with pytest.raises(ValueError, match="evidence"):
-        dialog_module._validate_role_direction_verdict(
-            valid,
-            generated_dialog=["I already made the required selection."],
-        )
-
-
-@pytest.mark.asyncio
-async def test_focused_verifier_exhaustion_returns_unavailable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Malformed verifier output cannot erase a valid dialog candidate."""
-
-    verifier_llm = MagicMock()
-    verifier_llm.ainvoke = AsyncMock(return_value=SimpleNamespace(
-        content='{"score": 1.0, "Issues": []}',
-    ))
-    monkeypatch.setattr(
-        dialog_module,
-        "_dialog_semantic_fidelity_llm",
-        verifier_llm,
-    )
-    monkeypatch.setattr(
-        dialog_module.llm_tracing,
-        "record_llm_trace_step",
-        AsyncMock(),
-    )
-    monkeypatch.setattr(
-        dialog_module.event_logging,
-        "record_model_contract_event",
-        AsyncMock(),
-    )
-
-    verdict = await dialog_module._verify_dialog_semantic_fidelity(
-        surface_output=_surface_output(),
-        generated_dialog=["I choose the first option."],
-        current_visible_percepts=[],
-        llm_trace_id="verifier-unavailable-test",
-    )
-
-    assert verdict == {"status": "unavailable", "hard_errors": []}
-    assert verifier_llm.ainvoke.await_count == 3
-
-
-@pytest.mark.asyncio
-async def test_focused_verifier_provider_exhaustion_returns_unavailable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Three classified provider failures cannot erase a dialog candidate."""
-
-    verifier_llm = MagicMock()
-    verifier_llm.ainvoke = AsyncMock(
-        side_effect=ConnectionError("provider unavailable"),
-    )
-    monkeypatch.setattr(
-        dialog_module,
-        "_dialog_semantic_fidelity_llm",
-        verifier_llm,
-    )
-    monkeypatch.setattr(
-        dialog_module.llm_tracing,
-        "record_llm_trace_step",
-        AsyncMock(),
-    )
-    monkeypatch.setattr(
-        dialog_module.event_logging,
-        "record_model_contract_event",
-        AsyncMock(),
-    )
-
-    verdict = await dialog_module._verify_dialog_semantic_fidelity(
-        surface_output=_surface_output(),
-        generated_dialog=["I choose the first option."],
-        current_visible_percepts=[],
-        llm_trace_id="verifier-provider-unavailable-test",
-    )
-
-    assert verdict == {"status": "unavailable", "hard_errors": []}
-    assert verifier_llm.ainvoke.await_count == 3
-
-
-@pytest.mark.asyncio
-async def test_unexpected_verifier_exception_remains_unrecoverable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """An internal verifier invariant still reaches the fatal boundary."""
-
-    monkeypatch.setattr(
-        dialog_module,
-        "_verify_dialog_semantic_fidelity",
-        AsyncMock(side_effect=AssertionError("verifier invariant")),
-    )
-    monkeypatch.setattr(
-        dialog_module,
-        "_verify_dialog_role_direction",
-        AsyncMock(return_value={"score": 1.0, "violations": []}),
-    )
-    monkeypatch.setattr(
-        dialog_module,
-        "_verify_dialog_surface_integrity",
-        AsyncMock(return_value={"score": 1.0, "issues": []}),
-    )
-
-    with pytest.raises(AssertionError, match="verifier invariant"):
-        await dialog_module._verify_dialog_compliance(
-            surface_output=_surface_output(),
-            generated_dialog=["I choose the first option."],
-            current_visible_percepts=[],
-            llm_trace_id="verifier-invariant-test",
-        )
-
-
-@pytest.mark.asyncio
-async def test_dialog_third_candidate_requires_terminal_verification(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The highest-scoring valid candidate is delivered after exhaustion."""
-
-    generator_llm, compliance = _patch_dialog_sequence(
-        monkeypatch,
-        candidates=[
-            {
-            "final_dialog": ["candidate one"],
-            },
-            {
-            "final_dialog": ["candidate two"],
-            },
-            {
-            "final_dialog": ["candidate three"],
-            },
-        ],
-        compliance_results=[
-            _compliance_result(aligned=False),
-            _compliance_result(aligned=False),
-            _compliance_result(aligned=False),
-        ],
-    )
-
-    result = await dialog_module.dialog_generator(_dialog_state())
-
-    assert generator_llm.ainvoke.await_count == 3
-    assert compliance.await_count == 3
-    assert result["final_dialog"] == ["candidate three"]
-
-
-@pytest.mark.asyncio
-async def test_empty_terminal_candidate_withholds_unverified_candidates(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """An empty terminal render leaves the best earlier candidate eligible."""
-
-    generator_llm, compliance = _patch_dialog_sequence(
-        monkeypatch,
-        candidates=[
-            {"final_dialog": ["candidate one"]},
-            {"final_dialog": ["candidate two"]},
-            {"final_dialog": []},
-        ],
-        compliance_results=[
-            _compliance_result(aligned=False),
-            _compliance_result(aligned=False),
-        ],
-    )
-
-    result = await dialog_module.dialog_generator(_dialog_state())
-
-    assert generator_llm.ainvoke.await_count == 3
-    assert compliance.await_count == 2
-    assert result["final_dialog"] == ["candidate two"]
-
-
-@pytest.mark.asyncio
-async def test_unusable_candidates_remain_unrecoverable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A valid candidate remains deliverable when later attempts are empty."""
-
-    generator_llm, compliance = _patch_dialog_sequence(
-        monkeypatch,
-        candidates=[
-            {"final_dialog": ["candidate one"]},
-            {"final_dialog": []},
-            {"final_dialog": []},
-        ],
-        compliance_results=[
-            _compliance_result(aligned=False),
-        ],
-    )
-
-    result = await dialog_module.dialog_generator(_dialog_state())
-
-    assert generator_llm.ainvoke.await_count == 3
-    assert compliance.await_count == 1
-    assert result["final_dialog"] == ["candidate one"]
-
-
-@pytest.mark.asyncio
 async def test_zero_usable_dialog_candidates_remains_unrecoverable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Total generator exhaustion has no visible fallback to deliver."""
 
-    generator_llm, compliance = _patch_dialog_sequence(
-        monkeypatch,
-        candidates=[{}, {}, {}],
-        compliance_results=[],
+    generator_llm = MagicMock()
+    generator_llm.ainvoke = AsyncMock(
+        return_value=SimpleNamespace(content="{}"),
+    )
+    monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
+    monkeypatch.setattr(
+        dialog_module.llm_tracing,
+        "record_llm_trace_step",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        dialog_module.event_logging,
+        "record_llm_stage_event",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        dialog_module.event_logging,
+        "record_model_contract_event",
+        AsyncMock(),
     )
 
     with pytest.raises(dialog_module.StateContractError):
         await dialog_module.dialog_generator(_dialog_state())
 
     assert generator_llm.ainvoke.await_count == 3
-    compliance.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -801,46 +496,3 @@ async def test_unexpected_text_surface_failure_remains_unrecoverable(
         )
 
 
-@pytest.mark.asyncio
-async def test_dialog_surface_repair_exhaustion_retains_valid_surface(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Dialog repair continues from the latest validated semantic surface."""
-
-    generator_llm, compliance = _patch_dialog_sequence(
-        monkeypatch,
-        candidates=[
-            {"final_dialog": ["candidate one"]},
-            {"final_dialog": ["candidate two"]},
-        ],
-        compliance_results=[
-            _compliance_result(
-                aligned=False,
-                semantic_hard_error=True,
-            ),
-            _compliance_result(aligned=True),
-        ],
-    )
-    surface_repair = AsyncMock(side_effect=CognitionExecutionError(
-        "dialog surface repair contract exhausted",
-        error_code="surface_dialog_compliance_repair_contract_exhausted",
-        stage="surface.dialog_compliance_repair",
-        attempt_count=3,
-        safe_checkpoint="post_cognition_commit",
-        retryable=False,
-    ))
-    monkeypatch.setattr(
-        dialog_module,
-        "repair_text_surface_for_dialog",
-        surface_repair,
-    )
-
-    result = await dialog_module.dialog_generator(_dialog_state())
-
-    assert result == {
-        "final_dialog": ["candidate two"],
-        "text_surface_output_v2": _surface_output(),
-    }
-    assert generator_llm.ainvoke.await_count == 2
-    assert compliance.await_count == 2
-    surface_repair.assert_awaited_once()

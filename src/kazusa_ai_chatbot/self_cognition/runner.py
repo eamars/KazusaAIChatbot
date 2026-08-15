@@ -648,7 +648,6 @@ def _scheduled_guard_blocked_artifacts(
         "schema_version": models.SCHEDULED_GATE_RESULT_SCHEMA_VERSION,
         "disposition": models.SCHEDULED_GATE_DISPOSITION_SUPPRESSED,
         "gate_codes": list(guard_codes),
-        "evaluator_attempt_count": 0,
     }
     artifact_payloads: dict[str, Any] = {
         models.ARTIFACT_TRIGGER_RECORD: trigger_record,

@@ -421,9 +421,8 @@ def test_rejected_scheduled_candidate_is_not_candidate_memory_input() -> None:
     worker._record_scheduled_gate_outcome(
         case=case,
         artifact_payloads=artifact_payloads,
-        gate_codes=["scheduled_objective_mismatch"],
+        gate_codes=["scheduled_due_not_reached"],
         disposition=models.SCHEDULED_GATE_DISPOSITION_SUPPRESSED,
-        evaluator_attempt_count=1,
         dispatch_status="scheduled_content_suppressed",
     )
 
@@ -490,7 +489,6 @@ def test_undelivered_scheduled_candidate_is_not_candidate_memory_input() -> None
         artifact_payloads=artifact_payloads,
         gate_codes=[],
         disposition=models.SCHEDULED_GATE_DISPOSITION_ACCEPTED,
-        evaluator_attempt_count=1,
         dispatch_status="delivery_failed",
     )
 

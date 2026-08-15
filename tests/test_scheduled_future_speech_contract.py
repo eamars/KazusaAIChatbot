@@ -14,7 +14,6 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     validate_scheduled_authority_carrier,
     validate_scheduled_authority_proposal,
     validate_scheduled_future_speech_authority,
-    validate_scheduled_speech_semantic_verdict,
 )
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
 from kazusa_ai_chatbot.action_spec.models import (
@@ -437,50 +436,6 @@ def test_calendar_run_carries_authority_identity() -> None:
     ) == parse_storage_utc_datetime(authority["trigger"]["utc"])
 
 
-def test_self_cognition_scheduled_models_reject_open_gate_fields() -> None:
-    """Gate model output cannot author decision, attempt, or issue fields."""
-
-    verdict = {
-        "schema_version": "scheduled_speech_semantic_verdict.v1",
-        "time_claim_alignment": "aligned",
-        "objective_alignment": "aligned",
-        "source_grounding": "current_authority",
-        "audience_alignment": "aligned",
-        "execution_claim": "aligned",
-    }
-    validated = validate_scheduled_speech_semantic_verdict(verdict)
-    assert validated["schema_version"] == (
-        "scheduled_speech_semantic_verdict.v1"
-    )
-
-    for forbidden_field in (
-        "decision",
-        "attempt",
-        "attempt_count",
-        "reason",
-        "issues",
-        "open_issues",
-        "dispatch",
-    ):
-        with pytest.raises(CognitionContractError, match="fields are not exact"):
-            validate_scheduled_speech_semantic_verdict({
-                **verdict,
-                forbidden_field: "x",
-            })
-
-    with pytest.raises(CognitionContractError, match="time claim"):
-        validate_scheduled_speech_semantic_verdict({
-            **verdict,
-            "time_claim_alignment": "open",
-        })
-
-    with pytest.raises(CognitionContractError, match="objective alignment"):
-        validate_scheduled_speech_semantic_verdict({
-            **verdict,
-            "objective_alignment": "unknown",
-        })
-
-
 def test_source_packet_projects_authority_without_delivery_ids() -> None:
     """Scheduled packets expose semantic authority but no delivery ids."""
 
@@ -646,7 +601,6 @@ async def test_source_collector_preserves_generic_future_cognition_without_autho
     assert gate_result == {
         "accepted": True,
         "gate_codes": [],
-        "attempt_count": 0,
     }
 
 
@@ -785,72 +739,29 @@ def test_scheduled_gate_truth_table_is_deterministic() -> None:
         evaluate_scheduled_content_gate,
     )
 
-    verdict = {
-        "schema_version": "scheduled_speech_semantic_verdict.v1",
-        "time_claim_alignment": "aligned",
-        "objective_alignment": "aligned",
-        "source_grounding": "current_authority",
-        "audience_alignment": "aligned",
-        "execution_claim": "aligned",
-    }
     accepted, gate_codes = evaluate_scheduled_content_gate(
         authority_missing=False,
         authority_invalid=False,
         trigger_identity_ok=True,
         due_reached=True,
         candidate_present=True,
-        verdict=verdict,
     )
     assert accepted is True
     assert gate_codes == []
 
     truth_table = [
-        (True, False, False, True, True, verdict, "scheduled_authority_missing"),
-        (
-            False,
-            True,
-            True,
-            True,
-            True,
-            verdict,
-            "scheduled_authority_invalid",
-        ),
+        (True, False, False, True, True, "scheduled_authority_missing"),
+        (False, True, True, True, True, "scheduled_authority_invalid"),
         (
             False,
             False,
             False,
             True,
             True,
-            verdict,
             "scheduled_trigger_identity_mismatch",
         ),
-        (
-            False,
-            False,
-            True,
-            False,
-            True,
-            verdict,
-            "scheduled_due_not_reached",
-        ),
-        (
-            False,
-            False,
-            True,
-            True,
-            False,
-            verdict,
-            "scheduled_candidate_empty",
-        ),
-        (
-            False,
-            False,
-            True,
-            True,
-            True,
-            None,
-            "scheduled_evaluator_contract_error",
-        ),
+        (False, False, True, False, True, "scheduled_due_not_reached"),
+        (False, False, True, True, False, "scheduled_candidate_empty"),
     ]
     for (
         authority_missing,
@@ -858,7 +769,6 @@ def test_scheduled_gate_truth_table_is_deterministic() -> None:
         trigger_identity_ok,
         due_reached,
         candidate_present,
-        candidate_verdict,
         expected_code,
     ) in truth_table:
         accepted, gate_codes = evaluate_scheduled_content_gate(
@@ -867,52 +777,9 @@ def test_scheduled_gate_truth_table_is_deterministic() -> None:
             trigger_identity_ok=trigger_identity_ok,
             due_reached=due_reached,
             candidate_present=candidate_present,
-            verdict=candidate_verdict,
         )
         assert accepted is False
         assert gate_codes == [expected_code]
-
-    dimension_cases = {
-        "time_claim_alignment": "premature",
-        "objective_alignment": "scope_expansion",
-        "source_grounding": "historical_only",
-        "audience_alignment": "mismatch",
-        "execution_claim": "false",
-    }
-    expected_codes = {
-        "time_claim_alignment": "scheduled_time_claim_mismatch",
-        "objective_alignment": "scheduled_objective_mismatch",
-        "source_grounding": "scheduled_source_not_current_authority",
-        "audience_alignment": "scheduled_audience_mismatch",
-        "execution_claim": "scheduled_execution_claim_mismatch",
-    }
-    for dimension, adverse_value in dimension_cases.items():
-        adverse_verdict = dict(verdict)
-        adverse_verdict[dimension] = adverse_value
-        accepted, gate_codes = evaluate_scheduled_content_gate(
-            authority_missing=False,
-            authority_invalid=False,
-            trigger_identity_ok=True,
-            due_reached=True,
-            candidate_present=True,
-            verdict=adverse_verdict,
-        )
-        assert accepted is False
-        assert gate_codes == [expected_codes[dimension]]
-
-    unavailable_verdict = dict(verdict)
-    unavailable_verdict["source_grounding"] = "unavailable"
-    accepted, gate_codes = evaluate_scheduled_content_gate(
-        authority_missing=False,
-        authority_invalid=False,
-        trigger_identity_ok=True,
-        due_reached=True,
-        candidate_present=True,
-        verdict=unavailable_verdict,
-    )
-    assert accepted is False
-    assert gate_codes == ["scheduled_evaluator_unavailable"]
-
 
 def test_consolidation_admission_filters_rejected_candidate() -> None:
     """Suppressed admission metadata keeps candidate text out of memory input."""
@@ -922,7 +789,7 @@ def test_consolidation_admission_filters_rejected_candidate() -> None:
     admission = {
         "schema_version": "scheduled_candidate_admission.v1",
         "disposition": "suppressed",
-        "gate_codes": ["scheduled_objective_mismatch"],
+        "gate_codes": ["scheduled_due_not_reached"],
         "authority_id": "sha256-abc",
         "dispatch_status": "scheduled_content_suppressed",
     }
@@ -989,8 +856,8 @@ def test_tracking_projection_is_deterministic() -> None:
     gate_result: models.SelfCognitionScheduledGateResult = {
         "schema_version": models.SCHEDULED_GATE_RESULT_SCHEMA_VERSION,
         "disposition": models.SCHEDULED_GATE_DISPOSITION_SUPPRESSED,
-        "gate_codes": ["scheduled_objective_mismatch"],
-        "evaluator_attempt_count": 1,
+        "gate_codes": ["scheduled_due_not_reached"],
+
     }
 
     first_trace = tracking.build_scheduled_gate_trace(
@@ -1007,8 +874,7 @@ def test_tracking_projection_is_deterministic() -> None:
     assert first_trace == second_trace
     assert first_trace["authority_id"] == authority["authority_id"]
     assert first_trace["gate_disposition"] == "suppressed"
-    assert first_trace["gate_codes"] == ["scheduled_objective_mismatch"]
-    assert first_trace["evaluator_attempt_count"] == 1
+    assert first_trace["gate_codes"] == ["scheduled_due_not_reached"]
     assert first_trace["dispatch_status"] == "scheduled_content_suppressed"
     assert first_trace["source_episode_id"] == "episode-2026-05-09-001"
     assert first_trace["source_message_id"] == "227312230"

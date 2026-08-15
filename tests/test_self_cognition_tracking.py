@@ -2158,8 +2158,7 @@ def test_scheduled_gate_trace_contains_authority_and_disposition() -> None:
     gate_result: models.SelfCognitionScheduledGateResult = {
         "schema_version": models.SCHEDULED_GATE_RESULT_SCHEMA_VERSION,
         "disposition": models.SCHEDULED_GATE_DISPOSITION_SUPPRESSED,
-        "gate_codes": ["scheduled_source_not_current_authority"],
-        "evaluator_attempt_count": 1,
+        "gate_codes": ["scheduled_due_not_reached"],
     }
     settled_trace = tracking.build_scheduled_gate_trace(
         case,
@@ -2176,8 +2175,5 @@ def test_scheduled_gate_trace_contains_authority_and_disposition() -> None:
     assert settled_trace["accepted_at_utc"] == authority["accepted_at"]["utc"]
     assert settled_trace["trigger_utc"] == authority["trigger"]["utc"]
     assert settled_trace["gate_disposition"] == "suppressed"
-    assert settled_trace["gate_codes"] == [
-        "scheduled_source_not_current_authority"
-    ]
-    assert settled_trace["evaluator_attempt_count"] == 1
+    assert settled_trace["gate_codes"] == ["scheduled_due_not_reached"]
     assert settled_trace["dispatch_status"] == "scheduled_content_suppressed"

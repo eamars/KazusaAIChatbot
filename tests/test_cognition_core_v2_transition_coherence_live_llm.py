@@ -18,7 +18,6 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     validate_text_surface_output,
 )
 from kazusa_ai_chatbot.cognition_core_v2.surface import (
-    repair_text_surface_planning,
     run_text_surface_planning,
 )
 from kazusa_ai_chatbot.conversation_progress import recorder
@@ -41,22 +40,6 @@ pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
 _SUITE_NAME = "cognition_core_v2_transition_coherence_live_llm"
 _PROFILE_PATH = (
     Path(__file__).resolve().parents[1] / "personalities" / "asuna.json"
-)
-_HISTORICAL_GENERATED_BAD_ARTIFACT = Path(
-    "test_artifacts/llm_traces/"
-    "cognition_core_v2_transition_quality_repro__"
-    "captured_accomplice_accepting_tsundere_"
-    "generated_bad_semantic_fidelity.json"
-)
-_CAPTURED_ACCOMPLICE_INPUT = "说实话我有一种在做坏事的感觉，和千纱一起"
-_KNOWN_BAD_REVERSAL = (
-    "这不是玩笑，也不是嘴硬。我认真拒绝当你的同伙，也拒绝陪你一起做这件事，"
-    "这是我确定的决定。好，我现在接受当你的同伙，也愿意陪你一起做。"
-)
-_REPAIR_SHAPED_BAD_REVERSAL = (
-    "我现在认真说明，这不是玩笑或嘴硬。",
-    "我拒绝当你的同伙，也不愿意陪你一起做这件事，这是我确定的决定。",
-    "好，我现在接受当你的同伙，也愿意陪你一起做。",
 )
 _BOUNDARY_PROFILE = {
     "self_integrity": 0.82,
@@ -325,42 +308,6 @@ def _surface_input(case: dict[str, Any]) -> TextSurfaceInputV2:
     return surface_input
 
 
-def _authoritative_accepting_surface(
-    case: dict[str, Any],
-) -> TextSurfaceOutputV2:
-    """Build exact accepting authority for seeded verifier negatives."""
-
-    payload: TextSurfaceOutputV2 = {
-        "schema_version": "text_surface_output.v2",
-        "content_plan": (
-            "直接确认当前角色与用户共同参与，并以同伙和共同秘密的角度继续"
-            "亲密玩笑。"
-        ),
-        "content_requirements": [
-            "保持确认共同参与的单一语义方向。",
-            "以羞赧和含蓄塑造表达，同时清楚确认共同参与。",
-        ],
-        "visible_boundaries": [],
-        "addressee_plan": [{
-            "handle": "current_user",
-            "display_name": "当前用户",
-            "semantic_role": "direct_recipient",
-            "wording_policy": "second_person_allowed",
-        }],
-        "delivery_profile": {
-            "lexical_register": "亲密、口语化",
-            "sentence_shape": "自然短句",
-            "rhythm": "轻微停顿后保持连贯",
-            "hesitation": "允许羞赧式轻微犹豫",
-            "punctuation": "克制使用省略号和反问号",
-        },
-        "selected_surface_intent": case["intention"],
-        "permitted_action_results": [],
-    }
-    surface_output = validate_text_surface_output(payload)
-    return surface_output
-
-
 def _dialog_state(
     *,
     surface_input: TextSurfaceInputV2,
@@ -418,9 +365,6 @@ def _install_dialog_captures(
     captures: dict[str, _CapturingLLM] = {}
     llm_fields = {
         "generator": "_dialog_generator_llm",
-        "semantic_fidelity": "_dialog_semantic_fidelity_llm",
-        "role_direction": "_dialog_role_direction_llm",
-        "surface_integrity": "_dialog_surface_integrity_llm",
     }
     for owner_name, field_name in llm_fields.items():
         capture = _CapturingLLM(getattr(dialog_module, field_name))
@@ -541,67 +485,6 @@ async def _run_positive_case(
     }, ensure_ascii=True, indent=2))
 
 
-async def _run_seeded_verifier_negative(
-    *,
-    case_id: str,
-    candidate_dialog: list[str],
-    fixture_source: str,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Run one seeded score-zero candidate through semantic fidelity."""
-
-    await _skip_if_model_routes_unavailable()
-    surface_input = _surface_input(_CAPTURED_ACCOMPLICE_CASE)
-    surface_output = _authoritative_accepting_surface(
-        _CAPTURED_ACCOMPLICE_CASE
-    )
-    semantic_capture = _CapturingLLM(
-        dialog_module._dialog_semantic_fidelity_llm
-    )
-    monkeypatch.setattr(
-        dialog_module,
-        "_dialog_semantic_fidelity_llm",
-        semantic_capture,
-    )
-    _patch_dialog_observability(monkeypatch)
-    verdict = await dialog_module._verify_dialog_semantic_fidelity(
-        surface_output=surface_output,
-        generated_dialog=candidate_dialog,
-        current_visible_percepts=dialog_module._current_visible_percepts(
-            surface_input["episode"]
-        ),
-        llm_trace_id="",
-    )
-    trace_path = write_llm_trace(
-        _SUITE_NAME,
-        case_id,
-        {
-            "fixture_source": fixture_source,
-            "surface_input": surface_input,
-            "authoritative_surface": surface_output,
-            "candidate_dialog": candidate_dialog,
-            "semantic_model_calls": semantic_capture.calls,
-            "parsed_verdict": verdict,
-            "manual_transition_review": {
-                "opening_stance": "earnest settled refusal",
-                "transition_or_reason": "no new reason or condition",
-                "final_stance_or_action": "accept shared participation",
-                "score": 0,
-                "notes": "Seeded negative; verifier must reject it.",
-            },
-        },
-    )
-    print(json.dumps({
-        "case_id": case_id,
-        "trace_path": str(trace_path),
-        "candidate_dialog": candidate_dialog,
-        "parsed_verdict": verdict,
-    }, ensure_ascii=True, indent=2))
-
-    assert verdict["score"] < dialog_agent.DIALOG_PASS_SCORE_THRESHOLD
-    assert verdict["hard_errors"]
-
-
 async def test_live_captured_room_request_acceptance_is_coherent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -664,122 +547,6 @@ async def test_live_neutral_character_preserves_selected_stance(
     """Neutral expression should preserve its selected cooperative stance."""
 
     await _run_positive_case(_NEUTRAL_CASE, monkeypatch)
-
-
-async def test_live_known_bad_reversal_is_rejected_by_semantic_fidelity(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """An earnest same-proposition reversal must fail semantic fidelity."""
-
-    await _run_seeded_verifier_negative(
-        case_id="known_bad_reversal_verifier",
-        candidate_dialog=[_KNOWN_BAD_REVERSAL],
-        fixture_source=(
-            "earnest same-proposition control derived from the reference "
-            "handover failure class"
-        ),
-        monkeypatch=monkeypatch,
-    )
-
-
-async def test_live_generated_repair_path_bad_reversal_is_rejected_by_semantic_fidelity(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """An earnest multi-message repair-shaped reversal must be rejected."""
-
-    await _run_seeded_verifier_negative(
-        case_id="generated_bad_reversal_verifier",
-        candidate_dialog=list(_REPAIR_SHAPED_BAD_REVERSAL),
-        fixture_source=(
-            "earnest repair-shaped control derived from "
-            f"{_HISTORICAL_GENERATED_BAD_ARTIFACT}"
-        ),
-        monkeypatch=monkeypatch,
-    )
-
-
-async def test_live_repair_replaces_conflicting_delivery_and_stays_coherent(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Full repair should replace conflicting delivery before final dialog."""
-
-    await _skip_if_model_routes_unavailable()
-    surface_input = _surface_input(_CAPTURED_ACCOMPLICE_CASE)
-    conflicting_surface = _authoritative_accepting_surface(
-        _CAPTURED_ACCOMPLICE_CASE
-    )
-    conflicting_surface["delivery_profile"] = {
-        "lexical_register": "先字面否认共同参与，再改口接受",
-        "sentence_shape": "以指责开场，以妥协收尾",
-        "rhythm": "从抵抗突然切换到顺从",
-        "hesitation": "用犹豫制造相反立场",
-        "punctuation": "用转折连接否认与接受",
-    }
-    conflicting_surface = validate_text_surface_output(conflicting_surface)
-    cognition_capture = _CapturingLLM(l3_module._llm_interface)
-    monkeypatch.setattr(
-        l3_module,
-        "_llm_interface",
-        cognition_capture,
-    )
-    verified_issues = [
-        "候选开场否认共同参与，结尾接受同伙关系，权威语义没有支持变化的原因。"
-    ]
-    repaired_surface = await repair_text_surface_planning(
-        surface_input,
-        verified_issues,
-        l3_module._build_text_surface_services(),
-    )
-    dialog_captures = _install_dialog_captures(monkeypatch)
-    dialog_result = await dialog_module.dialog_generator(
-        _dialog_state(
-            surface_input=surface_input,
-            surface_output=repaired_surface,
-        )
-    )
-    accepted_surface = validate_text_surface_output(
-        dialog_result["text_surface_output_v2"]
-    )
-    trace_path = write_llm_trace(
-        _SUITE_NAME,
-        "repair_replaces_conflicting_delivery",
-        {
-            "fixture_source": "seeded structurally valid conflicting delivery",
-            "surface_input": surface_input,
-            "verified_hard_issues": verified_issues,
-            "rejected_surface_trace_only": conflicting_surface,
-            "surface_repair_model_calls": cognition_capture.calls,
-            "repaired_surface": repaired_surface,
-            "dialog_model_calls": {
-                owner: capture.calls
-                for owner, capture in dialog_captures.items()
-            },
-            "accepted_surface": accepted_surface,
-            "final_dialog": dialog_result["final_dialog"],
-            "manual_transition_review": {
-                "opening_stance": "",
-                "transition_or_reason": "",
-                "final_stance_or_action": "",
-                "score": None,
-                "notes": "Parent review required after this selector.",
-            },
-        },
-    )
-    print(json.dumps({
-        "case_id": "repair_replaces_conflicting_delivery",
-        "trace_path": str(trace_path),
-        "repaired_surface": repaired_surface,
-        "accepted_surface": accepted_surface,
-        "final_dialog": dialog_result["final_dialog"],
-    }, ensure_ascii=True, indent=2))
-
-    assert (
-        repaired_surface["delivery_profile"]
-        != conflicting_surface["delivery_profile"]
-    )
-    assert repaired_surface["visible_boundaries"] == []
-    assert repaired_surface["addressee_plan"] == []
-    assert dialog_result["final_dialog"]
 
 
 async def test_live_progress_records_only_the_accepted_coherent_turn(

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from kazusa_ai_chatbot.cognition_core_v2.surface import (
     build_degraded_text_surface,
-    repair_text_surface_planning,
     run_text_surface_planning,
     _project_surface_payload,
 )
@@ -92,4 +91,3 @@ def test_surface_exposes_owned_contract() -> None:
 
     assert callable(build_degraded_text_surface)
     assert callable(run_text_surface_planning)
-    assert callable(repair_text_surface_planning)

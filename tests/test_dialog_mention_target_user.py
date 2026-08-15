@@ -11,28 +11,6 @@ from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from tests.cognition_core_v2_test_helpers import canonical_episode
 
 
-@pytest.fixture(autouse=True)
-def _aligned_dialog_compliance(monkeypatch) -> None:
-    """Keep mention tests focused on delivery-neutral authored text."""
-
-    verifier_payloads = {
-        "_dialog_semantic_fidelity_llm": {
-            "score": 1.0,
-            "hard_errors": [],
-        },
-        "_dialog_surface_integrity_llm": {
-            "score": 1.0,
-            "issues": [],
-        },
-    }
-    for llm_name, payload in verifier_payloads.items():
-        monkeypatch.setattr(
-            dialog_module,
-            llm_name,
-            _CapturingLLM(payload),
-        )
-
-
 class _CapturingLLM:
     """Capture dialog-generator messages and return a fixed payload."""
 

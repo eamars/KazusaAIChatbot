@@ -43,8 +43,7 @@ for the character singleton. The test database harness requires the exact
 mutable test row a unique owner.
 
 The public Stage 2 surface consists of `run_cognition(...)`,
-`run_text_surface_planning(...)`, `repair_text_surface_planning(...)`, and
-`run_visual_surface_planning(...)`.
+`run_text_surface_planning(...)`, and `run_visual_surface_planning(...)`.
 Cognition runs deterministic preparation, scoped semantic appraisal,
 dependency-ready goal branches, complete-bid collapse, route validation, and
 one replacement-state update. The caller commits that update before action,
@@ -88,11 +87,11 @@ condition, or secondary clauses do not replace its endpoints.
 The selected operation is carried through the admitted bid, selected
 intention, and `TextSurfaceInputV2`. Deterministic validators preserve every
 known non-`无` response-owner, selection-owner, actor, and target role. The
-surface prompt projection cannot rewrite this control carrier; dialog role
-verification consumes it as the authority for required-selection turns.
-Missing or conflicting selected operations fail at the cognition contract
-boundary within the existing bounded regeneration policy. Numeric dialog
-scores cannot override a typed role-direction hard gate.
+surface prompt projection cannot rewrite this control carrier; dialog
+receives only the validated surface projection and renders its wording without
+re-interpreting role ownership. Missing or conflicting selected operations
+fail at the cognition contract boundary within the existing bounded
+regeneration policy.
 
 ## Stage Model Routing
 
@@ -220,8 +219,8 @@ In a group episode, visible third-party participants use an episode-local
 typed binding such as `p1`, paired with its display name and the
 `third_party` entity kind. The binding is transient: it is available to
 decontextualization, cognition goal selection, L3 surface planning, and dialog
-verification, but it is not a user identifier, a persistent memory handle, or
-a delivery recipient. A typed `pN` target is rendered by name or an explicit
+rendering, but it is not a user identifier, a persistent memory handle, or a
+delivery recipient. A typed `pN` target is rendered by name or an explicit
 third-person reference; only a `current_user` addressee row with
 `second_person_allowed` authorizes `你`. The structured addressee plan is
 propagated as surface authority and validated again at the dialog boundary.
@@ -461,14 +460,12 @@ consolidation projection excludes their fragments.
 
 ### Surface score and confidence boundary
 
-Only `surface_content_plan` and
-`surface_dialog_compliance_repair` are research candidates for an owner-local
+Only `surface_content_plan` is a research candidate for an owner-local
 score-selection contract. The current execution has no accepted calibration
 corpus or thresholds, so production keeps the existing first-valid and
-degraded-surface behavior; the evaluator and selection path is not active.
-Future activation requires the plan's independent held-out evidence, finite
-`score` contract, bounded blocking issues, three-call producer cap, evaluator
-cap, threshold return, highest-score exhaustion, and deterministic tie order.
+degraded-surface behavior. Future activation requires independent held-out
+evidence, a finite `score` contract, a bounded producer cap, threshold return,
+highest-score exhaustion, and deterministic tie order.
 
 The V2 `confidence` field remains a bounded semantic descriptor and advisory
 context. It is not a score, ranking input, threshold input, authorization
@@ -476,84 +473,27 @@ signal, or delivery gate. Goal, action, group-engagement, and branch
 observation contracts reject numeric or boolean confidence values. Workspace
 candidate-quality comparison does not receive confidence. Preference, visual,
 goal, action, authorization, persistence, queue, delivery, and stateful retry
-owners remain outside this score contract, and the dialog renderer keeps its
-existing numeric evaluator behavior.
+owners remain outside this score contract, and the dialog renderer remains
+outside score selection.
 
     `lexical_avoidances` contains only concrete current-turn expression fragments
     such as a repeated recent opening, stale filler, stale address, or wording
     that obscures the selected intent. It is a surface-owned continuity hint,
     never a topic, moral, or refusal policy. The dialog renderer preserves the
-    selected semantics while avoiding those literal fragments, and a deterministic
-    literal check routes a hit through the existing bounded repair path.
+    selected semantics while avoiding those literal fragments; the check is
+    deterministic and bounded.
 
     Content planning expresses the selected character judgment using the current
-scene, affect, relationship, and interaction style. Coherent imaginative
-detail is allowed when it remains compatible with current input, active
-constraints, and actor/target/subject roles. Preference planning emits only
-real visible boundaries and addressee constraints, so both lists may be empty.
-Dialog owns natural character-specific chat-ready wording. Three focused
-hard-error checks run in parallel on the existing dialog-model route within
-the bounded verifier path, followed by the deterministic expression-continuity
-check. Current visible percepts retain their shared
-32,000-character cap. Semantic fidelity separately caps authoritative surface
-semantics at 11,000 characters, candidate dialog at 12,000 characters, and its
-complete serialized payload at 50,000 characters. Semantic fidelity receives
-current model-visible percept rows, the candidate role frame, candidate
-dialog, and the authoritative selected surface intent, content plan,
-requirements, visible boundaries, and lexical avoidances. It rejects internal contradiction,
-direct current-input conflict, non-selection role reversal, and unsupported
-within-turn opposite-stance transitions. Delivery profile and action-result
-fields are excluded from semantic authority. Role direction receives only typed
-selection-required role tuples and rejects selection-owner transfer or
-actor/target reversal. Selection-required role fields are excluded from the
-semantic-fidelity projection, which retains the raw current-input meaning and
-cannot rejudge role-owned operation completion. Surface integrity receives
-permitted action results and candidate dialog; it rejects only false system,
-tool, platform, or other character-brain execution claims.
-Text planning owns expressed meaning and interaction progress without
-supplying staging forms. Dialog expresses emotion, character, and interaction
-posture through sendable wording and cadence. Action narration is outside the
-fatal taxonomy and remains unchanged when the model produces it; the runtime
-prompts neither request it nor create a rejection or repair rule for it.
-Source percepts and generated character speech carry separate typed pronoun
-frames before role direction is compared. Novelty, coherent drift,
-character-owned refusal, negotiation, and supported changes of mind are not
-failures by themselves. Deterministic code validates the exact numeric score
-shapes and merges available scores with an equal-weight geometric mean. The
-dialog threshold is currently `0.50`; a below-threshold candidate without hard
-issues remains eligible for degraded ranking after bounded exhaustion. Explicit
-semantic hard errors, role violations, false-execution issues, lexical
-violations, empty candidates, and state or delivery failures remain fail-closed.
-Each owner is bounded to four issues and the merged result to eight. A negative
-result returns canonical surface input plus bounded verified issues to the
-text-surface owner for one complete replacement of `content_plan`,
-`content_requirements`, `delivery_profile`, `lexical_avoidances`,
-`visible_boundaries`, and `addressee_plan`. Rejected surface fields and rejected dialog are trace-only
-and are absent from both repair-model payloads. Selected intent, action truth,
-the exact relational stance, and runtime capability limits are reconstructed
-from canonical input before each dialog retry. Every candidate, including the
-terminal candidate, passes the semantic, role, surface, and expression-continuity
-checks. After bounded exhaustion the highest-scoring eligible candidate is
-delivered as degraded output; when no eligible candidate remains the delivery
-boundary raises a typed failure. No hard-invalid or unverified dialog reaches
-post-turn consumers. The protected turn trace
-records rejected checks, surfaces, and dialog candidates as diagnostic
-evidence.
-
-Each focused verifier validates its own exact JSON verdict. A structurally
-invalid parsed verdict receives up to two complete replacements using the
-unchanged system and semantic payload plus the latest bounded rejected
-assistant candidate and exact contract error. The replacement remains inside
-that verifier and does not create another dialog candidate. All attempts are
-recorded in the protected trace. Semantic fidelity uses the
-collision-resistant producer field `hard_errors`; deterministic validation
-rejects boolean aliases, non-finite values, and out-of-range scores before
-bounded regeneration. Role direction uses typed `violations` limited to
-`selection_owner_transfer` and `typed_operation_role_reversal`; surface
-integrity retains evidence-bearing `issues`. Exhaustion marks only that
-verifier `unavailable`; available numeric dimensions continue to rank
-structurally valid candidates, and an all-focused outage receives aggregate
-score `0.0` for deterministic degraded tie-breaking.
+    scene, affect, relationship, and interaction style. Coherent imaginative
+    detail is allowed when it remains compatible with current input, active
+    constraints, and actor/target/subject roles. Preference planning emits only
+    real visible boundaries and addressee constraints, so both lists may be empty.
+    Dialog owns natural character-specific chat-ready wording. The generator
+    receives the validated surface and emits the visible `final_dialog`; its
+    output goes through canonical JSON parsing, structural message validation,
+    and deterministic required-source-URL checks. No semantic verifier, score
+    gate, or evaluator-driven repair follows the generator. Action narration is
+    outside the rendering contract and remains an ungated model variation.
 
 ## Document Control
 
@@ -576,7 +516,6 @@ execution, dialog wording, and adapter delivery remain downstream owners.
 
 - `run_cognition(...)`
 - `run_text_surface_planning(...)`
-- `repair_text_surface_planning(...)`
 - `run_visual_surface_planning(...)`
 - `run_character_morning_refresh(...)`
 - `validate_cognition_input(...)`
@@ -674,10 +613,10 @@ idempotency, the guarded write, the refresh callback, and the audit row.
 
 ## Failure Behavior
 
-Every recoverable V2 producer and verifier has at least three total local
-attempts except semantic appraisal. Each appraisal micro item has one initial
-call plus at most one complete-replacement attempt, and each family has at most
-eight items. Existing longer semantic ledgers keep their cap. The outcome
+Every recoverable V2 model owner has at least three total local attempts
+except semantic appraisal. Each appraisal micro item has one initial call plus
+at most one complete-replacement attempt, and each family has at most eight
+items. Existing longer semantic ledgers keep their cap. The outcome
 ladder is `accepted`, `recovered`, `accepted_degraded`, then `unrecoverable`.
 Appraisal and optional visual exhaustion are omitted; decontextualization keeps
 the normalized original input; workspace keeps the highest-priority complete
@@ -696,10 +635,8 @@ acceptance. Recoverable and degraded outcomes owned by other stages follow the
 normal persistence and delivery path. Callers commit only validated replacement
 state.
 
-All four public entrypoints capture their raw arguments before validation in a
-ContextVar-isolated protected failure buffer. `repair_text_surface_planning`
-captures both the raw surface input and `verified_hard_issues`; the other
-entrypoints capture their raw input payload. Clean runs discard the buffer.
+All public entrypoints capture their raw arguments before validation in a
+ContextVar-isolated protected failure buffer. Clean runs discard the buffer.
 Terminal exceptions, failed appraisals or branches, recovered model attempts,
 and degraded surfaces schedule one failure capsule without delaying or
 changing the returned output or raised exception.

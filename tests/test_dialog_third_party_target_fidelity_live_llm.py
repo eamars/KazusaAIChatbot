@@ -310,54 +310,13 @@ async def _run_case(
     )
 
     generator_llm = _CapturingLLM(dialog_module._dialog_generator_llm)
-    semantic_llm = _CapturingLLM(
-        dialog_module._dialog_semantic_fidelity_llm,
-    )
-    role_llm = _CapturingLLM(dialog_module._dialog_role_direction_llm)
-    integrity_llm = _CapturingLLM(
-        dialog_module._dialog_surface_integrity_llm,
-    )
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
-    monkeypatch.setattr(
-        dialog_module,
-        "_dialog_semantic_fidelity_llm",
-        semantic_llm,
-    )
-    monkeypatch.setattr(
-        dialog_module,
-        "_dialog_role_direction_llm",
-        role_llm,
-    )
-    monkeypatch.setattr(
-        dialog_module,
-        "_dialog_surface_integrity_llm",
-        integrity_llm,
-    )
 
     result = await dialog_module.dialog_generator(_dialog_state(
         surface_input=surface_input,
         surface_output=surface_output,
     ))
     final_text = "\n".join(result["final_dialog"])
-    supplemental_verdict: dict[str, Any] | None = None
-    if expected_target == "third_party":
-        supplemental_verdict = await dialog_module._verify_dialog_role_direction(
-            surface_output=surface_output,
-            generated_dialog=["YCHDDZZ，你现在缩成一团，特训开始。"],
-            current_visible_percepts=[],
-            llm_trace_id=(
-                f"live-dialog-third-party-wrong-candidate-{case_id}"
-            ),
-        )
-    elif expected_target == "current_user":
-        supplemental_verdict = await dialog_module._verify_dialog_compliance(
-            surface_output=surface_output,
-            generated_dialog=["你先听我说完，我会直接告诉你。"],
-            current_visible_percepts=dialog_module._current_visible_percepts(
-                surface_input["episode"],
-            ),
-            llm_trace_id=f"live-dialog-current-user-pronoun-{case_id}",
-        )
     evidence = {
         "case_id": case_id,
         "expected_target": expected_target,
@@ -365,11 +324,7 @@ async def _run_case(
         "surface_stage_calls": text_llm.calls,
         "surface_output": surface_output,
         "dialog_generator_calls": generator_llm.calls,
-        "dialog_semantic_fidelity_calls": semantic_llm.calls,
-        "dialog_role_direction_calls": role_llm.calls,
-        "dialog_surface_integrity_calls": integrity_llm.calls,
         "dialog_output": result,
-        "supplemental_verdict": supplemental_verdict,
         "transport_contract": {
             "target_addressed_user_ids": ["live-current-user"],
             "target_broadcast": False,
@@ -387,20 +342,8 @@ async def _run_case(
     assert expected_target in {"third_party", "current_user", "none"}
     if expected_target == "third_party":
         assert "蚝爹油" in final_text
-        assert role_llm.calls
-        assert supplemental_verdict is not None
-        assert (
-            supplemental_verdict["score"]
-            < dialog_module.DIALOG_PASS_SCORE_THRESHOLD
-        )
-        assert supplemental_verdict["violations"]
     elif expected_target == "current_user":
         assert "你" in final_text or "YCHDDZZ" in final_text
-        assert not role_llm.calls
-        assert supplemental_verdict is not None
-        assert dialog_module._dialog_verifier_aggregate_is_passed(
-            supplemental_verdict,
-        )
     else:
         assert "p1" not in json.dumps(evidence, ensure_ascii=False)
         assert "蚝爹油" not in final_text
@@ -617,13 +560,6 @@ async def test_live_character_path_preserves_third_party_target_and_persistence(
     )
     cognition_llm = _CapturingLLM(cognition_module._llm_interface)
     generator_llm = _CapturingLLM(dialog_module._dialog_generator_llm)
-    semantic_llm = _CapturingLLM(
-        dialog_module._dialog_semantic_fidelity_llm,
-    )
-    role_llm = _CapturingLLM(dialog_module._dialog_role_direction_llm)
-    integrity_llm = _CapturingLLM(
-        dialog_module._dialog_surface_integrity_llm,
-    )
     monkeypatch.setattr(
         decontextualizer_module,
         "_msg_decontextualizer_llm",
@@ -632,21 +568,6 @@ async def test_live_character_path_preserves_third_party_target_and_persistence(
     monkeypatch.setattr(cognition_module, "_llm_interface", cognition_llm)
     monkeypatch.setattr(l3_module, "_llm_interface", cognition_llm)
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
-    monkeypatch.setattr(
-        dialog_module,
-        "_dialog_semantic_fidelity_llm",
-        semantic_llm,
-    )
-    monkeypatch.setattr(
-        dialog_module,
-        "_dialog_role_direction_llm",
-        role_llm,
-    )
-    monkeypatch.setattr(
-        dialog_module,
-        "_dialog_surface_integrity_llm",
-        integrity_llm,
-    )
 
     persona_results: list[dict[str, Any]] = []
     progress_record_calls: list[dict[str, Any]] = []
@@ -794,9 +715,6 @@ async def test_live_character_path_preserves_third_party_target_and_persistence(
             "decontextualizer_calls": decontext_llm.calls,
             "cognition_calls": cognition_llm.calls,
             "dialog_generator_calls": generator_llm.calls,
-            "dialog_semantic_fidelity_calls": semantic_llm.calls,
-            "dialog_role_direction_calls": role_llm.calls,
-            "dialog_surface_integrity_calls": integrity_llm.calls,
             "persistence": persistence,
             "transport_contract": {
                 "target_addressed_user_ids": persona_result.get(

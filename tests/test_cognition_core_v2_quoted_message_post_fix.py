@@ -673,32 +673,10 @@ async def _run_surface_dialog_case(
     surface_llm = _CapturingLLM(surface_services.llm)
     surface_services = replace(surface_services, llm=surface_llm)
     dialog_generator_llm = _CapturingLLM(dialog_module._dialog_generator_llm)
-    dialog_semantic_llm = _CapturingLLM(
-        dialog_module._dialog_semantic_fidelity_llm
-    )
-    dialog_role_llm = _CapturingLLM(dialog_module._dialog_role_direction_llm)
-    dialog_surface_llm = _CapturingLLM(
-        dialog_module._dialog_surface_integrity_llm
-    )
     monkeypatch.setattr(
         dialog_module,
         "_dialog_generator_llm",
         dialog_generator_llm,
-    )
-    monkeypatch.setattr(
-        dialog_module,
-        "_dialog_semantic_fidelity_llm",
-        dialog_semantic_llm,
-    )
-    monkeypatch.setattr(
-        dialog_module,
-        "_dialog_role_direction_llm",
-        dialog_role_llm,
-    )
-    monkeypatch.setattr(
-        dialog_module,
-        "_dialog_surface_integrity_llm",
-        dialog_surface_llm,
     )
     surface_output = await run_text_surface_planning(
         surface_input,
@@ -710,9 +688,6 @@ async def _run_surface_dialog_case(
     evidence = {
         "surface_calls": surface_llm.calls,
         "dialog_generator_calls": dialog_generator_llm.calls,
-        "dialog_semantic_fidelity_calls": dialog_semantic_llm.calls,
-        "dialog_role_direction_calls": dialog_role_llm.calls,
-        "dialog_surface_integrity_calls": dialog_surface_llm.calls,
     }
     return surface_input, surface_output, {
         "dialog_output": dialog_output,

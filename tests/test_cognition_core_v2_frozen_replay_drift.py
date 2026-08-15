@@ -459,7 +459,7 @@ def _surface_output() -> dict[str, object]:
 
 
 def _surface_input() -> dict[str, object]:
-    """Build the canonical input retained for one bounded dialog repair."""
+    """Build the canonical dialog surface input."""
 
     return {
         "schema_version": "text_surface_input.v2",
@@ -502,135 +502,6 @@ def test_text_surface_contract_carries_requirements_and_delivery() -> None:
         "punctuation",
     }
     assert validated["content_requirements"][0].startswith("Actor: character")
-
-
-@pytest.mark.asyncio
-async def test_dialog_semantic_verdict_triggers_one_bounded_repair(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A detected actor inversion is repaired once before dialog is returned."""
-
-    for recorder_name in (
-        "record_llm_stage_event",
-        "record_model_contract_event",
-        "record_dialog_quality_event",
-    ):
-        monkeypatch.setattr(
-            dialog_module.event_logging,
-            recorder_name,
-            AsyncMock(),
-        )
-    trace_recorder = AsyncMock()
-    monkeypatch.setattr(
-        dialog_module.llm_tracing,
-        "record_llm_trace_step",
-        trace_recorder,
-    )
-    generator_llm = MagicMock()
-    generator_llm.ainvoke = AsyncMock(side_effect=[
-        AIMessage(content=json.dumps({
-            "final_dialog": ["You will give me the reward after I choose."],
-        })),
-        AIMessage(content=json.dumps({
-            "final_dialog": ["Choose it, and I will give you the reward."],
-        })),
-    ])
-    semantic_llm = MagicMock()
-    semantic_llm.ainvoke = AsyncMock(side_effect=[
-        AIMessage(content=json.dumps({
-            "score": 0.1,
-            "hard_errors": ["Actor and beneficiary are reversed."],
-        })),
-        AIMessage(content=json.dumps({
-            "score": 1.0,
-            "hard_errors": [],
-        })),
-    ])
-    surface_llm = MagicMock()
-    surface_llm.ainvoke = AsyncMock(side_effect=[
-        AIMessage(content=json.dumps({
-            "score": 1.0,
-            "issues": [],
-        })),
-        AIMessage(content=json.dumps({
-            "score": 1.0,
-            "issues": [],
-        })),
-    ])
-    monkeypatch.setattr(dialog_module, "_dialog_generator_llm", generator_llm)
-    monkeypatch.setattr(
-        dialog_module,
-        "_dialog_semantic_fidelity_llm",
-        semantic_llm,
-    )
-    monkeypatch.setattr(
-        dialog_module,
-        "_dialog_surface_integrity_llm",
-        surface_llm,
-    )
-    monkeypatch.setattr(
-        dialog_module,
-        "repair_text_surface_for_dialog",
-        AsyncMock(return_value=_surface_output()),
-    )
-
-    result = await dialog_generator({
-        "internal_monologue": "I should preserve the direction.",
-        "cognitive_episode": _episode(),
-        "text_surface_input_v2": _surface_input(),
-        "text_surface_output_v2": _surface_output(),
-        "chat_history_wide": [],
-        "chat_history_recent": [],
-        "platform_user_id": "673225019",
-        "platform_bot_id": "kazusa",
-        "global_user_id": "user-1",
-        "user_name": "Participant",
-        "user_profile": {},
-        "character_profile": {"name": "Kazusa"},
-        "final_dialog": [],
-        "target_addressed_user_ids": [],
-        "target_broadcast": False,
-        "dialog_usage_mode": "unit_test",
-        "llm_trace_id": "trace-1",
-    })
-
-    assert result["final_dialog"] == [
-        "Choose it, and I will give you the reward."
-    ]
-    assert generator_llm.ainvoke.await_count == 2
-    assert semantic_llm.ainvoke.await_count == 2
-    assert surface_llm.ainvoke.await_count == 2
-    semantic_payload = json.loads(
-        semantic_llm.ainvoke.await_args_list[0].args[0][1].content
-    )
-    surface_payload = json.loads(
-        surface_llm.ainvoke.await_args_list[0].args[0][1].content
-    )
-    assert set(semantic_payload) == {
-        "candidate_final_dialog",
-        "candidate_role_frame",
-        "current_visible_percepts",
-        "authoritative_surface_semantics",
-    }
-    assert set(surface_payload) == {
-        "candidate_final_dialog",
-        "completed_source_evidence",
-        "permitted_action_results",
-    }
-    trace_stage_names = [
-        call.kwargs["stage_name"]
-        for call in trace_recorder.await_args_list
-    ]
-    assert trace_stage_names[0] == "dialog_generator"
-    assert set(trace_stage_names[1:3]) == {
-        "dialog_semantic_fidelity_verifier",
-        "dialog_surface_integrity_verifier",
-    }
-    assert trace_stage_names[3] == "dialog_generator_repair"
-    assert set(trace_stage_names[4:]) == {
-        "dialog_semantic_fidelity_recheck",
-        "dialog_surface_integrity_recheck",
-    }
 
 
 def test_consolidation_dedup_uses_canonical_v2_memory_candidates() -> None:

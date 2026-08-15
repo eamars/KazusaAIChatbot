@@ -12,7 +12,6 @@ ARTIFACT_PATH = Path(
 )
 EXPECTED_OWNERS = {
     "surface_content_plan",
-    "surface_dialog_compliance_repair",
 }
 
 

@@ -437,7 +437,6 @@ def test_result_status_wording_matrix_is_exact() -> None:
     prompt = (
         surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
         + surface_stages.PREFERENCE_SYSTEM_PROMPT
-        + surface_stages.DIALOG_COMPLIANCE_REPAIR_SYSTEM_PROMPT
     )
     for state_name in (
         "complete",
