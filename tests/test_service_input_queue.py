@@ -1136,6 +1136,7 @@ async def test_first_settled_contract_failure_uses_bounded_wait(
 @pytest.mark.asyncio
 async def test_final_settled_contract_failure_returns_operational_error(
     monkeypatch,
+    caplog,
 ) -> None:
     """A repeated hard-deadline schema failure must close without silence."""
 
@@ -1163,9 +1164,13 @@ async def test_final_settled_contract_failure_returns_operational_error(
     )
     contract_error = service_module.SettledRelevanceContractError(
         "authoritative settled output repair failed",
-        validation_reason="output fields are not exact",
+        validation_reason=(
+            "authoritative settled output fields are not exact; "
+            "missing required fields: reason_to_respond"
+        ),
         attempt_count=2,
     )
+    caplog.set_level(logging.ERROR, logger=service_module.__name__)
     coordinator = SimpleNamespace(
         evaluate_settled=AsyncMock(side_effect=contract_error),
         apply_settled_decision=AsyncMock(),
@@ -1209,6 +1214,11 @@ async def test_final_settled_contract_failure_returns_operational_error(
     assert response.operational_error is not None
     assert response.operational_error.error_code == "model_contract_invalid"
     assert response.operational_error.attempt_count == 2
+    assert any(
+        "validation_reason=authoritative settled output fields are not exact; "
+        "missing required fields: reason_to_respond" in record.message
+        for record in caplog.records
+    )
     finalize_trace.assert_awaited_once()
     assert finalize_trace.await_args.kwargs["status"] == "failed"
     assert finalize_trace.await_args.kwargs["final_dialog_count"] == 0

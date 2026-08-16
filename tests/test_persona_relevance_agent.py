@@ -100,6 +100,70 @@ def _active_goal_state(description: str) -> dict:
     return state
 
 
+def test_settled_decision_normalizes_missing_indirect_context() -> None:
+    """An absent optional context field becomes the canonical empty value."""
+
+    decision = validate_settled_relevance_decision(
+        {
+            "response_action": "proceed",
+            "reason_to_respond": "the current message addresses the character",
+            "use_reply_feature": False,
+            "channel_topic": "watching a film",
+        },
+        observation_status="observation_complete",
+    )
+
+    assert decision["indirect_speech_context"] == ""
+
+    authoritative_decision = (
+        relevance_module._validate_authoritative_settled_decision(
+            {
+                "semantic_disposition": "proceed",
+                "reason_to_respond": "the current message addresses the character",
+                "use_reply_feature": False,
+                "channel_topic": "watching a film",
+            },
+            available_dispositions=["proceed"],
+        )
+    )
+
+    assert authoritative_decision["indirect_speech_context"] == ""
+
+
+def test_authoritative_validation_reports_structural_field_differences() -> None:
+    """Contract feedback identifies missing and unexpected output fields."""
+
+    with pytest.raises(ValueError) as error_info:
+        relevance_module._validate_authoritative_settled_decision(
+            {
+                "semantic_disposition": "proceed",
+                "use_reply_feature": False,
+                "channel_topic": "watching a film",
+                "unexpected_field": "not part of the contract",
+            },
+            available_dispositions=["proceed"],
+        )
+
+    assert str(error_info.value) == (
+        "authoritative settled output fields are not exact; "
+        "missing required fields: reason_to_respond; "
+        "unexpected fields: unexpected_field"
+    )
+
+
+def test_settled_contract_error_preserves_nonempty_validation_feedback() -> None:
+    """A blank validator reason falls back to the typed error message."""
+
+    error = SettledRelevanceContractError(
+        "authoritative settled output repair failed",
+        validation_reason="",
+    )
+
+    assert error.validation_reason == (
+        "authoritative settled output repair failed"
+    )
+
+
 @pytest.mark.asyncio
 async def test_relevance_agent_returns_proceed_action() -> None:
     """A valid proceed object is forwarded as the settled action."""
@@ -404,6 +468,52 @@ async def test_relevance_agent_rejects_unavailable_resolved_disposition() -> Non
     ]
     assert record_trace.await_args_list[0].kwargs["status"] == "failed"
     assert record_trace.await_args_list[1].kwargs["status"] == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_relevance_repair_feedback_identifies_missing_required_field() -> None:
+    """Repair receives the exact structural reason for a rejected output."""
+
+    invalid_response = _llm_response(json.dumps({
+        "semantic_disposition": "proceed",
+        "recipient_relation": "character",
+        "admission_basis": "interaction_relevance",
+        "interaction_evidence_refs": ["target_character"],
+        "character_state_refs": [],
+        "use_reply_feature": False,
+        "channel_topic": "watching a film",
+        "indirect_speech_context": "",
+    }))
+    repaired_response = _llm_response(json.dumps({
+        "semantic_disposition": "proceed",
+        "recipient_relation": "character",
+        "admission_basis": "interaction_relevance",
+        "interaction_evidence_refs": ["target_character"],
+        "character_state_refs": [],
+        "reason_to_respond": "the current message addresses the character",
+        "use_reply_feature": False,
+        "channel_topic": "watching a film",
+        "indirect_speech_context": "",
+    }))
+    state = _base_state()
+    state["fresh_history"] = [
+        _character_history_row("The character answered an earlier request.")
+    ]
+
+    with patch.object(relevance_module, "_relevance_agent_llm") as mock_llm:
+        mock_llm.ainvoke = AsyncMock(
+            side_effect=[invalid_response, repaired_response],
+        )
+        result = await relevance_agent(state)
+
+    assert result["response_action"] == "proceed"
+    assert mock_llm.ainvoke.await_count == 2
+    repair_messages = mock_llm.ainvoke.await_args_list[1].args[0]
+    repair_payload = json.loads(str(repair_messages[1].content))
+    assert repair_payload["validation_reason"] == (
+        "authoritative settled output fields are not exact; "
+        "missing required fields: reason_to_respond"
+    )
 
 
 @pytest.mark.asyncio

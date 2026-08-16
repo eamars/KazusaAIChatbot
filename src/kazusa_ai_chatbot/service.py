@@ -2119,7 +2119,11 @@ async def _process_settlement_lease(
             decision,
         )
     except SettledRelevanceContractError as exc:
-        logger.exception(f"Settled relevance contract failed: {exc}")
+        logger.error(
+            "Settled relevance contract failed: "
+            f"{exc}; validation_reason={exc.validation_reason}",
+            exc_info=True,
+        )
         if lease.observation_status == "more_time_available":
             wait_decision = {
                 "response_action": "wait",

@@ -5,8 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from contextlib import ExitStack
+from datetime import datetime
+from pathlib import Path
 from time import perf_counter
 from typing import Any
 from unittest.mock import patch
@@ -16,6 +18,11 @@ import pytest
 import kazusa_ai_chatbot.relevance.persona_relevance_agent as settled_module
 from kazusa_ai_chatbot.cognition_core_v2 import (
     build_character_production_state,
+)
+from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+    project_character_operational_state,
+    project_relationship_context,
+    select_character_operational_context,
 )
 from kazusa_ai_chatbot.relevance.persona_relevance_agent import (
     SettledRelevanceContractError,
@@ -104,165 +111,230 @@ _QQ_PRIOR_BOT_REPLY = (
     '你去拿薯片的时候，顺手看下电视或投影能不能正常播？片源方便打开的话，'
     '我等你回来再一起开始嘛。'
 )
-_QQ_OTHER_GLOBAL_USER_ID = '686d4c62-e5fa-4771-9afa-70684211a29d'
-_QQ_OTHER_PLATFORM_USER_ID = '2506166881'
-_QQ_SOYO_GLOBAL_USER_ID = 'b4b93a08-7861-4716-b169-96fc3f19fc04'
-_QQ_SOYO_PLATFORM_USER_ID = '2444371484'
-_QQ_RELATIONSHIP_OPERATIONAL_CONTEXT = {
-    'schema_version': 'relationship_operational_context.v1',
-    'relationship_id': (
-        'relationship:user:4759394b-a4d2-4634-9d12-b6423a92a248'
-    ),
-    'axes': {
-        'familiarity': 50,
-        'positive_regard': 100,
-        'trust': 95,
-        'attachment': 100,
-        'desired_closeness': 100,
-        'perceived_closeness': 100,
-        'care': 100,
-        'boundary_safety': 6,
-        'exclusivity': 90,
-        'unresolved_injury': 75,
-        'salience': 50,
-    },
-    'causal_context': [],
-    'affect': [],
-    'relationship_freshness': '即时',
-    'evidence_freshness': '即时',
-}
+_QQ_CAPTURE_DIAGNOSTICS = (
+    Path(__file__).resolve().parents[1] / 'test_artifacts' / 'diagnostics'
+)
+_QQ_CHARACTER_STATE_CAPTURE = 'qq_480386272_character_state.json'
+_QQ_USER_PROFILE_CAPTURE = 'qq_480386272_user_profile.json'
+_QQ_HISTORY_CAPTURE = 'qq_480386272_history_before_owner_exclusive.json'
+_QQ_LATEST_CAPTURE = 'qq_480386272_latest_10m.json'
+_QQ_ACTIVE_EFFECTIVE_AT = '2026-08-16T08:32:30.211607Z'
+
+
+def _load_qq_capture(filename: str) -> dict[str, Any]:
+    """Load one read-only diagnostic capture required by the replay."""
+
+    path = _QQ_CAPTURE_DIAGNOSTICS / filename
+    if not path.is_file():
+        raise FileNotFoundError(f'QQ replay capture is missing: {path}')
+    value = json.loads(path.read_text(encoding='utf-8'))
+    if not isinstance(value, dict):
+        raise TypeError(f'QQ replay capture must be an object: {path}')
+    return value
+
+
+def _capture_rows(
+    capture: Mapping[str, Any],
+    field_name: str,
+) -> list[dict[str, Any]]:
+    """Return validated conversation rows from one diagnostic capture."""
+
+    value = capture.get(field_name)
+    if not isinstance(value, list) or not all(
+        isinstance(row, Mapping) for row in value
+    ):
+        raise ValueError(f'QQ capture field is not a row list: {field_name}')
+    return [dict(row) for row in value]
+
+
+def _capture_text(row: Mapping[str, Any], field_name: str) -> str:
+    """Return required text from one captured row."""
+
+    value = row.get(field_name)
+    if not isinstance(value, str) or not value:
+        raise ValueError(f'QQ capture field is invalid: {field_name}')
+    return value
+
+
+def _capture_timestamp(row: Mapping[str, Any]) -> datetime:
+    """Parse one captured storage timestamp for chronological selection."""
+
+    timestamp = _capture_text(row, 'timestamp')
+    return datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+
+
+def _captured_history_row(
+    source_row: Mapping[str, Any],
+    *,
+    turn_temporal_relation: str,
+) -> dict[str, Any]:
+    """Project one captured conversation row into the settled-state shape."""
+
+    addressed_to = source_row.get('addressed_to_global_user_ids')
+    if not isinstance(addressed_to, list) or not all(
+        isinstance(item, str) for item in addressed_to
+    ):
+        raise ValueError('QQ captured addressing is invalid')
+    reply_context = source_row.get('reply_context')
+    if not isinstance(reply_context, Mapping):
+        reply_context = {}
+    reply_to_platform_user_id = reply_context.get('reply_to_platform_user_id')
+    reply_to_display_name = reply_context.get('reply_to_display_name')
+    return _history_row(
+        role=_capture_text(source_row, 'role'),
+        platform_user_id=_capture_text(source_row, 'platform_user_id'),
+        global_user_id=_capture_text(source_row, 'global_user_id'),
+        body_text=_capture_text(source_row, 'body_text'),
+        addressed_to=list(addressed_to),
+        timestamp=_capture_text(source_row, 'timestamp'),
+        turn_temporal_relation=turn_temporal_relation,
+        reply_to_platform_user_id=(
+            reply_to_platform_user_id
+            if isinstance(reply_to_platform_user_id, str)
+            else ''
+        ),
+        reply_to_display_name=(
+            reply_to_display_name
+            if isinstance(reply_to_display_name, str)
+            else ''
+        ),
+        llm_trace_id=(
+            source_row.get('llm_trace_id')
+            if isinstance(source_row.get('llm_trace_id'), str)
+            else ''
+        ),
+    )
+
+
+def _qq_current_capture() -> dict[str, Any]:
+    """Return the captured active QQ message row."""
+
+    rows = _capture_rows(
+        _load_qq_capture(_QQ_LATEST_CAPTURE),
+        'messages',
+    )
+    matches = [
+        row
+        for row in rows
+        if row.get('platform_message_id') == '731909695'
+    ]
+    if len(matches) != 1:
+        raise ValueError('QQ active message capture is not unique')
+    return matches[0]
 
 
 def _qq_history_before_failure() -> list[dict[str, Any]]:
-    """Return the ten chronological history rows before the failed turn."""
+    """Return the exact ten newest pre-failure rows from the capture."""
 
+    rows = _capture_rows(
+        _load_qq_capture(_QQ_HISTORY_CAPTURE),
+        'documents',
+    )
+    selected = sorted(rows, key=_capture_timestamp)[-10:]
+    if len(selected) != 10:
+        raise ValueError('QQ pre-failure capture has fewer than ten rows')
     return [
-        _history_row(
-            role='assistant',
-            platform_user_id=_CHARACTER_PLATFORM_USER_ID,
-            global_user_id=_CHARACTER_GLOBAL_USER_ID,
-            body_text=(
-                '嗯，被你这么一抱，整个人都软下来了。外面走了一天，现在总算回到家了，'
-                '沙发窝着是真的舒服。你也别急着动呀，先靠过来缓一会儿。'
-            ),
-            addressed_to=[_CURRENT_GLOBAL_USER_ID],
-            timestamp='2026-08-16T08:19:18.000000+00:00',
-        ),
-        _history_row(
-            platform_user_id=_CURRENT_PLATFORM_USER_ID,
-            global_user_id=_CURRENT_GLOBAL_USER_ID,
-            body_text=(
-                '@一之濑明日奈 今天晚上想留下来么？如果留下来的话我就把你的那套洗漱和毛巾'
-                '拿出来。都给你准备好啦'
-            ),
-            addressed_to=[_CHARACTER_GLOBAL_USER_ID],
-            timestamp='2026-08-16T08:20:13.000000+00:00',
-        ),
-        _history_row(
-            role='assistant',
-            platform_user_id=_CHARACTER_PLATFORM_USER_ID,
-            global_user_id=_CHARACTER_GLOBAL_USER_ID,
-            body_text=(
-                '留下来呀，当然可以。你把洗漱用品和毛巾都准备好了，也太贴心了吧，我直接安心住下就行。'
-                '那先别急着开始，你先挑电影，我去倒两杯水？'
-            ),
-            addressed_to=[_CURRENT_GLOBAL_USER_ID],
-            timestamp='2026-08-16T08:21:52.000000+00:00',
-        ),
-        _history_row(
-            platform_user_id=_QQ_SOYO_PLATFORM_USER_ID,
-            global_user_id=_QQ_SOYO_GLOBAL_USER_ID,
-            body_text='连洗漱用品都备好了，看来是早有预谋呢。',
-            addressed_to=[_CURRENT_GLOBAL_USER_ID],
-            timestamp='2026-08-16T08:22:29.000000+00:00',
-            reply_to_platform_user_id=_CURRENT_PLATFORM_USER_ID,
-            reply_to_display_name='蚝爹油',
-        ),
-        _history_row(
-            platform_user_id=_CURRENT_PLATFORM_USER_ID,
-            global_user_id=_CURRENT_GLOBAL_USER_ID,
-            body_text='绷不住',
-            addressed_to=[],
-            timestamp='2026-08-16T08:23:10.000000+00:00',
-        ),
-        _history_row(
-            platform_user_id=_QQ_SOYO_PLATFORM_USER_ID,
-            global_user_id=_QQ_SOYO_GLOBAL_USER_ID,
-            body_text='这图发得挺应景，看来某人确实需要防诈骗提醒呢。',
-            addressed_to=[_CURRENT_GLOBAL_USER_ID],
-            timestamp='2026-08-16T08:23:21.000000+00:00',
-            reply_to_platform_user_id=_CURRENT_PLATFORM_USER_ID,
-            reply_to_display_name='蚝爹油',
-        ),
-        _history_row(
-            platform_user_id=_CURRENT_PLATFORM_USER_ID,
-            global_user_id=_CURRENT_GLOBAL_USER_ID,
-            body_text='@Nagasaki Soyo 这可不是仙人跳啊',
-            addressed_to=[_QQ_SOYO_GLOBAL_USER_ID],
-            timestamp='2026-08-16T08:23:31.000000+00:00',
-            reply_to_platform_user_id=_QQ_SOYO_PLATFORM_USER_ID,
-            reply_to_display_name='Nagasaki Soyo',
-        ),
-        _history_row(
-            platform_user_id=_QQ_SOYO_PLATFORM_USER_ID,
-            global_user_id=_QQ_SOYO_GLOBAL_USER_ID,
-            body_text='知道啦，旁边两位也收敛点。',
-            addressed_to=[],
-            timestamp='2026-08-16T08:23:43.000000+00:00',
-        ),
-        _history_row(
-            platform_user_id=_CURRENT_PLATFORM_USER_ID,
-            global_user_id=_CURRENT_GLOBAL_USER_ID,
-            body_text=(
-                '@一之濑明日奈 好哒，我去拿点薯片~\n明日奈想看什么电影？'
-            ),
-            addressed_to=[_CHARACTER_GLOBAL_USER_ID],
-            timestamp='2026-08-16T08:24:22.000000+00:00',
-            reply_to_platform_user_id=_CHARACTER_PLATFORM_USER_ID,
-            reply_to_display_name=_CHARACTER_NAME,
-        ),
-        _history_row(
-            role='assistant',
-            platform_user_id=_CHARACTER_PLATFORM_USER_ID,
-            global_user_id=_CHARACTER_GLOBAL_USER_ID,
-            body_text=_QQ_PRIOR_BOT_REPLY,
-            addressed_to=[_CURRENT_GLOBAL_USER_ID],
-            timestamp='2026-08-16T08:26:10.000000+00:00',
-        ),
+        _captured_history_row(
+            row,
+            turn_temporal_relation='before_active_turn',
+        )
+        for row in selected
     ]
 
 
 def _qq_history_after_failure() -> list[dict[str, Any]]:
-    """Return the five subsequent group rows seen during reassessment."""
+    """Return the exact five post-failure rows from the capture."""
 
-    rows = [
-        ('哦哦，Blue Archive的动画', '2026-08-16T08:32:37.000000+00:00'),
-        ('那个游戏我也听说过，画风确实可爱', '2026-08-16T08:32:39.000000+00:00'),
-        ('你们俩好好看吧，我就不打扰了', '2026-08-16T08:32:42.000000+00:00'),
-        ('等你们看完记得告诉我值不值得补', '2026-08-16T08:32:44.000000+00:00'),
-        ('嘿嘿', '2026-08-16T08:32:46.000000+00:00'),
+    rows = _capture_rows(
+        _load_qq_capture(_QQ_LATEST_CAPTURE),
+        'messages',
+    )
+    active_at = _capture_timestamp(_qq_current_capture())
+    selected = [
+        row
+        for row in sorted(rows, key=_capture_timestamp)
+        if _capture_timestamp(row) > active_at
     ]
+    if len(selected) != 5:
+        raise ValueError('QQ post-failure capture does not contain five rows')
     return [
-        _history_row(
-            platform_user_id=_QQ_OTHER_PLATFORM_USER_ID,
-            global_user_id=_QQ_OTHER_GLOBAL_USER_ID,
-            body_text=body_text,
-            addressed_to=[],
-            timestamp=timestamp,
+        _captured_history_row(
+            row,
             turn_temporal_relation='after_active_turn',
         )
-        for body_text, timestamp in rows
+        for row in selected
     ]
+
+
+def _qq_prior_bot_reply() -> str:
+    """Return and verify the exact bot continuity row from the capture."""
+
+    before_history = _qq_history_before_failure()
+    prior_row = before_history[-1]
+    if prior_row.get('role') != 'assistant':
+        raise ValueError('QQ pre-failure history does not end with the bot')
+    prior_bot_reply = _capture_text(prior_row, 'body_text')
+    if prior_bot_reply != _QQ_PRIOR_BOT_REPLY:
+        raise ValueError('QQ prior bot reply capture differs from the case')
+    return prior_bot_reply
+
+
+def _qq_character_cognition_state() -> dict[str, Any]:
+    """Return the persisted character cognition snapshot at the incident."""
+
+    capture = _load_qq_capture(_QQ_CHARACTER_STATE_CAPTURE)
+    character_state = capture.get('character_state')
+    if not isinstance(character_state, Mapping):
+        raise TypeError('QQ character capture is missing character_state')
+    cognition_state = character_state.get('cognition_state')
+    if not isinstance(cognition_state, Mapping):
+        raise TypeError('QQ character capture is missing cognition_state')
+    return dict(cognition_state)
+
+
+def _qq_user_cognition_state() -> dict[str, Any]:
+    """Return the persisted current-user cognition snapshot at the incident."""
+
+    capture = _load_qq_capture(_QQ_USER_PROFILE_CAPTURE)
+    profile = capture.get('profile')
+    if not isinstance(profile, Mapping):
+        raise TypeError('QQ profile capture is missing profile')
+    cognition_state = profile.get('cognition_state')
+    if not isinstance(cognition_state, Mapping):
+        raise TypeError('QQ profile capture is missing cognition_state')
+    return dict(cognition_state)
 
 
 def _qq_failure_state(history: list[dict[str, Any]]) -> dict[str, Any]:
-    """Build the bounded settled-relevance state for the captured QQ turn."""
+    """Build settled state from exact incident snapshots and history rows."""
 
+    current_message = _capture_text(_qq_current_capture(), 'body_text')
+    if current_message != _QQ_CURRENT_MESSAGE:
+        raise ValueError('QQ active message capture differs from the case')
+    prior_bot_reply = _qq_prior_bot_reply()
+    character_state = _qq_character_cognition_state()
+    character_view = project_character_operational_state(
+        character_state,
+        effective_at=_QQ_ACTIVE_EFFECTIVE_AT,
+    )
+    character_context = select_character_operational_context(
+        character_view,
+        consumer_role='settled_relevance',
+    )
+    relationship_context = project_relationship_context(
+        _qq_user_cognition_state(),
+        effective_at=_QQ_ACTIVE_EFFECTIVE_AT,
+    )
+    group_attention = settled_module.build_group_attention_context(
+        chat_history_wide=history,
+        platform_bot_id=_CHARACTER_PLATFORM_USER_ID,
+        character_global_user_id=_CHARACTER_GLOBAL_USER_ID,
+    )['group_attention']
     return {
         'conversation_scope': 'group',
         'active_character_name': _CHARACTER_NAME,
         'assembled_fragments': [{
-            'body_text': _QQ_CURRENT_MESSAGE,
+            'body_text': current_message,
             'semantic_target_labels': ['character'],
             'reply_target_label': 'character',
             'media_labels': [],
@@ -272,18 +344,11 @@ def _qq_failure_state(history: list[dict[str, Any]]) -> dict[str, Any]:
         'fresh_history': history,
         'scene_context': '',
         'relationship_context': 'direct participant',
-        'character_operational_context': {
-            'affect': [],
-            'pressures': [],
-        },
-        'group_attention': '',
-        'bot_continuity': _QQ_PRIOR_BOT_REPLY,
-        'character_cognition_state': build_character_production_state(
-            updated_at='2026-08-16T01:10:01Z',
-        ),
-        'relationship_operational_context': (
-            _QQ_RELATIONSHIP_OPERATIONAL_CONTEXT.copy()
-        ),
+        'character_operational_context': character_context,
+        'group_attention': group_attention,
+        'bot_continuity': prior_bot_reply,
+        'character_cognition_state': character_state,
+        'relationship_operational_context': relationship_context,
         'current_author_global_user_id': _CURRENT_GLOBAL_USER_ID,
         'current_author_platform_user_id': _CURRENT_PLATFORM_USER_ID,
         'character_global_user_id': _CHARACTER_GLOBAL_USER_ID,
@@ -376,6 +441,12 @@ async def _run_qq_failure_replay() -> dict[str, Any]:
         )
     evidence = {
         'input_kind': 'captured_production_failure',
+        'capture_sources': [
+            str(_QQ_CAPTURE_DIAGNOSTICS / _QQ_HISTORY_CAPTURE),
+            str(_QQ_CAPTURE_DIAGNOSTICS / _QQ_LATEST_CAPTURE),
+            str(_QQ_CAPTURE_DIAGNOSTICS / _QQ_CHARACTER_STATE_CAPTURE),
+            str(_QQ_CAPTURE_DIAGNOSTICS / _QQ_USER_PROFILE_CAPTURE),
+        ],
         'production_trace_reference': {
             'trace_id': 'llmtrace_7ed034efc21249fd8f5d1ee3b0bd1266',
             'platform_channel_id': '480386272',
@@ -407,6 +478,16 @@ async def _run_qq_failure_replay() -> dict[str, Any]:
         'first_error': first_error,
         'second_result': second_result,
         'second_error': second_error,
+        'first_contract_failure_after_fix': first_error is not None,
+        'full_terminal_failure_after_fix': (
+            first_error is not None and second_error is not None
+        ),
+        'optional_context_omission_accepted': any(
+            isinstance(call['parsed_output'], Mapping)
+            and 'indirect_speech_context' not in call['parsed_output']
+            and call['validated_decision'] is not None
+            for call in inspected_calls
+        ),
         'route': 'RELEVANCE_AGENT_LLM',
         'model': settled_module.RELEVANCE_AGENT_LLM_MODEL,
     }
@@ -421,25 +502,24 @@ async def _run_qq_failure_replay() -> dict[str, Any]:
 async def test_live_replays_qq_480386272_settled_relevance_failure(
     ensure_relevance_live_llms,  # noqa: F811
 ) -> None:
-    """Reproduce the two-assessment failure before cognition admission."""
+    """Replay the incident and verify optional context no longer fails intake."""
 
     del ensure_relevance_live_llms
     evidence = await _run_qq_failure_replay()
-    assert evidence['first_error'] is not None, (
-        'The original first settled-relevance assessment did not fail; '
-        f"result={evidence['first_result']!r}"
+    assert evidence['first_error'] is None, (
+        'The first settled-relevance assessment still failed after the fix: '
+        f"error={evidence['first_error']!r}"
     )
-    assert evidence['second_error'] is not None, (
-        'The original hard-deadline settled-relevance assessment did not '
-        f"fail; result={evidence['second_result']!r}"
+    assert evidence['first_result'] is not None, (
+        'The fixed first assessment produced no decision: '
+        f"calls={evidence['model_calls']!r}"
     )
-    assert evidence['second_error']['error_code'] == 'model_contract_invalid'
-    assert (
-        evidence['second_error']['stage']
-        == 'settled_relevance.authoritative_parse'
+    assert evidence['first_result']['indirect_speech_context'] == ''
+    assert evidence['second_error'] is None, (
+        'The optional-context fix still left a terminal second-assessment '
+        f"error: {evidence['second_error']!r}"
     )
-    assert evidence['second_error']['attempt_count'] == 2
-    assert len(evidence['model_calls']) == 3
+    assert evidence['full_terminal_failure_after_fix'] is False
 
 
 class _RecordingLLM:

@@ -170,6 +170,20 @@ def test_settled_evidence_prompts_state_the_total_reference_cap() -> None:
     )
 
 
+def test_settled_prompts_define_empty_indirect_context() -> None:
+    """Keep optional indirect context semantics clear in every settled path."""
+
+    settled_prompts = (
+        persona_relevance_agent._SETTLED_SYSTEM_PROMPT_COMMON,
+        persona_relevance_agent._SETTLED_AUTHORITATIVE_ACTION_CONTRACT,
+        persona_relevance_agent._SETTLED_AUTHORITATIVE_REPAIR_PROMPT,
+    )
+
+    for prompt in settled_prompts:
+        assert "indirect_speech_context" in prompt
+        assert "填 null 或空字符串" in prompt
+
+
 def test_text_prompts_organically_favor_spoken_or_typed_dialog() -> None:
     """Keep staging out of upstream guidance without adding a rejection gate."""
 

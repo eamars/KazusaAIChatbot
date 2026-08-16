@@ -128,6 +128,9 @@ invalid result raises a typed operational failure. During the first assessment,
 an invalid authoritative result reaches the coordinator's existing one-time
 `wait` boundary and is reassessed at the hard deadline instead of becoming a
 synthetic semantic `ignore`.
+`indirect_speech_context` is optional metadata: a missing key, `null`, or an
+empty string is canonicalized to the empty string. The semantic disposition,
+recipient, evidence, and action fields remain contract-validated.
 The settled agent also treats `use_reply_feature` as a semantic request for a
 native visual anchor. It requests an anchor only for a proceeding group turn
 where anchoring the effective latest fragment materially clarifies a specific

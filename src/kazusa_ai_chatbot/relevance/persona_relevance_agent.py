@@ -107,7 +107,13 @@ class SettledRelevanceContractError(ValueError):
         super().__init__(message)
         self.error_code = "model_contract_invalid"
         self.stage = "settled_relevance.authoritative_parse"
-        self.validation_reason = validation_reason
+        normalized_validation_reason = validation_reason.strip()
+        if not normalized_validation_reason:
+            normalized_validation_reason = (
+                message.strip()
+                or "authoritative settled output failed its contract"
+            )
+        self.validation_reason = normalized_validation_reason
         self.attempt_count = attempt_count
         self.safe_checkpoint = "pre_state_commit"
         self.retryable = False
@@ -199,6 +205,8 @@ _SETTLED_SYSTEM_PROMPT_COMMON = '''你是具备角色语境的 settled relevance
    为重复回复选择适用的终止 action。
 7. 只选择下方输出 contract 列出的 action。
 8. 填写所有输出字段，使 action、接收者、准入依据和引用 ref 一致。
+indirect_speech_context 没有内容时填 null 或空字符串；不要省略该字段，
+也不要编造不存在的间接语境。
 '''
 
 _SETTLED_WAIT_ACTION_CONTRACT = '''
@@ -239,7 +247,8 @@ _SETTLED_AUTHORITATIVE_ACTION_CONTRACT = '''
 "reason_to_respond":"最多 180 字符","use_reply_feature":false,
 "channel_topic":"最多 60 字符",
 "indirect_speech_context":"最多 100 字符"}}
-semantic_disposition 只能选择本输出 contract 中列出的值。'''
+semantic_disposition 只能选择本输出 contract 中列出的值。indirect_speech_context 没有内容时
+填 null 或空字符串；不要编造不存在的间接语境。'''
 
 _SETTLED_AUTHORITATIVE_REPAIR_PROMPT = '''你负责修复一次 settled relevance 的结构化输出。
 修复输入中的 settled_evidence 是本轮判断证据，validation_reason 是上一次输出未通过的结构问题，
@@ -250,6 +259,8 @@ use_reply_feature、channel_topic、indirect_speech_context。所有 ref 必须�
 中的 interaction_evidence 或 character_state_evidence。interaction_evidence_refs 和
 character_state_refs 每个列表合计最多 3 个 ref；只保留足以支持判断的最少 ref。只返回一个
 JSON 对象，不添加解释。
+indirect_speech_context 没有内容时填 null 或空字符串；不要省略该字段，
+也不要编造不存在的间接语境。
 semantic_disposition 为 recipient_withdrawn 时，admission_basis 必须为 none；保留最新实际
 recipient_relation，并引用支持该接收者的 target、reply 或 message evidence。
 允许的 semantic_disposition：{semantic_dispositions}
@@ -1307,8 +1318,12 @@ def validate_settled_relevance_decision(
         raise ValueError("settled use_reply_feature must be bool")
     if not isinstance(channel_topic, str):
         raise ValueError("settled channel_topic must be a string")
-    if not isinstance(indirect_context, str):
-        raise ValueError("settled indirect_speech_context must be a string")
+    if indirect_context is None:
+        indirect_context = ""
+    elif not isinstance(indirect_context, str):
+        raise ValueError(
+            "settled indirect_speech_context must be a string or null"
+        )
 
     return_value: SettledRelevanceDecision = {
         "response_action": response_action,
@@ -1339,26 +1354,45 @@ def _validate_authoritative_settled_decision(
         "reason_to_respond",
         "use_reply_feature",
         "channel_topic",
-        "indirect_speech_context",
     }
+    optional_decision_fields = {"indirect_speech_context"}
     assessment_fields = {
         "recipient_relation",
         "admission_basis",
         "interaction_evidence_refs",
         "character_state_refs",
     }
-    if (
-        not required_decision_fields.issubset(raw)
-        or set(raw) - required_decision_fields - assessment_fields
-    ):
-        raise ValueError("authoritative settled output fields are not exact")
+    expected_fields = (
+        required_decision_fields
+        | optional_decision_fields
+        | assessment_fields
+    )
+    missing_fields = sorted(required_decision_fields - set(raw))
+    unexpected_fields = sorted(
+        str(field_name)
+        for field_name in set(raw) - expected_fields
+    )
+    if missing_fields or unexpected_fields:
+        field_errors: list[str] = []
+        if missing_fields:
+            field_errors.append(
+                "missing required fields: " + ", ".join(missing_fields)
+            )
+        if unexpected_fields:
+            field_errors.append(
+                "unexpected fields: " + ", ".join(unexpected_fields)
+            )
+        raise ValueError(
+            "authoritative settled output fields are not exact; "
+            + "; ".join(field_errors)
+        )
     semantic_disposition = raw["semantic_disposition"]
     if semantic_disposition not in available_dispositions:
         raise ValueError("authoritative semantic_disposition is unavailable")
     reason = raw["reason_to_respond"]
     use_reply_feature = raw["use_reply_feature"]
     channel_topic = raw["channel_topic"]
-    indirect_context = raw["indirect_speech_context"]
+    indirect_context = raw.get("indirect_speech_context")
     if not isinstance(reason, str):
         raise ValueError("authoritative reason_to_respond must be a string")
     if not isinstance(use_reply_feature, bool):
@@ -1369,7 +1403,7 @@ def _validate_authoritative_settled_decision(
         indirect_context = ""
     elif not isinstance(indirect_context, str):
         raise ValueError(
-            "authoritative indirect_speech_context must be a string"
+            "authoritative indirect_speech_context must be a string or null"
         )
     if semantic_disposition != "proceed" and use_reply_feature:
         raise ValueError(
@@ -1764,9 +1798,13 @@ async def relevance_agent(state: IMProcessState) -> dict[str, Any]:
                         status="failed",
                         started_at=repair_started_at,
                     )
+                    repair_validation_reason = (
+                        repair_exc.validation_reason.strip()
+                        or exc.validation_reason
+                    )
                     raise SettledRelevanceContractError(
                         "authoritative settled output repair failed",
-                        validation_reason=repair_exc.validation_reason,
+                        validation_reason=repair_validation_reason,
                         attempt_count=2,
                     ) from repair_exc
                 messages = tuple(repair_messages)
