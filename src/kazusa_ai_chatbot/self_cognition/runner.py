@@ -1196,14 +1196,20 @@ def _build_public_group_scene(case: models.SelfCognitionCase) -> str:
     trigger_row = visible_rows[-1]
     ambient_logical_turns = [
         {
+            "turn_id": f"self-cognition-scene:{index}",
             "occurred_at": row["timestamp"],
             "role": row["role"],
             "display_name": "",
             "fragments": [row["body_text"]],
+            "conversation_row_ids": [],
+            "llm_trace_id": "",
+            "platform_user_id": "",
+            "global_user_id": "",
             "addressed_to_global_user_ids": [],
+            "broadcast": False,
             "reply_context": {},
         }
-        for row in ambient_rows
+        for index, row in enumerate(ambient_rows)
     ]
     group_scene_context = build_group_scene_context(
         ambient_logical_turns=ambient_logical_turns,
