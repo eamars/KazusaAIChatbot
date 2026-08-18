@@ -1339,6 +1339,16 @@
     "tests/unit/cognition_core_v3/test_action_selection.py::test_selected_operation_and_goal_progress_are_preserved"
    ],
    "supplemental_tests": []
+  },
+  {
+   "source": "src/kazusa_ai_chatbot/cognition_core_v3/diagnostics.py",
+   "owner": "V3 public diagnostics and protected chain metadata owner",
+   "contract": "exact V2 stage-trace public field parity plus credential-free config identity and typed-only protected failure projection",
+   "required_unit_tests": [
+    "tests/unit/cognition_core_v3/test_diagnostics.py::test_v3_public_diagnostics_match_v2_contract",
+    "tests/unit/cognition_core_v3/test_diagnostics.py::test_protected_chain_metadata_excludes_secrets_and_rejected_content"
+   ],
+   "supplemental_tests": []
   }
  ]
 }
