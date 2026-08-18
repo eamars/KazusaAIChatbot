@@ -114,7 +114,7 @@ from kazusa_ai_chatbot.cognition_episode import (
     validate_cognitive_episode_v1,
     validate_goal_continuation_ref,
 )
-from kazusa_ai_chatbot.cognition_core_v2 import run_cognition
+from kazusa_ai_chatbot.cognition_core_selector import run_cognition
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     ActionAffordanceV2,
     CognitionContractError,
