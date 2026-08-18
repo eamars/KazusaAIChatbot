@@ -1245,6 +1245,27 @@
     "tests/unit/test_cognition_core_selector.py::test_v3_failure_never_invokes_v2"
    ],
    "supplemental_tests": []
+  },
+  {
+   "source": "src/kazusa_ai_chatbot/cognition_core_v3/contracts.py",
+   "owner": "V3 internal execution contract owner",
+   "contract": "stage outcomes, typed failures, chain checkpoints, and cache-domain identity validation",
+   "required_unit_tests": [
+    "tests/unit/cognition_core_v3/test_contracts.py::test_chain_contracts_reject_unknown_fields_and_values"
+   ],
+   "supplemental_tests": [
+    "tests/unit/cognition_core_v3/test_contracts.py::test_boundary_class_failures_are_terminal_without_repair_calls",
+    "tests/unit/cognition_core_v3/test_contracts.py::test_cache_domain_identity_is_deterministic_and_credential_free"
+   ]
+  },
+  {
+   "source": "src/kazusa_ai_chatbot/cognition_core_v3/registry.py",
+   "owner": "V3 fixed topology and visibility owner",
+   "contract": "immutable appraisal-chain, stage-order, goal-topology registry with import-time validation",
+   "required_unit_tests": [
+    "tests/unit/cognition_core_v3/test_registry.py::test_registry_exposes_exact_appraisal_and_goal_topology"
+   ],
+   "supplemental_tests": []
   }
  ]
 }
