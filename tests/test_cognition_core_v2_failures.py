@@ -19,7 +19,6 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
 from kazusa_ai_chatbot.cognition_core_v2.morning_refresh import (
     run_character_morning_refresh,
 )
-from kazusa_ai_chatbot.llm_tracing import failure_capsule
 from kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal import (
     _validate_handles,
     validate_semantic_appraisal_result,
@@ -47,6 +46,7 @@ from kazusa_ai_chatbot.cognition_core_v2.transition_guards import (
     transition_knowledge_gap,
     transition_threat,
 )
+from kazusa_ai_chatbot.llm_tracing import failure_capsule
 from tests.cognition_core_v2_test_helpers import canonical_episode
 
 
@@ -519,6 +519,13 @@ async def test_appraisal_collection_records_original_failure_cause(
             "question_id": "q:event_agency",
             "question_kind": "event_agency",
             "failure_code": "semantic_appraisal_context_limit",
+            "failure_kind": "context_limit",
+            "field_path": None,
+            "repair_attempted": False,
+            "attempt_count": 1,
+            "retryable": False,
+            "disposition": "question_omitted",
+            "exception_text": "candidate origin evidence is missing",
         },
         "cause_chain": [
             {

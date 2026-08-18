@@ -1648,6 +1648,59 @@ def _reduce_appraisals_with_isolation(
     )
 
 
+def _appraisal_failure_details(
+    question: Mapping[str, Any],
+    result: BaseException,
+    error_code: str,
+) -> dict[str, Any]:
+    """Build raw-output-independent metadata for one omitted appraisal."""
+
+    cause = result.__cause__
+    attempt_count = getattr(result, "attempt_count", 1)
+    if not isinstance(attempt_count, int) or attempt_count < 1:
+        attempt_count = 1
+    failure_kind = getattr(cause, "failure_kind", None)
+    if not isinstance(failure_kind, str) or not failure_kind:
+        failure_kind = {
+            "semantic_appraisal_context_limit": "context_limit",
+            "semantic_appraisal_provider_exhausted": (
+                "provider_transport_failure"
+            ),
+            "semantic_appraisal_contract_exhausted": (
+                "structural_contract_error"
+            ),
+            "semantic_appraisal_state_incompatibility": (
+                "state_incompatibility"
+            ),
+        }.get(error_code, "unknown_validation_failure")
+    field_path = getattr(cause, "field_path", None)
+    if not isinstance(field_path, str):
+        field_path = None
+    disposition = (
+        "question_omitted"
+        if error_code in {
+            "semantic_appraisal_context_limit",
+            "semantic_appraisal_provider_exhausted",
+            "semantic_appraisal_contract_exhausted",
+            "semantic_appraisal_state_incompatibility",
+        }
+        else "terminal_rejection"
+    )
+    exception_text = str(cause if cause is not None else result)
+    return {
+        "question_id": question["question_id"],
+        "question_kind": question["question_kind"],
+        "failure_code": error_code,
+        "failure_kind": failure_kind,
+        "field_path": field_path,
+        "repair_attempted": attempt_count > 1,
+        "attempt_count": attempt_count,
+        "retryable": bool(getattr(result, "retryable", False)),
+        "disposition": disposition,
+        "exception_text": exception_text[:MAX_APPRAISAL_REJECTION_ERROR_CHARS],
+    }
+
+
 async def _collect_appraisals(
     tasks: Sequence[asyncio.Task[SemanticAppraisalResultV2]],
     questions: Sequence[Mapping[str, Any]],
@@ -1672,25 +1725,11 @@ async def _collect_appraisals(
                 raise result
             else:
                 error_code = result.error_code
-            failure_details = {
-                "question_id": question["question_id"],
-                "question_kind": question["question_kind"],
-                "failure_code": error_code,
-            }
-            if error_code == "semantic_appraisal_state_incompatibility":
-                original_state_error = result.__cause__
-                exception_text = (
-                    str(original_state_error)
-                    if isinstance(original_state_error, CognitionStateError)
-                    else str(result)
-                )
-                failure_details.update({
-                    "attempt_count": result.attempt_count,
-                    "disposition": "question_omitted",
-                    "exception_text": exception_text[
-                        :MAX_APPRAISAL_REJECTION_ERROR_CHARS
-                    ],
-                })
+            failure_details = _appraisal_failure_details(
+                question,
+                result,
+                error_code,
+            )
             failure_capsule.mark_current_failure(
                 failure_kind="semantic_appraisal_failure",
                 stage_name="semantic_appraisal",

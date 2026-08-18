@@ -232,6 +232,7 @@ async def _run_boundary_once(
                 "intention": "remain silent",
                 "target_roles": [],
                 "reason": "no valid admitted bid",
+                "goal_continuation_ref": None,
             },
             "action_requests": [],
             "resolver_requests": [],
@@ -461,9 +462,16 @@ def _search_evidence(
     if not any(
         fragment in haystack for fragment in expected_error_fragments
     ):
+        observed_errors = [
+            str(stage.get("error") or "")
+            for stage in candidate_run["capture"].get("stages", [])
+            if isinstance(stage, Mapping) and stage.get("error")
+        ]
         raise AssertionError(
             "the preserved candidate did not produce the named failure: "
             + ", ".join(expected_error_fragments)
+            + "; observed: "
+            + " || ".join(observed_errors)
         )
 
 
@@ -513,6 +521,72 @@ async def replay_appraisal_through_public_boundary(
     _search_evidence(candidate_run, expected_error_fragments)
 
     if candidate_run["run_error"] is not None:
+        if candidate_run["run_error"]["error_code"] == (
+            "cognition_boundary_rejected"
+        ):
+            if candidate_run["commit_calls"] or candidate_run["event_calls"]:
+                raise AssertionError(
+                    "terminal boundary replay committed a side effect"
+                )
+            if candidate_run["snapshot"]["action_plan_inputs"]:
+                raise AssertionError(
+                    "terminal boundary replay reached action planning"
+                )
+            if candidate_run["surface_input"] is not None:
+                raise AssertionError(
+                    "terminal boundary replay reached L3 projection"
+                )
+            artifact = {
+                "schema_version": (
+                    "cognition_core_v2_appraisal_public_boundary.v1"
+                ),
+                "case_id": case_id,
+                "source": {
+                    "trace_id": source_trace_id,
+                    "path": (
+                        str(source_path)
+                        if source_path is not None
+                        else None
+                    ),
+                    "sha256": source_sha256,
+                },
+                "candidate": {
+                    "classification": candidate_classification,
+                    "candidate_sha256": hashlib.sha256(
+                        first_response_text.encode()
+                    ).hexdigest(),
+                    "controlled_mutation": (
+                        _clone(controlled_mutation)
+                        if controlled_mutation is not None
+                        else None
+                    ),
+                    "first_attempt_performance_evidence": False,
+                    "expected_first_failure": list(expected_error_fragments),
+                    "real_repair_call": len(calls) >= 2,
+                    "calls": _clone(candidate_run["candidate_calls"]),
+                },
+                "disposition": {
+                    "boundary_status": "terminal_rejection",
+                    "boundary_error": _clone(candidate_run["run_error"]),
+                    "control_mode": "none",
+                    "accepted_repaired_result": False,
+                },
+                "candidate_snapshot": _clone(candidate_run["snapshot"]),
+                "capture": _clone(candidate_run["capture"]),
+                "failure_capsule": _clone(candidate_run["persisted_capsules"]),
+                "commit_events": _clone(candidate_run["event_calls"]),
+            }
+            artifact_path = write_diagnostic_artifact(
+                f"{case_id}_{time_ns()}",
+                artifact,
+                artifact_root=_ARTIFACT_ROOT,
+            )
+            return {
+                "artifact_path": artifact_path,
+                "artifact": artifact,
+                "candidate_run": candidate_run,
+                "control_run": None,
+            }
         if candidate_run["run_error"]["error_code"] != (
             "required_selection_without_admitted_bid"
         ):

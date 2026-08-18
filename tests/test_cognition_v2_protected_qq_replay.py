@@ -16,7 +16,6 @@ from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
     _normalize_nonowning_goal_fields,
 )
 from kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal import (
-    _is_boundary_validation_error,
     appraise_semantic_question,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
@@ -28,6 +27,10 @@ from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
 
 TRACE_PATH = Path(__file__).resolve().parents[1] / "test_artifacts" / (
     "diagnostics/llmtrace_93482_validator_evidence.json"
+)
+CURRENT_TRACE_PATH = Path(__file__).resolve().parents[1] / "test_artifacts" / (
+    "diagnostics/llm_trace_llmtrace_79651aa48cfd41d0a50c06343dbaa8db_"
+    "20260818T004324Z.json"
 )
 
 
@@ -43,6 +46,128 @@ class _CapturedCandidateLLM:
 
         self.calls += 1
         return SimpleNamespace(content=self.response_text)
+
+
+class _ScriptedCandidateLLM:
+    """Return a preserved candidate, bounded repair, and empty terminator."""
+
+    def __init__(self, responses: list[str]) -> None:
+        self.responses = list(responses)
+        self.calls = 0
+
+    async def ainvoke(self, *_args: object, **_kwargs: object) -> object:
+        """Return the next deterministic replay response."""
+
+        self.calls += 1
+        return SimpleNamespace(content=self.responses.pop(0))
+
+
+def _current_trace_candidate() -> str:
+    """Read the first failed semantic candidate from the protected export."""
+
+    trace = json.loads(CURRENT_TRACE_PATH.read_text(encoding="utf-8"))
+    for attempt in _semantic_attempts(trace):
+        if attempt.get("stage_name") == (
+            "semantic_appraisal.q:goal_threat_outcome.item_1"
+        ):
+            raw_response = attempt.get("raw_response_text")
+            if isinstance(raw_response, str):
+                return raw_response
+    raise AssertionError("current protected trace candidate is missing")
+
+
+def _current_trace_question() -> dict[str, object]:
+    """Build the scoped question represented by the current failure."""
+
+    return {
+        "question_id": "q:goal_threat_outcome",
+        "question_kind": "goal_threat_outcome",
+        "semantic_question": "Assess whether the knowledge gap was answered.",
+        "evidence_handles": ["e1", "e3"],
+        "permitted_role_handles": ["ck1", "current_user", "self"],
+        "permitted_role_assignment_handles": ["current_user", "self"],
+        "permitted_delta_paths": [],
+        "dependencies": [],
+    }
+
+
+def _current_trace_evidence() -> list[dict[str, object]]:
+    """Build the origin and resolution evidence used by the current case."""
+
+    return [
+        {
+            "evidence_handle": handle,
+            "evidence_ref": {
+                "source_kind": "conversation",
+                "source_id": f"conversation:{handle}",
+                "occurred_at": "2026-08-18T00:00:00Z",
+                "semantic_summary": f"Evidence row {handle}.",
+            },
+            "semantic_text": f"Evidence row {handle}.",
+            "visible_to": ["q:goal_threat_outcome"],
+            "authority": "conversation",
+        }
+        for handle in ("e1", "e3")
+    ]
+
+
+def _current_trace_projection() -> PromptProjectionV2:
+    """Build canonical handles for the current protected failure."""
+
+    return PromptProjectionV2(
+        payload={
+            "knowledge_gaps": [{
+                "handle": "ck1",
+                "description": "The current knowledge gap.",
+            }],
+        },
+        handle_to_ref={
+            "ck1": {
+                "scope": "user",
+                "kind": "knowledge_gap",
+                "entity_id": "candidate:knowledge_gap:e1",
+            },
+            "current_user": {
+                "scope": "user",
+                "kind": "relationship",
+                "entity_id": "relationship:user:qq-current",
+            },
+            "self": {
+                "scope": "character",
+                "kind": "meaning",
+                "entity_id": "meaning:character",
+            },
+        },
+    )
+
+
+def _current_trace_repaired_candidate() -> str:
+    """Build the expected producer-owned origin-plus-resolution replacement."""
+
+    return json.dumps({
+        "question_id": "q:goal_threat_outcome",
+        "proposition": {
+            "proposition_kind": "knowledge_answered",
+            "subject_handle": "ck1",
+            "evidence_handles": ["e1", "e3"],
+            "role_assignments": [
+                {"role": "actor", "entity_handle": "self"},
+                {"role": "target", "entity_handle": "current_user"},
+            ],
+            "semantic_value": "The knowledge gap has been answered.",
+        },
+        "delta": None,
+    })
+
+
+def _current_trace_empty_item() -> str:
+    """Build the bounded empty item that ends the repaired appraisal family."""
+
+    return json.dumps({
+        "question_id": "q:goal_threat_outcome",
+        "proposition": None,
+        "delta": None,
+    })
 
 
 def _captured_boundary_question() -> dict[str, object]:
@@ -159,6 +284,60 @@ def _semantic_attempts(trace: Mapping[str, object]) -> list[Mapping[str, object]
     return attempts
 
 
+async def _run_current_trace_repair() -> tuple[Mapping[str, object], _ScriptedCandidateLLM]:
+    """Replay the current failed candidate through bounded producer repair."""
+
+    llm = _ScriptedCandidateLLM([
+        _current_trace_candidate(),
+        _current_trace_repaired_candidate(),
+        _current_trace_empty_item(),
+    ])
+    config = SimpleNamespace(route_name="test.current_qq_replay")
+    services = SimpleNamespace(
+        llm=llm,
+        appraisal_event_agency_config=config,
+        appraisal_relationship_social_config=config,
+        appraisal_moral_identity_config=config,
+        appraisal_goal_threat_outcome_config=config,
+        appraisal_epistemic_comparison_memory_config=config,
+        appraisal_existential_drive_config=config,
+    )
+    result = await appraise_semantic_question(
+        _current_trace_question(),
+        _current_trace_evidence(),
+        _current_trace_projection(),
+        services,
+        validation_state=build_acquaintance_user_state(
+            global_user_id="qq-current",
+            updated_at="2026-08-18T00:00:00Z",
+        ),
+    )
+    return result, llm
+
+
+@pytest.mark.asyncio
+async def test_protected_qq_replay_repairs_candidate_origin_without_semantic_policy_retry(
+) -> None:
+    """The current protected origin failure reaches a producer repair call."""
+
+    result, llm = await _run_current_trace_repair()
+
+    assert llm.calls == 3
+    assert result["question_id"] == "q:goal_threat_outcome"
+    assert result["propositions"]
+
+
+@pytest.mark.asyncio
+async def test_protected_qq_replay_preserves_origin_and_resolution_evidence(
+) -> None:
+    """The repaired protected candidate retains both required citations."""
+
+    result, _ = await _run_current_trace_repair()
+
+    assert result["selected_evidence_handles"] == ["e1", "e3"]
+    assert result["propositions"][0]["evidence_handles"] == ["e1", "e3"]
+
+
 def test_protected_qq_replay_semantic_appraisal_avoids_semantic_retry() -> None:
     """Replay the captured raw candidate through the boundary owner."""
 
@@ -176,7 +355,6 @@ def test_protected_qq_replay_semantic_appraisal_avoids_semantic_retry() -> None:
     assert isinstance(attempt.get("parsed_output"), Mapping)
     validation_error = str(attempt["validation_error"])
     assert "knowledge_gaps.k7.uncertainty" in validation_error
-    assert _is_boundary_validation_error(ValueError(validation_error))
 
 
 @pytest.mark.asyncio

@@ -9,7 +9,13 @@ from typing import Any
 import pytest
 
 from kazusa_ai_chatbot.cognition_core_v2 import facade
-from kazusa_ai_chatbot.cognition_core_v2.contracts import BranchDefinition
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    BranchDefinition,
+    CognitionExecutionError,
+)
+from kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal import (
+    _SemanticBoundaryValidationError,
+)
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
@@ -34,6 +40,49 @@ def test_facade_exposes_owned_contract() -> None:
     assert not missing_symbols, (
         f"{MODULE_PATH} is missing owner symbols: {missing_symbols}"
     )
+
+
+def test_appraisal_collection_records_typed_contract_exhaustion_metadata() -> None:
+    """Expose typed omission metadata without requiring raw model output."""
+
+    cause = _SemanticBoundaryValidationError(
+        "causal candidates must cite originating evidence: ck1->e1",
+        failure_kind="candidate_origin_missing",
+        field_path="proposition.evidence_handles",
+        repairable=True,
+    )
+    try:
+        raise CognitionExecutionError(
+            "semantic appraisal contract attempts exhausted",
+            error_code="semantic_appraisal_contract_exhausted",
+            stage="semantic_appraisal",
+            attempt_count=3,
+            retryable=False,
+        ) from cause
+    except CognitionExecutionError as error:
+        details = facade._appraisal_failure_details(
+            {
+                "question_id": "q:goal_threat_outcome",
+                "question_kind": "goal_threat_outcome",
+            },
+            error,
+            "semantic_appraisal_contract_exhausted",
+        )
+
+    assert details == {
+        "question_id": "q:goal_threat_outcome",
+        "question_kind": "goal_threat_outcome",
+        "failure_code": "semantic_appraisal_contract_exhausted",
+        "failure_kind": "candidate_origin_missing",
+        "field_path": "proposition.evidence_handles",
+        "repair_attempted": True,
+        "attempt_count": 3,
+        "retryable": False,
+        "disposition": "question_omitted",
+        "exception_text": (
+            "causal candidates must cite originating evidence: ck1->e1"
+        ),
+    }
 
 
 def test_cognition_passes_episode_source_id_and_interaction_date_to_relationship_maintenance(

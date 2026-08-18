@@ -347,6 +347,7 @@
       "contract": "facade public contract",
       "required_unit_tests": [
         "tests/unit/cognition_core_v2/test_facade.py::test_facade_exposes_owned_contract",
+        "tests/unit/cognition_core_v2/test_facade.py::test_appraisal_collection_records_typed_contract_exhaustion_metadata",
         "tests/unit/cognition_core_v2/test_facade.py::test_branch_handler_carries_input_episode_into_recurrence_context",
         "tests/unit/cognition_core_v2/test_facade.py::test_reduction_rejects_over_cap_candidate_during_full_finalization",
         "tests/unit/cognition_core_v2/test_facade.py::test_reduction_rejects_affect_protected_terminal_during_finalization",
@@ -509,6 +510,14 @@
         "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_prompt_cap_stops_before_the_first_provider_call",
         "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_recoverable_structure_uses_one_replacement_then_completes",
         "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_unrecoverable_structure_exhausts_replacement_budget",
+        "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_candidate_origin_repair_preserves_resolution_evidence_at_both_levels",
+        "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_candidate_origin_repair_is_bounded_and_exhaustion_is_question_omission",
+        "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_handle_domain_repair_preserves_valid_evidence_at_both_levels",
+        "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_handle_domain_repair_rejects_evidence_drop",
+        "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_selected_role_handle_domain_repair_never_admits_disallowed_handle",
+        "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_terminal_boundary_classes_do_not_issue_repair_call",
+        "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_unmapped_validator_failure_is_unknown_terminal_without_repair",
+        "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_boundary_failure_metadata_is_typed_without_raw_output",
         "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_structurally_usable_semantic_content_does_not_trigger_semantic_retry",
         "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_recoverable_structure_does_not_trigger_producer_retry",
         "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_unrecoverable_structure_retries_within_appraisal_budget",
@@ -522,6 +531,8 @@
         "tests/test_cognition_core_v2_prompt_contract_guidance.py::test_prompt_payloads_preserve_contract_order",
         "tests/test_cognition_core_v2_prompt_budget_continuity.py::test_appraisal_question_keeps_candidate_origin_contract",
         "tests/test_cognition_core_v2_prompt_budget_continuity.py::test_appraisal_repair_uses_residual_budget_for_second_call",
+        "tests/test_cognition_v2_protected_qq_replay.py::test_protected_qq_replay_repairs_candidate_origin_without_semantic_policy_retry",
+        "tests/test_cognition_v2_protected_qq_replay.py::test_protected_qq_replay_preserves_origin_and_resolution_evidence",
         "tests/test_cognition_v2_protected_qq_replay.py::test_protected_qq_replay_semantic_appraisal_avoids_semantic_retry",
         "tests/test_cognition_v2_protected_qq_replay.py::test_protected_qq_replay_executes_captured_boundary_without_retry"
       ]

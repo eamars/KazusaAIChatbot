@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
-from copy import deepcopy
 import importlib
 import json
+from collections.abc import Mapping
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -43,9 +43,9 @@ from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
     DEFAULT_BRANCH_DEFINITIONS,
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    EVIDENCE_SOURCE_QUESTION_IDS,
     CognitionContextLimitError,
     CognitionExecutionError,
-    EVIDENCE_SOURCE_QUESTION_IDS,
     validate_cognition_core_input,
 )
 from kazusa_ai_chatbot.cognition_core_v2.prompt_budget import (
@@ -73,7 +73,6 @@ from tests.cognition_core_v2_test_helpers import (
     canonical_identity_context,
     maximum_identity_context,
 )
-
 
 FIXTURE_PATH = (
     Path(__file__).parent
@@ -1313,19 +1312,32 @@ async def test_appraisal_exhaustion_returns_the_accepted_prefix(
     assert len(llm.payloads) == 3
     assert len(result["propositions"]) == 1
     assert result["deltas"] == []
-    assert events == [(
-        "semantic_appraisal_bounded_termination",
-        {
-            "question_id": question["question_id"],
-            "item_index": 2,
-            "error_code": "semantic_appraisal_contract_exhausted",
-            "attempt_count": 2,
-            "accepted_proposition_count": 1,
-            "accepted_delta_count": 0,
-            "disposition": "accepted_prefix",
-            "error": events[0][1]["error"],
-        },
-    )]
+    boundary_events = [
+        payload
+        for event_id, payload in events
+        if event_id == "semantic_appraisal_boundary_failure"
+    ]
+    assert len(boundary_events) == 2
+    assert all(
+        payload["failure_kind"] == "producer_handle_domain_invalid"
+        for payload in boundary_events
+    )
+    assert boundary_events[-1]["disposition"] == "question_omitted"
+    bounded_event = next(
+        payload
+        for event_id, payload in events
+        if event_id == "semantic_appraisal_bounded_termination"
+    )
+    assert bounded_event == {
+        "question_id": question["question_id"],
+        "item_index": 2,
+        "error_code": "semantic_appraisal_contract_exhausted",
+        "attempt_count": 2,
+        "accepted_proposition_count": 1,
+        "accepted_delta_count": 0,
+        "disposition": "accepted_prefix",
+        "error": bounded_event["error"],
+    }
 
 
 def test_appraisal_suppresses_exact_repeats_as_no_progress() -> None:

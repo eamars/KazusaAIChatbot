@@ -12,10 +12,10 @@ from typing import Any
 
 import pytest
 
+from kazusa_ai_chatbot.cognition_core_v2 import facade
 from kazusa_ai_chatbot.cognition_core_v2.action_selection import (
     _validate_action_plan_decision,
 )
-from kazusa_ai_chatbot.cognition_core_v2 import facade
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     validate_cognition_core_input,
     validate_relational_willingness,
@@ -47,7 +47,6 @@ from kazusa_ai_chatbot.cognition_core_v2.transition_guards import (
 from kazusa_ai_chatbot.conversation_progress.projection import (
     _progress_age_descriptor,
 )
-
 
 _ROOT = Path(__file__).resolve().parents[1]
 _TRACE_INVENTORY_PATH = (
@@ -905,6 +904,20 @@ def _load_capacity_replay_input(
     input_payload = capsule.get("input_payload")
     assert isinstance(input_payload, Mapping)
     replay_input = deepcopy(dict(input_payload))
+    mutable_state = replay_input.get("mutable_state")
+    if isinstance(mutable_state, dict):
+        relationship = mutable_state.get("relationship")
+        if (
+            isinstance(relationship, dict)
+            and "relationship_maintenance" not in relationship
+        ):
+            relationship["relationship_maintenance"] = {
+                "schema_version": "relationship_maintenance.v1",
+                "last_interaction_date_utc": None,
+                "last_bonus_date_utc": None,
+                "last_source_id": None,
+                "processed_source_ids": [],
+            }
     current_event_occurred_at = next(
         evidence_row["evidence_ref"]["occurred_at"]
         for evidence_row in replay_input["evidence"]
@@ -1044,10 +1057,11 @@ def _replay_capacity_trace(
         return {
             "intention": {
                 "route": "silence",
-                "intention": "remain silent",
-                "target_roles": [],
-                "reason": "no valid admitted bid",
-            },
+            "intention": "remain silent",
+            "target_roles": [],
+            "reason": "no valid admitted bid",
+            "goal_continuation_ref": None,
+        },
             "action_requests": [],
             "resolver_requests": [],
             "goal_resolution": "blocked",

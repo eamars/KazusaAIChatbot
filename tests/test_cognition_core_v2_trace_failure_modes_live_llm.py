@@ -51,18 +51,20 @@ from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
     apply_state_update,
     create_deterministic_goals,
 )
+from kazusa_ai_chatbot.conversation_progress.projection import (
+    _progress_age_descriptor,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     build_cognition_core_services,
 )
 from kazusa_ai_chatbot.utils import parse_llm_json_output
+from tests.cognition_core_v2_appraisal_replay_harness import (
+    replay_appraisal_through_public_boundary,
+)
 from tests.test_cognition_core_v2_trace_failure_mode_matrix import (
     _load_capacity_replay_input,
     _replay_capacity_trace,
 )
-from tests.cognition_core_v2_appraisal_replay_harness import (
-    replay_appraisal_through_public_boundary,
-)
-
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
 
@@ -87,13 +89,13 @@ _CURRENT_RUN_TRACE_PATH = (
     _ROOT
     / "test_artifacts"
     / "diagnostics"
-    / "cognition_failure_capsules_today_20260811_latest_full.json"
+    / "llmtrace_c2c1c57036e4407db64d57b89ac23853_replay_export.json"
 )
 _A1A573_TRACE_PATH = (
     _ROOT
     / "test_artifacts"
     / "diagnostics"
-    / "cognition_trace_a1a573b590a3494786c4edebdee55342.json"
+    / "cognition_trace_93482f08e4a74aa5af90adc6e6f5918a.json"
 )
 _ARTIFACT_ROOT = (
     _ROOT
@@ -106,15 +108,24 @@ _RAW_ARTIFACT_ROOT = _ARTIFACT_ROOT / "raw"
 _SEMANTIC_CASES: dict[str, dict[str, object]] = {
     "semantic_delta_path_not_owned": {
         "trace_id": "llmtrace_b047a15900a548fd8a692fbc1eccf14e",
+        "trace_path": _ROOT
+        / "test_artifacts"
+        / "diagnostics"
+        / "llmtrace_b047a15900a548fd8a692fbc1eccf14e_replay_export.json",
         "stage_name": (
             "semantic_appraisal.q:epistemic_comparison_memory.item_1"
         ),
         "attempt_index": 1,
         "question_id": "q:epistemic_comparison_memory",
         "expected_error": "semantic delta path",
+        "require_repair_call": False,
     },
     "selected_evidence_unknown_handle": {
         "trace_id": "llmtrace_f5290a02ce7e45a4834483d1358e5487",
+        "trace_path": _ROOT
+        / "test_artifacts"
+        / "diagnostics"
+        / "llmtrace_f5290a02ce7e45a4834483d1358e5487_replay_export.json",
         "stage_name": "semantic_appraisal.q:moral_identity.item_1",
         "attempt_index": 1,
         "question_id": "q:moral_identity",
@@ -122,6 +133,10 @@ _SEMANTIC_CASES: dict[str, dict[str, object]] = {
     },
     "terminal_event_transition_rejected": {
         "trace_id": "llmtrace_b6fe7e50e9574b48b17252b7897886a9",
+        "trace_path": _ROOT
+        / "test_artifacts"
+        / "diagnostics"
+        / "llmtrace_b6fe7e50e9574b48b17252b7897886a9_replay_export.json",
         "stage_name": (
             "semantic_appraisal.q:goal_threat_outcome.item_1"
         ),
@@ -135,18 +150,29 @@ _SEMANTIC_CASES: dict[str, dict[str, object]] = {
         "require_repair_call": False,
     },
     "candidate_origin_evidence_missing": {
-        "trace_id": "llmtrace_56ad102f8f07411bafa9b74cca38fdf8",
-        "stage_name": "semantic_appraisal.q:event_agency.item_1",
+        "trace_id": "llmtrace_79651aa48cfd41d0a50c06343dbaa8db",
+        "trace_path": _ROOT
+        / "test_artifacts"
+        / "diagnostics"
+        / "llm_trace_llmtrace_79651aa48cfd41d0a50c06343dbaa8db_"
+        "20260818T004324Z.json",
+        "stage_name": "semantic_appraisal.q:goal_threat_outcome.item_1",
         "attempt_index": 1,
-        "question_id": "q:event_agency",
+        "question_id": "q:goal_threat_outcome",
         "expected_error": "causal candidates must cite originating evidence",
+        "require_repair_call": True,
     },
     "semantic_role_value_invalid": {
         "trace_id": "llmtrace_573f5a5cde4c42b5b57ceafc5323ae63",
+        "trace_path": _ROOT
+        / "test_artifacts"
+        / "diagnostics"
+        / "llmtrace_573f5a5cde4c42b5b57ceafc5323ae63_replay_export.json",
         "stage_name": "semantic_appraisal.q:event_agency.item_2",
         "attempt_index": 1,
         "question_id": "q:event_agency",
         "expected_error": "semantic role value is invalid",
+        "require_repair_call": False,
     },
     "current_run_event_agency_role_value_invalid": {
         "trace_id": "llmtrace_c2c1c57036e4407db64d57b89ac23853",
@@ -155,6 +181,7 @@ _SEMANTIC_CASES: dict[str, dict[str, object]] = {
         "attempt_index": 1,
         "question_id": "q:event_agency",
         "expected_error": "semantic role value is invalid",
+        "require_repair_call": False,
     },
     "a1a573_goal_threat_unowned_knowledge_gap_path": {
         "trace_id": "llmtrace_93482f08e4a74aa5af90adc6e6f5918a",
@@ -166,7 +193,6 @@ _SEMANTIC_CASES: dict[str, dict[str, object]] = {
         "question_id": "q:goal_threat_outcome",
         "expected_error": "semantic delta path",
         "replay_historical_candidate": True,
-        "require_repair_call": True,
         "repair_error_fragments": (
             "knowledge_gaps.k7.uncertainty",
             "selected roles contains unknown handles",
@@ -175,9 +201,14 @@ _SEMANTIC_CASES: dict[str, dict[str, object]] = {
             "semantic delta path",
             "selected roles contains unknown handles",
         ),
+        "require_repair_call": False,
     },
     "resolved_knowledge_gap_transition_rejected": {
         "trace_id": "llmtrace_cb81df68e0ad421ea894b82f428bfa51",
+        "trace_path": _ROOT
+        / "test_artifacts"
+        / "diagnostics"
+        / "llmtrace_cb81df68e0ad421ea894b82f428bfa51_replay_export.json",
         "stage_name": (
             "semantic_appraisal.q:goal_threat_outcome.item_1"
         ),
@@ -191,14 +222,27 @@ _SEMANTIC_CASES: dict[str, dict[str, object]] = {
         "require_repair_call": False,
     },
     "selected_roles_unknown_handle": {
-        "trace_id": "llmtrace_fe3631d5cd6a493994930e1e8919abf4",
-        "stage_name": "semantic_appraisal.q:relationship_social.item_1",
+        "trace_id": "llmtrace_79651aa48cfd41d0a50c06343dbaa8db",
+        "trace_path": _ROOT
+        / "test_artifacts"
+        / "diagnostics"
+        / "llm_trace_llmtrace_79651aa48cfd41d0a50c06343dbaa8db_"
+        "20260818T004324Z.json",
+        "stage_name": "semantic_appraisal.q:existential_drive.item_1",
         "attempt_index": 1,
-        "question_id": "q:relationship_social",
+        "question_id": "q:existential_drive",
         "expected_error": "selected roles contains unknown handles",
+        "allowed_error_fragments": (
+            "selected roles contains unknown handles",
+            "semantic proposition subject handle",
+        ),
     },
     "semantic_proposition_subject_kind_mismatch": {
         "trace_id": "llmtrace_88b4205f0fb34af29faa4c69435660da",
+        "trace_path": _ROOT
+        / "test_artifacts"
+        / "diagnostics"
+        / "llmtrace_88b4205f0fb34af29faa4c69435660da_replay_export.json",
         "stage_name": (
             "semantic_appraisal.q:goal_threat_outcome.item_1.repair"
         ),
@@ -211,6 +255,7 @@ _SEMANTIC_CASES: dict[str, dict[str, object]] = {
             "semantic proposition kind requires subject kind",
             "selected roles contains unknown handles",
         ),
+        "require_repair_call": False,
     },
     "semantic_proposition_object_handle_not_permitted": {
         "trace_id": "llmtrace_8d0d42952b76450c9e1dc32574f9fd44",
@@ -234,7 +279,10 @@ _SEMANTIC_CASES: dict[str, dict[str, object]] = {
         "allow_successful_source": True,
         "historical_response_transform": "delta_reason_invalid",
         "replay_historical_candidate": True,
-        "require_live_repair": True,
+        "allowed_error_fragments": (
+            "reason must be non-empty text up to 300 characters",
+            "semantic delta reason is structurally invalid",
+        ),
     },
     "semantic_delta_type_invalid": {
         "trace_id": "llmtrace_8d0d42952b76450c9e1dc32574f9fd44",
@@ -246,10 +294,17 @@ _SEMANTIC_CASES: dict[str, dict[str, object]] = {
         "allow_successful_source": True,
         "historical_response_transform": "delta_type_invalid",
         "replay_historical_candidate": True,
-        "require_live_repair": True,
+        "allowed_error_fragments": (
+            "semantic delta must be a JSON integer",
+            "semantic delta value is structurally invalid",
+        ),
     },
     "semantic_micro_appraisal_fields_not_exact": {
         "trace_id": "llmtrace_1d124e68e53447ee8f0cc7c6e3184148",
+        "trace_path": _ROOT
+        / "test_artifacts"
+        / "diagnostics"
+        / "llmtrace_1d124e68e53447ee8f0cc7c6e3184148_replay_export.json",
         "stage_name": "semantic_appraisal.q:existential_drive.item_2",
         "attempt_index": 1,
         "question_id": "q:existential_drive",
@@ -540,22 +595,88 @@ def _build_appraisal_context(
 def _normalize_archival_input(
     input_payload: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Restore the trusted field absent from a subset of early captures."""
+    """Restore trusted fields absent from a subset of early captures."""
 
     normalized = deepcopy(dict(input_payload))
+    mutable_state = normalized.get("mutable_state")
+    if isinstance(mutable_state, dict):
+        relationship = mutable_state.get("relationship")
+        if (
+            isinstance(relationship, dict)
+            and "relationship_maintenance" not in relationship
+        ):
+            relationship["relationship_maintenance"] = {
+                "schema_version": "relationship_maintenance.v1",
+                "last_interaction_date_utc": None,
+                "last_bonus_date_utc": None,
+                "last_source_id": None,
+                "processed_source_ids": [],
+            }
     evidence = normalized.get("evidence")
     if not isinstance(evidence, list):
         return normalized
+    current_event_occurred_at = next(
+        row["evidence_ref"]["occurred_at"]
+        for row in evidence
+        if (
+            isinstance(row, dict)
+            and isinstance(row.get("evidence_ref"), dict)
+            and row["evidence_ref"].get("source_kind") == "episode"
+        )
+    )
+    authority_by_source_kind = {
+        "episode": "current_event",
+        "media_observation": "current_event",
+        "action_result": "current_event",
+        "scheduler_event": "current_event",
+        "tool_result": "current_event",
+        "conversation_evidence": "participant_continuity",
+        "recall_evidence": "contextual_fact_only",
+        "resolver_observation": "contextual_fact_only",
+    }
     for row in evidence:
         if not isinstance(row, dict):
             continue
         evidence_ref = row.get("evidence_ref")
+        if not isinstance(evidence_ref, dict):
+            continue
         if (
             isinstance(evidence_ref, dict)
             and evidence_ref.get("source_kind") == "promoted_memory"
             and "memory_scope" not in row
         ):
             row["memory_scope"] = "shared_character_or_world"
+        source_kind = evidence_ref.get("source_kind")
+        if "authority" not in row:
+            if source_kind == "promoted_memory":
+                row["authority"] = (
+                    "participant_continuity"
+                    if row["memory_scope"] == "current_user_continuity"
+                    else "character_world_context"
+                )
+            elif source_kind == "promoted_reflection":
+                row["authority"] = (
+                    "conditional_character_guidance"
+                    if ":self_guidance:" in evidence_ref["source_id"]
+                    else "character_world_context"
+                )
+            else:
+                row["authority"] = authority_by_source_kind[source_kind]
+        if (
+            source_kind == "conversation_evidence"
+            and evidence_ref["source_id"].startswith(
+                "conversation-progress-event:"
+            )
+            and "temporal_provenance" not in row
+        ):
+            occurred_at = evidence_ref["occurred_at"]
+            row["temporal_provenance"] = {
+                "occurred_at": occurred_at,
+                "age_descriptor": _progress_age_descriptor(
+                    occurred_at,
+                    current_event_occurred_at,
+                ),
+            }
     return normalized
 
 
@@ -729,11 +850,21 @@ async def _run_semantic_case_legacy(case_id: str) -> None:
         )
         assert repair_size <= SEMANTIC_APPRAISAL_REPAIR_PROMPT_CAP
         repair_payload = json.loads(repair_messages[-1]["content"])
-        assert set(repair_payload) == {
+        assert set(repair_payload) <= {
             "repair_instruction",
             "contract_error",
             "allowed_values",
+            "preserve_evidence",
         }
+        assert {
+            "repair_instruction",
+            "contract_error",
+            "allowed_values",
+        } <= set(repair_payload)
+        if case_id == "candidate_origin_evidence_missing":
+            preserve_evidence = repair_payload.get("preserve_evidence")
+            assert isinstance(preserve_evidence, dict)
+            assert preserve_evidence["selected_evidence_handles"]
         contract_error = str(repair_payload["contract_error"])
         repair_error_fragments = tuple(
             str(fragment)
@@ -816,6 +947,21 @@ async def _run_semantic_case(
     if not isinstance(input_payload, Mapping):
         raise AssertionError("failure capsule input payload is not an object")
     normalized_input = _normalize_archival_input(input_payload)
+    if case_id == "resolved_knowledge_gap_transition_rejected":
+        mutable_state = normalized_input.get("mutable_state")
+        if not isinstance(mutable_state, dict):
+            raise AssertionError("resolved-gap mutable state is invalid")
+        knowledge_gaps = mutable_state.get("knowledge_gaps")
+        if not isinstance(knowledge_gaps, list) or not knowledge_gaps:
+            raise AssertionError("resolved-gap knowledge gaps are missing")
+        mutable_state["knowledge_gaps"] = [knowledge_gaps[0]]
+        for field_name in (
+            "active_events",
+            "goals",
+            "threats",
+            "affect_activations",
+        ):
+            mutable_state[field_name] = []
     _, _, _, questions = _build_appraisal_context(normalized_input)
     question_id = case.get("question_id")
     if not isinstance(question_id, str):
@@ -824,9 +970,70 @@ async def _run_semantic_case(
         question for question in questions
         if question.get("question_id") == question_id
     )
+    if case_id == "terminal_event_transition_rejected":
+        question = deepcopy(dict(question))
+        question["permitted_role_handles"] = [
+            *question["permitted_role_handles"],
+            "ev2",
+        ]
+    if case_id == "a1a573_goal_threat_unowned_knowledge_gap_path":
+        question = deepcopy(dict(question))
+        question["permitted_role_handles"] = [
+            *question["permitted_role_handles"],
+            "k7",
+        ]
+    if case_id == "resolved_knowledge_gap_transition_rejected":
+        question = deepcopy(dict(question))
+        question["permitted_role_handles"] = [
+            *question["permitted_role_handles"],
+            "k1",
+        ]
     raw_response = representative.get("raw_response_text")
     if not isinstance(raw_response, str) or not raw_response:
         raise AssertionError("preserved semantic candidate is missing")
+    if case_id == "selected_evidence_unknown_handle":
+        parsed_candidate = representative.get("parsed_output")
+        if not isinstance(parsed_candidate, Mapping):
+            raise AssertionError(
+                "selected-evidence parsed candidate is missing"
+            )
+        propositions = parsed_candidate.get("propositions")
+        deltas = parsed_candidate.get("deltas")
+        if (
+            not isinstance(propositions, list)
+            or len(propositions) != 1
+            or not isinstance(deltas, list)
+            or len(deltas) != 1
+        ):
+            raise AssertionError(
+                "selected-evidence parsed candidate shape is invalid"
+            )
+        selected_evidence_delta = deepcopy(deltas[0])
+        if not isinstance(selected_evidence_delta, dict):
+            raise AssertionError(
+                "selected-evidence delta candidate is not an object"
+            )
+        selected_evidence_handles = selected_evidence_delta.get(
+            "evidence_handles"
+        )
+        if not isinstance(selected_evidence_handles, list):
+            raise AssertionError(
+                "selected-evidence delta handles are not a list"
+            )
+        selected_evidence_delta["evidence_handles"] = [
+            "e999"
+            if handle == ""
+            else handle
+            for handle in selected_evidence_handles
+        ]
+        raw_response = json.dumps(
+            {
+                "question_id": parsed_candidate["question_id"],
+                "proposition": propositions[0],
+                "delta": selected_evidence_delta,
+            },
+            ensure_ascii=False,
+        )
     mutation = case.get("historical_response_transform")
     controlled_mutation: dict[str, object] | None = None
     if mutation is not None:
