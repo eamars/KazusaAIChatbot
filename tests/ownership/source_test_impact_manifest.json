@@ -1317,6 +1317,16 @@
    "supplemental_tests": [
     "tests/unit/cognition_core_v3/test_goal_cognition.py::test_isolated_goal_chain_registry_identity"
    ]
+  },
+  {
+   "source": "src/kazusa_ai_chatbot/cognition_core_v3/workspace.py",
+   "owner": "V3 complete-bid workspace collapse owner",
+   "contract": "complete-bid admission, registry-order partitioning, and authoritative relational collapse without confidence ranking",
+   "required_unit_tests": [
+    "tests/unit/cognition_core_v3/test_workspace.py::test_workspace_preserves_ordinary_relational_authority",
+    "tests/unit/cognition_core_v3/test_workspace.py::test_workspace_admits_only_complete_current_matter_bids"
+   ],
+   "supplemental_tests": []
   }
  ]
 }
