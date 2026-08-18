@@ -530,74 +530,66 @@ async def test_unrecoverable_structure_exhausts_replacement_budget() -> None:
 
 
 @pytest.mark.asyncio
-async def test_candidate_origin_repair_preserves_resolution_evidence_at_both_levels(
-) -> None:
-    """Repair adds the origin while retaining the resolution citation."""
+async def test_candidate_origin_mismatch_omits_family_without_retry() -> None:
+    """A candidate-origin mismatch ends only this family after one call."""
 
     question = _origin_repair_question()
-    llm = _ScriptedSemanticLLM([
-        _origin_repair_item(["e3"]),
-        _origin_repair_item(["e1", "e3"]),
-        _empty_item_response().replace(
-            '"q:event_agency"',
-            '"q:goal_threat_outcome"',
-        ),
-    ])
+    state = build_acquaintance_user_state(
+        global_user_id="semantic-origin",
+        updated_at="2026-08-18T00:00:00Z",
+    )
+    original_state = deepcopy(state)
+    llm = _ScriptedSemanticLLM([_origin_repair_item(["e3"])])
 
     result = await appraise_semantic_question(
         question,
         _origin_repair_evidence(),
         _origin_repair_projection(),
         _execution_services(llm),
-        validation_state=build_acquaintance_user_state(
-            global_user_id="semantic-origin",
-            updated_at="2026-08-18T00:00:00Z",
-        ),
+        validation_state=state,
     )
 
-    assert llm.calls == 3
-    assert result["selected_evidence_handles"] == ["e1", "e3"]
-    assert result["propositions"][0]["evidence_handles"] == ["e1", "e3"]
+    assert result["question_id"] == "q:goal_threat_outcome"
+    assert result["propositions"] == []
+    assert result["deltas"] == []
+    assert llm.calls == 1
+    assert state == original_state
 
 
 @pytest.mark.asyncio
-async def test_candidate_origin_repair_is_bounded_and_exhaustion_is_question_omission(
+async def test_boundary_rejection_after_accepted_item_retains_prefix_without_retry(
 ) -> None:
-    """Repeated origin failures use the existing contract-exhaustion cap."""
+    """Keep a valid prefix when the next item fails a carrier boundary."""
 
     question = _origin_repair_question()
-    llm = _ScriptedSemanticLLM([
-        _origin_repair_item(["e3"])
-        for _ in range(SEMANTIC_APPRAISAL_ATTEMPT_LIMIT)
-    ])
-
-    with pytest.raises(CognitionExecutionError) as error_info:
-        await appraise_semantic_question(
-            question,
-            _origin_repair_evidence(),
-            _origin_repair_projection(),
-            _execution_services(llm),
-            validation_state=build_acquaintance_user_state(
-                global_user_id="semantic-origin-exhaustion",
-                updated_at="2026-08-18T00:00:00Z",
-            ),
-        )
-
-    assert error_info.value.error_code == (
-        "semantic_appraisal_contract_exhausted"
+    accepted_item = _origin_repair_item(["e1"])
+    rejected_item = _origin_repair_item(["e1", "e9"])
+    llm = _ScriptedSemanticLLM([accepted_item, rejected_item])
+    state = build_acquaintance_user_state(
+        global_user_id="semantic-prefix",
+        updated_at="2026-08-18T00:00:00Z",
     )
-    assert error_info.value.attempt_count == SEMANTIC_APPRAISAL_ATTEMPT_LIMIT
-    assert llm.calls == SEMANTIC_APPRAISAL_ATTEMPT_LIMIT
-    cause = error_info.value.__cause__
-    assert isinstance(cause, _SemanticBoundaryValidationError)
-    assert cause.failure_kind == "candidate_origin_missing"
-    assert cause.repairable is True
+    original_state = deepcopy(state)
+
+    result = await appraise_semantic_question(
+        question,
+        _origin_repair_evidence(),
+        _origin_repair_projection(),
+        _execution_services(llm),
+        validation_state=state,
+    )
+
+    assert result["question_id"] == "q:goal_threat_outcome"
+    assert len(result["propositions"]) == 1
+    assert result["propositions"][0]["evidence_handles"] == ["e1"]
+    assert result["deltas"] == []
+    assert llm.calls == 2
+    assert state == original_state
 
 
 @pytest.mark.asyncio
-async def test_handle_domain_repair_preserves_valid_evidence_at_both_levels(
-) -> None:
-    """A handle-domain repair retains valid selected and nested citations."""
+async def test_handle_domain_violation_omits_family_without_retry() -> None:
+    """An unknown evidence handle ends only this family after one call."""
 
     question = _execution_domain_question()
     initial = {
@@ -614,13 +606,7 @@ async def test_handle_domain_repair_preserves_valid_evidence_at_both_levels(
         },
         "delta": None,
     }
-    repaired = deepcopy(initial)
-    repaired["proposition"]["evidence_handles"] = ["e1"]
-    llm = _ScriptedSemanticLLM([
-        json.dumps(initial),
-        json.dumps(repaired),
-        _empty_item_response(),
-    ])
+    llm = _ScriptedSemanticLLM([json.dumps(initial)])
 
     result = await _run_execution_appraisal(
         llm,
@@ -628,100 +614,89 @@ async def test_handle_domain_repair_preserves_valid_evidence_at_both_levels(
         evidence=_execution_domain_evidence(),
     )
 
-    assert llm.calls == 3
-    assert result["selected_evidence_handles"] == ["e1"]
-    assert result["propositions"][0]["evidence_handles"] == ["e1"]
+    assert result["question_id"] == "q:event_agency"
+    assert result["propositions"] == []
+    assert result["deltas"] == []
+    assert llm.calls == 1
 
 
 @pytest.mark.asyncio
-async def test_handle_domain_repair_rejects_evidence_drop() -> None:
-    """A producer replacement cannot drop a valid prior citation."""
+async def test_unknown_role_enum_omits_family_without_retry() -> None:
+    """An unknown role enum ends one family without state mutation."""
 
-    question = _execution_domain_question()
-    initial = {
+    question = _execution_question()
+    state = build_acquaintance_user_state(
+        global_user_id="semantic-role-enum",
+        updated_at="2026-08-18T00:00:00Z",
+    )
+    original_state = deepcopy(state)
+    candidate = json.dumps({
         "question_id": question["question_id"],
         "proposition": {
             "proposition_kind": "intentionality",
             "subject_handle": "ce1",
-            "evidence_handles": ["e1", "e9"],
+            "evidence_handles": ["e1"],
             "role_assignments": [{
-                "role": "actor",
+                "role": "unknown_role",
                 "entity_handle": "current_user",
             }],
             "semantic_value": "The event appears intentional.",
         },
         "delta": None,
+    })
+    llm = _ScriptedSemanticLLM([candidate])
+
+    result = await appraise_semantic_question(
+        question,
+        _execution_evidence(),
+        _execution_projection(),
+        _execution_services(llm),
+        validation_state=state,
+    )
+
+    assert result == {
+        "question_id": "q:event_agency",
+        "selected_evidence_handles": [],
+        "selected_role_handles": [],
+        "propositions": [],
+        "deltas": [],
+        "explanation": "No additional supported semantic item.",
     }
-    dropped = deepcopy(initial)
-    dropped["proposition"]["evidence_handles"] = ["e9"]
-    llm = _ScriptedSemanticLLM([
-        json.dumps(initial),
-        json.dumps(dropped),
-    ])
-
-    with pytest.raises(CognitionExecutionError) as error_info:
-        await _run_execution_appraisal(
-            llm,
-            question=question,
-            evidence=_execution_domain_evidence(),
-        )
-
-    assert error_info.value.error_code == "cognition_boundary_rejected"
-    assert llm.calls == 2
-    cause = error_info.value.__cause__
-    assert isinstance(cause, _SemanticBoundaryValidationError)
-    assert cause.failure_kind == "semantic_boundary_terminal"
-    assert cause.field_path == "candidate.evidence_handles"
-    assert cause.repairable is False
+    assert llm.calls == 1
+    assert state == original_state
 
 
 @pytest.mark.asyncio
-async def test_selected_role_handle_domain_repair_never_admits_disallowed_handle(
+async def test_unmapped_boundary_error_propagates_without_structural_retry(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A selected-role domain repair cannot admit the invalid handle."""
+    """Unexpected boundary defects propagate after their first model call."""
 
-    question = _execution_question()
-    invalid = json.loads(_empty_item_response())
-    invalid["question_id"] = question["question_id"]
-    invalid["proposition"] = {
-        "proposition_kind": "intentionality",
-        "subject_handle": "ev1",
-        "evidence_handles": ["e1"],
-        "role_assignments": [{
-            "role": "actor",
-            "entity_handle": "current_user",
-        }],
-        "semantic_value": "The event appears intentional.",
-    }
-    llm = _ScriptedSemanticLLM([
-        json.dumps(invalid),
-        json.dumps({
-            "question_id": question["question_id"],
-            "proposition": {
-                "proposition_kind": "intentionality",
-                "subject_handle": "ce1",
-                "evidence_handles": ["e1"],
-                "role_assignments": [{
-                    "role": "actor",
-                    "entity_handle": "current_user",
-                }],
-                "semantic_value": "The event appears intentional.",
-            },
-            "delta": None,
-        }),
-        _empty_item_response(),
-    ])
+    def raise_unmapped_boundary_error(
+        *_args: object,
+        **_kwargs: object,
+    ) -> object:
+        raise ValueError("injected unmapped boundary defect")
 
-    result = await _run_execution_appraisal(llm)
+    monkeypatch.setattr(
+        semantic_appraisal_module,
+        "_validate_semantic_boundary_candidate",
+        raise_unmapped_boundary_error,
+    )
+    llm = _ScriptedSemanticLLM([_empty_item_response()])
 
-    assert llm.calls == 3
-    assert "ev1" not in result["selected_role_handles"]
-    assert set(result["selected_role_handles"]) == {"ce1", "current_user"}
+    with pytest.raises(
+        ValueError,
+        match="injected unmapped boundary defect",
+    ):
+        await _run_execution_appraisal(llm)
+
+    assert llm.calls == 1
 
 
 @pytest.mark.asyncio
-async def test_terminal_boundary_classes_do_not_issue_repair_call() -> None:
-    """Semantic ownership failures are typed terminal boundaries."""
+async def test_unowned_delta_is_blocked_without_retry() -> None:
+    """An unowned target path ends only this family after one call."""
 
     llm = _ScriptedSemanticLLM([json.dumps({
         "question_id": "q:event_agency",
@@ -734,113 +709,90 @@ async def test_terminal_boundary_classes_do_not_issue_repair_call() -> None:
         },
     })])
 
-    with pytest.raises(CognitionExecutionError) as error_info:
-        await _run_execution_appraisal(llm)
+    result = await _run_execution_appraisal(llm)
 
-    assert error_info.value.error_code == "cognition_boundary_rejected"
+    assert result["question_id"] == "q:event_agency"
+    assert result["propositions"] == []
+    assert result["deltas"] == []
     assert llm.calls == 1
-    cause = error_info.value.__cause__
-    assert isinstance(cause, _SemanticBoundaryValidationError)
-    assert cause.failure_kind == "semantic_boundary_terminal"
-    assert cause.repairable is False
 
 
 @pytest.mark.asyncio
-async def test_unmapped_validator_failure_is_unknown_terminal_without_repair(
+async def test_runtime_admission_does_not_call_strict_semantic_validator(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An untyped validator failure fails closed without a semantic retry."""
+    """Runtime admission stays independent from the strict contract helper."""
 
-    captured_events: list[tuple[str, dict[str, object]]] = []
-
-    def raise_unmapped_failure(*_args: object, **_kwargs: object) -> object:
-        raise ValueError("unmapped validator failure")
-
-    def capture_event(name: str, details: dict[str, object]) -> None:
-        captured_events.append((name, details))
+    def raise_if_called(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("strict semantic validator was invoked")
 
     monkeypatch.setattr(
         semantic_appraisal_module,
         "validate_semantic_appraisal_result",
-        raise_unmapped_failure,
+        raise_if_called,
     )
-    monkeypatch.setattr(
-        semantic_appraisal_module,
-        "capture_validation_event",
-        capture_event,
-    )
-    llm = _ScriptedSemanticLLM([_empty_item_response()])
 
-    with pytest.raises(CognitionExecutionError) as error_info:
-        await _run_execution_appraisal(llm)
-
-    assert error_info.value.error_code == "cognition_boundary_rejected"
-    assert llm.calls == 1
-    cause = error_info.value.__cause__
-    assert isinstance(cause, _SemanticBoundaryValidationError)
-    assert cause.failure_kind == "unknown_validation_failure"
-    assert cause.repairable is False
-    boundary_events = [
-        details
-        for name, details in captured_events
-        if name == "semantic_appraisal_boundary_failure"
-    ]
-    assert boundary_events == [{
+    candidate = json.dumps({
         "question_id": "q:event_agency",
-        "question_kind": "event_agency",
-        "item_index": 1,
-        "failure_kind": "unknown_validation_failure",
-        "field_path": None,
-        "repair_attempted": False,
-        "attempt_count": 1,
-        "retryable": False,
-        "disposition": "terminal_rejection",
-    }]
+        "proposition": {
+            "proposition_kind": "unfamiliar_semantic_label",
+            "subject_handle": "ce1",
+            "evidence_handles": ["e1"],
+            "role_assignments": [{
+                "role": "actor",
+                "entity_handle": "current_user",
+            }],
+            "semantic_value": "The authored meaning remains opaque.",
+        },
+        "delta": None,
+    })
+    llm = _ScriptedSemanticLLM([candidate, _empty_item_response()])
+
+    result = await _run_execution_appraisal(llm)
+
+    assert result["propositions"][0]["proposition_kind"] == (
+        "unfamiliar_semantic_label"
+    )
+    assert llm.calls == 2
 
 
 def test_boundary_failure_metadata_is_typed_without_raw_output() -> None:
     """Typed boundary errors expose fields needed by metadata-only capture."""
 
     error = _SemanticBoundaryValidationError(
-        "selected roles contains unknown handles [\"ev1\"]",
-        failure_kind="producer_handle_domain_invalid",
-        field_path="selected_role_handles",
-        repairable=True,
+        "semantic delta path is not owned by question",
+        failure_kind="semantic_boundary_terminal",
+        field_path="delta.target_path",
     )
 
-    assert error.failure_kind == "producer_handle_domain_invalid"
-    assert error.field_path == "selected_role_handles"
-    assert error.repairable is True
+    assert error.failure_kind == "semantic_boundary_terminal"
+    assert error.field_path == "delta.target_path"
 
 
-def test_structurally_usable_semantic_content_does_not_trigger_semantic_retry(
+@pytest.mark.asyncio
+async def test_structurally_usable_semantic_content_passes_runtime_without_retry(
 ) -> None:
-    """Keep authored semantic content opaque at the producer envelope."""
+    """Admit a structurally valid unfamiliar proposition label unchanged."""
 
-    normalized = _normalize_structural_semantic_appraisal_result(
-        {
-            "question_id": "q:event_agency",
-            "selected_evidence_handles": ["e1"],
-            "selected_role_handles": ["ce1"],
-            "propositions": [{
-                "proposition_kind": "unfamiliar_semantic_label",
-                "subject_handle": "ce1",
-                "evidence_handles": ["e1"],
-                "role_assignments": [],
-                "semantic_value": "The authored meaning remains opaque.",
-            }],
-            "deltas": [],
-            "explanation": "The authored meaning remains opaque.",
+    candidate = json.dumps({
+        "question_id": "q:event_agency",
+        "proposition": {
+            "proposition_kind": "unfamiliar_semantic_label",
+            "subject_handle": "ce1",
+            "evidence_handles": ["e1"],
+            "role_assignments": [],
+            "semantic_value": "The authored meaning remains opaque.",
         },
-        question_id="q:event_agency",
-        maximum_propositions=1,
-        maximum_deltas=1,
-        maximum_explanation_chars=120,
-    )
+        "delta": None,
+    })
+    llm = _ScriptedSemanticLLM([candidate, _empty_item_response()])
 
-    assert normalized["propositions"][0]["proposition_kind"] == (
+    result = await _run_execution_appraisal(llm)
+
+    assert result["propositions"][0]["proposition_kind"] == (
         "unfamiliar_semantic_label"
     )
+    assert llm.calls == 2
 
 
 def test_recoverable_structure_does_not_trigger_producer_retry() -> None:
@@ -922,4 +874,3 @@ def test_boundary_validation_preserves_existing_rejection_behavior() -> None:
         )
 
     assert error_info.value.failure_kind == "semantic_boundary_terminal"
-    assert error_info.value.repairable is False

@@ -9,9 +9,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
-    CognitionExecutionError,
-)
 from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
     _normalize_nonowning_goal_fields,
 )
@@ -24,6 +21,7 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
 from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
     PromptProjectionV2,
 )
+from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 TRACE_PATH = Path(__file__).resolve().parents[1] / "test_artifacts" / (
     "diagnostics/llmtrace_93482_validator_evidence.json"
@@ -35,31 +33,18 @@ CURRENT_TRACE_PATH = Path(__file__).resolve().parents[1] / "test_artifacts" / (
 
 
 class _CapturedCandidateLLM:
-    """Replay one captured raw response through the semantic stage."""
+    """Replay captured raw responses through the semantic stage."""
 
-    def __init__(self, response_text: str) -> None:
-        self.response_text = response_text
+    def __init__(self, response_texts: list[str]) -> None:
+        self.response_texts = list(response_texts)
         self.calls = 0
 
     async def ainvoke(self, *_args: object, **_kwargs: object) -> object:
-        """Return the captured candidate and count the real stage call."""
+        """Return the next captured candidate and count the stage call."""
 
         self.calls += 1
-        return SimpleNamespace(content=self.response_text)
-
-
-class _ScriptedCandidateLLM:
-    """Return a preserved candidate, bounded repair, and empty terminator."""
-
-    def __init__(self, responses: list[str]) -> None:
-        self.responses = list(responses)
-        self.calls = 0
-
-    async def ainvoke(self, *_args: object, **_kwargs: object) -> object:
-        """Return the next deterministic replay response."""
-
-        self.calls += 1
-        return SimpleNamespace(content=self.responses.pop(0))
+        response_text = self.response_texts.pop(0)
+        return SimpleNamespace(content=response_text)
 
 
 def _current_trace_candidate() -> str:
@@ -139,35 +124,6 @@ def _current_trace_projection() -> PromptProjectionV2:
             },
         },
     )
-
-
-def _current_trace_repaired_candidate() -> str:
-    """Build the expected producer-owned origin-plus-resolution replacement."""
-
-    return json.dumps({
-        "question_id": "q:goal_threat_outcome",
-        "proposition": {
-            "proposition_kind": "knowledge_answered",
-            "subject_handle": "ck1",
-            "evidence_handles": ["e1", "e3"],
-            "role_assignments": [
-                {"role": "actor", "entity_handle": "self"},
-                {"role": "target", "entity_handle": "current_user"},
-            ],
-            "semantic_value": "The knowledge gap has been answered.",
-        },
-        "delta": None,
-    })
-
-
-def _current_trace_empty_item() -> str:
-    """Build the bounded empty item that ends the repaired appraisal family."""
-
-    return json.dumps({
-        "question_id": "q:goal_threat_outcome",
-        "proposition": None,
-        "delta": None,
-    })
 
 
 def _captured_boundary_question() -> dict[str, object]:
@@ -284,14 +240,12 @@ def _semantic_attempts(trace: Mapping[str, object]) -> list[Mapping[str, object]
     return attempts
 
 
-async def _run_current_trace_repair() -> tuple[Mapping[str, object], _ScriptedCandidateLLM]:
-    """Replay the current failed candidate through bounded producer repair."""
+async def _run_current_trace_boundary() -> tuple[
+    Mapping[str, object], _CapturedCandidateLLM
+]:
+    """Replay the current failed candidate through family termination."""
 
-    llm = _ScriptedCandidateLLM([
-        _current_trace_candidate(),
-        _current_trace_repaired_candidate(),
-        _current_trace_empty_item(),
-    ])
+    llm = _CapturedCandidateLLM([_current_trace_candidate()])
     config = SimpleNamespace(route_name="test.current_qq_replay")
     services = SimpleNamespace(
         llm=llm,
@@ -316,26 +270,62 @@ async def _run_current_trace_repair() -> tuple[Mapping[str, object], _ScriptedCa
 
 
 @pytest.mark.asyncio
-async def test_protected_qq_replay_repairs_candidate_origin_without_semantic_policy_retry(
+async def test_current_candidate_origin_trace_terminates_family_without_retry(
 ) -> None:
-    """The current protected origin failure reaches a producer repair call."""
+    """The current origin failure ends its family after one model call."""
 
-    result, llm = await _run_current_trace_repair()
+    result, llm = await _run_current_trace_boundary()
 
-    assert llm.calls == 3
+    assert llm.calls == 1
     assert result["question_id"] == "q:goal_threat_outcome"
-    assert result["propositions"]
+    assert result["propositions"] == []
+    assert result["deltas"] == []
 
 
 @pytest.mark.asyncio
-async def test_protected_qq_replay_preserves_origin_and_resolution_evidence(
+async def test_canonical_origin_candidate_is_admitted_without_preservation_guard(
 ) -> None:
-    """The repaired protected candidate retains both required citations."""
+    """Admit the corrected origin citation, then stop on the empty item."""
 
-    result, _ = await _run_current_trace_repair()
+    candidate = parse_llm_json_output(_current_trace_candidate())
+    assert isinstance(candidate, dict)
+    proposition = candidate["proposition"]
+    assert isinstance(proposition, dict)
+    proposition["evidence_handles"] = ["e1"]
+    empty_item = json.dumps({
+        "question_id": "q:goal_threat_outcome",
+        "proposition": None,
+        "delta": None,
+    })
+    llm = _CapturedCandidateLLM([
+        json.dumps(candidate, ensure_ascii=False),
+        empty_item,
+    ])
+    config = SimpleNamespace(route_name="test.current_qq_correction")
+    services = SimpleNamespace(
+        llm=llm,
+        appraisal_event_agency_config=config,
+        appraisal_relationship_social_config=config,
+        appraisal_moral_identity_config=config,
+        appraisal_goal_threat_outcome_config=config,
+        appraisal_epistemic_comparison_memory_config=config,
+        appraisal_existential_drive_config=config,
+    )
 
-    assert result["selected_evidence_handles"] == ["e1", "e3"]
-    assert result["propositions"][0]["evidence_handles"] == ["e1", "e3"]
+    result = await appraise_semantic_question(
+        _current_trace_question(),
+        _current_trace_evidence(),
+        _current_trace_projection(),
+        services,
+        validation_state=build_acquaintance_user_state(
+            global_user_id="qq-current-correction",
+            updated_at="2026-08-18T00:00:00Z",
+        ),
+    )
+
+    assert result["propositions"][0]["evidence_handles"] == ["e1"]
+    assert result["deltas"] == []
+    assert llm.calls == 2
 
 
 def test_protected_qq_replay_semantic_appraisal_avoids_semantic_retry() -> None:
@@ -358,8 +348,8 @@ def test_protected_qq_replay_semantic_appraisal_avoids_semantic_retry() -> None:
 
 
 @pytest.mark.asyncio
-async def test_protected_qq_replay_executes_captured_boundary_without_retry() -> None:
-    """Use the captured raw response and assert one typed boundary call."""
+async def test_captured_unowned_path_terminates_family_without_retry() -> None:
+    """The captured unowned target ends its family after one model call."""
 
     trace = json.loads(TRACE_PATH.read_text(encoding="utf-8"))
     attempts = _semantic_attempts(trace)
@@ -372,7 +362,7 @@ async def test_protected_qq_replay_executes_captured_boundary_without_retry() ->
     raw_response = target.get("raw_response_text")
     assert isinstance(raw_response, str)
 
-    llm = _CapturedCandidateLLM(raw_response)
+    llm = _CapturedCandidateLLM([raw_response])
     config = SimpleNamespace(route_name="test.protected_qq_replay")
     services = SimpleNamespace(
         llm=llm,
@@ -383,20 +373,20 @@ async def test_protected_qq_replay_executes_captured_boundary_without_retry() ->
         appraisal_epistemic_comparison_memory_config=config,
         appraisal_existential_drive_config=config,
     )
-    with pytest.raises(CognitionExecutionError) as error_info:
-        await appraise_semantic_question(
-            _captured_boundary_question(),
-            _captured_boundary_evidence(),
-            _captured_boundary_projection(),
-            services,
-            validation_state=build_acquaintance_user_state(
-                global_user_id="qq-replay",
-                updated_at="2026-08-08T00:00:00Z",
-            ),
-        )
+    result = await appraise_semantic_question(
+        _captured_boundary_question(),
+        _captured_boundary_evidence(),
+        _captured_boundary_projection(),
+        services,
+        validation_state=build_acquaintance_user_state(
+            global_user_id="qq-replay",
+            updated_at="2026-08-08T00:00:00Z",
+        ),
+    )
 
-    assert error_info.value.error_code == "cognition_boundary_rejected"
-    assert error_info.value.attempt_count == 1
+    assert result["question_id"] == "q:goal_threat_outcome"
+    assert result["propositions"] == []
+    assert result["deltas"] == []
     assert llm.calls == 1
 
 

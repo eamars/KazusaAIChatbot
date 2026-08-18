@@ -82,7 +82,7 @@ FIXTURE_PATH = (
 INCIDENT_TIMESTAMP = "2026-07-28T04:19:18Z"
 _CAPTURED_NEAR_CAP_CASES: tuple[dict[str, object], ...] = (
     {
-        "case_id": "a1a573_near_cap_semantic_repair",
+        "case_id": "a1a573_near_cap_boundary_termination",
         "trace_id": "llmtrace_93482f08e4a74aa5af90adc6e6f5918a",
         "trace_path": (
             Path(__file__).parents[1]
@@ -94,7 +94,7 @@ _CAPTURED_NEAR_CAP_CASES: tuple[dict[str, object], ...] = (
         "question_id": "q:goal_threat_outcome",
     },
     {
-        "case_id": "caad1a_near_cap_semantic_repair",
+        "case_id": "caad1a_near_cap_boundary_termination",
         "trace_id": "llmtrace_caad1a9370cf4d859e8ea6233f1e473d",
         "trace_path": (
             Path(__file__).parents[1]
@@ -109,7 +109,7 @@ _CAPTURED_NEAR_CAP_CASES: tuple[dict[str, object], ...] = (
         "question_id": "q:goal_threat_outcome",
     },
     {
-        "case_id": "df6eb4_near_cap_semantic_repair",
+        "case_id": "df6eb4_near_cap_boundary_termination",
         "trace_id": "llmtrace_df6eb45b1bfc405fa0e781baa7ce8d76",
         "trace_path": (
             Path(__file__).parents[1]
@@ -1239,10 +1239,10 @@ async def test_appraisal_accumulates_one_item_then_stops_on_empty() -> None:
 
 
 @pytest.mark.asyncio
-async def test_appraisal_exhaustion_returns_the_accepted_prefix(
+async def test_appraisal_boundary_rejection_returns_accepted_prefix_without_retry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A later exhausted item keeps the already accepted appraisal prefix."""
+    """A later boundary rejection keeps the accepted appraisal prefix."""
 
     class _PrefixThenInvalidLLM:
         def __init__(self) -> None:
@@ -1309,7 +1309,7 @@ async def test_appraisal_exhaustion_returns_the_accepted_prefix(
         validation_state=state,
     )
 
-    assert len(llm.payloads) == 3
+    assert len(llm.payloads) == 2
     assert len(result["propositions"]) == 1
     assert result["deltas"] == []
     boundary_events = [
@@ -1317,12 +1317,11 @@ async def test_appraisal_exhaustion_returns_the_accepted_prefix(
         for event_id, payload in events
         if event_id == "semantic_appraisal_boundary_failure"
     ]
-    assert len(boundary_events) == 2
-    assert all(
-        payload["failure_kind"] == "producer_handle_domain_invalid"
-        for payload in boundary_events
+    assert len(boundary_events) == 1
+    assert boundary_events[0]["failure_kind"] == (
+        "producer_handle_domain_invalid"
     )
-    assert boundary_events[-1]["disposition"] == "question_omitted"
+    assert boundary_events[0]["disposition"] == "terminal_rejection"
     bounded_event = next(
         payload
         for event_id, payload in events
@@ -1331,8 +1330,8 @@ async def test_appraisal_exhaustion_returns_the_accepted_prefix(
     assert bounded_event == {
         "question_id": question["question_id"],
         "item_index": 2,
-        "error_code": "semantic_appraisal_contract_exhausted",
-        "attempt_count": 2,
+        "error_code": "cognition_boundary_rejected",
+        "attempt_count": 1,
         "accepted_proposition_count": 1,
         "accepted_delta_count": 0,
         "disposition": "accepted_prefix",
@@ -2460,10 +2459,10 @@ async def test_appraisal_repair_uses_residual_budget_for_second_call(
     _CAPTURED_NEAR_CAP_CASES,
     ids=lambda case: str(case["case_id"]),
 )
-async def test_captured_near_cap_repairs_fit_the_existing_budget(
+async def test_captured_near_cap_boundary_candidates_terminate_without_retry(
     case: Mapping[str, object],
 ) -> None:
-    """Each captured near-cap path reaches its bounded repair call."""
+    """Each captured boundary candidate ends its family after one call."""
 
     input_payload, historical_response = _load_captured_near_cap_case(case)
     payload, preliminary_state, projection, questions = (
@@ -2477,63 +2476,27 @@ async def test_captured_near_cap_repairs_fit_the_existing_budget(
         if question.get("question_id") == question_id
     ]
     assert len(matching_questions) == 1
+    original_state = deepcopy(preliminary_state)
     llm = _InvalidCandidateLLM(historical_response)
 
-    with pytest.raises(
-        CognitionExecutionError,
-        match="contract attempts exhausted",
-    ):
-        await appraise_semantic_question(
-            matching_questions[0],
-            payload["evidence"],
-            projection,
-            _appraisal_services(llm),
-            validation_state=preliminary_state,
-        )
+    result = await appraise_semantic_question(
+        matching_questions[0],
+        payload["evidence"],
+        projection,
+        _appraisal_services(llm),
+        validation_state=preliminary_state,
+    )
 
-    assert len(llm.calls) == 2
-    repair_messages = llm.calls[1]
-    repair_size = sum(len(content) for content in repair_messages)
-    assert (
-        repair_size
-        <= semantic_appraisal_module.SEMANTIC_APPRAISAL_REPAIR_PROMPT_CAP
-    )
-    repair_payload = json.loads(repair_messages[-1])
-    assert set(repair_payload) == {
-        "repair_instruction",
-        "contract_error",
-        "allowed_values",
+    assert result == {
+        "question_id": question_id,
+        "selected_evidence_handles": [],
+        "selected_role_handles": [],
+        "propositions": [],
+        "deltas": [],
+        "explanation": "No additional supported semantic item.",
     }
-    assert "selected roles contains unknown handles" in repair_payload[
-        "contract_error"
-    ]
-    assert "knowledge_gaps.k7.uncertainty" not in repair_payload[
-        "contract_error"
-    ]
-    assert "permitted paths:" not in repair_payload["contract_error"]
-    assert "permitted_delta_path_domains" in repair_payload[
-        "allowed_values"
-    ]
-    path_domains = repair_payload["allowed_values"][
-        "permitted_delta_path_domains"
-    ]
-    reconstructed_paths = {
-        f"{domain['state_field']}.{handle}.{axis}"
-        for domain in path_domains
-        for handle in domain["handles"]
-        for axis in domain["axes"]
-    }
-    surviving_role_handles = set(
-        repair_payload["allowed_values"]["handle_field_domains"][
-            "subject_handle"
-        ]
-    )
-    expected_paths = {
-        path
-        for path in matching_questions[0]["permitted_delta_paths"]
-        if path.split(".")[1] in surviving_role_handles
-    }
-    assert reconstructed_paths == expected_paths
+    assert len(llm.calls) == 1
+    assert preliminary_state == original_state
 
 
 @pytest.mark.asyncio

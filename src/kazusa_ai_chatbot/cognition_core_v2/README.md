@@ -615,12 +615,13 @@ idempotency, the guarded write, the refresh callback, and the audit row.
 
 Every recoverable V2 model owner has at least three total local attempts
 except semantic appraisal. Each appraisal micro item has one initial call plus
-at most one complete-replacement attempt, and each family has at most eight
-items. Semantic replacement is limited to structural recovery, missing
-candidate-origin citations, and declared producer handle-domain violations.
-Semantic ownership, proposition-kind, target-policy, duplicate/conflict,
-permission, effect, and state/FSM violations remain terminal with no repair
-call. Existing longer semantic ledgers keep their cap. The outcome ladder is
+at most one complete-replacement attempt for malformed producer structure, and
+each family has at most eight items. Runtime semantic admission does not issue
+a semantic verdict, semantic omission, or semantic retry. Deterministic carrier
+and state/FSM rejection consumes the one producer call, authorizes no state
+mutation, and terminates only the affected family with its accepted prefix or
+canonical empty result. Existing longer semantic ledgers keep their cap. The
+outcome ladder is
 `accepted`, `recovered`, `accepted_degraded`, then `unrecoverable`. Appraisal
 and optional visual exhaustion are omitted; decontextualization keeps the
 normalized original input; workspace keeps the highest-priority complete bid;
@@ -633,14 +634,14 @@ commit or post-commit invariants, and total model unavailability with no owned
 fallback remain execution errors. Unknown fields, semantic ownership or kind
 mismatches, duplicate/conflicting role or evidence handles, unowned delta
 paths, invalid consequences, invalid permissions, and invalid relational
-pairings stay terminal producer-owned contract errors. A missing candidate
-origin citation and a generated value outside an explicit question-local
-handle domain receive one complete producer replacement; the replacement
-must retain every valid prior citation at both selected and nested candidate
-levels. Unmapped validator failures are typed as
-`unknown_validation_failure`, fail closed, and issue no semantic repair. The
-runtime never substitutes handles, unions evidence, or repairs semantic
-meaning. Goal cognition regenerates a complete candidate within its
+pairings stay outside runtime semantic judgment. Runtime carrier errors such as
+unknown evidence or role handles, unowned target paths, invalid role enums,
+duplicate conflicts, and state/FSM incompatibility fail closed for the current
+family without replacement. Candidate-origin mismatches are handled by the
+same family boundary; runtime never substitutes handles, unions evidence,
+preserves citations as repair obligations, or repairs semantic meaning. The
+strict semantic validator remains available only to direct contract tests.
+Goal cognition regenerates a complete candidate within its
 cumulative budget and never deletes model-authored handles or values into
 acceptance. Recoverable and degraded outcomes owned by other stages follow the
 normal persistence and delivery path. Callers commit only validated replacement
@@ -703,9 +704,9 @@ disposition.
 
 Every bounded repair or replacement attempt measures its owner-defined dynamic
 content before invoking its model. Semantic appraisal repair feedback includes
-the typed failure kind, exact field path, and any valid evidence citations that
-the replacement must preserve. The appraisal initial and repair ceilings are
-20,000 and 24,000 characters, action and resolver authorization use
+the structural failure detail, exact field path, and current allowed carrier
+domains. Deterministic boundary rejection produces no repair feedback. The
+appraisal initial and repair ceilings are 20,000 and 24,000 characters, action and resolver authorization use
 20,000 and 24,000 characters, and each surface stage uses 32,000 characters.
 Semantic appraisal repair feedback keeps the failed rule and exact offending
 path while omitting only the validator-owned permitted-path suffix when the
@@ -793,20 +794,18 @@ serve it.
 
 Semantic appraisal admission is structural-first. The canonical JSON parser and
 producer envelope own object shape, required fields, bounded types, lengths,
-counts, and routing identity. Structurally usable semantic prose and structured
-values remain opaque to semantic judgment. A typed producer-contract failure
-may receive one complete replacement only when it is a missing candidate-origin
-binding or a value outside an explicit question-local handle domain. The
-replacement retains valid selected and nested evidence citations and is fully
-revalidated. Unmapped validator failures are typed as
-`unknown_validation_failure`, fail closed, and issue no repair call. Semantic
-ownership, proposition-kind, target, duplicate/conflict,
-permission, state/FSM, operation, action, and delivery violations do not
-retry. Existing deterministic provenance and boundary guards remain
-authoritative and fail closed before effectful work. Recoverable structure
-follows the existing repair path, unrecoverable structure uses the existing
-owner cap, provider failures keep their operational cap, and a prompt-cap
-disposition issues no provider call.
+counts, and routing identity. Structurally usable semantic prose, proposition
+labels, and proposition-kind/subject combinations remain opaque to runtime
+semantic judgment. Runtime admission validates only deterministic carrier
+contracts: evidence and handle provenance, role enum/domain, exact target paths,
+bounded deltas, duplicate conflicts, and state/FSM trial safety. Candidate-origin
+mismatches and producer handle-domain violations are boundary failures, not
+producer repair cases. They consume one model call, authorize no state
+mutation, and terminate only the affected family with its accepted prefix or
+canonical empty result. The strict semantic validator remains available for
+direct contract tests but does not govern producer admission. Structural
+malformed output follows the existing replacement path, provider failures keep
+their operational cap, and a prompt-cap disposition issues no provider call.
 
 Relationship familiarity and salience maintenance belong to the reducer, not to
 the model projection. User relationship state carries non-model-facing

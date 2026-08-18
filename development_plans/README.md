@@ -63,6 +63,7 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
+| [cognition_v2_semantic_admission_original_contract_restoration_plan.md](archive/completed/cognition_v2_semantic_admission_original_contract_restoration_plan.md) | Cognition V2 semantic-admission original-contract restoration | completed |
 | [dialog_final_generator_evaluator_decommission_plan.md](archive/completed/dialog_final_generator_evaluator_decommission_plan.md) | Final dialog evaluator/verifier and scheduled semantic-evaluator decommission | completed |
 | [selected_operation_nested_role_scope_bugfix_plan.md](archive/completed/selected_operation_nested_role_scope_bugfix_plan.md) | Selected-operation nested role scope and dialog evaluator false-positive fix | completed |
 | [dialog_language_and_model_output_contract_cleanup_plan.md](archive/completed/dialog_language_and_model_output_contract_cleanup_plan.md) | Final-dialog language delegation and deterministic model-output contract cleanup | completed |

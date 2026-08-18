@@ -112,7 +112,6 @@ _PROPOSITION_SUBJECT_KIND_SETS = {
 _CANDIDATE_ORIGIN_MISSING = "candidate_origin_missing"
 _PRODUCER_HANDLE_DOMAIN_INVALID = "producer_handle_domain_invalid"
 _SEMANTIC_BOUNDARY_TERMINAL = "semantic_boundary_terminal"
-_UNKNOWN_VALIDATION_FAILURE = "unknown_validation_failure"
 
 
 class _SemanticBoundaryValidationError(ValueError):
@@ -124,14 +123,16 @@ class _SemanticBoundaryValidationError(ValueError):
         *,
         failure_kind: str,
         field_path: str | None = None,
-        repairable: bool,
     ) -> None:
-        """Attach the validator-owned kind and repair authority."""
+        """Attach the validator-owned failure kind and field path."""
 
         super().__init__(message)
         self.failure_kind = failure_kind
         self.field_path = field_path
-        self.repairable = repairable
+
+
+class _SemanticStructuralOutputError(ValueError):
+    """Mark producer output that requires structural replacement."""
 
 
 def _boundary_validation_error(
@@ -139,15 +140,13 @@ def _boundary_validation_error(
     *,
     failure_kind: str,
     field_path: str | None = None,
-    repairable: bool,
 ) -> _SemanticBoundaryValidationError:
-    """Build one typed error without inferring policy from its message."""
+    """Build one typed terminal boundary error."""
 
     return _SemanticBoundaryValidationError(
         message,
         failure_kind=failure_kind,
         field_path=field_path,
-        repairable=repairable,
     )
 
 
@@ -162,7 +161,6 @@ def _terminal_boundary_error(
         message,
         failure_kind=_SEMANTIC_BOUNDARY_TERMINAL,
         field_path=field_path,
-        repairable=False,
     )
 
 
@@ -431,8 +429,16 @@ async def appraise_semantic_question(
                 item_index=item_index,
             )
         except CognitionExecutionError as exc:
-            if accepted_result is None:
+            if exc.error_code not in {
+                "cognition_boundary_rejected",
+                "semantic_appraisal_state_incompatibility",
+            }:
                 raise
+            disposition = (
+                "accepted_prefix"
+                if accepted_result is not None
+                else "question_omitted"
+            )
             capture_validation_event(
                 "semantic_appraisal_bounded_termination",
                 {
@@ -440,15 +446,32 @@ async def appraise_semantic_question(
                     "item_index": item_index,
                     "error_code": exc.error_code,
                     "attempt_count": exc.attempt_count,
-                    "accepted_proposition_count": len(
-                        accepted_result["propositions"]
+                    "accepted_proposition_count": (
+                        len(accepted_result["propositions"])
+                        if accepted_result is not None
+                        else 0
                     ),
-                    "accepted_delta_count": len(accepted_result["deltas"]),
-                    "disposition": "accepted_prefix",
+                    "accepted_delta_count": (
+                        len(accepted_result["deltas"])
+                        if accepted_result is not None
+                        else 0
+                    ),
+                    "disposition": disposition,
                     "error": str(exc),
                 },
             )
-            return accepted_result
+            if accepted_result is not None:
+                bounded_result = accepted_result
+            else:
+                bounded_result = {
+                    "question_id": question["question_id"],
+                    "selected_evidence_handles": [],
+                    "selected_role_handles": [],
+                    "propositions": [],
+                    "deltas": [],
+                    "explanation": "No additional supported semantic item.",
+                }
+            return bounded_result
         if not item_result["propositions"] and not item_result["deltas"]:
             final_result = (
                 accepted_result
@@ -483,7 +506,6 @@ async def _appraise_semantic_item(
 
     human_message = HumanMessage(content=payload_text)
     request_messages: list[BaseMessage] = [system_message, human_message]
-    preserved_evidence: dict[str, Any] | None = None
     for attempt_index in range(SEMANTIC_APPRAISAL_ATTEMPT_LIMIT):
         started_at = time.perf_counter()
         raw_output: str | None = None
@@ -545,32 +567,36 @@ async def _appraise_semantic_item(
             continue
         raw_output = getattr(response, "content", "")
         try:
-            parsed_output = parse_llm_json_output(
-                raw_output,
-                repair_trace_hook=(
-                    failure_capsule.append_json_repair_attempt
-                ),
-            )
-            parsed_output = _canonicalize_semantic_appraisal_item(parsed_output)
+            try:
+                parsed_output = parse_llm_json_output(
+                    raw_output,
+                    repair_trace_hook=(
+                        failure_capsule.append_json_repair_attempt
+                    ),
+                )
+                parsed_output = _canonicalize_semantic_appraisal_item(
+                    parsed_output
+                )
+            except (AttributeError, KeyError, TypeError, ValueError) as exc:
+                raise _SemanticStructuralOutputError(str(exc)) from exc
+
             parsed_output = _suppress_emitted_appraisal_components(
                 parsed_output,
                 accepted_result,
             )
-            parsed_output = _normalize_structural_semantic_appraisal_result(
-                parsed_output,
-                question_id=item_question["question_id"],
-                maximum_propositions=1,
-                maximum_deltas=1,
-                maximum_explanation_chars=(
-                    SEMANTIC_APPRAISAL_ITEM_EXPLANATION_LIMIT
-                ),
-            )
-            if preserved_evidence is not None:
-                _validate_preserved_candidate_evidence(
+            try:
+                parsed_output = _normalize_structural_semantic_appraisal_result(
                     parsed_output,
-                    preserved_evidence,
-                    set(evidence_by_handle),
+                    question_id=item_question["question_id"],
+                    maximum_propositions=1,
+                    maximum_deltas=1,
+                    maximum_explanation_chars=(
+                        SEMANTIC_APPRAISAL_ITEM_EXPLANATION_LIMIT
+                    ),
                 )
+            except (AttributeError, KeyError, TypeError, ValueError) as exc:
+                raise _SemanticStructuralOutputError(str(exc)) from exc
+
             result, merged_result = _validate_semantic_boundary_candidate(
                 parsed_output,
                 accepted_result,
@@ -651,37 +677,24 @@ async def _appraise_semantic_item(
         except _SemanticBoundaryValidationError as exc:
             ended_at = time.perf_counter()
             attempt_count = attempt_index + 1
-            exhausted = attempt_count >= SEMANTIC_APPRAISAL_ATTEMPT_LIMIT
-            disposition = (
-                "question_omitted"
-                if exhausted and exc.repairable
-                else "producer_repair"
-                if exc.repairable
-                else "terminal_rejection"
-            )
             failure_details = {
                 "question_id": question["question_id"],
                 "question_kind": question["question_kind"],
                 "item_index": item_index,
                 "failure_kind": exc.failure_kind,
                 "field_path": exc.field_path,
-                "repair_attempted": attempt_count > 1,
+                "repair_attempted": False,
                 "attempt_count": attempt_count,
-                "retryable": exc.repairable and not exhausted,
-                "disposition": disposition,
+                "retryable": False,
+                "disposition": "terminal_rejection",
             }
-            parse_status = (
-                "boundary_repairable"
-                if exc.repairable
-                else "boundary_error"
-            )
             _record_semantic_appraisal_trace(
                 config=config,
                 question=question,
                 messages=request_messages,
                 response_text=str(raw_output),
                 parsed_output=parsed_output,
-                parse_status=parse_status,
+                parse_status="boundary_error",
                 status="failed",
                 started_at=started_at,
                 attempt_index=attempt_count,
@@ -695,7 +708,7 @@ async def _appraise_semantic_item(
                 human_payload=payload_text,
                 raw_output=raw_output,
                 parsed_output=parsed_output,
-                parse_status=parse_status,
+                parse_status="boundary_error",
                 started_at=started_at,
                 ended_at=ended_at,
                 error=str(exc),
@@ -704,39 +717,15 @@ async def _appraise_semantic_item(
                 "semantic_appraisal_boundary_failure",
                 failure_details,
             )
-            if not exc.repairable:
-                raise CognitionExecutionError(
-                    "semantic appraisal candidate failed a deterministic boundary",
-                    error_code="cognition_boundary_rejected",
-                    stage="semantic_appraisal",
-                    attempt_count=attempt_count,
-                    safe_checkpoint="pre_state_commit",
-                    retryable=False,
-                ) from exc
-            if preserved_evidence is None:
-                preserved_evidence = _capture_valid_candidate_evidence(
-                    parsed_output,
-                    set(evidence_by_handle),
-                )
-            if exhausted:
-                raise CognitionExecutionError(
-                    "semantic appraisal contract attempts exhausted",
-                    error_code="semantic_appraisal_contract_exhausted",
-                    stage="semantic_appraisal",
-                    attempt_count=attempt_count,
-                    safe_checkpoint="pre_state_commit",
-                    retryable=False,
-                ) from exc
-            request_messages = _appraisal_repair_messages(
-                system_message=system_message,
-                human_message=human_message,
-                invalid_candidate=str(raw_output),
-                contract_error=_compact_semantic_contract_error(str(exc)),
-                allowed_values=repair_allowed_values,
-                preserve_evidence=preserved_evidence,
-            )
-            continue
-        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            raise CognitionExecutionError(
+                "semantic appraisal candidate failed a deterministic boundary",
+                error_code="cognition_boundary_rejected",
+                stage="semantic_appraisal",
+                attempt_count=attempt_count,
+                safe_checkpoint="pre_state_commit",
+                retryable=False,
+            ) from exc
+        except _SemanticStructuralOutputError as exc:
             ended_at = time.perf_counter()
             _record_semantic_appraisal_trace(
                 config=config,
@@ -822,44 +811,32 @@ def _validate_semantic_boundary_candidate(
     evidence_handles: set[str],
     handle_to_ref: Mapping[str, Mapping[str, str]],
 ) -> tuple[SemanticAppraisalResultV2, SemanticAppraisalResultV2]:
-    """Run existing provenance and boundary validators after structure admission."""
+    """Validate deterministic carriers without judging authored meaning."""
 
-    try:
-        result = validate_semantic_appraisal_result(
-            parsed,
-            item_question,
-            evidence_handles,
-            handle_to_ref,
-            maximum_propositions=1,
-            maximum_deltas=1,
-            maximum_explanation_chars=(
-                SEMANTIC_APPRAISAL_ITEM_EXPLANATION_LIMIT
-            ),
-        )
-        merged_result = _merge_semantic_appraisal_item(
-            accepted_result,
-            result,
-        )
-        validate_semantic_appraisal_result(
-            merged_result,
-            question,
-            evidence_handles,
-            handle_to_ref,
-        )
-    except _SemanticBoundaryValidationError:
-        raise
-    except (AttributeError, KeyError, TypeError) as exc:
-        raise _boundary_validation_error(
-            str(exc),
-            failure_kind=_UNKNOWN_VALIDATION_FAILURE,
-            repairable=False,
-        ) from exc
-    except ValueError as exc:
-        raise _boundary_validation_error(
-            str(exc),
-            failure_kind=_UNKNOWN_VALIDATION_FAILURE,
-            repairable=False,
-        ) from exc
+    result = _validate_semantic_appraisal_contract(
+        parsed,
+        item_question,
+        evidence_handles,
+        handle_to_ref,
+        maximum_propositions=1,
+        maximum_deltas=1,
+        maximum_explanation_chars=SEMANTIC_APPRAISAL_ITEM_EXPLANATION_LIMIT,
+        enforce_semantic_ownership=False,
+    )
+    merged_result = _merge_semantic_appraisal_item(
+        accepted_result,
+        result,
+    )
+    _validate_semantic_appraisal_contract(
+        merged_result,
+        question,
+        evidence_handles,
+        handle_to_ref,
+        maximum_propositions=8,
+        maximum_deltas=8,
+        maximum_explanation_chars=1000,
+        enforce_semantic_ownership=False,
+    )
     return result, merged_result
 
 
@@ -1279,127 +1256,6 @@ def _emitted_proposition_signatures(
     ]
 
 
-def _capture_valid_candidate_evidence(
-    parsed: object,
-    evidence_handles: set[str],
-) -> dict[str, Any]:
-    """Capture valid citations that a producer replacement must preserve."""
-
-    if not isinstance(parsed, Mapping):
-        return {
-            "selected_evidence_handles": [],
-            "proposition_evidence": [],
-            "delta_evidence": [],
-        }
-    selected = [
-        handle
-        for handle in parsed.get("selected_evidence_handles", [])
-        if isinstance(handle, str) and handle in evidence_handles
-    ]
-    proposition_evidence: list[dict[str, Any]] = []
-    for proposition_index, proposition in enumerate(
-        parsed.get("propositions", [])
-    ):
-        if not isinstance(proposition, Mapping):
-            continue
-        proposition_kind = proposition.get("proposition_kind")
-        subject_handle = proposition.get("subject_handle")
-        object_handle = proposition.get("object_handle", "")
-        if not all(
-            isinstance(value, str)
-            for value in (proposition_kind, subject_handle, object_handle)
-        ):
-            continue
-        cited = [
-            handle
-            for handle in proposition.get("evidence_handles", [])
-            if isinstance(handle, str) and handle in evidence_handles
-        ]
-        proposition_evidence.append({
-            "identity": f"propositions[{proposition_index}].evidence_handles",
-            "evidence_handles": cited,
-        })
-    delta_evidence: list[dict[str, Any]] = []
-    for delta_index, delta in enumerate(parsed.get("deltas", [])):
-        if not isinstance(delta, Mapping):
-            continue
-        target_path = delta.get("target_path")
-        if not isinstance(target_path, str):
-            continue
-        cited = [
-            handle
-            for handle in delta.get("evidence_handles", [])
-            if isinstance(handle, str) and handle in evidence_handles
-        ]
-        delta_evidence.append({
-            "identity": f"deltas[{delta_index}].evidence_handles",
-            "evidence_handles": cited,
-        })
-    return {
-        "selected_evidence_handles": selected,
-        "proposition_evidence": proposition_evidence,
-        "delta_evidence": delta_evidence,
-    }
-
-
-def _validate_preserved_candidate_evidence(
-    parsed: object,
-    preserved_evidence: Mapping[str, Any],
-    evidence_handles: set[str],
-) -> None:
-    """Reject a replacement that drops citations from the failed candidate."""
-
-    current = _capture_valid_candidate_evidence(
-        parsed,
-        evidence_handles,
-    )
-    missing_selected = sorted(
-        set(preserved_evidence.get("selected_evidence_handles", []))
-        - set(current["selected_evidence_handles"])
-    )
-    current_propositions = {
-        row["identity"]: set(row["evidence_handles"])
-        for row in current["proposition_evidence"]
-    }
-    current_deltas = {
-        row["identity"]: set(row["evidence_handles"])
-        for row in current["delta_evidence"]
-    }
-    missing_nested: list[str] = []
-    for row in preserved_evidence.get("proposition_evidence", []):
-        if not isinstance(row, Mapping):
-            continue
-        identity = row.get("identity")
-        required = set(row.get("evidence_handles", []))
-        if (
-            not isinstance(identity, str)
-            or not required <= current_propositions.get(identity, set())
-        ):
-            missing_nested.append(str(identity))
-    for row in preserved_evidence.get("delta_evidence", []):
-        if not isinstance(row, Mapping):
-            continue
-        identity = row.get("identity")
-        required = set(row.get("evidence_handles", []))
-        if (
-            not isinstance(identity, str)
-            or not required <= current_deltas.get(identity, set())
-        ):
-            missing_nested.append(str(identity))
-    if missing_selected or missing_nested:
-        missing = [
-            *(f"selected_evidence_handles:{handle}" for handle in missing_selected),
-            *(f"candidate:{identity}" for identity in missing_nested),
-        ]
-        raise _boundary_validation_error(
-            "candidate replacement dropped valid evidence: "
-            + ", ".join(missing),
-            failure_kind=_SEMANTIC_BOUNDARY_TERMINAL,
-            field_path="candidate.evidence_handles",
-            repairable=False,
-        )
-
-
 def _record_semantic_appraisal_trace(
     *,
     config: LLMCallConfig,
@@ -1475,7 +1331,6 @@ def _appraisal_repair_messages(
     invalid_candidate: str,
     contract_error: str,
     allowed_values: Mapping[str, Any],
-    preserve_evidence: Mapping[str, Any] | None = None,
 ) -> list[SystemMessage | HumanMessage | AIMessage]:
     """Build one bounded replacement request from the latest invalid output.
 
@@ -1505,8 +1360,6 @@ def _appraisal_repair_messages(
         "contract_error": contract_error,
         "allowed_values": dict(allowed_values),
     }
-    if preserve_evidence is not None:
-        repair_payload["preserve_evidence"] = dict(preserve_evidence)
     repair_payload_text = json.dumps(
         repair_payload,
         ensure_ascii=False,
@@ -1574,6 +1427,32 @@ def validate_semantic_appraisal_result(
 ) -> SemanticAppraisalResultV2:
     """Validate one appraisal without interpreting its semantic prose."""
 
+    validated_result = _validate_semantic_appraisal_contract(
+        parsed,
+        question,
+        evidence_handles,
+        handle_to_ref,
+        maximum_propositions=maximum_propositions,
+        maximum_deltas=maximum_deltas,
+        maximum_explanation_chars=maximum_explanation_chars,
+        enforce_semantic_ownership=True,
+    )
+    return validated_result
+
+
+def _validate_semantic_appraisal_contract(
+    parsed: object,
+    question: SemanticQuestionV2,
+    evidence_handles: set[str],
+    handle_to_ref: Mapping[str, Mapping[str, str]],
+    *,
+    maximum_propositions: int,
+    maximum_deltas: int,
+    maximum_explanation_chars: int,
+    enforce_semantic_ownership: bool,
+) -> SemanticAppraisalResultV2:
+    """Validate shared carriers and optionally strict semantic ownership."""
+
     _validate_question_handle_authority(question, handle_to_ref)
     if not isinstance(parsed, Mapping):
         raise ValueError("semantic appraisal must return an object")
@@ -1591,11 +1470,6 @@ def validate_semantic_appraisal_result(
         or len(parsed["deltas"]) > maximum_deltas
     ):
         raise ValueError("semantic deltas are invalid")
-    _validate_all_candidate_evidence_bindings(
-        parsed["propositions"],
-        parsed["deltas"],
-        handle_to_ref,
-    )
     selected_evidence = _validate_handles(
         parsed["selected_evidence_handles"],
         evidence_handles,
@@ -1612,6 +1486,7 @@ def validate_semantic_appraisal_result(
             question,
             selected_evidence_set,
             handle_to_ref,
+            enforce_semantic_ownership=enforce_semantic_ownership,
         )
         for row in parsed["propositions"]
     ]
@@ -1624,7 +1499,7 @@ def validate_semantic_appraisal_result(
         )
         for row in parsed["deltas"]
     ]
-    _validate_handles(
+    selected_roles = _validate_handles(
         parsed["selected_role_handles"],
         set(question["permitted_role_handles"])
         | set(question["permitted_role_assignment_handles"]),
@@ -1640,13 +1515,6 @@ def validate_semantic_appraisal_result(
     referenced_role_handles = _referenced_role_handles(
         propositions,
         deltas,
-    )
-    selected_roles = _validate_handles(
-        parsed["selected_role_handles"],
-        referenced_role_handles,
-        "selected roles",
-        minimum=0,
-        maximum=len(referenced_role_handles),
     )
     if set(selected_roles) != referenced_role_handles:
         raise _terminal_boundary_error(
@@ -1681,6 +1549,8 @@ def _validate_proposition(
     question: SemanticQuestionV2,
     evidence_handles: set[str],
     handle_to_ref: Mapping[str, Mapping[str, str]],
+    *,
+    enforce_semantic_ownership: bool,
 ) -> dict[str, Any]:
     """Validate one semantic proposition and its role assignments."""
 
@@ -1698,14 +1568,6 @@ def _validate_proposition(
     if set(value) != allowed:
         raise ValueError("semantic proposition fields are not exact")
     proposition_kind = value["proposition_kind"]
-    permitted_kinds = question_proposition_kinds(question["question_kind"])
-    if proposition_kind not in permitted_kinds:
-        raise _terminal_boundary_error(
-            "semantic proposition kind "
-            f"{proposition_kind!r} is not owned by question; "
-            f"permitted kinds: {json.dumps(permitted_kinds)}",
-            field_path="proposition.proposition_kind",
-        )
     subject = value["subject_handle"]
     if subject not in set(question["permitted_role_handles"]):
         raise _boundary_validation_error(
@@ -1713,32 +1575,6 @@ def _validate_proposition(
             f"{subject!r} is not permitted; allowed role handles: "
             f"{_allowlist_hint(question['permitted_role_handles'])}",
             failure_kind=_PRODUCER_HANDLE_DOMAIN_INVALID,
-            field_path="proposition.subject_handle",
-            repairable=True,
-        )
-    required_subject_kind = _PROPOSITION_SUBJECT_KINDS.get(proposition_kind)
-    if (
-        required_subject_kind is not None
-        and handle_to_ref[subject]["kind"] != required_subject_kind
-    ):
-        raise _terminal_boundary_error(
-            "semantic proposition kind requires subject kind "
-            f"{required_subject_kind!r}; received "
-            f"{handle_to_ref[subject]['kind']!r}",
-            field_path="proposition.subject_handle",
-        )
-    permitted_subject_kinds = _PROPOSITION_SUBJECT_KIND_SETS.get(
-        proposition_kind
-    )
-    if (
-        permitted_subject_kinds is not None
-        and handle_to_ref[subject]["kind"] not in permitted_subject_kinds
-    ):
-        raise _terminal_boundary_error(
-            "semantic proposition subject kind "
-            f"{handle_to_ref[subject]['kind']!r} is not permitted for "
-            f"{proposition_kind!r}; permitted kinds: "
-            f"{json.dumps(sorted(permitted_subject_kinds))}",
             field_path="proposition.subject_handle",
         )
     if "object_handle" in value and value["object_handle"] not in set(
@@ -1750,34 +1586,7 @@ def _validate_proposition(
             f"handles: {_allowlist_hint(question['permitted_role_handles'])}",
             failure_kind=_PRODUCER_HANDLE_DOMAIN_INVALID,
             field_path="proposition.object_handle",
-            repairable=True,
         )
-    if proposition_kind == "goal_supersession":
-        if "object_handle" not in value:
-            raise _terminal_boundary_error(
-                "goal supersession requires an object handle",
-                field_path="proposition.object_handle",
-            )
-        if (
-            not subject.startswith("g")
-            or not value["object_handle"].startswith("g")
-        ):
-            raise _terminal_boundary_error(
-                "goal supersession requires two goal handles",
-                field_path="proposition.subject_handle",
-            )
-        if subject == value["object_handle"]:
-            raise _terminal_boundary_error(
-                "goal supersession requires a distinct goal",
-                field_path="proposition.object_handle",
-            )
-    cited = _validate_handles(
-        value["evidence_handles"],
-        evidence_handles,
-        "proposition evidence",
-        failure_kind=_PRODUCER_HANDLE_DOMAIN_INVALID,
-        field_path="proposition.evidence_handles",
-    )
     assignments = value["role_assignments"]
     if not isinstance(assignments, list) or len(assignments) > 8:
         raise ValueError("semantic proposition roles are invalid")
@@ -1811,7 +1620,6 @@ def _validate_proposition(
                 + json.dumps(permitted_handles),
                 failure_kind=_PRODUCER_HANDLE_DOMAIN_INVALID,
                 field_path="proposition.role_assignments[*].entity_handle",
-                repairable=True,
             )
         normalized_assignments.append(dict(assignment))
     referenced_handles = [subject]
@@ -1821,10 +1629,77 @@ def _validate_proposition(
         assignment["entity_handle"]
         for assignment in normalized_assignments
     )
-    _validate_candidate_evidence_binding(
-        referenced_handles,
-        cited,
-        handle_to_ref,
+    raw_evidence_handles = value["evidence_handles"]
+    if isinstance(raw_evidence_handles, list):
+        _validate_candidate_evidence_binding(
+            referenced_handles,
+            raw_evidence_handles,
+            handle_to_ref,
+            field_path="proposition.evidence_handles",
+        )
+    if enforce_semantic_ownership:
+        permitted_kinds = question_proposition_kinds(
+            question["question_kind"]
+        )
+        if proposition_kind not in permitted_kinds:
+            raise _terminal_boundary_error(
+                "semantic proposition kind "
+                f"{proposition_kind!r} is not owned by question; "
+                f"permitted kinds: {json.dumps(permitted_kinds)}",
+                field_path="proposition.proposition_kind",
+            )
+        required_subject_kind = _PROPOSITION_SUBJECT_KINDS.get(
+            proposition_kind
+        )
+        if (
+            required_subject_kind is not None
+            and handle_to_ref[subject]["kind"] != required_subject_kind
+        ):
+            raise _terminal_boundary_error(
+                "semantic proposition kind requires subject kind "
+                f"{required_subject_kind!r}; received "
+                f"{handle_to_ref[subject]['kind']!r}",
+                field_path="proposition.subject_handle",
+            )
+        permitted_subject_kinds = _PROPOSITION_SUBJECT_KIND_SETS.get(
+            proposition_kind
+        )
+        if (
+            permitted_subject_kinds is not None
+            and handle_to_ref[subject]["kind"]
+            not in permitted_subject_kinds
+        ):
+            raise _terminal_boundary_error(
+                "semantic proposition subject kind "
+                f"{handle_to_ref[subject]['kind']!r} is not permitted for "
+                f"{proposition_kind!r}; permitted kinds: "
+                f"{json.dumps(sorted(permitted_subject_kinds))}",
+                field_path="proposition.subject_handle",
+            )
+        if proposition_kind == "goal_supersession":
+            if "object_handle" not in value:
+                raise _terminal_boundary_error(
+                    "goal supersession requires an object handle",
+                    field_path="proposition.object_handle",
+                )
+            if (
+                not subject.startswith("g")
+                or not value["object_handle"].startswith("g")
+            ):
+                raise _terminal_boundary_error(
+                    "goal supersession requires two goal handles",
+                    field_path="proposition.subject_handle",
+                )
+            if subject == value["object_handle"]:
+                raise _terminal_boundary_error(
+                    "goal supersession requires a distinct goal",
+                    field_path="proposition.object_handle",
+                )
+    cited = _validate_handles(
+        raw_evidence_handles,
+        evidence_handles,
+        "proposition evidence",
+        failure_kind=_PRODUCER_HANDLE_DOMAIN_INVALID,
         field_path="proposition.evidence_handles",
     )
     result = {
@@ -1878,18 +1753,20 @@ def _validate_delta(
             f"received {type(delta).__name__}",
             field_path="delta.delta",
         )
+    path_handle = path.split(".")[1]
+    raw_evidence_handles = value["evidence_handles"]
+    if isinstance(raw_evidence_handles, list):
+        _validate_candidate_evidence_binding(
+            [path_handle],
+            raw_evidence_handles,
+            handle_to_ref,
+            field_path="delta.evidence_handles",
+        )
     cited = _validate_handles(
-        value["evidence_handles"],
+        raw_evidence_handles,
         evidence_handles,
         "delta evidence",
         failure_kind=_PRODUCER_HANDLE_DOMAIN_INVALID,
-        field_path="delta.evidence_handles",
-    )
-    path_handle = path.split(".")[1]
-    _validate_candidate_evidence_binding(
-        [path_handle],
-        cited,
-        handle_to_ref,
         field_path="delta.evidence_handles",
     )
     return {
@@ -1953,7 +1830,6 @@ def _validate_handles(
                 message,
                 failure_kind=failure_kind,
                 field_path=field_path,
-                repairable=True,
             )
         raise ValueError(message)
     if len(value) != len(set(value)):
@@ -2000,96 +1876,11 @@ def _validate_candidate_evidence_binding(
         evidence_handle = _candidate_evidence_handle(handle, handle_to_ref)
         if evidence_handle is not None and evidence_handle not in cited:
             raise _boundary_validation_error(
-                f"causal candidate {handle} must cite its originating "
-                f"evidence {evidence_handle}",
+                "causal candidates must cite originating evidence: "
+                f"{handle}->{evidence_handle}",
                 failure_kind=_CANDIDATE_ORIGIN_MISSING,
                 field_path=field_path,
-                repairable=True,
             )
-
-
-def _validate_all_candidate_evidence_bindings(
-    propositions: Sequence[Any],
-    deltas: Sequence[Any],
-    handle_to_ref: Mapping[str, Mapping[str, str]],
-) -> None:
-    """Report every missing candidate origin needed by one replacement."""
-
-    violations: set[tuple[str, str, str]] = set()
-    for proposition in propositions:
-        if not isinstance(proposition, Mapping):
-            continue
-        cited = proposition.get("evidence_handles")
-        if not isinstance(cited, list):
-            continue
-        handles = [
-            proposition.get("subject_handle"),
-            proposition.get("object_handle"),
-        ]
-        assignments = proposition.get("role_assignments")
-        if isinstance(assignments, list):
-            handles.extend(
-                assignment.get("entity_handle")
-                for assignment in assignments
-                if isinstance(assignment, Mapping)
-            )
-        _collect_missing_candidate_bindings(
-            handles,
-            cited,
-            handle_to_ref,
-            violations,
-            field_path="proposition.evidence_handles",
-        )
-    for delta in deltas:
-        if not isinstance(delta, Mapping):
-            continue
-        path = delta.get("target_path")
-        cited = delta.get("evidence_handles")
-        if not isinstance(path, str) or not isinstance(cited, list):
-            continue
-        pieces = path.split(".")
-        if len(pieces) != 3:
-            continue
-        _collect_missing_candidate_bindings(
-            [pieces[1]],
-            cited,
-            handle_to_ref,
-            violations,
-            field_path="delta.evidence_handles",
-        )
-    if violations:
-        bindings = ", ".join(
-            f"{handle}->{evidence_handle}"
-            for _, handle, evidence_handle in sorted(violations)
-        )
-        field_paths = sorted({field_path for field_path, _, _ in violations})
-        raise _boundary_validation_error(
-            "causal candidates must cite originating evidence: " + bindings,
-            failure_kind=_CANDIDATE_ORIGIN_MISSING,
-            field_path=", ".join(field_paths),
-            repairable=True,
-        )
-
-
-def _collect_missing_candidate_bindings(
-    candidate_handles: Sequence[Any],
-    cited_evidence_handles: Sequence[Any],
-    handle_to_ref: Mapping[str, Mapping[str, str]],
-    violations: set[tuple[str, str, str]],
-    *,
-    field_path: str,
-) -> None:
-    """Collect missing candidate origins from one proposition or delta."""
-
-    cited = {
-        handle for handle in cited_evidence_handles if isinstance(handle, str)
-    }
-    for handle in candidate_handles:
-        if not isinstance(handle, str):
-            continue
-        evidence_handle = _candidate_evidence_handle(handle, handle_to_ref)
-        if evidence_handle is not None and evidence_handle not in cited:
-            violations.add((field_path, handle, evidence_handle))
 
 
 def _candidate_evidence_handle(
@@ -2123,23 +1914,31 @@ def _validate_question_handle_authority(
     canonical_handles = set(handle_to_ref)
     permitted_handles = set(question["permitted_role_handles"])
     if not permitted_handles <= canonical_handles:
-        raise ValueError("semantic question contains a non-canonical role handle")
+        raise _terminal_boundary_error(
+            "semantic question contains a non-canonical role handle",
+            field_path="question.permitted_role_handles",
+        )
     assignment_handles = set(question["permitted_role_assignment_handles"])
     if not assignment_handles <= canonical_handles:
-        raise ValueError(
-            "semantic question contains a non-canonical assignment handle"
+        raise _terminal_boundary_error(
+            "semantic question contains a non-canonical assignment handle",
+            field_path="question.permitted_role_assignment_handles",
         )
     for handle in assignment_handles:
         if handle in {"self", "current_user"}:
             continue
         if handle_to_ref[handle]["kind"] not in ROLE_ENTITY_KINDS:
-            raise ValueError(
-                "semantic question contains a non-role assignment handle"
+            raise _terminal_boundary_error(
+                "semantic question contains a non-role assignment handle",
+                field_path="question.permitted_role_assignment_handles",
             )
     for path in question["permitted_delta_paths"]:
         pieces = path.split(".")
         if len(pieces) >= 3 and pieces[1] not in canonical_handles:
-            raise ValueError("semantic question contains a non-canonical path handle")
+            raise _terminal_boundary_error(
+                "semantic question contains a non-canonical path handle",
+                field_path="question.permitted_delta_paths",
+            )
 
 
 def _require_text(

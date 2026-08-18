@@ -117,7 +117,6 @@ class _ScriptedLLM:
                 "expected_consequences": ["preserve continuity"],
                 "confidence": "high",
                 "relational_willingness": self.relational_decision or {
-                    "schema_version": "relational_willingness.v2",
                     "applicability": "not_relationship_sensitive",
                     "stance": "not_applicable",
                     "current_user_relationship_state": "not_applicable",
@@ -456,7 +455,6 @@ async def test_sensitive_collapse_observability_uses_fixed_preservation_reason()
     """Sensitive collapse observability never copies model bid prose."""
 
     decision = {
-        "schema_version": "relational_willingness.v2",
         "applicability": "relationship_sensitive",
         "stance": "reject",
         "current_user_relationship_state": "unestablished",
@@ -793,6 +791,55 @@ async def test_appraisal_retry_or_omission_preserves_cognition(
 
 
 @pytest.mark.asyncio
+async def test_boundary_terminated_appraisal_family_allows_cognition_to_continue(
+) -> None:
+    """A rejected appraisal family leaves the full cognition turn viable."""
+
+    class _BoundaryTerminatingLLM(_ScriptedLLM):
+        def __init__(self) -> None:
+            super().__init__()
+            self.target_calls = 0
+
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config: object,
+        ) -> SimpleNamespace:
+            stage_name = getattr(config, "stage_name", "")
+            payload = json.loads(str(getattr(messages[-1], "content", "{}")))
+            question = payload.get("question", {})
+            if (
+                stage_name == "v2_appraisal"
+                and question.get("question_id") == "q:event_agency"
+            ):
+                self.target_calls += 1
+                result = {
+                    "question_id": question["question_id"],
+                    "proposition": {
+                        "proposition_kind": "intentionality",
+                        "subject_handle": "current_user",
+                        "evidence_handles": ["e1"],
+                        "role_assignments": [{
+                            "role": "unknown_role",
+                            "entity_handle": "self",
+                        }],
+                        "semantic_value": "The event appears intentional.",
+                    },
+                    "delta": None,
+                }
+                return SimpleNamespace(content=json.dumps(result))
+            return await super().ainvoke(messages, config=config)
+
+    llm = _BoundaryTerminatingLLM()
+
+    output = await run_cognition(_input(), _core_services(llm))
+
+    assert output["schema_version"] == "cognition_core_output.v2"
+    assert llm.target_calls == 1
+
+
+@pytest.mark.asyncio
 async def test_appraisal_internal_invariant_propagates() -> None:
     """An unexpected appraisal exception reaches the fatal pipeline boundary."""
 
@@ -852,7 +899,6 @@ async def test_goal_structure_recovers_on_third_attempt() -> None:
                     "expected_consequences": ["preserve continuity"],
                     "confidence": "high",
                     "relational_willingness": {
-                        "schema_version": "relational_willingness.v2",
                         "applicability": "not_relationship_sensitive",
                         "stance": "not_applicable",
                         "current_user_relationship_state": "not_applicable",
@@ -901,7 +947,6 @@ async def test_required_goal_invalid_evidence_stops_before_action_planning(
                     "expected_consequences": ["preserve continuity"],
                     "confidence": "high",
                     "relational_willingness": {
-                        "schema_version": "relational_willingness.v2",
                         "applicability": "not_relationship_sensitive",
                         "stance": "not_applicable",
                         "current_user_relationship_state": "not_applicable",

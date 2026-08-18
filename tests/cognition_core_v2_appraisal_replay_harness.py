@@ -75,7 +75,7 @@ def _message_question_id(messages: Sequence[object]) -> str | None:
 
 
 class _TargetCandidateLLM:
-    """Inject one preserved candidate and delegate every repair to the model."""
+    """Inject one preserved candidate and delegate later calls to the model."""
 
     def __init__(
         self,
@@ -487,15 +487,16 @@ async def replay_appraisal_through_public_boundary(
     source_sha256: str | None = None,
     candidate_classification: str = "preserved_failed_candidate",
     controlled_mutation: Mapping[str, Any] | None = None,
-    require_repair_call: bool = True,
+    require_repair_call: bool = False,
     monkeypatch: Any,
 ) -> dict[str, Any]:
     """Exercise candidate exclusion and a disposition-matched control run.
 
-    The candidate run uses the public facade and a real repair call. The
-    control run uses the same public boundary with either the accepted repaired
-    result or an omitted question, so downstream candidate-sensitive data is
-    compared at the state, persistence, workspace, action, and L3 surfaces.
+    The candidate run uses the public facade and its current bounded
+    disposition. The control run uses the same public boundary with either the
+    accepted result or an omitted question, so downstream candidate-sensitive
+    data is compared at the state, persistence, workspace, action, and L3
+    surfaces.
     """
 
     question_id = question.get("question_id")
@@ -517,6 +518,10 @@ async def replay_appraisal_through_public_boundary(
     if require_repair_call and len(calls) < 2:
         raise AssertionError(
             "the controlled candidate did not reach a real repair call"
+        )
+    if not require_repair_call and len(calls) != 1:
+        raise AssertionError(
+            "the boundary candidate did not terminate after one model call"
         )
     _search_evidence(candidate_run, expected_error_fragments)
 
@@ -680,9 +685,16 @@ async def replay_appraisal_through_public_boundary(
     appraisal_row = appraisal_rows[0]
     if not isinstance(appraisal_row, Mapping):
         raise TypeError("the appraisal observability row is invalid")
+    candidate_result = candidate_run["candidate_result"]
+    family_terminated = (
+        isinstance(candidate_result, Mapping)
+        and candidate_result.get("propositions") == []
+        and candidate_result.get("deltas") == []
+    )
     accepted = (
         appraisal_row.get("status") == "completed"
         and not appraisal_row.get("failure_code")
+        and not family_terminated
     )
     control_mode = "accepted_control" if accepted else "omit"
     control_run = await _run_boundary_once(
@@ -733,10 +745,13 @@ async def replay_appraisal_through_public_boundary(
             ),
             "first_attempt_performance_evidence": False,
             "expected_first_failure": list(expected_error_fragments),
-            "real_repair_call": require_repair_call,
+            "real_repair_call": len(calls) >= 2,
             "calls": _clone(candidate_run["candidate_calls"]),
         },
         "disposition": {
+            "boundary_status": (
+                "family_terminated" if family_terminated else "accepted"
+            ),
             "appraisal_status": appraisal_row.get("status"),
             "appraisal_failure_code": appraisal_row.get("failure_code"),
             "control_mode": control_mode,

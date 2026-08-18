@@ -13,9 +13,6 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     BranchDefinition,
     CognitionExecutionError,
 )
-from kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal import (
-    _SemanticBoundaryValidationError,
-)
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
@@ -45,12 +42,7 @@ def test_facade_exposes_owned_contract() -> None:
 def test_appraisal_collection_records_typed_contract_exhaustion_metadata() -> None:
     """Expose typed omission metadata without requiring raw model output."""
 
-    cause = _SemanticBoundaryValidationError(
-        "causal candidates must cite originating evidence: ck1->e1",
-        failure_kind="candidate_origin_missing",
-        field_path="proposition.evidence_handles",
-        repairable=True,
-    )
+    cause = ValueError("semantic micro-appraisal must return an object")
     try:
         raise CognitionExecutionError(
             "semantic appraisal contract attempts exhausted",
@@ -73,15 +65,13 @@ def test_appraisal_collection_records_typed_contract_exhaustion_metadata() -> No
         "question_id": "q:goal_threat_outcome",
         "question_kind": "goal_threat_outcome",
         "failure_code": "semantic_appraisal_contract_exhausted",
-        "failure_kind": "candidate_origin_missing",
-        "field_path": "proposition.evidence_handles",
+        "failure_kind": "structural_contract_error",
+        "field_path": None,
         "repair_attempted": True,
         "attempt_count": 3,
         "retryable": False,
         "disposition": "question_omitted",
-        "exception_text": (
-            "causal candidates must cite originating evidence: ck1->e1"
-        ),
+        "exception_text": "semantic micro-appraisal must return an object",
     }
 
 

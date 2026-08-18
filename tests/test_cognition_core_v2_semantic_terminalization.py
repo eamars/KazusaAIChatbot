@@ -11,9 +11,6 @@ import pytest
 
 from kazusa_ai_chatbot.cognition_core_v2 import facade
 from kazusa_ai_chatbot.cognition_core_v2 import semantic_source_planner
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
-    CognitionExecutionError,
-)
 from kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal import (
     appraise_semantic_question,
     validate_semantic_appraisal_result,
@@ -557,10 +554,12 @@ def test_invalid_role_handle_reports_its_structured_domain() -> None:
 
 
 @pytest.mark.asyncio
-async def test_appraisal_classifies_state_incompatibility_without_retry() -> None:
-    """Reducer-owned state conflicts do not consume model repair attempts."""
+async def test_appraisal_state_incompatibility_terminates_family_without_retry(
+) -> None:
+    """Reducer-owned state conflicts terminate with an empty family."""
 
     state = _state_with_goals()
+    original_state = deepcopy(state)
     evidence = [_evidence()]
     projection = project_state_for_prompt(
         state,
@@ -584,20 +583,22 @@ async def test_appraisal_classifies_state_incompatibility_without_retry() -> Non
     }
     llm = _CapturingInvoker([invalid])
 
-    with pytest.raises(CognitionExecutionError) as error_info:
-        await appraise_semantic_question(
-            question,
-            evidence,
-            projection,
-            _services(llm),
-            validation_state=state,
-        )
+    result = await appraise_semantic_question(
+        question,
+        evidence,
+        projection,
+        _services(llm),
+        validation_state=state,
+    )
 
-    error = error_info.value
-    assert error.error_code == "semantic_appraisal_state_incompatibility"
-    assert error.attempt_count == 1
-    assert error.retryable is False
-    assert isinstance(error.__cause__, CognitionStateError)
+    assert result == {
+        "question_id": question["question_id"],
+        "selected_evidence_handles": [],
+        "selected_role_handles": [],
+        "propositions": [],
+        "deltas": [],
+        "explanation": "No additional supported semantic item.",
+    }
     assert len(llm.configs) == 1
     first_payload = json.loads(str(llm.messages[0][1].content))
     handle_domains = first_payload["question"]["handle_field_domains"]
@@ -620,7 +621,7 @@ async def test_appraisal_classifies_state_incompatibility_without_retry() -> Non
     assert first_payload["question"]["permitted_target_paths"] == (
         question["permitted_delta_paths"]
     )
-    assert state == _state_with_goals()
+    assert state == original_state
 
 
 def test_terminalized_low_salience_candidate_survives_same_batch_pruning(

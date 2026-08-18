@@ -130,6 +130,7 @@ _SEMANTIC_CASES: dict[str, dict[str, object]] = {
         "attempt_index": 1,
         "question_id": "q:moral_identity",
         "expected_error": "selected evidence contains",
+        "require_repair_call": False,
     },
     "terminal_event_transition_rejected": {
         "trace_id": "llmtrace_b6fe7e50e9574b48b17252b7897886a9",
@@ -160,7 +161,7 @@ _SEMANTIC_CASES: dict[str, dict[str, object]] = {
         "attempt_index": 1,
         "question_id": "q:goal_threat_outcome",
         "expected_error": "causal candidates must cite originating evidence",
-        "require_repair_call": True,
+        "require_repair_call": False,
     },
     "semantic_role_value_invalid": {
         "trace_id": "llmtrace_573f5a5cde4c42b5b57ceafc5323ae63",
@@ -236,6 +237,7 @@ _SEMANTIC_CASES: dict[str, dict[str, object]] = {
             "selected roles contains unknown handles",
             "semantic proposition subject handle",
         ),
+        "require_repair_call": False,
     },
     "semantic_proposition_subject_kind_mismatch": {
         "trace_id": "llmtrace_88b4205f0fb34af29faa4c69435660da",
@@ -267,7 +269,7 @@ _SEMANTIC_CASES: dict[str, dict[str, object]] = {
         "allow_successful_source": True,
         "historical_response_transform": "object_handle_not_permitted",
         "replay_historical_candidate": True,
-        "require_live_repair": True,
+        "require_repair_call": False,
     },
     "delta_reason_invalid": {
         "trace_id": "llmtrace_8d0d42952b76450c9e1dc32574f9fd44",
@@ -283,6 +285,7 @@ _SEMANTIC_CASES: dict[str, dict[str, object]] = {
             "reason must be non-empty text up to 300 characters",
             "semantic delta reason is structurally invalid",
         ),
+        "require_repair_call": True,
     },
     "semantic_delta_type_invalid": {
         "trace_id": "llmtrace_8d0d42952b76450c9e1dc32574f9fd44",
@@ -298,6 +301,7 @@ _SEMANTIC_CASES: dict[str, dict[str, object]] = {
             "semantic delta must be a JSON integer",
             "semantic delta value is structurally invalid",
         ),
+        "require_repair_call": True,
     },
     "semantic_micro_appraisal_fields_not_exact": {
         "trace_id": "llmtrace_1d124e68e53447ee8f0cc7c6e3184148",
@@ -311,12 +315,13 @@ _SEMANTIC_CASES: dict[str, dict[str, object]] = {
         "expected_error": (
             "semantic micro-appraisal fields must be exactly question_id"
         ),
+        "require_repair_call": True,
     },
 }
 
 
 class _HistoricalFirstThenLiveLLM:
-    """Replay one preserved invalid candidate before a real repair call."""
+    """Replay one preserved candidate before any later live-model call."""
 
     def __init__(self, delegate: Any, historical_response: str) -> None:
         self.delegate = delegate
@@ -1098,7 +1103,7 @@ async def _run_semantic_case(
             else "preserved_failed_candidate"
         ),
         controlled_mutation=controlled_mutation,
-        require_repair_call=bool(case.get("require_repair_call", True)),
+        require_repair_call=bool(case.get("require_repair_call", False)),
         monkeypatch=monkeypatch,
     )
     assert result["artifact_path"].exists()
@@ -1131,7 +1136,7 @@ async def test_terminal_event_transition_rejected_live_llm(
 async def test_candidate_origin_evidence_missing_live_llm(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Reproduce the captured candidate-origin evidence exhaustion."""
+    """Verify captured candidate-origin failure terminates one family."""
 
     await _run_semantic_case("candidate_origin_evidence_missing", monkeypatch)
 
@@ -1139,7 +1144,7 @@ async def test_candidate_origin_evidence_missing_live_llm(
 async def test_semantic_role_value_invalid_live_llm(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Reproduce the captured semantic-role exhaustion."""
+    """Verify a captured unknown role terminates one family."""
 
     await _run_semantic_case("semantic_role_value_invalid", monkeypatch)
 
