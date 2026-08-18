@@ -32,7 +32,6 @@ from dataclasses import replace
 from typing import Any
 
 import httpx
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from openai import OpenAIError
 
 from kazusa_ai_chatbot import llm_tracing
@@ -124,6 +123,7 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
 )
 from kazusa_ai_chatbot.cognition_core_v2.workspace import collapse_bids
 from kazusa_ai_chatbot.llm_interface.contracts import LLMCallConfig
+from kazusa_ai_chatbot.llm_interface.detection import detect_backend_descriptor
 from kazusa_ai_chatbot.llm_tracing import failure_capsule
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
@@ -133,6 +133,7 @@ from kazusa_ai_chatbot.cognition_core_v3.appraisal import (
     FAMILY_IDENTITY_OPTIONAL_CATEGORY_SETS,
     STATIC_APPRAISAL_SYSTEM_PROMPT,
     build_family_question_tail,
+    build_repair_instruction,
     build_terminal_outcome_request,
     classify_appaisal_candidate,
     reduce_appraisal_results,
@@ -140,9 +141,12 @@ from kazusa_ai_chatbot.cognition_core_v3.appraisal import (
 )
 from kazusa_ai_chatbot.cognition_core_v3.contracts import (
     APPRASAL_CONTRACT_EXHAUSTED_ERROR_CODE,
+    CacheDomainIdentity,
     PROVIDER_FAILURE_CLASS,
     StageResult,
     STRUCTURAL_FAILURE_CLASS,
+    hash_credential_identity,
+    hash_static_prompt,
 )
 from kazusa_ai_chatbot.cognition_core_v3.diagnostics import (
     build_chain_trace_record,
@@ -159,6 +163,7 @@ from kazusa_ai_chatbot.cognition_core_v3.goal_cognition import (
     STATIC_GOAL_SYSTEM_PROMPT,
     bind_selected_response_operation,
     build_goal_question_tail,
+    build_goal_repair_instruction,
     project_required_selection_operations,
     resolve_goal_disposition,
     validate_goal_bid_draft,
@@ -169,6 +174,15 @@ from kazusa_ai_chatbot.cognition_core_v3.registry import (
     ChainSpec,
     GOAL_CHAINS,
     TERMINAL_OUTCOME_CHAIN,
+)
+from kazusa_ai_chatbot.cognition_core_v3.transcript import (
+    TranscriptState,
+    build_repair_request,
+    domain_matches,
+    extend_accepted,
+    start_chain,
+    start_fresh_from_checkpoint,
+    to_invoker_messages,
 )
 from kazusa_ai_chatbot.cognition_core_v3.workspace import (
     collapse_authoritative_relational_bid,
@@ -234,6 +248,28 @@ def _goal_stage_config(
     if goal_kind == ORDINARY_GOAL_KIND:
         return services.goal_ordinary_response_config
     return services.goal_active_branch_config
+
+
+def _cache_domain_identity(
+    config: LLMCallConfig, static_system_prompt: str
+) -> CacheDomainIdentity:
+    """Derive the route cache-domain identity for one stage's model call.
+
+    Every component resolves deterministically from the injected route
+    configuration and the family-owned byte-identical static prompt, so two
+    attempts of one stage agree on their domain while a routed change to URL,
+    credential, backend kind, model, or template strategy changes it.
+    """
+
+    descriptor = detect_backend_descriptor(config=config, generation=1)
+    return CacheDomainIdentity(
+        normalized_backend_url=descriptor.normalized_base_url,
+        credential_identity_hash=hash_credential_identity(config.api_key),
+        backend_kind=descriptor.backend_kind,
+        model=descriptor.model,
+        template_strategy=descriptor.thinking_strategy,
+        static_system_prompt_hash=hash_static_prompt(static_system_prompt),
+    )
 
 
 def _family_state_projection(
@@ -329,18 +365,56 @@ def _classify_stage_candidate(
     )
 
 
-def _make_appraisal_stage_producer(
+def _make_appraisal_stage_producers(
     services: CognitionCoreServicesV2,
     projection: Any,
     question_by_kind: Mapping[str, Mapping[str, Any]],
-):
-    """Bind one appraisal stage producer closure for the first wave.
+    chain: ChainSpec,
+) -> dict[str, StageProducer]:
+    """Bind transcript-isolated stage producers for one appraisal chain.
 
-    A stage whose family owns no planned question returns a deterministic
-    empty accepted state without any model call; every other attempt runs the
-    byte-identical static system prompt with the fresh family tail and records
-    provider, parse, and classification outcomes on the protected trace sidecar.
+    Every producer in the returned mapping shares one chain-local transcript
+    state: accepted continuations preserve their prefix byte-for-byte across
+    this chain's stages only, a structural rejection answers with a bounded
+    local repair request carrying the exact contract error and closed allowed
+    values, provider failures retry the stage's base request on the next
+    attempt, and a route cache-domain mismatch restarts from the canonical
+    checkpoint tail. Stages without an authorized question keep the
+    deterministic empty accepted state without any model call; their projection
+    travels through later tails' accepted-prefix summaries instead of assistant
+    text.
     """
+
+    stages_with_questions = [
+        stage for stage in chain.stages if stage in question_by_kind
+    ]
+    next_question_stage: dict[str, str | None] = {}
+    position = 0
+    while position < len(stages_with_questions):
+        current_stage = stages_with_questions[position]
+        following_stage = (
+            stages_with_questions[position + 1]
+            if position + 1 < len(stages_with_questions)
+            else None
+        )
+        next_question_stage[current_stage] = following_stage
+        position += 1
+
+    transcript: dict[str, TranscriptState | None] = {"current": None}
+    stage_base: dict[str, TranscriptState] = {}
+    pending_repair: dict[str, tuple[str, str | None]] = {}
+
+    def _question_tail(stage_name: str, accepted_prefix) -> str:
+        question = question_by_kind[stage_name]
+        return build_family_question_tail(
+            stage_name,
+            _family_state_projection(
+                stage_name,
+                projection.identity_by_question,
+            ),
+            question["evidence_handles"],
+            render_accepted_context(accepted_prefix),
+        )
 
     async def produce(context) -> StageAttemptOutcome:
         stage_name = context.stage_name
@@ -356,19 +430,57 @@ def _make_appraisal_stage_producer(
                 semantic_summary=None,
             )
         config = _stage_config(stage_name, services)
-        tail = build_family_question_tail(
-            stage_name,
-            _family_state_projection(
-                stage_name,
-                projection.identity_by_question,
-            ),
-            question["evidence_handles"],
-            render_accepted_context(context.accepted_prefix),
+        identity = _cache_domain_identity(
+            config, STATIC_APPRAISAL_SYSTEM_PROMPT
         )
-        messages: list[BaseMessage] = [
-            SystemMessage(content=STATIC_APPRAISAL_SYSTEM_PROMPT),
-            HumanMessage(content=tail),
-        ]
+        tail = _question_tail(stage_name, context.accepted_prefix)
+        sent_payload = tail
+        current = transcript["current"]
+        if current is None:
+            current = start_chain(
+                STATIC_APPRAISAL_SYSTEM_PROMPT, tail, identity
+            )
+            transcript["current"] = current
+            stage_base[stage_name] = current
+            messages = to_invoker_messages(
+                current.messages,
+                static_system_prompt=STATIC_APPRAISAL_SYSTEM_PROMPT,
+            )
+        elif not domain_matches(current, identity):
+            current = start_fresh_from_checkpoint(current, tail, identity)
+            transcript["current"] = current
+            stage_base[stage_name] = current
+            pending_repair.pop(stage_name, None)
+            messages = to_invoker_messages(
+                current.messages,
+                static_system_prompt=STATIC_APPRAISAL_SYSTEM_PROMPT,
+            )
+        else:
+            base_state = stage_base.get(stage_name)
+            if base_state is None:
+                stage_base[stage_name] = current
+                base_state = current
+                messages = to_invoker_messages(
+                    base_state.messages,
+                    static_system_prompt=STATIC_APPRAISAL_SYSTEM_PROMPT,
+                )
+            else:
+                repair_entry = pending_repair.pop(stage_name, None)
+                if repair_entry is not None and repair_entry[0]:
+                    invalid_raw, failure_detail = repair_entry
+                    instruction = build_repair_instruction(
+                        stage_name, failure_detail
+                    )
+                    sent_payload = instruction
+                    messages = to_invoker_messages(
+                        build_repair_request(base_state, invalid_raw, instruction),
+                        static_system_prompt=STATIC_APPRAISAL_SYSTEM_PROMPT,
+                    )
+                else:
+                    messages = to_invoker_messages(
+                        base_state.messages,
+                        static_system_prompt=STATIC_APPRAISAL_SYSTEM_PROMPT,
+                    )
         started_at = time.monotonic()
         try:
             response = await services.llm.ainvoke(messages, config=config)
@@ -379,7 +491,7 @@ def _make_appraisal_stage_producer(
                 stage_id=f"{context.chain_name}:{stage_name}",
                 config=config,
                 system_prompt=STATIC_APPRAISAL_SYSTEM_PROMPT,
-                human_payload=tail,
+                human_payload=sent_payload,
                 raw_output=None,
                 parsed_output=None,
                 parse_status="provider_error",
@@ -398,12 +510,14 @@ def _make_appraisal_stage_producer(
         try:
             candidate = parse_llm_json_output(raw_output, deterministic_only=True)
         except _CANONICALIZE_EXCEPTIONS as exc:
+            parse_detail = f"原始输出无法解析为 JSON 对象：{exc}"
+            pending_repair[stage_name] = (raw_output, parse_detail)
             _record_chain_trace(
                 chain_name=context.chain_name,
                 stage_id=f"{context.chain_name}:{stage_name}",
                 config=config,
                 system_prompt=STATIC_APPRAISAL_SYSTEM_PROMPT,
-                human_payload=tail,
+                human_payload=sent_payload,
                 raw_output=raw_output,
                 parsed_output=None,
                 parse_status="parse_failed",
@@ -417,6 +531,7 @@ def _make_appraisal_stage_producer(
                 local_state=None,
                 semantic_summary=None,
                 failure_class=STRUCTURAL_FAILURE_CLASS,
+                detail=parse_detail,
             )
         accepted_states = [
             result.local_state
@@ -434,39 +549,112 @@ def _make_appraisal_stage_producer(
             stage_id=f"{context.chain_name}:{stage_name}",
             config=config,
             system_prompt=STATIC_APPRAISAL_SYSTEM_PROMPT,
-            human_payload=tail,
+            human_payload=sent_payload,
             raw_output=raw_output,
             parsed_output=candidate,
             parse_status="accepted" if outcome.accepted else "rejected",
             started_at=started_at,
             ended_at=time.monotonic(),
             attempt_number=context.attempt_number,
+            error=None if outcome.accepted else outcome.detail,
+        )
+        if not outcome.accepted:
+            if outcome.failure_class == STRUCTURAL_FAILURE_CLASS:
+                pending_repair[stage_name] = (raw_output, outcome.detail)
+            return outcome
+        base_state = stage_base[stage_name]
+        following_stage = next_question_stage.get(stage_name)
+        if following_stage is None:
+            extension_tail: str | None = None
+        else:
+            successor_result = StageResult(
+                chain_name=chain.name,
+                stage_name=stage_name,
+                accepted=True,
+                local_state=outcome.local_state,
+                semantic_summary=outcome.semantic_summary,
+            )
+            successor_prefix = context.accepted_prefix + (successor_result,)
+            extension_tail = _question_tail(following_stage, successor_prefix)
+        transcript["current"] = extend_accepted(
+            base_state, raw_output, extension_tail
         )
         return outcome
 
-    return produce
+    return {stage_name: produce for stage_name in chain.stages}
 
 
 def _make_terminal_stage_producer(
     services: CognitionCoreServicesV2,
     provisional_state: Any,
     evidence_handles: Sequence[str],
-):
+) -> dict[str, StageProducer]:
     """Bind the fresh canonical terminal-outcome stage producer.
 
     The terminal chain runs on a clean transcript: no prior wave history enters
     its tail beyond the accepted-prefix reduction and typed omissions recorded
-    by the provisional state it is built from.
+    by the provisional state it is built from. Structural rejections answer with
+    a bounded local repair request; provider failures retry the base request.
     """
+
+    transcript: dict[str, TranscriptState | None] = {"current": None}
+    stage_base: dict[str, TranscriptState] = {}
+    pending_repair: dict[str, tuple[str, str | None]] = {}
 
     async def produce(context) -> StageAttemptOutcome:
         stage_name = context.stage_name
         config = _stage_config(stage_name, services)
+        identity = _cache_domain_identity(
+            config, STATIC_APPRAISAL_SYSTEM_PROMPT
+        )
         tail = build_terminal_outcome_request(provisional_state, evidence_handles)
-        messages: list[BaseMessage] = [
-            SystemMessage(content=STATIC_APPRAISAL_SYSTEM_PROMPT),
-            HumanMessage(content=tail),
-        ]
+        sent_payload = tail
+        current = transcript["current"]
+        if current is None:
+            current = start_chain(
+                STATIC_APPRAISAL_SYSTEM_PROMPT, tail, identity
+            )
+            transcript["current"] = current
+            stage_base[stage_name] = current
+            messages = to_invoker_messages(
+                current.messages,
+                static_system_prompt=STATIC_APPRAISAL_SYSTEM_PROMPT,
+            )
+        elif not domain_matches(current, identity):
+            current = start_fresh_from_checkpoint(current, tail, identity)
+            transcript["current"] = current
+            stage_base[stage_name] = current
+            pending_repair.pop(stage_name, None)
+            messages = to_invoker_messages(
+                current.messages,
+                static_system_prompt=STATIC_APPRAISAL_SYSTEM_PROMPT,
+            )
+        else:
+            base_state = stage_base.get(stage_name)
+            if base_state is None:
+                stage_base[stage_name] = current
+                base_state = current
+                messages = to_invoker_messages(
+                    base_state.messages,
+                    static_system_prompt=STATIC_APPRAISAL_SYSTEM_PROMPT,
+                )
+            else:
+                repair_entry = pending_repair.pop(stage_name, None)
+                if repair_entry is not None and repair_entry[0]:
+                    invalid_raw, failure_detail = repair_entry
+                    instruction = build_repair_instruction(
+                        stage_name, failure_detail
+                    )
+                    sent_payload = instruction
+                    messages = to_invoker_messages(
+                        build_repair_request(base_state, invalid_raw, instruction),
+                        static_system_prompt=STATIC_APPRAISAL_SYSTEM_PROMPT,
+                    )
+                else:
+                    messages = to_invoker_messages(
+                        base_state.messages,
+                        static_system_prompt=STATIC_APPRAISAL_SYSTEM_PROMPT,
+                    )
         started_at = time.monotonic()
         try:
             response = await services.llm.ainvoke(messages, config=config)
@@ -477,7 +665,7 @@ def _make_terminal_stage_producer(
                 stage_id=f"{context.chain_name}:{stage_name}",
                 config=config,
                 system_prompt=STATIC_APPRAISAL_SYSTEM_PROMPT,
-                human_payload=tail,
+                human_payload=sent_payload,
                 raw_output=None,
                 parsed_output=None,
                 parse_status="provider_error",
@@ -496,12 +684,14 @@ def _make_terminal_stage_producer(
         try:
             candidate = parse_llm_json_output(raw_output, deterministic_only=True)
         except _CANONICALIZE_EXCEPTIONS as exc:
+            parse_detail = f"原始输出无法解析为 JSON 对象：{exc}"
+            pending_repair[stage_name] = (raw_output, parse_detail)
             _record_chain_trace(
                 chain_name=context.chain_name,
                 stage_id=f"{context.chain_name}:{stage_name}",
                 config=config,
                 system_prompt=STATIC_APPRAISAL_SYSTEM_PROMPT,
-                human_payload=tail,
+                human_payload=sent_payload,
                 raw_output=raw_output,
                 parsed_output=None,
                 parse_status="parse_failed",
@@ -515,6 +705,7 @@ def _make_terminal_stage_producer(
                 local_state=None,
                 semantic_summary=None,
                 failure_class=STRUCTURAL_FAILURE_CLASS,
+                detail=parse_detail,
             )
         outcome = _classify_stage_candidate(
             stage_name, candidate, evidence_handles, None
@@ -524,17 +715,21 @@ def _make_terminal_stage_producer(
             stage_id=f"{context.chain_name}:{stage_name}",
             config=config,
             system_prompt=STATIC_APPRAISAL_SYSTEM_PROMPT,
-            human_payload=tail,
+            human_payload=sent_payload,
             raw_output=raw_output,
             parsed_output=candidate,
             parse_status="accepted" if outcome.accepted else "rejected",
             started_at=started_at,
             ended_at=time.monotonic(),
             attempt_number=context.attempt_number,
+            error=None if outcome.accepted else outcome.detail,
         )
+        if not outcome.accepted:
+            if outcome.failure_class == STRUCTURAL_FAILURE_CLASS:
+                pending_repair[stage_name] = (raw_output, outcome.detail)
         return outcome
 
-    return produce
+    return {stage_name: produce for stage_name in TERMINAL_OUTCOME_CHAIN.stages}
 
 
 def _validate_relational_carrier(
@@ -619,10 +814,9 @@ def _make_goal_stage_producer(
         evidence_handles,
         selection_mode=selection_mode,
     )
-    messages: list[BaseMessage] = [
-        SystemMessage(content=STATIC_GOAL_SYSTEM_PROMPT),
-        HumanMessage(content=tail),
-    ]
+    transcript: dict[str, TranscriptState | None] = {"current": None}
+    stage_base: dict[str, TranscriptState] = {}
+    pending_repair: dict[str, tuple[str, str | None]] = {}
 
     async def produce(context_) -> StageAttemptOutcome:
         if goal_kind == ORDINARY_GOAL_KIND:
@@ -637,6 +831,55 @@ def _make_goal_stage_producer(
                 raise CognitionExecutionError(
                     "current-turn relational carrier is missing on recurrence"
                 )
+        identity = _cache_domain_identity(config, STATIC_GOAL_SYSTEM_PROMPT)
+        sent_payload = tail
+        current = transcript["current"]
+        if current is None:
+            current = start_chain(
+                STATIC_GOAL_SYSTEM_PROMPT, tail, identity
+            )
+            transcript["current"] = current
+            stage_base[goal_kind] = current
+            messages = to_invoker_messages(
+                current.messages, static_system_prompt=STATIC_GOAL_SYSTEM_PROMPT
+            )
+        elif not domain_matches(current, identity):
+            current = start_fresh_from_checkpoint(current, tail, identity)
+            transcript["current"] = current
+            stage_base[goal_kind] = current
+            pending_repair.pop(goal_kind, None)
+            messages = to_invoker_messages(
+                current.messages, static_system_prompt=STATIC_GOAL_SYSTEM_PROMPT
+            )
+        else:
+            base_state = stage_base.get(goal_kind)
+            if base_state is None:
+                stage_base[goal_kind] = current
+                base_state = current
+                messages = to_invoker_messages(
+                    base_state.messages,
+                    static_system_prompt=STATIC_GOAL_SYSTEM_PROMPT,
+                )
+            else:
+                repair_entry = pending_repair.pop(goal_kind, None)
+                if repair_entry is not None and repair_entry[0]:
+                    invalid_raw, failure_detail = repair_entry
+                    instruction = build_goal_repair_instruction(
+                        goal_kind,
+                        selection_mode,
+                        failure_detail,
+                        frozenset(role_bindings),
+                    )
+                    sent_payload = instruction
+                    messages = to_invoker_messages(
+                        build_repair_request(base_state, invalid_raw, instruction),
+                        static_system_prompt=STATIC_GOAL_SYSTEM_PROMPT,
+                    )
+                else:
+                    messages = to_invoker_messages(
+                        base_state.messages,
+                        static_system_prompt=STATIC_GOAL_SYSTEM_PROMPT,
+                    )
         started_at = time.monotonic()
         try:
             response = await services.llm.ainvoke(messages, config=config)
@@ -647,7 +890,7 @@ def _make_goal_stage_producer(
                 stage_id=f"{goal_kind}:{goal_kind}",
                 config=config,
                 system_prompt=STATIC_GOAL_SYSTEM_PROMPT,
-                human_payload=tail,
+                human_payload=sent_payload,
                 raw_output=None,
                 parsed_output=None,
                 parse_status="provider_error",
@@ -667,12 +910,14 @@ def _make_goal_stage_producer(
         try:
             candidate = parse_llm_json_output(raw_output, deterministic_only=True)
         except _CANONICALIZE_EXCEPTIONS as exc:
+            parse_detail = f"原始输出无法解析为 JSON 对象：{exc}"
+            pending_repair[goal_kind] = (raw_output, parse_detail)
             _record_chain_trace(
                 chain_name=goal_kind,
                 stage_id=f"{goal_kind}:{goal_kind}",
                 config=config,
                 system_prompt=STATIC_GOAL_SYSTEM_PROMPT,
-                human_payload=tail,
+                human_payload=sent_payload,
                 raw_output=raw_output,
                 parsed_output=None,
                 parse_status="parse_failed",
@@ -687,6 +932,7 @@ def _make_goal_stage_producer(
                 local_state=None,
                 semantic_summary=None,
                 failure_class=STRUCTURAL_FAILURE_CLASS,
+                detail=parse_detail,
             )
         evidence_domain = set(evidence_handles)
         role_domain = set(role_bindings)
@@ -711,12 +957,13 @@ def _make_goal_stage_producer(
                     role_handles=role_domain,
                 )
         except ValueError as exc:
+            pending_repair[goal_kind] = (raw_output, str(exc))
             _record_chain_trace(
                 chain_name=goal_kind,
                 stage_id=f"{goal_kind}:{goal_kind}",
                 config=config,
                 system_prompt=STATIC_GOAL_SYSTEM_PROMPT,
-                human_payload=tail,
+                human_payload=sent_payload,
                 raw_output=raw_output,
                 parsed_output=candidate,
                 parse_status="rejected",
@@ -731,6 +978,7 @@ def _make_goal_stage_producer(
                 local_state=None,
                 semantic_summary=None,
                 failure_class=STRUCTURAL_FAILURE_CLASS,
+                detail=str(exc),
             )
         if goal_kind == ORDINARY_GOAL_KIND:
             relational_carrier = payload.get(
@@ -752,7 +1000,7 @@ def _make_goal_stage_producer(
             stage_id=f"{goal_kind}:{goal_kind}",
             config=config,
             system_prompt=STATIC_GOAL_SYSTEM_PROMPT,
-            human_payload=tail,
+            human_payload=sent_payload,
             raw_output=raw_output,
             parsed_output=candidate,
             parse_status="accepted",
@@ -1197,16 +1445,16 @@ async def _run_cognition(
             and not payload["evidence"]
         )
     ]
-    appraisal_producer = _make_appraisal_stage_producer(
-        services,
-        projection,
-        question_by_kind,
-    )
     wave_a_specs: list[ChainTaskSpec] = [
         ChainTaskSpec(
             chain.name,
             chain.stages,
-            {stage_name: appraisal_producer for stage_name in chain.stages},
+            _make_appraisal_stage_producers(
+                services,
+                projection,
+                question_by_kind,
+                chain,
+            ),
         )
         for chain in APPRAISAL_FIRST_WAVE_CHAINS
     ]
@@ -1267,7 +1515,7 @@ async def _run_cognition(
     ]
     provisional_state = reduce_appraisal_results(appraisal_chain_outcomes)
     evidence_handles = [row["evidence_handle"] for row in payload["evidence"]]
-    terminal_producer = _make_terminal_stage_producer(
+    terminal_producers = _make_terminal_stage_producer(
         services,
         provisional_state,
         evidence_handles,
@@ -1277,10 +1525,7 @@ async def _run_cognition(
             ChainTaskSpec(
                 TERMINAL_OUTCOME_CHAIN.name,
                 TERMINAL_OUTCOME_CHAIN.stages,
-                {
-                    stage_name: terminal_producer
-                    for stage_name in TERMINAL_OUTCOME_CHAIN.stages
-                },
+                terminal_producers,
             )
         ],
         ledger=ledger,

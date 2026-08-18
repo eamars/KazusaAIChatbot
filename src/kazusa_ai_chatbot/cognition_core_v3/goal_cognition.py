@@ -582,6 +582,62 @@ def build_goal_question_tail(
     return "\n".join(lines)
 
 
+def build_goal_repair_instruction(
+    goal_kind: str,
+    selection_mode: bool,
+    detail: str | None,
+    role_handles: frozenset[str],
+) -> str:
+    """Render one bounded local repair instruction for a rejected goal draft.
+
+    Args:
+        goal_kind: The closed V2 goal kind owning the rejected chain; its field
+            contract is restated exactly as the validator owns it, including the
+            ordinary-response ``relational_willingness`` field when owned and
+            absent in selection mode.
+        selection_mode: True when the episode carries a required selection
+            operation and the draft follows the selection-draft field set
+            instead of the goal bid field set.
+        detail: The exact validator error of the rejected attempt, or None when
+            the raw output could not be parsed as a JSON object at all.
+        role_handles: Complete authorized role handle domain; the closed target
+            value set restated so replacement output stays in-domain.
+
+    Returns:
+        Deterministic instruction text carrying the exact violation, the closed
+            field and value sets, and a complete-replacement directive; no new
+            semantic guidance enters the message.
+    """
+    goal_kind_owns_relational_willingness(goal_kind)
+    error_text = detail if detail is not None else "原始输出无法解析为 JSON 对象"
+    if selection_mode:
+        field_lines = ", ".join(SELECTION_GOAL_DRAFT_FIELDS)
+    else:
+        field_names = list(GOAL_BID_FIELDS)
+        if goal_kind_owns_relational_willingness(goal_kind):
+            field_names.append("relational_willingness")
+        field_lines = ", ".join(field_names)
+    allowed_role_handles = (
+        ", ".join(sorted(role_handles)) if role_handles else "（无）"
+    )
+    lines: list[str] = [
+        "# 修复请求",
+        f"上一条输出未通过结构校验：{error_text}",
+        f"顶层字段集合必须恰为 {field_lines}。",
+        (
+            f"target_role_handles 只允许取值 [{allowed_role_handles}]，最多 "
+            f"{GOAL_BID_ROLE_HANDLE_LIMIT} 个；evidence_handles 只允许请求中列出的授权证据 handle。"
+        ),
+        (
+            f"confidence 最长 {GOAL_CONFIDENCE_CHAR_LIMIT} 字符；expected_consequences "
+            f"是字符串列表，最多 {EXPECTED_CONSEQUENCE_ITEM_LIMIT} 条，每条最长 "
+            f"{CONSEQUENCE_CHAR_LIMIT} 字符。"
+        ),
+        "现在重新输出一个完整替换的 JSON 对象，不要重复上一条错误内容。",
+    ]
+    return "\n".join(lines)
+
+
 @dataclass(frozen=True)
 class GoalBidDisposition:
     """Fail-closed disposition of one isolated goal chain.

@@ -37,12 +37,16 @@ class StageAttemptOutcome:
 
     ``failure_class`` uses the closed contract failure vocabulary; it is None
     when the attempt was accepted, so no parallel failure vocabulary exists.
+    ``detail`` carries the owner validator's exact structural violation or
+    boundary context for non-accepted outcomes so a local repair request can
+    restate the precise error without inventing a new failure class.
     """
 
     accepted: bool
     local_state: dict[str, object] | None
     semantic_summary: str | None
     failure_class: str | None = None
+    detail: str | None = None
 
 
 @dataclass(frozen=True)
