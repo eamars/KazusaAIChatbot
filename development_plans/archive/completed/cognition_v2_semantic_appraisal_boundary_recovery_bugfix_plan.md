@@ -477,7 +477,7 @@ separately covered.
 - Static verification: compileall, Ruff import-order checks, JSON validation,
   and `git diff --check` passed. Git emitted only line-ending normalization
   warnings.
-- Commit: recorded in the implementation commit that closes this plan.
+- Implementation commit: `5a7bfbd6` (`Fix Cognition V2 semantic appraisal boundary recovery`).
 - The unrelated untracked
   `development_plans/active/short_term/cognition_v3_cache_affine_semantic_chain_bigbang_plan.md`
   remains untouched.
