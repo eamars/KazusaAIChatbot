@@ -1302,6 +1302,21 @@
     "tests/unit/cognition_core_v3/test_appraisal.py::test_optional_stage_exhaustion_preserves_accepted_prefix"
    ],
    "supplemental_tests": []
+  },
+  {
+   "source": "src/kazusa_ai_chatbot/cognition_core_v3/goal_cognition.py",
+   "owner": "V3 cache-affine goal cognition owner",
+   "contract": "shared static goal prompt, ordinary-only relational-willingness ownership, isolated sibling transcripts, required-selection fixed-role binding and progress evidence projection, fail-closed exhaustion disposition",
+   "required_unit_tests": [
+    "tests/unit/cognition_core_v3/test_goal_cognition.py::test_all_goal_chains_use_one_byte_identical_static_system_prompt",
+    "tests/unit/cognition_core_v3/test_goal_cognition.py::test_ordinary_goal_remains_relational_willingness_owner",
+    "tests/unit/cognition_core_v3/test_goal_cognition.py::test_sibling_goal_transcripts_are_isolated",
+    "tests/unit/cognition_core_v3/test_goal_cognition.py::test_required_selection_preserves_fixed_roles_and_progress_evidence",
+    "tests/unit/cognition_core_v3/test_goal_cognition.py::test_required_goal_exhaustion_preserves_existing_fail_closed_contract"
+   ],
+   "supplemental_tests": [
+    "tests/unit/cognition_core_v3/test_goal_cognition.py::test_isolated_goal_chain_registry_identity"
+   ]
   }
  ]
 }
