@@ -121,7 +121,6 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     ResolverValidationError,
     validate_current_turn_relational_willingness,
 )
-from kazusa_ai_chatbot.cognition_core_v2.workspace import collapse_bids
 from kazusa_ai_chatbot.llm_interface.contracts import LLMCallConfig
 from kazusa_ai_chatbot.llm_interface.detection import detect_backend_descriptor
 from kazusa_ai_chatbot.llm_tracing import failure_capsule
@@ -186,6 +185,7 @@ from kazusa_ai_chatbot.cognition_core_v3.transcript import (
 )
 from kazusa_ai_chatbot.cognition_core_v3.workspace import (
     collapse_authoritative_relational_bid,
+    collapse_bids_via_partition,
 )
 
 _PROVIDER_EXCEPTIONS = (
@@ -1730,7 +1730,7 @@ async def _run_cognition(
         warnings.append("authoritative_relational_willingness")
     else:
         try:
-            collapse = await collapse_bids(
+            collapse = await collapse_bids_via_partition(
                 eligible_bids,
                 services,
                 current_event=_workspace_current_event(payload["evidence"]),
