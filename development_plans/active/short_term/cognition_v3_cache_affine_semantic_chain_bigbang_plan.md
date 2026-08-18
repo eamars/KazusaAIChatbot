@@ -6,7 +6,7 @@
   that preserves the complete Cognition Core V2 input, output, state,
   emotion, relationship, goal, action, resolver, and surface handoff
   contracts while replacing the parallel-appraisal execution topology.
-- Status: draft.
+- Status: approved.
 - Plan class: high-risk cognition architecture and local-LLM behavior change.
 - Scope boundary: a new `cognition_core_v3` semantic execution package, one
   process-level V2/V3 selector, the live and idle connector import reached
@@ -15,7 +15,8 @@
 - Change direction: implement V3 as a separate engine in one coherent change;
   preserve the V2-shaped public substrate; evaluate V2 and V3 explicitly;
   move the production default to V3 only after every gate in this plan passes.
-- Evidence-gated workflow: after the predecessor bugfix is frozen, capture an
+- Evidence-gated workflow: with both predecessor plans completed and archived,
+  capture an
   immutable V2 baseline that exercises every registered finite internal path
   and failure disposition; implement V3; replay the exact frozen corpus and
   protocol through V3; compare contract accuracy, semantic quality,
@@ -26,17 +27,30 @@
   evaluation and observation period.
 - Acceptance state: architecture, parity map, failure policy, change surface,
   and test contract are drafted. Implementation and test execution require a
-  later user approval and explicit production-code authorization.
+  later user approval and explicit production-code authorization. In the
+  current execution environment the configured LLM is test-purpose only (its
+  output quality shall not be relied on) and the production database in `.env`
+  is out of scope; live cases therefore run as `realistic_fixture`-labelled
+  contract/robustness smoke, performance capture is deferred, and
+  directional-improvement plus semantic-quality sign-off defer to a real-model
+  re-run under this plan's continued in_progress state.
 - Retirement boundary: this plan retires neither the V2 package nor the
   V2-shaped state and public contracts. A later decommission plan may remove
   the V2 semantic executor after V3 production evidence is accepted. The
   shared V2-shaped substrate remains until that later plan resolves its many
   downstream imports.
-- Dependency: complete and archive
-  `development_plans/active/bugfix/cognition_v2_semantic_appraisal_boundary_recovery_bugfix_plan.md`
-  first. Its completed commit, typed appraisal-failure disposition matrix,
-  evidence-preservation invariant, and exact tests become the V2 baseline for
-  V3 parity. V3 implementation cannot overlap its V2 source edits.
+- Dependency: both predecessor plans are already completed and archived in the
+  registry. The appraisal-boundary-recovery bugfix
+  (`archive/completed/cognition_v2_semantic_appraisal_boundary_recovery_bugfix_plan.md`,
+  commits `5a7bfbd6` fix, `7505e789` closure) is followed by the semantic-
+  admission original-contract restoration
+  (`archive/completed/cognition_v2_semantic_admission_original_contract_restoration_plan.md`,
+  commit `fd47fe9d`), which deliberately removed candidate-origin and
+  handle-domain producer-repair eligibility from runtime admission. Gate 0
+  records both completed commits, their exact passing test nodes, and the
+  current uniform terminal-boundary contract as the frozen V2 baseline for V3
+  parity; it does not resurrect the superseded repair matrix. V3
+  implementation cannot overlap either predecessor's V2 source edits.
 
 ## Confirmed Decisions
 
@@ -102,14 +116,18 @@
 16. L3 text planning, preference planning, visual planning, dialog wording,
     consolidation, persistence, resolver capabilities, adapters, and delivery
     remain outside the V3 semantic-engine implementation.
-17. V3 ports the completed predecessor bugfix's exact appraisal disposition:
-    only `candidate_origin_missing` and explicitly declared
-    `producer_handle_domain_invalid` failures receive bounded producer
-    replacement; semantic ownership, proposition-kind, target, delta-owner,
-    permission/effect, state/FSM, and unknown validation failures remain
-    terminal. Candidate-origin replacement preserves every valid existing
-    citation and adds the canonical origin at selected and nested evidence
-    levels.
+17. V3 ports the appraisal dispositions currently in effect on main after
+    the semantic-admission original-contract restoration (`fd47fe9d`): every
+    deterministic boundary-class validation failure, including
+    `candidate_origin_missing`, `producer_handle_domain_invalid`, and
+    `semantic_boundary_terminal`, is a terminal boundary rejection with zero
+    repair calls (`repair_attempted=False`, error code
+    `cognition_boundary_rejected`). Only structural output failures receive
+    bounded complete replacement within the owner's attempt cap; exhaustion
+    reuses `semantic_appraisal_contract_exhausted` and the facade records
+    `question_omitted`. The predecessor bugfix candidate-origin/handle-domain
+    producer-repair eligibility was deliberately removed by that restoration
+    (its archived plan, Must Do #5) and is out of scope for V3.
 18. The V2 baseline gate completes before the first V3 production-source
     edit. "Every possible internal path" means every finite registered
     control-flow edge, stage/branch eligibility outcome, typed validator and
@@ -204,15 +222,20 @@ replay, and controlled cold/warm/cache-domain performance evidence.
 | Resolver recurrence | `cognition_resolver` and connector | Preserve cognition -> one capability -> typed observation -> cognition, cycle cap, no intermediate commit, answerability suppression, pending state, and final single commit. |
 | L3 text/preference/visual surface | V2 surface and node connector | Reuse unchanged after a validated V3 output. Content and preference remain parallel; visual remains an optional sibling. |
 | Self-cognition, tool result, scheduled and internal sources | episode/connector/self-cognition runner | Preserve every canonical source, output-mode constraint, scheduled authority, targetless group behavior, and source-bound delivery. |
-| Prompt caps and bounded regeneration | prompt-budget owners and attempt ledger | Preserve owner caps, call arithmetic, zero-call over-cap dispositions, provider retry behavior, parent checkpoint arithmetic, and the completed typed appraisal-repair matrix from the predecessor bugfix. |
+| Prompt caps and bounded regeneration | prompt-budget owners and attempt ledger | Preserve owner caps, call arithmetic, zero-call over-cap dispositions, provider retry behavior, parent checkpoint arithmetic, and the current uniform terminal-boundary disposition contract (structural-only bounded regeneration; boundary failure classes terminal with zero repair calls). |
 | Diagnostics and protected evidence | observability, LLM tracing, failure capsules | Preserve exact public diagnostic shape and add V3-only chain detail to protected trace metadata rather than the public output. |
 | Morning refresh and operational carry-over | V2 deterministic public functions | Reuse unchanged. V3 semantic execution cannot alter their persisted-state contracts. |
 
 ## Current V2 Parallel And Sequential Topology Baseline
 
 The baseline audit finds these complete explicit concurrency regions on the
-live cognition and immediate L3 path. The V2 source contains no other
-`asyncio.create_task` or `asyncio.gather` region inside `cognition_core_v2`.
+live cognition and immediate L3 path, with exact V2 file owners: core first
+wave in `facade.py`, goal dependency execution in
+`parallel_executor.execute_dependency_graph`, text-surface gather in
+`surface.py`, and visual siblings inside the L3 node connector. The V2 source
+contains no other `asyncio.create_task` or `asyncio.gather` region inside
+`cognition_core_v2`; the character-carryover sequential wait-for timeout
+region is a separate unchanged owner outside this plan's scope.
 
 | Region | Current V2 parallel execution | V3 disposition |
 | --- | --- | --- |
@@ -254,6 +277,14 @@ bounded replacement after an eligible failure, then accepted result or typed
 exhaustion. Action and resolver proposals are mutually exclusive by contract;
 their fresh authorization boundaries therefore remain ordered conditional
 stages rather than a parallel region.
+
+The one-commit invariant is scoped per live turn and self-cognition cycle
+through the connector's single commit owner in
+`nodes/persona_supervisor2_cognition.py`, which reaches the user-scope
+compare-and-replace in `db/users` or the character-scope compare-and-replace
+in `db/character`. The separate post-turn lifecycle character-scope in-session
+CAS path (`db/post_turn_lifecycle`) remains unchanged and outside this plan's
+engine boundary.
 
 ## Target Architecture
 
@@ -401,9 +432,9 @@ model trace, provider metadata, permissions, adapter fields, or hidden state.
 | Rejected output pollutes later stages | Transcript owner | Permit it only in the local repair request; force a canonical scrub checkpoint before continuation. |
 | Parsed output has missing/unknown keys, wrong types, unsupported enums, handles, or paths | Stage structural validator | Request one complete bounded replacement under the existing owner attempt cap; keep the candidate out of reduction and effects. |
 | JSON remains malformed after canonical parser/allowed repair | Producing stage | Consume the stage attempt budget and apply that owner's existing exhausted disposition. |
-| Candidate-bearing proposition/delta omits its canonical origin evidence | Typed appraisal validator | Classify `candidate_origin_missing`; request bounded producer replacement; require every valid prior citation plus the canonical origin at selected and nested evidence levels. |
-| Generated handle violates an explicitly declared question-local field domain | Typed appraisal validator | Classify `producer_handle_domain_invalid`; request bounded producer replacement; deterministic code selects no substitute. |
-| Semantic ownership, proposition-kind, target, delta-owner, duplicate/conflict, permission/effect, state/FSM, or unknown validator failure occurs | Typed appraisal validator or trial reducer | Classify the exact terminal/unknown disposition from the completed predecessor matrix, issue no producer-repair call, and keep the candidate out of state and effects. |
+| Candidate-bearing proposition/delta omits its canonical origin evidence | Typed appraisal validator | Terminal boundary rejection with zero repair calls (`repair_attempted=False`, error code `cognition_boundary_rejected`) per the current admission contract. |
+| Generated handle violates an explicitly declared question-local field domain | Typed appraisal validator | Terminal boundary rejection with zero repair calls per the current admission contract (error code `cognition_boundary_rejected`). |
+| Semantic ownership, proposition-kind, target, delta-owner, duplicate/conflict, permission/effect, state/FSM, or unknown validator failure occurs | Typed appraisal validator or trial reducer | Classify the exact terminal/unknown disposition from the current admission contract (terminal boundary rejection with zero repair calls for every boundary class), and keep the candidate out of state and effects. |
 | Model repeats an accepted micro-item or emits an empty item | Appraisal stage | Terminate that family successfully with its accepted prefix. |
 | Model invents a stage, route, dependency, permission, capability, or cache instruction | Registry and validators | Reject the unsupported field/value. Deterministic topology and permission owners remain unchanged. |
 | First stage of a chain exhausts | Chain executor | Restore the last accepted checkpoint and run the next registered stage when it is independently valid from the root. |
@@ -425,7 +456,7 @@ model trace, provider metadata, permissions, adapter fields, or hidden state.
 The workflow is ordered and irreversible inside one baseline version:
 
 ```text
-complete V2 predecessor fix
+record completed predecessor plans as frozen baseline inputs
   -> freeze V2 code/config/corpus/harness/rubric
   -> exercise and capture every registered V2 path
   -> seal immutable V2 baseline
@@ -438,20 +469,34 @@ complete V2 predecessor fix
 
 ### Gate 0: Baseline Eligibility
 
-- Complete and archive the predecessor V2 appraisal-recovery bugfix. Record
-  its commit and exact passing test nodes.
+- Both predecessor plans are already completed and archived in the registry.
+  Record their commits (`5a7bfbd6` fix, `7505e789` closure for appraisal-boundary
+  recovery; `fd47fe9d` semantic-admission original-contract restoration), each
+  plan's exact passing test nodes, and the current uniform terminal-boundary
+  disposition contract as the frozen baseline matrix. The admission restoration
+  deliberately superseded the predecessor bugfix's candidate-origin/handle-
+  domain producer-repair eligibility; Gate 0 does not resurrect it.
 - Confirm the V2 production package has no later uncommitted or unreviewed
   source change. Record the complete worktree status and explicitly owned
   files.
+- Create and record the execution branch from `main` before any V3, selector,
+  harness, or test file is created; every plan-owned edit lands on that
+  branch. Preserve pre-existing untracked worktree entries untouched.
+- Record current-environment constraints in the baseline index: the configured
+  LLM is test-purpose only (its output quality shall not be relied on for
+  acceptance) and the production database in `.env` is out of scope, so every
+  live case is labelled `realistic_fixture`, no harness or test reads
+  production data, and performance capture is deferred. All Mongo access in
+  tests routes through the standard env-var-driven DB facade only.
 - Freeze the baseline harness, case manifest, path registry, rubrics, model
   and route configuration, prompt budgets, generation parameters, backend
   strategy, and environment fingerprint before the first V3 production edit.
 - Derive `baseline_id` from the V2 commit, baseline-manifest hash,
   harness-code hash, model/configuration fingerprint, and rubric hash. The
   baseline index records each component rather than relying on a mutable name.
-- Gate 0 fails if the predecessor plan is active, the V2 source is dirty, an
-  input lacks a canonical hash, or any required model/configuration identity
-  is unavailable.
+- Gate 0 fails if either completed predecessor plan is not archived in the
+  registry, the V2 source is dirty, an input lacks a canonical hash, or any
+  required model/configuration identity is unavailable.
 
 ### Gate 1: Capture The Exhaustive V2 Baseline
 
@@ -464,7 +509,12 @@ The baseline has two complementary evidence layers:
 2. Real local-LLM evidence uses production traces and captured failures where
    available, plus explicitly labelled realistic fixtures for missing
    semantic situations. This layer measures actual judgment quality and
-   latency; fixtures alone cannot establish production performance.
+   latency; fixtures alone cannot establish production performance. In the
+   current execution environment production-trace and captured-failure sources
+   are out of scope (production database access is prohibited), so every live
+   case is labelled `realistic_fixture` and its evidence serves contract/
+   robustness smoke; directional-improvement quality sign-off defers to a
+   real-model re-run.
 
 The path manifest expands every row below into stable `scenario_id` values and
 engine-scoped `path_id` values. Every scenario names its preconditions,
@@ -481,7 +531,7 @@ in Gate 3.
 | --- | --- |
 | Appraisal eligibility and topology | Question absent/present for all six appraisal families; accepted, empty, repeated-item completion, optional exhaustion, provisional reduction, terminal-outcome execution/omission, and every declared sequential edge and parallel-wave join. |
 | Goal topology | Ordinary response, every one of the fourteen goal kinds, inactive/active/newly activated states, complete/incomplete bid, required-selection success/exhaustion, sibling isolation, dependency-ready waves, and workspace admission/suppression. |
-| Typed appraisal disposition | Every repairable and terminal class from the completed predecessor matrix, successful replacement, replacement exhaustion, valid-citation preservation, unknown failure, and proof that terminal classes make zero repair calls. |
+| Typed appraisal disposition | Every boundary-class validation failure of the current admission contract (`candidate_origin_missing`, `producer_handle_domain_invalid`, `semantic_boundary_terminal`) as a terminal rejection with zero repair calls, structural-output bounded replacement success/exhaustion via `semantic_appraisal_contract_exhausted` and facade `question_omitted`, unknown-failure fail-closed behavior, and proof that no boundary class triggers a repair call. |
 | Structure and parsing | Canonical parser success, deterministic syntax cleanup, allowed JSON repair, irreparable structure, missing/unknown keys, wrong types, enum/handle/path failures, normalization success/failure, and owner attempt exhaustion. |
 | Bounded execution | Provider success, configured provider reload retry, timeout, cancellation, model error, zero-call prompt over-cap, stage cap, global attempt cap, optional-owner failure, required-owner failure, and parent checkpoint replay arithmetic. |
 | Transcript and cache isolation | Accepted same-domain continuation, rejected-candidate local repair visibility, post-repair scrub checkpoint, context-pressure checkpoint, route-domain split, cache hit/miss/eviction equivalence, sibling non-visibility, and fresh workspace/action/resolver safety boundaries. |
@@ -504,13 +554,18 @@ Gate 1 execution order is fixed:
 3. Run each V2 live-quality case as a separate pytest node. Each case performs
    three independent model trials under the frozen generation configuration;
    inspect and review all three trials before starting the next case.
-4. Capture V2 performance using five independent cold backend/model-load
-   trials, twenty measured warm exact-repeat trials after one real effect-free
-   setup request, twenty measured changed-tail trials, and ten mixed-route
-   transitions. Record the setup request as evidence and exclude it from warm
-   statistics.
+4. Performance capture is **deferred in the current execution environment**
+   (test-purpose-only LLM; no production-trace corpus). The fixed protocol —
+   five independent cold backend/model-load trials, twenty measured warm exact-
+   repeat trials after one real effect-free setup request, twenty measured
+   changed-tail trials, and ten mixed-route transitions with the setup request
+   recorded as evidence and excluded from warm statistics — remains frozen in
+   this plan and is re-run when a real-model trace corpus becomes available;
+   Gate 1 seals without performance files and records that omission in the
+   baseline index.
 5. Write the V2 path-closure report, deterministic contract results, raw live
-   outputs, agent-authored quality reviews, and timing summary.
+   outputs (labelled `realistic_fixture` in this environment), agent-authored
+   quality reviews, and timing summary once the deferred performance layer runs.
 6. Seal the V2 baseline index with content hashes. The indexed V2 files remain
    immutable; Gate 3 creates V3 and comparison sibling files plus a separate
    comparison index without rewriting the baseline index.
@@ -557,7 +612,9 @@ output is comparison evidence, not automatically the ideal semantic answer.
   load policy, or measurement instrumentation differs from the Gate 1
   fingerprint, mark only the historical timing delta non-comparable. The
   current V2 run supplements rather than replaces the immutable semantic V2
-  baseline.
+  baseline. In the current execution environment (test-purpose-only LLM; no
+  production-trace corpus) this entire surface is deferred until a real-model
+  re-run, with the protocol and node definitions frozen in this plan.
 - Produce four separate comparison surfaces: deterministic contract accuracy,
   semantic quality, robustness/path coverage, and performance/cache behavior.
   A favorable aggregate cannot hide a safety, permission, isolation, state,
@@ -571,6 +628,14 @@ each capability-group mean is at least its V2 baseline, the overall V3 mean is
 strictly greater than V2, and at least one of `appraisal/state`,
 `goal/selection`, or `robustness` improves by at least 0.20 on the 0-2 scale.
 Performance uses the thresholds in Performance Comparison Contract.
+
+In the current execution environment, the performance surface is deferred as
+described above, and the directional-improvement and capability-group quality
+sign-off items defer to the real-model re-run. The deterministic contract-
+accuracy and robustness/path-coverage surfaces remain fully active here; live-
+case evidence serves contract/robustness smoke only and shall not be treated
+as production-quality or latency evidence. Cutover remains blocked until the
+deferred surfaces complete their re-run.
 
 ### Gate 4: Sign-Off And Cutover
 
@@ -589,7 +654,8 @@ Sign-off requires all of these conclusions:
   the parity gates.
 - **Improved direction:** V3 meets the fixed positive semantic delta and warm
   cache/prompt-processing improvement while satisfying cold and end-to-end
-  latency bounds.
+  latency bounds. Deferred to the real-model re-run in the current execution
+  environment; sign-off cannot complete before that evidence exists.
 - **Operational safety:** V2 remains explicitly selectable, V3 has no runtime
   fallback or dual effects, rollback is a process-level selector change, and
   the production smoke protocol is complete.
@@ -686,8 +752,14 @@ area before later V2 retirement.
   rewrite a valid model stance into another semantic decision.
 - Preserve emotion and relationship behavior as first-class acceptance gates,
   not incidental output fields.
-- Start from the completed predecessor bugfix commit and preserve its typed
-  appraisal failure matrix and evidence-preservation rules exactly.
+- Start from the current main commit with both predecessor plans completed and
+  archived (`5a7bfbd6`/`7505e789` appraisal-boundary recovery; `fd47fe9d`
+  semantic-admission original-contract restoration). Port the currently in-
+  effect appraisal contract exactly: uniform terminal-boundary disposition for
+  every boundary failure class, structural-only bounded regeneration,
+  exhaustion via `semantic_appraisal_contract_exhausted`, facade
+  `question_omitted`. The candidate-origin/handle-domain producer-repair
+  eligibility was deliberately removed by the restoration and is out of scope.
 - Preserve current-turn relational-willingness ownership in the ordinary goal
   branch.
 - Preserve evidence authority. Retrieved, reflected, historical, resolver,
@@ -712,17 +784,23 @@ area before later V2 retirement.
   case manifests, effect-free capture/replay harness, scoring rubric, timing
   protocol, and artifact-integrity contract.
 - Exercise every registered V2 control-flow edge and terminal disposition,
-  capture raw deterministic, patched-LLM, live-quality, and performance
-  evidence, close path coverage at 100%, and seal the V2 `baseline_id`.
+  capture raw deterministic, patched-LLM, and live-quality (contract/
+  robustness smoke in this environment) evidence, close path coverage at 100%,
+  and seal the V2 `baseline_id`. Performance capture is deferred per Gate 1.
 - Create the complete `cognition_core_v3` package and public `run_cognition`
   entrypoint.
 - Add exact chain contracts, fixed registry, transcript/checkpoint owner,
   bounded executor, V3 appraiser, V3 goal producer, V3 workspace collapse, V3
   action planner/authorizers, V3 diagnostics, and V3 facade.
 - Preserve every V2 capability and external carrier in the parity map.
-- Port the completed predecessor bugfix's typed appraisal-failure classes,
-  repair eligibility, citation-preservation validation, exhaustion metadata,
-  and terminal no-repair classes into V3.
+- Port the currently in-effect appraisal-failure contract into V3: every
+  boundary failure class (`candidate_origin_missing`,
+  `producer_handle_domain_invalid`, `semantic_boundary_terminal`) is a terminal
+  rejection with zero repair calls; only structural output failures receive
+  bounded complete replacement within the owner's attempt cap; exhaustion
+  reuses `semantic_appraisal_contract_exhausted` and the facade records
+  `question_omitted`. The candidate-origin/handle-domain producer-repair
+  eligibility removed by the admission restoration is out of scope.
 - Add a closed `COGNITION_CORE_ENGINE` setting accepting exactly `v2` and
   `v3`.
 - Add one selector module that resolves the configured module once and exposes
@@ -739,9 +817,12 @@ area before later V2 retirement.
 - Add a fixed 24-case live quality manifest and one unparameterized pytest node
   per case. Capture and inspect three independent model trials per engine per
   case.
-- Add four one-at-a-time performance comparison nodes covering cold full
-  appraisal, warm exact repeat, warm changed tail, and mixed-route checkpoint
-  with the fixed sample counts and environment controls in Gate 1.
+- Performance comparison nodes are **deferred in the current execution
+  environment**. When a real-model trace corpus becomes available, add four
+  one-at-a-time performance comparison nodes covering cold full appraisal, warm
+  exact repeat, warm changed tail, and mixed-route checkpoint with the fixed
+  sample counts and environment controls in Gate 1. Node names stay frozen as
+  defined by the Performance Comparison Contract.
 - Replay V3 with the exact sealed scenario/case IDs, canonical input hashes,
   predeclared V2-to-V3 path mappings, harness, route/configuration fingerprint,
   rubric, and timing protocol.
@@ -970,10 +1051,17 @@ inspected before another live node runs:
 The manifest labels each case as `production_trace`, `captured_failure`, or
 `realistic_fixture`. Performance conclusions use only production-trace or
 captured-production inputs. Realistic fixtures support semantic coverage and
-cannot establish cache or latency performance.
+cannot establish cache or latency performance. In the current execution
+environment every case is labelled `realistic_fixture` because production-
+trace and captured-failure sources are out of scope (production database access
+is prohibited); performance conclusions remain deferred until a real-model re-
+run with an eligible corpus.
 
 ## Performance Comparison Contract
 
+This contract is frozen but its execution is **deferred in the current
+execution environment**; node creation and capture resume when a real-model
+trace corpus becomes available. When it runs,
 `tests/test_cognition_core_v3_performance_live_llm.py` contains these exact
 separate nodes:
 
@@ -1058,9 +1146,11 @@ For every live quality and performance node:
 
 ## Verification Sequence
 
-1. Verify the predecessor appraisal-recovery plan is completed and archived.
-   Capture the clean post-fix V2 commit, worktree status, exact passing
-   predecessor nodes, and owned file set.
+1. Verify both predecessor plans are completed and archived in the registry
+   (`5a7bfbd6`/`7505e789` appraisal-boundary recovery; `fd47fe9d` semantic-
+   admission original-contract restoration). Capture the clean current V2
+   commit, worktree status, exact passing nodes of both plans, and owned file
+   set.
 2. Create and review the baseline path registry, case manifests, capture/
    replay harness, rubric, environment fingerprint, performance protocol, and
    artifact-integrity tests. Freeze their hashes before any V3 production edit.
@@ -1069,11 +1159,15 @@ For every live quality and performance node:
    observed paths until the V2 path-closure report reaches 100%.
 4. Run each of the twenty-four V2 live-quality nodes separately, three trials
    per node, inspect all trial traces, and author the V2 baseline review before
-   continuing to the next node.
-5. Run the four V2 performance nodes separately under the fixed five/twenty/
-   twenty/ten measurement protocol and review each artifact.
+   continuing to the next node (all cases labelled `realistic_fixture` in this
+   environment; evidence serves contract/robustness smoke only).
+5. Performance capture is **deferred in the current execution environment**.
+   When a real-model trace corpus becomes available, run the four V2
+   performance nodes separately under the fixed five/twenty/twenty/ten
+   measurement protocol and review each artifact.
 6. Seal and independently verify the V2 baseline index, hashes, path closure,
-   live reviews, timing summary, known-defect register, and `baseline_id`.
+   live reviews (timing summary when the deferred performance layer runs),
+   known-defect register, and `baseline_id`.
 7. Complete V3 production source and source-mirrored deterministic tests while
    production remains configured for V2 and the V2 package/baseline remain
    unchanged.
@@ -1089,11 +1183,15 @@ For every live quality and performance node:
     `path_id`.
 11. Run each of the twenty-four V3 live-quality nodes separately, three trials
     per node, inspect every trace, complete blind rubric scoring, unblind, and
-    author the side-by-side review before the next node.
-12. Run each of the four performance nodes separately for alternating V2 and
-    V3 blocks on the current environment, using separate cache epochs. Use the
-    current V2 run for acceptance deltas and label historical V2 timing
-    comparable or non-comparable from its environment fingerprint.
+    author the side-by-side review before the next node (contract/robustness
+    smoke in this environment; directional-improvement quality sign-off defers
+    to the real-model re-run).
+12. **Deferred in the current execution environment.** When a real-model trace
+    corpus becomes available, run each of the four performance nodes separately
+    for alternating V2 and V3 blocks on the current environment, using separate
+    cache epochs. Use the current V2 run for acceptance deltas and label
+    historical V2 timing comparable or non-comparable from its environment
+    fingerprint.
 13. Produce and review the contract-accuracy, semantic-quality, robustness,
     and performance summaries. Resolve every failed gate through V3-only
     remediation and rerun every affected gate without changing the baseline.
@@ -1101,7 +1199,8 @@ For every live quality and performance node:
     baseline seal, implementation diff, exact test evidence, live reviews,
     performance evidence, and forbidden paths.
 15. Obtain explicit human-owner V3 sign-off and production-default cutover
-    authorization, then change the default to V3.
+    authorization, then change the default to V3 (cutover cannot complete until
+    the deferred performance and directional-improvement surfaces have re-run).
 16. Rerun selector/config nodes, complete external-contract integration nodes,
     and run one ordinary, one relationship-boundary, and one resolver-
     continuation live smoke individually.
@@ -1260,9 +1359,11 @@ amendment and user decision before that work continues.
   used for the cutover decision.
 - The complete V2 functionality map has a tested V3 counterpart or an
   explicitly unchanged shared owner.
-- The predecessor appraisal-recovery plan is completed and archived, and V3
-  matches its typed repair/terminal disposition and evidence-preservation
-  contract.
+- Both predecessor plans are completed and archived in the registry, and V3
+  matches the currently in-effect appraisal disposition contract exactly:
+  uniform terminal-boundary rejection with zero repair calls for every boundary
+  failure class, structural-only bounded regeneration, exhaustion via
+  `semantic_appraisal_contract_exhausted`, facade `question_omitted`.
 - V3 accepts and returns the exact V2-shaped public contract and passes the
   unchanged canonical validators.
 - User/character state scope, one final compare-and-replace commit, resolver
@@ -1292,7 +1393,11 @@ amendment and user decision before that work continues.
   no capability-group mean regresses, the overall V3 quality mean is strictly
   greater than V2, and one predeclared objective group improves by at least
   0.20 on the 0-2 scale.
-- Every performance gate passes.
+- Every performance gate passes (deferred in the current execution environment;
+  re-run on the real-model continuation).
+- In the current execution environment, performance capture and directional-
+  improvement quality sign-off are recorded as deferred items; production-
+  default cutover remains blocked until their real-model re-run completes.
 - Documentation matches the implemented topology and operator workflow.
 - Independent code review passes with no unresolved critical or high finding.
 - The human owner explicitly signs off the V3 evidence package and authorizes
@@ -1304,17 +1409,19 @@ amendment and user decision before that work continues.
 
 - [ ] Plan approved and baseline/test evidence execution explicitly
       authorized.
-- [ ] Predecessor V2 appraisal-recovery bugfix completed, archived, and frozen
-      as the baseline commit.
+- [ ] Both predecessor plans (appraisal-boundary recovery `5a7bfbd6`/`7505e789`;
+      semantic-admission restoration `fd47fe9d`) completed, archived, and frozen
+      as the baseline commits with their supersession recorded.
 - [ ] Baseline path registry, predeclared V2-to-target-V3 path mapping, case
       manifests, harness, rubric, timing protocol, environment fingerprint,
       and governed hashes reviewed and frozen.
 - [ ] Every registered V2 deterministic and patched path exercised; V2 path
       closure is 100% with no unregistered observed edge.
 - [ ] Twenty-four V2 quality cases captured at three trials each, individually
-      inspected, and reviewed.
-- [ ] V2 cold/warm/changed-tail/mixed-route performance baseline captured under
-      the fixed sample protocol.
+      inspected, and reviewed (labelled `realistic_fixture` in this environment).
+- [ ] **Deferred in the current execution environment.** V2 cold/warm/changed-
+      tail/mixed-route performance baseline captured under the fixed sample
+      protocol.
 - [ ] V2 baseline index sealed and independently verified before any V3
       production-source edit.
 - [ ] V3 production implementation explicitly authorized after baseline
@@ -1328,10 +1435,12 @@ amendment and user decision before that work continues.
       path closure, contract accuracy, V2-path mapping completeness, and
       input-identity proof.
 - [ ] Twenty-four V3 quality cases captured at three trials each, individually
-      inspected, blind-scored, unblinded, and compared with V2.
-- [ ] Four V3 performance cases individually run against a contemporaneous V2
-      control with separate cache epochs and alternating engine-order blocks;
-      historical timing comparability is recorded.
+      inspected, blind-scored, unblinded, and compared with V2 (directional-
+      improvement sign-off deferred in this environment).
+- [ ] **Deferred in the current execution environment.** Four V3 performance
+      cases individually run against a contemporaneous V2 control with separate
+      cache epochs and alternating engine-order blocks; historical timing
+      comparability is recorded.
 - [ ] Final comparison index seals all V3 evidence, summaries, readable
       reviews, and sign-off records without modifying the V2 baseline index.
 - [ ] Every feature, quality, safety, robustness, and performance gate passes,
@@ -1351,3 +1460,61 @@ predeclared V2-to-V3 path mapping, baseline immutability, exact scenario/input
 replay identity, accuracy and directional-improvement gates, performance
 validity, scope exclusions, and retirement separation. Findings are resolved
 in the draft before status changes to `approved`.
+
+## Independent Plan Review Record
+
+The pre-approval independent review (subagent-assisted static verification plus
+direct source/git corroboration) completed in draft state recorded these
+findings and resolutions:
+
+- **F1 (blocker, resolved):** Confirmed Decision 17, Gate 0, and the failure-
+  mode table referenced the predecessor bugfix's bounded producer-repair matrix
+  (`candidate_origin_missing`/declared `producer_handle_domain_invalid`), which
+  commit `fd47fe9d` ("Restore Cognition V2 semantic admission contract")
+  deliberately removed from main (archived completed plan
+  `cognition_v2_semantic_admission_original_contract_restoration_plan.md`, Must
+  Do #5). Human owner chose Option A: V3 ports the currently in-effect
+  contract — uniform terminal-boundary disposition for every boundary failure
+  class with zero repair calls, structural-only bounded regeneration. The
+  supersession note and both predecessor commit sets (`5a7bfbd6`/`7505e789`,
+  `fd47fe9d`) are recorded in the Summary, Dependency, Decision 17, Gate 0,
+  Required Rules, Must Do, verification sequence, acceptance criteria, and
+  progress checklist.
+- **F2 (resolved by owner decision):** live performance capture is deferred in
+  the current execution environment (test-purpose-only configured LLM; no
+  production-trace corpus). The fixed protocol, sample counts, node names, and
+  thresholds remain frozen in this plan; Gate 1 seals without performance files
+  and records that omission. Re-run on a real-model continuation under this
+  plan's continued in_progress state.
+- **F3 (resolved by owner decision):** directional-improvement plus semantic-
+  quality sign-off defers to the same real-model re-run; live cases still run
+  one at a time as `realistic_fixture`-labelled contract/robustness smoke and
+  their evidence is recorded only as such. Subagent reviewers inherit the
+  session model, so agent-authored quality judgments carry reduced authority and
+  human-owner sign-off owns semantic-quality acceptance.
+- **F4 (resolved):** the topology baseline table now carries exact V2 file
+  owners: core first wave in `facade.py`, goal dependency execution in
+  `parallel_executor.execute_dependency_graph`, text-surface gather in
+  `surface.py`, visual siblings inside the L3 node connector; the character-
+  carryover sequential wait-for timeout region is recorded as an unchanged owner
+  outside scope.
+- **F5 (resolved):** the one-commit invariant is scoped per live turn and
+  self-cognition cycle through the connector's single commit owner; the post-
+  turn lifecycle character-scope in-session CAS path (`db/post_turn_lifecycle`)
+  remains unchanged and outside the engine boundary.
+- **Carried implementation notes (F6–F9):** venv currently lacks pytest, so a
+  dev-dependency install is an environment prerequisite for collection checks;
+  the source-test impact manifest needs one entry per strict `.py` file plus an
+  explicit package-init root for new packages; `tests/cognition_core_v2/README.md`
+  precedent requires the V3 README to document its unit tree and manifest
+  reference; `TextSurfaceInputV2`/`TextSurfaceOutputV2` are defined in
+  `cognition_core_v2/contracts.py`; all harness Mongo access routes through the
+  standard env-var-driven DB facade only (test conftest redirects
+  `MONGODB_DB_NAME` to `_test_kazusa_live_llm`, and the production database in
+  `.env` stays out of scope).
+
+Status: approved by the human owner after this review round, with the registry
+entry in `development_plans/README.md` updated to match. This record documents
+the resolutions above; execution starts only under an explicit implementation
+authorization, at which point the status moves to `in_progress` on the forked
+branch per Gate 0.
