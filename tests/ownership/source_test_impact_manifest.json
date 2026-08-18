@@ -1289,6 +1289,19 @@
     "tests/unit/cognition_core_v3/test_execution.py::test_executor_cancels_owned_tasks_without_partial_effects"
    ],
    "supplemental_tests": []
+  },
+  {
+   "source": "src/kazusa_ai_chatbot/cognition_core_v3/appraisal.py",
+   "owner": "V3 cache-affine appraisal semantics owner",
+   "contract": "six-family domains, shared static prompt, candidate admission classification, and provisional reduction",
+   "required_unit_tests": [
+    "tests/unit/cognition_core_v3/test_appraisal.py::test_v3_appraisal_preserves_six_family_domains",
+    "tests/unit/cognition_core_v3/test_appraisal.py::test_all_appraisal_chains_use_one_byte_identical_static_system_prompt",
+    "tests/unit/cognition_core_v3/test_appraisal.py::test_causal_and_epistemic_chains_expose_only_accepted_predecessor_context",
+    "tests/unit/cognition_core_v3/test_appraisal.py::test_terminal_outcome_runs_from_provisional_accepted_state",
+    "tests/unit/cognition_core_v3/test_appraisal.py::test_optional_stage_exhaustion_preserves_accepted_prefix"
+   ],
+   "supplemental_tests": []
   }
  ]
 }
