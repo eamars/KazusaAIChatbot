@@ -6,7 +6,10 @@
   that preserves the complete Cognition Core V2 input, output, state,
   emotion, relationship, goal, action, resolver, and surface handoff
   contracts while replacing the parallel-appraisal execution topology.
-- Status: approved.
+- Status: in_progress on `feature/cognition_core_v3_cache_affine`, forked from
+  main at commit `5b2a0230` with the approved plan and registry committed as
+  `607dbb52`. Production implementation runs on that branch; production code
+  changes stay authorized only under this execution.
 - Plan class: high-risk cognition architecture and local-LLM behavior change.
 - Scope boundary: a new `cognition_core_v3` semantic execution package, one
   process-level V2/V3 selector, the live and idle connector import reached
@@ -1515,6 +1518,23 @@ findings and resolutions:
 
 Status: approved by the human owner after this review round, with the registry
 entry in `development_plans/README.md` updated to match. This record documents
-the resolutions above; execution starts only under an explicit implementation
-authorization, at which point the status moves to `in_progress` on the forked
-branch per Gate 0.
+the resolutions above. The explicit implementation authorization arrived on
+branch `feature/cognition_core_v3_cache_affine`, and execution is recorded in
+the Execution Log below.
+
+## Execution Log
+
+- Started on branch `feature/cognition_core_v3_cache_affine` from main commit
+  `5b2a0230`; approved plan and registry committed as `607dbb52`. Pre-existing
+  worktree state preserved: the untracked `renametest-0v4cmxu0/` entry stays
+  untouched and uncommitted throughout.
+- Owner-directed deviation, recorded before the first production-source edit:
+  Gate 1 baseline capture is skipped in this execution pass at explicit owner
+  direction ("skip the baseline capture and work on the coding related
+  changes"). V3 implementation proceeds against the current main sources with
+  both archived predecessor plans (`5a7bfbd6`/`7505e789`, `fd47fe9d`) as the
+  frozen contract reference. Baseline sealing, sealed replay, comparison
+  surfaces, and cutover remain blocked until their deferred re-runs (performance
+  protocol plus real-model quality sign-off) complete under this plan's
+  continued in_progress state; the V2 production default remains until those
+  gates pass.

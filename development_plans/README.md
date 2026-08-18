@@ -46,7 +46,7 @@ recorded evidence.
 | Document | Type | Status |
 |---|---|---|
 | [coding_agent_assessment_gap_phase_d_plan.md](active/short_term/coding_agent_assessment_gap_phase_d_plan.md) | Coding-agent persistent JSON action-loop and repository-index migration | in_progress |
-| [cognition_v3_cache_affine_semantic_chain_bigbang_plan.md](active/short_term/cognition_v3_cache_affine_semantic_chain_bigbang_plan.md) | Cognition V3 cache-affine semantic-chain engine, exhaustive sealed V2 baseline/replay, and evidence-gated default cutover | approved |
+| [cognition_v3_cache_affine_semantic_chain_bigbang_plan.md](active/short_term/cognition_v3_cache_affine_semantic_chain_bigbang_plan.md) | Cognition V3 cache-affine semantic-chain engine, exhaustive sealed V2 baseline/replay, and evidence-gated default cutover | in_progress (branch feature/cognition_core_v3_cache_affine; Gate 1 capture skipped by owner directive, recorded in the plan's Execution Log) |
 
 ### Completed Short-Term Plans
 
