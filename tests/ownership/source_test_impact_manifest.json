@@ -14,6 +14,8 @@
     "src/kazusa_ai_chatbot/conversation_progress/recorder.py",
     "src/kazusa_ai_chatbot/conversation_progress/runtime.py",
     "src/kazusa_ai_chatbot/db/__init__.py",
+    "src/kazusa_ai_chatbot/db/users.py",
+    "src/kazusa_ai_chatbot/db/script_operations.py",
     "src/kazusa_ai_chatbot/db/accepted_tasks.py",
     "src/kazusa_ai_chatbot/db/internal_monologue_residue.py",
     "src/kazusa_ai_chatbot/db/schemas.py",
@@ -43,6 +45,7 @@
     "src/kazusa_ai_chatbot/local_context_resolver/stages.py",
     "src/kazusa_ai_chatbot/service.py",
     "src/scripts/export_trace_correlation_manifest.py",
+    "src/scripts/migrate_cognition_relationship_maintenance.py",
     "src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_actions.py",
     "src/kazusa_ai_chatbot/action_spec/models.py",
     "src/kazusa_ai_chatbot/action_spec/execution.py",
@@ -270,7 +273,8 @@
       "owner": "cognition_core_v2 owner",
       "contract": "character_carryover public contract",
       "required_unit_tests": [
-        "tests/unit/cognition_core_v2/test_character_carryover.py::test_character_carryover_exposes_owned_contract"
+        "tests/unit/cognition_core_v2/test_character_carryover.py::test_character_carryover_exposes_owned_contract",
+        "tests/unit/cognition_core_v2/test_character_carryover.py::test_character_carryover_consumes_canonical_delta_receipts"
       ],
       "supplemental_tests": []
     },
@@ -294,9 +298,12 @@
         "tests/unit/cognition_core_v2/test_contracts.py::test_selected_response_operation_has_exact_contract",
         "tests/unit/cognition_core_v2/test_contracts.py::test_selected_response_operation_rejects_missing_required_fields",
         "tests/unit/cognition_core_v2/test_contracts.py::test_semantic_question_v2_requires_role_assignment_handles",
-        "tests/unit/cognition_core_v2/test_contracts.py::test_sensitive_relational_willingness_accepts_all_real_states_and_stances"
+        "tests/unit/cognition_core_v2/test_contracts.py::test_sensitive_relational_willingness_accepts_all_real_states_and_stances",
+        "tests/unit/cognition_core_v2/test_contracts.py::test_state_update_requires_complete_expected_previous_state"
       ],
-      "supplemental_tests": []
+      "supplemental_tests": [
+        "tests/test_cognition_v2_boundary_propagation.py::test_boundary_rejection_stops_before_action_resolver_delivery"
+      ]
     },
     {
       "source": "src/kazusa_ai_chatbot/cognition_core_v2/dependency_graph.py",
@@ -347,7 +354,9 @@
         "tests/unit/cognition_core_v2/test_facade.py::test_reduction_rejects_goal_capacity_during_finalization",
         "tests/unit/cognition_core_v2/test_facade.py::test_reduction_preserves_accepted_prefix_and_comparison_rows",
         "tests/unit/cognition_core_v2/test_facade.py::test_reduction_records_bounded_rejection_evidence",
-        "tests/unit/cognition_core_v2/test_facade.py::test_reduction_runs_finalization_once_per_admitted_prefix"
+        "tests/unit/cognition_core_v2/test_facade.py::test_reduction_runs_finalization_once_per_admitted_prefix",
+        "tests/unit/cognition_core_v2/test_facade.py::test_cognition_passes_episode_source_id_and_interaction_date_to_relationship_maintenance",
+        "tests/unit/cognition_core_v2/test_facade.py::test_cognition_applies_relationship_maintenance_once_after_cumulative_trials"
       ],
       "supplemental_tests": [
         "tests/test_cognition_core_v2_semantic_terminalization.py::test_appraisal_retries_a_reducer_incompatible_candidate",
@@ -359,7 +368,8 @@
         "tests/test_cognition_core_v2_trace_failure_modes_live_llm.py::test_captured_trace_9164e957_capacity_path_live_llm",
         "tests/test_cognition_core_v2_quoted_message_post_fix.py::test_post_fix_goal_branch_recurrence_live_llm",
         "tests/test_cognition_core_v2_relational_carrier_failure_live_llm.py::test_live_f408_carrier_failure_without_episode_binding",
-        "tests/test_cognition_core_v2_relational_carrier_failure_live_llm.py::test_live_fdd_carrier_failure_without_episode_binding"
+        "tests/test_cognition_core_v2_relational_carrier_failure_live_llm.py::test_live_fdd_carrier_failure_without_episode_binding",
+        "tests/test_cognition_relationship_maintenance_loop.py::test_relationship_maintenance_round_trips_create_consume_update_persist_reread"
       ]
     },
     {
@@ -380,7 +390,13 @@
         "tests/unit/cognition_core_v2/test_goal_cognition.py::test_goal_prompt_declares_one_primary_current_scene_objective",
         "tests/unit/cognition_core_v2/test_goal_cognition.py::test_goal_cognition_rejects_recurrence_without_episode_binding",
         "tests/unit/cognition_core_v2/test_goal_cognition.py::test_goal_cognition_rejects_recurrence_without_current_episode_evidence",
-        "tests/unit/cognition_core_v2/test_goal_cognition.py::test_relational_carrier_replay_fixture_is_deidentified_and_complete"
+        "tests/unit/cognition_core_v2/test_goal_cognition.py::test_relational_carrier_replay_fixture_is_deidentified_and_complete",
+        "tests/unit/cognition_core_v2/test_goal_cognition.py::test_nonowning_relational_willingness_is_stripped_without_propagation",
+        "tests/unit/cognition_core_v2/test_goal_cognition.py::test_owned_relational_willingness_boundary_failure_fails_closed",
+        "tests/unit/cognition_core_v2/test_goal_cognition.py::test_unrecoverable_goal_structure_retries_within_budget",
+        "tests/unit/cognition_core_v2/test_goal_cognition.py::test_provider_failure_preserves_goal_attempt_cap",
+        "tests/unit/cognition_core_v2/test_goal_cognition.py::test_prompt_cap_preserves_zero_call_disposition",
+        "tests/unit/cognition_core_v2/test_goal_cognition.py::test_goal_output_contract_keeps_existing_schema"
       ],
       "supplemental_tests": [
         "tests/test_cognition_core_v2_quoted_message_post_fix.py::test_post_fix_goal_branch_recurrence_live_llm",
@@ -388,7 +404,8 @@
         "tests/test_cognition_core_v2_relational_carrier_failure_live_llm.py::test_live_fdd_carrier_failure_without_episode_binding",
         "tests/test_cognition_core_v2_prompt_contract_guidance.py::test_required_selection_contract_projects_exact_fields_and_retry_facts",
         "tests/test_cognition_core_v2_required_selection_live_llm.py::test_live_harness_contract_inspection_is_exact",
-        "tests/test_cognition_core_v2_required_selection_live_llm.py::test_live_required_selection_projects_exact_writable_fields"
+        "tests/test_cognition_core_v2_required_selection_live_llm.py::test_live_required_selection_projects_exact_writable_fields",
+        "tests/test_cognition_v2_protected_qq_replay.py::test_protected_qq_replay_nonowning_goal_field_uses_structural_normalization"
       ]
     },
     {
@@ -448,7 +465,8 @@
       "owner": "cognition_core_v2 owner",
       "contract": "output_projection public contract",
       "required_unit_tests": [
-        "tests/unit/cognition_core_v2/test_output_projection.py::test_output_projection_exposes_owned_contract"
+        "tests/unit/cognition_core_v2/test_output_projection.py::test_output_projection_exposes_owned_contract",
+        "tests/unit/cognition_core_v2/test_output_projection.py::test_state_update_carries_expected_previous_state"
       ],
       "supplemental_tests": []
     },
@@ -486,14 +504,26 @@
       "required_unit_tests": [
         "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_character_constraint_projection_excludes_standard_handles",
         "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_semantic_appraisal_exposes_owned_contract",
-        "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_causal_candidate_is_rejected_as_role_assignment_handle"
+        "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_causal_candidate_is_rejected_as_role_assignment_handle",
+        "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_provider_failure_exhausts_the_stage_attempt_budget",
+        "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_prompt_cap_stops_before_the_first_provider_call",
+        "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_recoverable_structure_uses_one_replacement_then_completes",
+        "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_unrecoverable_structure_exhausts_replacement_budget",
+        "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_structurally_usable_semantic_content_does_not_trigger_semantic_retry",
+        "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_recoverable_structure_does_not_trigger_producer_retry",
+        "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_unrecoverable_structure_retries_within_appraisal_budget",
+        "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_provider_failure_preserves_appraisal_attempt_cap",
+        "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_prompt_cap_preserves_zero_call_disposition",
+        "tests/unit/cognition_core_v2/test_semantic_appraisal.py::test_boundary_validation_preserves_existing_rejection_behavior"
       ],
       "supplemental_tests": [
         "tests/test_cognition_core_v2_trace_failure_mode_matrix.py::test_candidate_role_assignment_handle_is_rejected",
         "tests/test_cognition_core_v2_semantic_terminalization.py::test_invalid_role_handle_reports_its_structured_domain",
         "tests/test_cognition_core_v2_prompt_contract_guidance.py::test_prompt_payloads_preserve_contract_order",
         "tests/test_cognition_core_v2_prompt_budget_continuity.py::test_appraisal_question_keeps_candidate_origin_contract",
-        "tests/test_cognition_core_v2_prompt_budget_continuity.py::test_appraisal_repair_uses_residual_budget_for_second_call"
+        "tests/test_cognition_core_v2_prompt_budget_continuity.py::test_appraisal_repair_uses_residual_budget_for_second_call",
+        "tests/test_cognition_v2_protected_qq_replay.py::test_protected_qq_replay_semantic_appraisal_avoids_semantic_retry",
+        "tests/test_cognition_v2_protected_qq_replay.py::test_protected_qq_replay_executes_captured_boundary_without_retry"
       ]
     },
     {
@@ -520,16 +550,22 @@
       "owner": "cognition_core_v2 owner",
       "contract": "state_models public contract",
       "required_unit_tests": [
-        "tests/unit/cognition_core_v2/test_state_models.py::test_state_models_exposes_owned_contract"
+        "tests/unit/cognition_core_v2/test_state_models.py::test_state_models_exposes_owned_contract",
+        "tests/unit/cognition_core_v2/test_state_models.py::test_relationship_maintenance_metadata_is_required_and_validated",
+        "tests/unit/cognition_core_v2/test_state_models.py::test_relationship_maintenance_rejects_unbounded_source_ledger"
       ],
-      "supplemental_tests": []
+      "supplemental_tests": [
+        "tests/test_cognition_relationship_maintenance_migration.py::test_dry_run_backfill_preserves_existing_relationship_axes",
+        "tests/test_cognition_v2_fixture_contract.py::test_mongo_seed_user_states_include_relationship_maintenance"
+      ]
     },
     {
       "source": "src/kazusa_ai_chatbot/cognition_core_v2/state_projection.py",
       "owner": "cognition_core_v2 owner",
       "contract": "state_projection public contract",
       "required_unit_tests": [
-        "tests/unit/cognition_core_v2/test_state_projection.py::test_state_projection_exposes_owned_contract"
+        "tests/unit/cognition_core_v2/test_state_projection.py::test_state_projection_exposes_owned_contract",
+        "tests/unit/cognition_core_v2/test_state_projection.py::test_relationship_maintenance_metadata_is_not_projected"
       ],
       "supplemental_tests": []
     },
@@ -539,6 +575,19 @@
       "contract": "state_reducers public contract",
       "required_unit_tests": [
         "tests/unit/cognition_core_v2/test_state_reducers.py::test_state_reducers_exposes_owned_contract",
+        "tests/unit/cognition_core_v2/test_state_reducers.py::test_relationship_familiarity_reinforces_once_per_utc_interaction_date",
+        "tests/unit/cognition_core_v2/test_state_reducers.py::test_relationship_familiarity_applies_same_day_bonus_once",
+        "tests/unit/cognition_core_v2/test_state_reducers.py::test_relationship_familiarity_accepts_clamped_zero_delta_bonus",
+        "tests/unit/cognition_core_v2/test_state_reducers.py::test_relationship_familiarity_crosses_utc_date_boundary",
+        "tests/unit/cognition_core_v2/test_state_reducers.py::test_relationship_familiarity_is_idempotent_for_replayed_source",
+        "tests/unit/cognition_core_v2/test_state_reducers.py::test_relationship_duplicate_source_after_intervening_episode_is_ignored",
+        "tests/unit/cognition_core_v2/test_state_reducers.py::test_relationship_maintenance_ignores_older_source_after_newer_episode",
+        "tests/unit/cognition_core_v2/test_state_reducers.py::test_relationship_maintenance_rejects_source_ledger_overflow",
+        "tests/unit/cognition_core_v2/test_state_reducers.py::test_relationship_salience_decays_before_downstream_derivation",
+        "tests/unit/cognition_core_v2/test_state_reducers.py::test_relationship_salience_uses_four_points_per_hour",
+        "tests/unit/cognition_core_v2/test_state_reducers.py::test_final_goal_reconciliation_removes_stale_connection_goal",
+        "tests/unit/cognition_core_v2/test_state_reducers.py::test_relationship_salience_reinforces_from_strongest_unique_delta",
+        "tests/unit/cognition_core_v2/test_state_reducers.py::test_cumulative_trial_reductions_do_not_multiply_relationship_maintenance",
         "tests/test_cognition_core_v2_semantic_terminalization.py::test_terminalized_low_salience_candidate_survives_same_batch_pruning",
         "tests/test_cognition_core_v2_semantic_terminalization.py::test_terminal_postconditions_survive_same_batch_deltas[event_completed-event-active_events-axis_deltas0-expected0]",
         "tests/test_cognition_core_v2_semantic_terminalization.py::test_terminal_postconditions_survive_same_batch_deltas[event_repaired-event-active_events-axis_deltas1-expected1]",
@@ -546,7 +595,9 @@
         "tests/test_cognition_core_v2_semantic_terminalization.py::test_terminal_postconditions_survive_same_batch_deltas[knowledge_answered-knowledge_gap-knowledge_gaps-axis_deltas3-expected3]",
         "tests/test_cognition_core_v2_semantic_terminalization.py::test_final_reduction_preserves_cross_appraisal_composition"
       ],
-      "supplemental_tests": []
+      "supplemental_tests": [
+        "tests/test_cognition_relationship_maintenance_loop.py::test_relationship_maintenance_round_trips_create_consume_update_persist_reread"
+      ]
     },
     {
       "source": "src/kazusa_ai_chatbot/cognition_core_v2/surface.py",
@@ -576,7 +627,10 @@
       "owner": "cognition_core_v2 owner",
       "contract": "transition_guards public contract",
       "required_unit_tests": [
-        "tests/unit/cognition_core_v2/test_transition_guards.py::test_transition_guards_exposes_owned_contract"
+        "tests/unit/cognition_core_v2/test_transition_guards.py::test_transition_guards_exposes_owned_contract",
+        "tests/unit/cognition_core_v2/test_transition_guards.py::test_apply_semantic_deltas_returns_authoritative_receipts",
+        "tests/unit/cognition_core_v2/test_transition_guards.py::test_duplicate_delta_is_rejected_from_receipts",
+        "tests/unit/cognition_core_v2/test_transition_guards.py::test_relationship_receipt_records_clamped_applied_delta"
       ],
       "supplemental_tests": []
     },
@@ -667,9 +721,51 @@
       "owner": "database public schema facade owner",
       "contract": "canonical residue schema export",
       "required_unit_tests": [
-        "tests/test_internal_monologue_residue_database.py::test_v2_residue_schema_requires_disposition_operation_and_retention"
+        "tests/test_internal_monologue_residue_database.py::test_v2_residue_schema_requires_disposition_operation_and_retention",
+        "tests/unit/db/test_public_facade.py::test_user_cognition_compare_and_replace_is_public"
       ],
-      "supplemental_tests": []
+      "supplemental_tests": [
+        "tests/test_cognition_relationship_maintenance_loop.py::test_relationship_maintenance_round_trips_create_consume_update_persist_reread"
+      ]
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/db/users.py",
+      "owner": "user cognition persistence owner",
+      "contract": "complete-state compare-and-replace for user cognition commits",
+      "required_unit_tests": [
+        "tests/unit/db/test_users_cognition_state.py::test_compare_and_replace_user_cognition_state_rejects_stale_base",
+        "tests/unit/db/test_users_cognition_state.py::test_compare_and_replace_user_cognition_state_rejects_same_timestamp_stale_state"
+      ],
+      "supplemental_tests": [
+        "tests/test_cognition_v2_boundary_propagation.py::test_boundary_rejection_stops_before_action_resolver_delivery",
+        "tests/test_cognition_relationship_maintenance_loop.py::test_relationship_maintenance_round_trips_create_consume_update_persist_reread"
+      ]
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/db/script_operations.py",
+      "owner": "database migration helper owner",
+      "contract": "ordered relationship-maintenance migration rows and digest-guarded replacement",
+      "required_unit_tests": [
+        "tests/unit/db/test_script_operations.py::test_relationship_maintenance_migration_helpers_use_expected_digest",
+        "tests/unit/db/test_script_operations.py::test_relationship_maintenance_migration_helpers_report_drift"
+      ],
+      "supplemental_tests": [
+        "tests/test_cognition_relationship_maintenance_migration.py::test_migration_uses_named_db_maintenance_boundary"
+      ]
+    },
+    {
+      "source": "src/scripts/migrate_cognition_relationship_maintenance.py",
+      "owner": "relationship maintenance migration command owner",
+      "contract": "zero-write dry run and drift-guarded maintenance backfill",
+      "required_unit_tests": [
+        "tests/test_cognition_relationship_maintenance_migration.py::test_relationship_maintenance_migration_dry_run_performs_no_writes",
+        "tests/test_cognition_relationship_maintenance_migration.py::test_dry_run_backfill_preserves_existing_relationship_axes",
+        "tests/test_cognition_relationship_maintenance_migration.py::test_apply_requires_matching_dry_run_digest",
+        "tests/test_cognition_relationship_maintenance_migration.py::test_migration_fails_closed_on_concurrent_drift",
+        "tests/test_cognition_relationship_maintenance_migration.py::test_migration_fails_closed_on_drifted_already_valid_row",
+        "tests/test_cognition_relationship_maintenance_migration.py::test_migration_fails_closed_on_missing_already_valid_row",
+        "tests/test_cognition_relationship_maintenance_migration.py::test_migration_uses_named_db_maintenance_boundary"
+      ]
     },
     {
       "source": "src/kazusa_ai_chatbot/db/internal_monologue_residue.py",
@@ -886,11 +982,13 @@
         "tests/unit/nodes/test_persona_supervisor2_cognition.py::test_group_self_cognition_proposal_materializes_existing_speak_surface",
         "tests/unit/nodes/test_persona_supervisor2_cognition.py::test_persona_supervisor2_cognition_exposes_owned_contract",
         "tests/unit/nodes/test_persona_supervisor2_cognition.py::test_promoted_reflection_preserves_source_updated_at",
-        "tests/unit/nodes/test_persona_supervisor2_cognition.py::test_promoted_self_guidance_is_goal_only_conditional_context"
+        "tests/unit/nodes/test_persona_supervisor2_cognition.py::test_promoted_self_guidance_is_goal_only_conditional_context",
+        "tests/unit/nodes/test_persona_supervisor2_cognition.py::test_user_cognition_commit_uses_compare_and_replace"
       ],
       "supplemental_tests": [
         "tests/test_persona_supervisor2_cognition_prewarm.py::test_parent_retry_does_not_repeat_shared_memory_prewarm",
-        "tests/test_persona_supervisor2_cognition_prewarm.py::test_omitted_coordinator_does_not_use_ambient_guardrail"
+        "tests/test_persona_supervisor2_cognition_prewarm.py::test_omitted_coordinator_does_not_use_ambient_guardrail",
+        "tests/test_cognition_v2_boundary_propagation.py::test_boundary_rejection_stops_before_action_resolver_delivery"
       ]
     },
     {

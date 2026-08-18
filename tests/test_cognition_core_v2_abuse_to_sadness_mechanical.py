@@ -208,7 +208,7 @@ def test_negative_abuse_outcome_reaches_sadness_mechanically() -> None:
         appraisal,
         evidence,
         handle_to_ref,
-    )
+    )["updated_state"]
     reduced = apply_state_update(
         reduced,
         updated_at=now,

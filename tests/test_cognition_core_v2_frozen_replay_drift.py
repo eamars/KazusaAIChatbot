@@ -136,7 +136,7 @@ def test_same_batch_repeated_terminal_meaning_is_idempotent() -> None:
             },
         },
         comparisons,
-    )
+    )["updated_state"]
 
     assert updated["active_events"][0]["status"] == "resolved"
     assert [row["outcome"] for row in comparisons] == [
@@ -178,7 +178,7 @@ def test_relationship_evidence_retains_the_newest_eight_rows() -> None:
                 "entity_id": state["relationship"]["relationship_id"],
             },
         },
-    )
+    )["updated_state"]
 
     validate_cognition_state(updated)
     assert [

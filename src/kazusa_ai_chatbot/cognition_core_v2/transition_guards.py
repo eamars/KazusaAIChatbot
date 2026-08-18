@@ -12,6 +12,9 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     ENTITY_LIST_FIELDS,
     ENTITY_KINDS,
 )
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    SemanticDeltaApplicationResultV2,
+)
 
 
 USER_FACT_PRODUCERS = frozenset(
@@ -172,8 +175,8 @@ def apply_direct_fact(
 def apply_semantic_deltas(
     state: Mapping[str, Any],
     deltas: Sequence[Mapping[str, Any]],
-) -> dict[str, Any]:
-    """Apply unique bounded deltas; duplicate targets invalidate only themselves."""
+) -> SemanticDeltaApplicationResultV2:
+    """Apply unique bounded deltas and return authoritative receipts."""
 
     normalized: list[tuple[str, int, list[str], str]] = []
     target_counts: dict[str, int] = {}
@@ -202,6 +205,24 @@ def apply_semantic_deltas(
         normalized.append((path, delta, list(handles), reason))
 
     updated_state = deepcopy(dict(state))
+    accepted_receipts = []
+    rejected_receipts = [
+        {
+            "target_path": path,
+            "disposition": "duplicate_target",
+        }
+        for path, count in sorted(target_counts.items())
+        if count > 1
+    ]
+    for path, delta, handles, _reason in normalized:
+        if target_counts[path] != 1:
+            validation_state = deepcopy(updated_state)
+            validation_target = _apply_delta_path(
+                validation_state,
+                path,
+                delta,
+            )
+            _retain_delta_evidence(validation_target, handles)
     for path, delta, handles, reason in sorted(normalized):
         if target_counts[path] != 1:
             continue
@@ -211,6 +232,9 @@ def apply_semantic_deltas(
             gap = _find_entity(updated_state, "knowledge_gap", pieces[1])
             if pieces[2] == "uncertainty":
                 previous_uncertainty = gap["uncertainty"]
+        pieces = path.split(".")
+        value_axis = pieces[-1]
+        previous_value = _read_delta_value(updated_state, path)
         target = _apply_delta_path(updated_state, path, delta)
         _retain_delta_evidence(target, handles)
         if previous_uncertainty is not None and delta < 0:
@@ -232,7 +256,52 @@ def apply_semantic_deltas(
                     )
                 )
         target["updated_at"] = updated_state["updated_at"]
-    return updated_state
+        evidence_refs = [
+            deepcopy(dict(ref))
+            for ref in target["evidence_refs"]
+            if ref.get("source_id") in handles
+        ][:8]
+        relationship_axis = (
+            pieces[1]
+            if len(pieces) == 2 and pieces[0] == "relationship"
+            else None
+        )
+        accepted_receipts.append({
+            "target_path": path,
+            "relationship_axis": relationship_axis,
+            "requested_delta": delta,
+            "applied_delta": target[value_axis] - previous_value,
+            "previous_value": previous_value,
+            "next_value": target[value_axis],
+            "evidence_refs": evidence_refs,
+            "duplicate_disposition": "unique",
+        })
+    return {
+        "updated_state": updated_state,
+        "accepted_delta_receipts": accepted_receipts,
+        "rejected_delta_receipts": rejected_receipts,
+    }
+
+
+def _read_delta_value(state: Mapping[str, Any], path: str) -> int:
+    """Read one allowlisted delta value before applying its change."""
+
+    pieces = path.split(".")
+    if len(pieces) == 2 and pieces[0] in {"relationship", "meaning_state"}:
+        target = state[pieces[0]]
+        return target[pieces[1]]
+    if len(pieces) == 3 and pieces[0] == "drives":
+        return state["drives"][pieces[1]][pieces[2]]
+    if len(pieces) == 3 and pieces[0] in ENTITY_LIST_FIELDS.values():
+        kind = {
+            "goals": "goal",
+            "threats": "threat",
+            "active_events": "event",
+            "knowledge_gaps": "knowledge_gap",
+        }[pieces[0]]
+        target = _find_entity(state, kind, pieces[1])
+        return target[pieces[2]]
+    raise CognitionStateError("semantic delta target is invalid")
 
 
 def compare_event(

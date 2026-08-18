@@ -17,6 +17,9 @@ from bson.json_util import RELAXED_JSON_OPTIONS
 from pymongo.errors import PyMongoError
 
 from kazusa_ai_chatbot.config import AUDIT_LOG_TTL_DAYS, DEBUG_LOG_TTL_DAYS
+from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    validate_cognition_state,
+)
 from kazusa_ai_chatbot.db._client import (
     build_vector_search_index_model,
     get_document_text_embedding,
@@ -1520,6 +1523,61 @@ async def load_user_state_documents(
         rows = [dict(doc) for doc in await cursor.to_list(length=None)]
         documents[collection_name] = rows
     return documents
+
+
+async def list_user_cognition_states_for_relationship_maintenance_migration(
+) -> list[dict[str, Any]]:
+    """Load user cognition rows in the migration's canonical order."""
+
+    db = await get_db()
+    cursor = db.user_profiles.find(
+        {"cognition_state.state_scope": "user"},
+        {
+            "_id": 0,
+            "global_user_id": 1,
+            "cognition_state": 1,
+        },
+    ).sort("global_user_id", 1)
+    return [dict(row) for row in await cursor.to_list(length=None)]
+
+
+def cognition_state_migration_digest(state: Mapping[str, Any]) -> str:
+    """Return the canonical digest used by the maintenance migration."""
+
+    return _extended_json_sha256(state)
+
+
+async def compare_and_replace_user_cognition_state_for_migration(
+    *,
+    global_user_id: str,
+    expected_previous_state: Mapping[str, Any],
+    expected_previous_digest: str,
+    replacement_state: Mapping[str, Any],
+) -> bool:
+    """Apply one migration row only when its reviewed base digest still matches."""
+
+    replacement = validate_cognition_state(replacement_state)
+    if (
+        expected_previous_state.get("state_scope") != "user"
+        or replacement["state_scope"] != "user"
+        or expected_previous_state.get("owner_user_id") != global_user_id
+        or replacement["owner_user_id"] != global_user_id
+    ):
+        raise ValueError("migration cognition state owner does not match row")
+    expected_state = dict(expected_previous_state)
+    actual_digest = cognition_state_migration_digest(expected_state)
+    if actual_digest != expected_previous_digest:
+        raise ValueError("migration expected-state digest does not match")
+    db = await get_db()
+    result = await db.user_profiles.update_one(
+        {
+            "global_user_id": global_user_id,
+            "cognition_state": expected_state,
+        },
+        {"$set": {"cognition_state": replacement}},
+        upsert=False,
+    )
+    return result.matched_count == 1
 
 
 async def load_user_state_snapshot_documents(

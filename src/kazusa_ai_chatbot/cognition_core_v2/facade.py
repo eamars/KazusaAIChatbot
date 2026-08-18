@@ -18,11 +18,11 @@ from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     ActionBidV2,
     BranchDefinition,
+    CognitionContextLimitError,
+    CognitionContractError,
     CognitionCoreInputV2,
     CognitionCoreOutputV2,
     CognitionCoreServicesV2,
-    CognitionContractError,
-    CognitionContextLimitError,
     CognitionExecutionError,
     CognitionObservabilityV2,
     GroupEngagementActionContextV2,
@@ -65,14 +65,15 @@ from kazusa_ai_chatbot.cognition_core_v2.semantic_source_planner import (
     plan_semantic_questions,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
-    CognitionStateError,
     ROLE_ENTITY_KINDS,
+    CognitionStateError,
     validate_cognition_state,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
     project_state_for_prompt,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
+    apply_relationship_maintenance,
     apply_semantic_appraisals,
     apply_state_update,
     create_deterministic_goals,
@@ -92,7 +93,6 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
 )
 from kazusa_ai_chatbot.llm_tracing import failure_capsule
 from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
-
 
 _DEGRADABLE_APPRAISAL_ERROR_CODES = frozenset({
     "semantic_appraisal_provider_exhausted",
@@ -294,6 +294,7 @@ async def _run_cognition(
         appraisal_results,
         reduction_failures,
         comparison_results,
+        accepted_relationship_deltas,
     ) = _reduce_appraisals_with_isolation(
         preliminary_state,
         appraisal_results,
@@ -308,6 +309,30 @@ async def _run_cognition(
         f"semantic_appraisal_failed:{error_code}"
         for error_code in reduction_failures.values()
     )
+    final_state = _apply_final_relationship_maintenance(
+        final_state,
+        episode=payload["episode"],
+        elapsed_seconds=elapsed_seconds,
+        accepted_relationship_deltas=accepted_relationship_deltas,
+        direct_facts=payload["direct_facts"],
+    )
+    if final_state["state_scope"] == "user":
+        final_state = apply_state_update(
+            final_state,
+            elapsed_seconds=0,
+            updated_at=updated_at,
+            character_constraints=payload["character_constraints"],
+            relationship_context=reducer_relationship_context,
+        )
+        final_state = create_deterministic_goals(
+            final_state,
+            character_constraints=payload["character_constraints"],
+            relationship_context=reducer_relationship_context,
+            evidence=payload["evidence"],
+            updated_at=updated_at,
+            reconcile_salience_gated_goals=True,
+        )
+        final_state = validate_cognition_state(final_state)
     stage_status["final_reduction"] = "completed"
     final_projection = project_state_for_prompt(
         final_state,
@@ -1434,6 +1459,47 @@ def _episode_updated_at(episode: Mapping[str, Any]) -> str:
     return parsed.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _episode_interaction_date_utc(episode: Mapping[str, Any]) -> str:
+    """Derive the canonical UTC interaction date from the episode carrier."""
+
+    return _episode_updated_at(episode)[:10]
+
+
+def _trusted_relationship_facts(
+    direct_facts: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Pass guarded producer facts to relationship maintenance."""
+
+    trusted: list[dict[str, Any]] = []
+    for fact in direct_facts:
+        row = dict(_fact_without_producer(fact))
+        row["producer"] = fact["producer"]
+        trusted.append(row)
+    return trusted
+
+
+def _apply_final_relationship_maintenance(
+    state: Mapping[str, Any],
+    *,
+    episode: Mapping[str, Any],
+    elapsed_seconds: int,
+    accepted_relationship_deltas: Sequence[Mapping[str, Any]],
+    direct_facts: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Apply the one final relationship-maintenance transaction."""
+
+    if state["state_scope"] != "user":
+        return dict(state)
+    return apply_relationship_maintenance(
+        state,
+        source_episode_id=episode["episode_id"],
+        interaction_date_utc=_episode_interaction_date_utc(episode),
+        elapsed_seconds=elapsed_seconds,
+        accepted_relationship_deltas=accepted_relationship_deltas,
+        trusted_facts=_trusted_relationship_facts(direct_facts),
+    )
+
+
 def _elapsed_seconds(previous: str, current: str) -> int:
     """Return non-negative elapsed seconds between two UTC values."""
 
@@ -1472,6 +1538,7 @@ def _reduce_appraisals_with_isolation(
     list[SemanticAppraisalResultV2],
     dict[str, str],
     list[dict[str, Any]],
+    list[dict[str, Any]],
 ]:
     """Validate each appraisal through a cumulative accepted-prefix reduction.
 
@@ -1495,6 +1562,7 @@ def _reduce_appraisals_with_isolation(
     accepted_results: list[SemanticAppraisalResultV2] = []
     failures: dict[str, str] = {}
     comparison_results: list[dict[str, Any]] = []
+    accepted_relationship_deltas: list[dict[str, Any]] = []
     for result in [None, *results]:
         candidate_results = list(accepted_results)
         if result is not None:
@@ -1502,13 +1570,14 @@ def _reduce_appraisals_with_isolation(
         candidate_comparisons: list[dict[str, Any]] = []
         finalization_step = "apply_semantic_appraisals"
         try:
-            candidate_state = apply_semantic_appraisals(
+            appraisal_application = apply_semantic_appraisals(
                 state,
                 candidate_results,
                 evidence,
                 handle_to_ref,
                 candidate_comparisons,
             )
+            candidate_state = appraisal_application["updated_state"]
             finalization_step = "_semantic_relief_transitions"
             relief_transitions = _semantic_relief_transitions(
                 state,
@@ -1565,6 +1634,9 @@ def _reduce_appraisals_with_isolation(
             continue
         updated_state = candidate_state
         comparison_results = candidate_comparisons
+        accepted_relationship_deltas = appraisal_application[
+            "accepted_delta_receipts"
+        ]
         if result is not None:
             accepted_results.append(result)
     return (
@@ -1572,6 +1644,7 @@ def _reduce_appraisals_with_isolation(
         accepted_results,
         failures,
         comparison_results,
+        accepted_relationship_deltas,
     )
 
 

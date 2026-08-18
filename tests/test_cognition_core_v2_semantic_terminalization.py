@@ -31,7 +31,7 @@ from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
     _causal_candidate_id,
     _matching_event,
     _retain_current_batch_evidence,
-    apply_semantic_appraisals,
+    apply_semantic_appraisals as _apply_semantic_appraisals,
 )
 from tests.test_cognition_core_v2_stage_model_routing import (
     _CapturingInvoker,
@@ -56,6 +56,12 @@ _FIXTURE_PATH = (
     / "fixtures"
     / "cognition_v2_group_ownership_terminalization.json"
 )
+
+
+def _reduced_state(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    """Extract the native state from the reducer's receipt envelope."""
+
+    return _apply_semantic_appraisals(*args, **kwargs)["updated_state"]
 
 
 def _evidence() -> dict[str, Any]:
@@ -193,7 +199,7 @@ def test_goal_completed_atomically_establishes_transition_invariants() -> None:
     state = _state_with_goals()
     result = _terminal_result(_proposition("goal_completed", "g1"))
 
-    updated = apply_semantic_appraisals(
+    updated = _reduced_state(
         state,
         [result],
         [_evidence()],
@@ -219,7 +225,7 @@ def test_goal_terminal_postcondition_survives_same_batch_delta() -> None:
         "reason": "The bounded evidence supports this obstruction observation.",
     }]
 
-    updated = apply_semantic_appraisals(
+    updated = _reduced_state(
         state,
         [result],
         [_evidence()],
@@ -241,7 +247,7 @@ def test_outcome_pending_has_no_state_authority() -> None:
     state["goals"][0]["evidence_refs"] = []
     result = _terminal_result(_proposition("outcome_pending", "g1"))
 
-    updated = apply_semantic_appraisals(
+    updated = _reduced_state(
         state,
         [result],
         [_evidence()],
@@ -350,7 +356,7 @@ def test_candidate_terminal_assertions_use_the_same_atomic_fsm(
     result = _terminal_result(_proposition(kind, "candidate1"))
     comparisons: list[dict[str, Any]] = []
 
-    updated = apply_semantic_appraisals(
+    updated = _reduced_state(
         state,
         [result],
         [_evidence()],
@@ -456,7 +462,7 @@ def test_terminal_postconditions_survive_same_batch_deltas(
         for axis, delta in axis_deltas.items()
     ]
 
-    updated = apply_semantic_appraisals(
+    updated = _reduced_state(
         state,
         [result],
         [_evidence()],
@@ -626,7 +632,7 @@ def test_terminalized_low_salience_candidate_survives_same_batch_pruning(
     evidence = document["evidence"]
     handle_to_ref = document["handle_to_ref"]
 
-    updated = apply_semantic_appraisals(
+    updated = _reduced_state(
         state,
         document["appraisals"],
         evidence,
@@ -645,7 +651,7 @@ def test_terminalized_low_salience_candidate_survives_same_batch_pruning(
     )
     assert surviving["entity_id"] == expected_id
 
-    weak_updated = apply_semantic_appraisals(
+    weak_updated = _reduced_state(
         state,
         [deepcopy(document["appraisals"][0])],
         evidence,
@@ -731,6 +737,7 @@ def test_final_reduction_isolates_one_residual_invalid_appraisal() -> None:
         accepted_results,
         failures,
         comparisons,
+        _receipts,
     ) = reducer(
         state,
         [invalid, accepted],
@@ -795,6 +802,7 @@ def test_final_reduction_preserves_cross_appraisal_composition() -> None:
         accepted_results,
         failures,
         comparisons,
+        _receipts,
     ) = reducer(
         state,
         [materializer, delta_result],
@@ -882,7 +890,7 @@ def test_relationship_reduction_pins_all_current_batch_evidence() -> None:
         "explanation": "The current relationship evidence supports both deltas.",
     }
 
-    updated = apply_semantic_appraisals(
+    updated = _reduced_state(
         state,
         [result],
         evidence,

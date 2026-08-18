@@ -5,12 +5,14 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
+from datetime import date
 from math import floor
 from typing import Any
 
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionEvidenceV2,
     SemanticAppraisalResultV2,
+    SemanticDeltaApplicationResultV2,
 )
 from kazusa_ai_chatbot.cognition_core_v2.emotion_definitions import (
     EMOTION_DEFINITIONS,
@@ -19,10 +21,11 @@ from kazusa_ai_chatbot.cognition_core_v2.emotion_derivation import (
     derive_persistent_emotion_activations,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
-    CognitionStateError,
     ENTITY_LIST_FIELDS,
     GOAL_KINDS,
+    MAX_PROCESSED_SOURCE_IDS,
     ROLE_ENTITY_KINDS,
+    CognitionStateError,
     prune_terminal_entities,
 )
 from kazusa_ai_chatbot.cognition_core_v2.transition_guards import (
@@ -36,10 +39,29 @@ from kazusa_ai_chatbot.cognition_core_v2.transition_guards import (
     transition_threat,
 )
 
-
 _ENTITY_FIELDS = ("goals", "threats", "active_events", "knowledge_gaps")
 MAX_EVIDENCE_REFS_PER_TARGET = 8
 CHARACTER_ELAPSED_SALIENCE_RATE_PER_HOUR = 4
+USER_SALIENCE_DECAY_RATE_PER_HOUR = 4
+SECONDS_PER_HOUR = 3600
+FAMILIARITY_DATE_INCREMENT = 1
+FAMILIARITY_DAILY_BONUS_INCREMENT = 1
+RELATIONSHIP_DAILY_INCREMENT_CAP = 2
+RELATIONSHIP_MAINTENANCE_SOURCE_PREFIX = "episode:"
+TRUSTED_RELATIONSHIP_FACT_PRODUCERS = frozenset({
+    "action_result",
+    "resolver_observation",
+    "tool_result",
+})
+TRUSTED_RELATIONSHIP_FACT_KINDS = frozenset({
+    "goal_progress_observed",
+    "goal_completed",
+    "goal_terminal_failure",
+    "goal_obstruction_removed",
+    "threat_resolved",
+    "event_repaired",
+    "knowledge_answered",
+})
 
 
 def apply_semantic_appraisals(
@@ -48,7 +70,7 @@ def apply_semantic_appraisals(
     evidence: Sequence[CognitionEvidenceV2],
     handle_to_ref: Mapping[str, Mapping[str, str]],
     comparison_results: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
+) -> SemanticDeltaApplicationResultV2:
     """Map prompt handles to native paths before the final deterministic reduce."""
 
     evidence_by_handle = {
@@ -108,7 +130,8 @@ def apply_semantic_appraisals(
         evidence_by_handle,
         local_handle_to_ref,
     )
-    updated = apply_semantic_deltas(updated, translated)
+    delta_result = apply_semantic_deltas(updated, translated)
+    updated = delta_result["updated_state"]
     _recompute_new_causal_salience(
         updated,
         translated,
@@ -122,7 +145,15 @@ def apply_semantic_appraisals(
         results,
         local_handle_to_ref,
     )
-    return updated
+    return {
+        "updated_state": updated,
+        "accepted_delta_receipts": delta_result[
+            "accepted_delta_receipts"
+        ],
+        "rejected_delta_receipts": delta_result[
+            "rejected_delta_receipts"
+        ],
+    }
 
 
 def _reassert_terminal_postconditions(
@@ -956,7 +987,7 @@ def apply_state_update(
         updated_state = apply_elapsed_decay(
             state,
             elapsed_seconds=elapsed_seconds,
-            rate_per_hour=4,
+            rate_per_hour=USER_SALIENCE_DECAY_RATE_PER_HOUR,
         )
     else:
         updated_state = apply_character_elapsed_decay(
@@ -979,7 +1010,8 @@ def apply_state_update(
         if transition is not None:
             accepted_transitions.append(transition)
         updated_state = next_state
-    updated_state = apply_semantic_deltas(updated_state, semantic_deltas)
+    delta_result = apply_semantic_deltas(updated_state, semantic_deltas)
+    updated_state = delta_result["updated_state"]
     _apply_guarded_lifecycle_transitions(updated_state)
     if updated_at is not None:
         updated_state["updated_at"] = updated_at
@@ -993,6 +1025,156 @@ def apply_state_update(
     )
     retained_state = prune_terminal_entities(updated_state)
     return retained_state
+
+
+def apply_relationship_maintenance(
+    state: Mapping[str, Any],
+    *,
+    source_episode_id: str,
+    interaction_date_utc: str,
+    elapsed_seconds: int,
+    accepted_relationship_deltas: Sequence[Mapping[str, Any]] = (),
+    trusted_facts: Sequence[Mapping[str, Any]] = (),
+) -> dict[str, Any]:
+    """Apply monotonic relationship familiarity and salience maintenance."""
+
+    if state["state_scope"] != "user":
+        raise CognitionStateError(
+            "relationship maintenance requires user cognition scope"
+        )
+    if (
+        not isinstance(source_episode_id, str)
+        or not source_episode_id
+        or source_episode_id.startswith(RELATIONSHIP_MAINTENANCE_SOURCE_PREFIX)
+    ):
+        raise CognitionStateError("relationship source identity is invalid")
+    _validate_interaction_date(interaction_date_utc)
+    if elapsed_seconds < 0:
+        raise CognitionStateError("relationship elapsed time is invalid")
+
+    updated_state = deepcopy(dict(state))
+    relationship = updated_state["relationship"]
+    maintenance = relationship["relationship_maintenance"]
+    source_id = (
+        f"{RELATIONSHIP_MAINTENANCE_SOURCE_PREFIX}{source_episode_id}"
+    )
+    last_date = maintenance["last_interaction_date_utc"]
+    processed_source_ids = maintenance["processed_source_ids"]
+    if last_date is not None and interaction_date_utc < last_date:
+        return updated_state
+    if source_id in processed_source_ids:
+        return updated_state
+    if last_date is None or interaction_date_utc > last_date:
+        next_source_ids = [source_id]
+        relationship["familiarity"] = min(
+            100,
+            relationship["familiarity"] + FAMILIARITY_DATE_INCREMENT,
+        )
+    else:
+        if len(processed_source_ids) >= MAX_PROCESSED_SOURCE_IDS:
+            raise CognitionStateError(
+                "relationship maintenance source ledger exceeds its cap"
+            )
+        next_source_ids = [*processed_source_ids, source_id]
+
+    relationship["salience"] = max(
+        0,
+        relationship["salience"]
+        - floor(
+            elapsed_seconds
+            * USER_SALIENCE_DECAY_RATE_PER_HOUR
+            / SECONDS_PER_HOUR
+        ),
+    )
+    has_unique_relationship_delta, strongest_delta = (
+        _strongest_relationship_delta(
+            accepted_relationship_deltas,
+        )
+    )
+    relationship["salience"] = min(
+        100,
+        relationship["salience"] + strongest_delta,
+    )
+    qualifies_for_bonus = has_unique_relationship_delta or any(
+        _is_trusted_relationship_fact(fact)
+        for fact in trusted_facts
+    )
+    daily_increment = 0
+    if (
+        qualifies_for_bonus
+        and maintenance["last_bonus_date_utc"] != interaction_date_utc
+    ):
+        daily_increment = min(
+            FAMILIARITY_DAILY_BONUS_INCREMENT,
+            RELATIONSHIP_DAILY_INCREMENT_CAP - FAMILIARITY_DATE_INCREMENT,
+        )
+        maintenance["last_bonus_date_utc"] = interaction_date_utc
+    relationship["familiarity"] = min(
+        100,
+        relationship["familiarity"] + daily_increment,
+    )
+    maintenance["last_interaction_date_utc"] = interaction_date_utc
+    maintenance["last_source_id"] = source_id
+    maintenance["processed_source_ids"] = next_source_ids
+    relationship["updated_at"] = updated_state["updated_at"]
+    return updated_state
+
+
+def _validate_interaction_date(value: str) -> None:
+    """Validate the canonical UTC interaction date carrier."""
+
+    if not isinstance(value, str):
+        raise CognitionStateError("relationship interaction date is invalid")
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError as exc:
+        raise CognitionStateError(
+            "relationship interaction date is invalid"
+        ) from exc
+    if parsed.isoformat() != value:
+        raise CognitionStateError("relationship interaction date is invalid")
+
+
+def _strongest_relationship_delta(
+    receipts: Sequence[Mapping[str, Any]],
+) -> tuple[bool, int]:
+    """Return unique-receipt presence and strongest applied delta."""
+
+    unique_targets: set[str] = set()
+    strongest = 0
+    for receipt in receipts:
+        if receipt.get("duplicate_disposition") != "unique":
+            continue
+        target_path = receipt.get("target_path")
+        axis = receipt.get("relationship_axis")
+        applied_delta = receipt.get("applied_delta")
+        if (
+            not isinstance(target_path, str)
+            or not target_path.startswith("relationship.")
+            or not isinstance(axis, str)
+            or not isinstance(applied_delta, int)
+            or target_path in unique_targets
+        ):
+            continue
+        unique_targets.add(target_path)
+        strongest = max(strongest, abs(applied_delta))
+    return bool(unique_targets), strongest
+
+
+def _is_trusted_relationship_fact(fact: Mapping[str, Any]) -> bool:
+    """Recognize a guarded user-specific fact eligible for a daily bonus."""
+
+    producer = fact.get("producer")
+    fact_kind = fact.get("fact_kind")
+    nested_fact = fact.get("fact")
+    if isinstance(nested_fact, Mapping):
+        fact_kind = nested_fact.get("fact_kind", fact_kind)
+    return (
+        isinstance(producer, str)
+        and isinstance(fact_kind, str)
+        and producer in TRUSTED_RELATIONSHIP_FACT_PRODUCERS
+        and fact_kind in TRUSTED_RELATIONSHIP_FACT_KINDS
+    )
 
 
 def _direct_fact_relief_transition(
@@ -1199,8 +1381,9 @@ def create_deterministic_goals(
     relationship_context: Mapping[str, Any] | None = None,
     evidence: Sequence[Mapping[str, Any]] = (),
     updated_at: str | None = None,
+    reconcile_salience_gated_goals: bool = False,
 ) -> dict[str, Any]:
-    """Create or retain every frozen goal kind from pursuing causal roots."""
+    """Create goals and optionally reconcile final salience-gated goals."""
 
     updated = deepcopy(dict(state))
     constraints = character_constraints or updated
@@ -1277,6 +1460,23 @@ def create_deterministic_goals(
             ),
             None,
         )
+        connection_goal_is_eligible = (
+            relationship["salience"] >= 40 and closeness_gap >= 40
+        )
+        if (
+            reconcile_salience_gated_goals
+            and not connection_goal_is_eligible
+        ):
+            updated["goals"] = [
+                goal
+                for goal in updated["goals"]
+                if not (
+                    isinstance(goal, Mapping)
+                    and goal.get("entity_id") == connection_goal_id
+                    and goal.get("status") in {"pursuing", "blocked"}
+                )
+            ]
+            connection_goal = None
         if (
             closeness_gap == 0
             and connection_goal is not None
@@ -1290,7 +1490,7 @@ def create_deterministic_goals(
             )
             connection_goal.update(transitioned_goal)
             connection_goal["updated_at"] = now
-        if relationship["salience"] >= 40 and closeness_gap >= 40:
+        if connection_goal_is_eligible:
             add_goal(
                 "relationship_connection",
                 relationship_root,

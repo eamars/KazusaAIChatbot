@@ -47,6 +47,7 @@ availability.
 | `load_character_profile.py` | `python -m scripts.load_character_profile personalities/<file>.json` | Required manual seed operation for a clean identity ledger; `--force --operator-action-id ...` creates an immutable operator-reset revision. |
 | `manage_memory_knowledge.py` | `manage-memory-knowledge` | Edit and sync local memory knowledge entries. |
 | `migrate_conversation_history_envelope.py` | `python -m scripts.migrate_conversation_history_envelope [--apply]` | Repair conversation rows that violate typed-envelope storage fields or semantic-text cleanliness. |
+| `migrate_cognition_relationship_maintenance.py` | `python -m scripts.migrate_cognition_relationship_maintenance --dry-run|--apply --backup <path> --report <path> --output <path>` | Backfill reducer-owned `relationship_maintenance.v1` metadata; dry-run writes the reviewed backup/report, while apply requires the matching digest and skips concurrent drift. |
 | `profile_embedding_prefix_modes.py` | `python -m scripts.profile_embedding_prefix_modes` | Compare embedding prefix strategies for RAG tuning. |
 | `profile_rag_retrieval.py` | `python -m scripts.profile_rag_retrieval` | Generate RAG retrieval profile cases for tuning and validation. |
 | `reembed_text_vector_embeddings.py` | `python -m scripts.reembed_text_vector_embeddings` | Replay text embedding generation for documents or collections. |

@@ -444,7 +444,7 @@ def test_reducer_records_current_event_ref_from_evidence_provenance() -> None:
             },
         },
         comparison_results,
-    )
+    )["updated_state"]
 
     event = updated["active_events"][0]
     assert comparison_results[0]["current_event_ref"] == {

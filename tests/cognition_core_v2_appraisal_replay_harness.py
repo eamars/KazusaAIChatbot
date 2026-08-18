@@ -242,13 +242,16 @@ async def _run_boundary_once(
 
     async def replace_user_state(
         owner_key: str,
+        expected_previous_state: Mapping[str, Any],
         replacement: Mapping[str, Any],
-    ) -> None:
+    ) -> bool:
         commit_calls.append({
             "state_scope": "user",
             "owner_key": owner_key,
+            "expected_previous_state": _clone(expected_previous_state),
             "replacement_state": _clone(replacement),
         })
+        return True
 
     async def replace_character_state(
         *,
@@ -284,7 +287,7 @@ async def _run_boundary_once(
     )
     monkeypatch.setattr(
         cognition_node,
-        "replace_user_cognition_state",
+        "compare_and_replace_user_cognition_state",
         replace_user_state,
     )
     monkeypatch.setattr(

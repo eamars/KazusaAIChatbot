@@ -727,12 +727,13 @@ def _reduce_apply_decision(
     )
     try:
         native_effective_at = _native_utc_z(effective_at)
-        preliminary_state = apply_semantic_appraisals(
+        appraisal_application = apply_semantic_appraisals(
             base_state,
             [semantic_result],
             evidence,
             handle_to_ref,
         )
+        preliminary_state = appraisal_application["updated_state"]
         replacement_state = apply_state_update(
             preliminary_state,
             elapsed_seconds=0,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from importlib import import_module
 from typing import Any
 
@@ -33,6 +34,109 @@ def test_facade_exposes_owned_contract() -> None:
     assert not missing_symbols, (
         f"{MODULE_PATH} is missing owner symbols: {missing_symbols}"
     )
+
+
+def test_cognition_passes_episode_source_id_and_interaction_date_to_relationship_maintenance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Carry the episode identity and canonical UTC date into the reducer."""
+
+    state = validate_cognition_state(
+        build_acquaintance_user_state(
+            global_user_id="facade-maintenance-user",
+            updated_at=_TIMESTAMP,
+        )
+    )
+    captured: dict[str, Any] = {}
+
+    def capture_maintenance(
+        current_state: dict[str, Any],
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        captured.update(kwargs)
+        return current_state
+
+    monkeypatch.setattr(
+        facade,
+        "apply_relationship_maintenance",
+        capture_maintenance,
+    )
+    facade._apply_final_relationship_maintenance(
+        state,
+        episode={
+            "episode_id": "facade-maintenance-episode",
+            "created_at": "2026-08-18T12:34:56+00:00",
+        },
+        elapsed_seconds=17,
+        accepted_relationship_deltas=[],
+        direct_facts=[],
+    )
+
+    assert captured["source_episode_id"] == "facade-maintenance-episode"
+    assert captured["interaction_date_utc"] == "2026-08-18"
+    assert captured["elapsed_seconds"] == 17
+
+
+def test_cognition_applies_relationship_maintenance_once_after_cumulative_trials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Forward the final accepted receipt prefix through one maintenance call."""
+
+    state = validate_cognition_state(
+        build_acquaintance_user_state(
+            global_user_id="facade-cumulative-user",
+            updated_at=_TIMESTAMP,
+        )
+    )
+    calls: list[list[Mapping[str, Any]]] = []
+
+    def count_maintenance(
+        current_state: dict[str, Any],
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        calls.append(list(kwargs["accepted_relationship_deltas"]))
+        return current_state
+
+    receipts = [
+        {
+            "target_path": "relationship.trust",
+            "relationship_axis": "trust",
+            "requested_delta": 4,
+            "applied_delta": 4,
+            "previous_value": 0,
+            "next_value": 4,
+            "evidence_refs": [],
+            "duplicate_disposition": "unique",
+        },
+        {
+            "target_path": "relationship.attachment",
+            "relationship_axis": "attachment",
+            "requested_delta": 8,
+            "applied_delta": 8,
+            "previous_value": 0,
+            "next_value": 8,
+            "evidence_refs": [],
+            "duplicate_disposition": "unique",
+        },
+    ]
+    monkeypatch.setattr(
+        facade,
+        "apply_relationship_maintenance",
+        count_maintenance,
+    )
+
+    facade._apply_final_relationship_maintenance(
+        state,
+        episode={
+            "episode_id": "facade-cumulative-episode",
+            "created_at": "2026-08-18T00:00:00Z",
+        },
+        elapsed_seconds=0,
+        accepted_relationship_deltas=receipts,
+        direct_facts=[],
+    )
+
+    assert calls == [receipts]
 
 
 @pytest.mark.asyncio
@@ -296,6 +400,7 @@ def _reduce(
     list[dict[str, Any]],
     dict[str, str],
     list[dict[str, Any]],
+    list[dict[str, Any]],
 ]:
     """Call the private facade owner with the canonical finalization inputs."""
 
@@ -316,7 +421,7 @@ def test_reduction_rejects_over_cap_candidate_during_full_finalization() -> None
     state = _state_with_events(32)
     result = _candidate_event_result("q:over-cap")
 
-    updated, accepted, failures, comparisons = _reduce(
+    updated, accepted, failures, comparisons, _receipts = _reduce(
         state,
         [result],
         [_evidence()],
@@ -342,7 +447,7 @@ def test_reduction_rejects_affect_protected_terminal_during_finalization() -> No
     )
     result = _candidate_event_result("q:protected-terminal")
 
-    updated, accepted, failures, comparisons = _reduce(
+    updated, accepted, failures, comparisons, _receipts = _reduce(
         state,
         [result],
         [_evidence()],
@@ -369,7 +474,7 @@ def test_reduction_accepts_candidate_when_terminal_row_is_removable() -> None:
     state = _state_with_events(32, terminal_index=0)
     result = _candidate_event_result("q:removable-terminal")
 
-    updated, accepted, failures, comparisons = _reduce(
+    updated, accepted, failures, comparisons, _receipts = _reduce(
         state,
         [result],
         [_evidence()],
@@ -399,7 +504,7 @@ def test_reduction_rejects_goal_capacity_during_finalization() -> None:
         outcome_impact=-80,
     )
 
-    updated, accepted, failures, comparisons = _reduce(
+    updated, accepted, failures, comparisons, _receipts = _reduce(
         state,
         [result],
         [_evidence()],
@@ -432,7 +537,7 @@ def test_reduction_preserves_accepted_prefix_and_comparison_rows() -> None:
         outcome_impact=40,
     )
 
-    updated, accepted, failures, comparisons = _reduce(
+    updated, accepted, failures, comparisons, _receipts = _reduce(
         state,
         [first, second],
         [_evidence("e1"), _evidence("e2")],
@@ -496,7 +601,7 @@ def test_reduction_records_bounded_rejection_evidence(
         record_validation_event,
     )
 
-    _, accepted, failures, comparisons = _reduce(
+    _, accepted, failures, comparisons, _receipts = _reduce(
         state,
         [result],
         [_evidence()],
@@ -559,7 +664,7 @@ def test_reduction_runs_finalization_once_per_admitted_prefix(
 
         monkeypatch.setattr(facade, name, counted)
 
-    updated, accepted, failures, comparisons = _reduce(
+    updated, accepted, failures, comparisons, _receipts = _reduce(
         state,
         [result],
         [],

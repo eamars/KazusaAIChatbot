@@ -903,6 +903,7 @@ async def _run_goal_cognition(
             >= attempt_coordinates["configured_limit"]
         )
         started_at = perf_counter()
+        structural_normalizations: list[dict[str, str]] = []
         if selection_required:
             stage_suffix = (
                 'selection_initial'
@@ -981,9 +982,18 @@ async def _run_goal_cognition(
                     llm_tracing.failure_capsule.append_json_repair_attempt
                 ),
             )
+            normalized_parsed, structural_normalizations = (
+                _normalize_nonowning_goal_fields(
+                    parsed,
+                    branch_id=definition.branch_id,
+                    require_relational_willingness=(
+                        require_relational_willingness
+                    ),
+                )
+            )
             if selection_required:
                 selection_draft = validate_selection_goal_draft(
-                    parsed,
+                    normalized_parsed,
                     evidence_handles=set(evidence_handles),
                     role_handles=set(role_bindings),
                     required_evidence_handles=required_evidence_handles,
@@ -1007,7 +1017,7 @@ async def _run_goal_cognition(
                 )
             else:
                 draft = validate_goal_bid_draft(
-                    parsed,
+                    normalized_parsed,
                     **validation_args,
                 )
         except (AttributeError, KeyError, TypeError, ValueError) as exc:
@@ -1035,6 +1045,9 @@ async def _run_goal_cognition(
                 attempt_metadata={
                     **attempt_coordinates,
                     "attempt_disposition": attempt_disposition,
+                    "structural_normalizations": (
+                        structural_normalizations
+                    ),
                 },
             )
             if producer_budget_exhausted:
@@ -1134,6 +1147,7 @@ async def _run_goal_cognition(
             attempt_metadata={
                 **attempt_coordinates,
                 "attempt_disposition": attempt_disposition,
+                "structural_normalizations": structural_normalizations,
             },
         )
         break
@@ -1390,6 +1404,11 @@ def validate_selection_goal_draft(
 
     if not isinstance(parsed, Mapping):
         raise ValueError("selection goal draft must be an object")
+    parsed, _normalizations = _normalize_nonowning_goal_fields(
+        parsed,
+        branch_id="unknown",
+        require_relational_willingness=require_relational_willingness,
+    )
     required_fields = {
         "selection",
         "selected_response_operation",
@@ -1656,6 +1675,11 @@ def validate_goal_bid_draft(
 
     if not isinstance(parsed, Mapping):
         raise ValueError("goal bid draft must be an object")
+    parsed, _normalizations = _normalize_nonowning_goal_fields(
+        parsed,
+        branch_id="unknown",
+        require_relational_willingness=require_relational_willingness,
+    )
     required = {
         "intention",
         "desired_outcome",
@@ -1740,6 +1764,29 @@ def _handles(
     if len(value) != len(set(value)) or any(handle not in allowed for handle in value):
         raise ValueError(f"{label} handles are not permitted")
     return list(value)
+
+
+def _normalize_nonowning_goal_fields(
+    parsed: object,
+    *,
+    branch_id: str,
+    require_relational_willingness: bool,
+) -> tuple[object, list[dict[str, str]]]:
+    """Strip one non-owning relational field before exact-shape validation."""
+
+    if (
+        require_relational_willingness
+        or not isinstance(parsed, Mapping)
+        or "relational_willingness" not in parsed
+    ):
+        return parsed, []
+    normalized = dict(parsed)
+    normalized.pop("relational_willingness")
+    return normalized, [{
+        "branch": branch_id,
+        "field_name": "relational_willingness",
+        "reason": "non_owning_branch_field",
+    }]
 
 
 def _bounded_text(value: Any, label: str, maximum: int) -> None:

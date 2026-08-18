@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, TypedDict
 
 SCHEMA_VERSION = "cognition_state.v2"
+RELATIONSHIP_MAINTENANCE_SCHEMA_VERSION = "relationship_maintenance.v1"
+MAX_PROCESSED_SOURCE_IDS = 256
 CHARACTER_SCOPE = "character"
 USER_SCOPE = "user"
 CHARACTER_OWNER = "global"
@@ -235,6 +237,15 @@ class RelationshipStateV2(TypedDict):
     salience: int
     updated_at: str
     evidence_refs: list[dict[str, Any]]
+    relationship_maintenance: RelationshipMaintenanceV1
+
+
+class RelationshipMaintenanceV1(TypedDict):
+    schema_version: str
+    last_interaction_date_utc: str | None
+    last_bonus_date_utc: str | None
+    last_source_id: str | None
+    processed_source_ids: list[str]
 
 
 class UserCognitionStateV2(TypedDict):
@@ -301,6 +312,13 @@ def build_acquaintance_user_state(
             "salience": 0,
             "updated_at": updated_at,
             "evidence_refs": [],
+            "relationship_maintenance": {
+                "schema_version": RELATIONSHIP_MAINTENANCE_SCHEMA_VERSION,
+                "last_interaction_date_utc": None,
+                "last_bonus_date_utc": None,
+                "last_source_id": None,
+                "processed_source_ids": [],
+            },
         },
         "goals": [],
         "threats": [],
@@ -597,6 +615,7 @@ def _validate_relationship(
         "salience",
         "updated_at",
         "evidence_refs",
+        "relationship_maintenance",
     }
     _require_exact_keys(relationship, required, "relationship")
     _require_nonempty_text(relationship["relationship_id"], "relationship_id")
@@ -618,6 +637,106 @@ def _validate_relationship(
         _validate_number(relationship[field_name], 0, 100, field_name)
     _validate_timestamp(relationship["updated_at"], "relationship.updated_at")
     _validate_evidence_refs(relationship["evidence_refs"], "relationship")
+    _validate_relationship_maintenance(
+        relationship["relationship_maintenance"]
+    )
+
+
+def _validate_relationship_maintenance(
+    maintenance: Mapping[str, Any],
+) -> None:
+    """Validate reducer-owned relationship maintenance metadata."""
+
+    _require_exact_keys(
+        maintenance,
+        {
+            "schema_version",
+            "last_interaction_date_utc",
+            "last_bonus_date_utc",
+            "last_source_id",
+            "processed_source_ids",
+        },
+        "relationship maintenance",
+    )
+    if maintenance["schema_version"] != RELATIONSHIP_MAINTENANCE_SCHEMA_VERSION:
+        raise CognitionStateError(
+            "unsupported relationship maintenance schema"
+        )
+    interaction_date = maintenance["last_interaction_date_utc"]
+    bonus_date = maintenance["last_bonus_date_utc"]
+    _validate_utc_date(interaction_date, "last_interaction_date_utc")
+    _validate_utc_date(bonus_date, "last_bonus_date_utc")
+    if (
+        interaction_date is None
+        and bonus_date is not None
+    ):
+        raise CognitionStateError(
+            "relationship maintenance bonus date requires interaction date"
+        )
+    if (
+        interaction_date is not None
+        and bonus_date is not None
+        and bonus_date > interaction_date
+    ):
+        raise CognitionStateError(
+            "relationship maintenance bonus date is newer than interaction"
+        )
+    last_source_id = maintenance["last_source_id"]
+    if last_source_id is not None:
+        _validate_relationship_source_id(last_source_id, "last_source_id")
+    source_ids = maintenance["processed_source_ids"]
+    if not isinstance(source_ids, list):
+        raise CognitionStateError(
+            "relationship maintenance source ledger must be a list"
+        )
+    if len(source_ids) > MAX_PROCESSED_SOURCE_IDS:
+        raise CognitionStateError(
+            "relationship maintenance source ledger exceeds its cap"
+        )
+    if any(not isinstance(source_id, str) for source_id in source_ids):
+        raise CognitionStateError(
+            "relationship maintenance source ledger must contain text"
+        )
+    if len(source_ids) != len(set(source_ids)):
+        raise CognitionStateError(
+            "relationship maintenance source ledger must be unique"
+        )
+    for source_id in source_ids:
+        _validate_relationship_source_id(source_id, "processed_source_id")
+    if last_source_id is None and source_ids:
+        raise CognitionStateError(
+            "relationship maintenance source ledger has no last source"
+        )
+    if last_source_id is not None and last_source_id not in source_ids:
+        raise CognitionStateError(
+            "relationship maintenance last source is absent from ledger"
+        )
+
+
+def _validate_utc_date(value: Any, label: str) -> None:
+    """Validate a canonical UTC calendar date or null."""
+
+    if value is None:
+        return
+    if not isinstance(value, str):
+        raise CognitionStateError(f"{label} must be a UTC date or null")
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError as exc:
+        raise CognitionStateError(f"{label} must be a canonical UTC date") from exc
+    if parsed.isoformat() != value:
+        raise CognitionStateError(f"{label} must be a canonical UTC date")
+
+
+def _validate_relationship_source_id(value: Any, label: str) -> None:
+    """Validate one canonical episode source identity."""
+
+    if (
+        not isinstance(value, str)
+        or not value.startswith("episode:")
+        or len(value) <= len("episode:")
+    ):
+        raise CognitionStateError(f"{label} must be a canonical episode source")
 
 
 def _validate_entity_lists(state: Mapping[str, Any]) -> None:

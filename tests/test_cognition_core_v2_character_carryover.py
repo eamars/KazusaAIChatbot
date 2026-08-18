@@ -410,7 +410,7 @@ def test_external_offence_roles_reach_native_reducer() -> None:
         [semantic_result],
         evidence,
         handle_to_ref,
-    )
+    )["updated_state"]
 
     event = state["active_events"][0]
     assert {
@@ -453,7 +453,7 @@ def test_disgust_target_role_is_preserved() -> None:
         [semantic_result],
         evidence,
         handle_to_ref,
-    )
+    )["updated_state"]
     state = apply_state_update(state, updated_at=NOW)
 
     assert any(

@@ -47,6 +47,12 @@ recorded evidence.
 |---|---|---|
 | [coding_agent_assessment_gap_phase_d_plan.md](active/short_term/coding_agent_assessment_gap_phase_d_plan.md) | Coding-agent persistent JSON action-loop and repository-index migration | in_progress |
 
+### Completed Short-Term Plans
+
+| Document | Type | Status |
+|---|---|---|
+| [cognition_v2_stale_axes_and_validator_policy_plan.md](archive/completed/cognition_v2_stale_axes_and_validator_policy_plan.md) | Stale relationship-axis maintenance and semantic/structural cognition admission policy | completed |
+
 ### Active Bugfix Plans
 
 | Document | Type | Status |

@@ -168,6 +168,23 @@ The runtime facade exports helpers for:
 Callers treat facade helpers as semantic operations. New storage behavior gets a
 named helper.
 
+### Cognition V2 state ownership
+
+The public runtime facade exports
+`compare_and_replace_user_cognition_state`. It validates the complete expected
+and replacement cognition states, requires the user scope and owner to agree,
+and compares the complete expected state in the Mongo selector. A false result
+is a stale-base or same-timestamp conflict; callers fail closed before action,
+resolver, surface, or delivery work.
+
+User cognition relationship state includes the reducer-owned,
+non-model-facing `relationship_maintenance.v1` object. Runtime reads and
+creates use the strict native state shape. The migration command does not use
+the runtime CAS: it calls the named maintenance boundary helpers
+`list_user_cognition_states_for_relationship_maintenance_migration` and
+`compare_and_replace_user_cognition_state_for_migration`, with an expected raw
+state digest so concurrent changes are skipped rather than overwritten.
+
 The self-cognition action-attempt collection is keyed by the existing unique
 idempotency index. The named `db.self_cognition` owner performs one
 conditional update with set-on-insert semantics and returns whether this

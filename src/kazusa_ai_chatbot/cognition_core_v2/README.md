@@ -775,3 +775,33 @@ only after the objective is fixed. `selection`, `intention`, `reason`,
 `desired_outcome`, `concrete_detail`, and `expected_consequences` stay causally
 attached to that objective, and ordered sub-actions are allowed only when they
 serve it.
+
+## Semantic Admission And Relationship Maintenance
+
+Semantic appraisal admission is structural-first. The canonical JSON parser and
+producer envelope own object shape, required fields, bounded types, lengths,
+counts, and routing identity. Structurally usable semantic prose and structured
+values are forwarded as a complete candidate; this stage does not create a
+semantic verdict, semantic omission, or semantic retry. Existing deterministic
+boundary, provenance, permission, target, state/FSM, operation, action, and
+delivery guards remain authoritative and fail closed before effectful work.
+Recoverable structure follows the existing repair path, unrecoverable structure
+uses the existing owner cap, provider failures keep their operational cap, and a
+prompt-cap disposition issues no provider call.
+
+Relationship familiarity and salience maintenance belong to the reducer, not to
+the model projection. User relationship state carries non-model-facing
+`relationship_maintenance.v1` metadata with the canonical UTC interaction date,
+bonus date, `episode:<episode_id>` source identity, and a bounded processed-source
+ledger. The final accepted appraisal prefix supplies canonical transition
+receipts; the reducer applies date reinforcement, one same-day trusted-evidence
+bonus, source-idempotency, UTC monotonicity, salience decay, and strongest-delta
+reinforcement exactly once. Maintenance runs after final reduction and remains
+excluded from `project_relationship_context`.
+
+Every user cognition commit carries the complete `expected_previous_state` and
+uses compare-and-replace semantics. A stale base, including a same-timestamp
+collision, fails closed. The relationship metadata cutover uses
+`scripts.migrate_cognition_relationship_maintenance` with a read-only dry run,
+durable backup/report digest, named DB maintenance helpers, and drift-checked
+apply before strict runtime activation.

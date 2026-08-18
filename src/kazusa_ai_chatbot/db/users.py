@@ -9,6 +9,7 @@ Covers:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 import logging
 import re
 import uuid
@@ -749,3 +750,29 @@ async def replace_user_cognition_state(
         raise DatabaseOperationError(
             f"user profile {global_user_id!r} does not exist"
         )
+
+
+async def compare_and_replace_user_cognition_state(
+    global_user_id: str,
+    expected_previous_state: Mapping[str, object],
+    replacement_state: Mapping[str, object],
+) -> bool:
+    """Replace a user state only when its complete expected base still matches."""
+
+    expected_state = validate_cognition_state(expected_previous_state)
+    validated_replacement = validate_cognition_state(replacement_state)
+    for state in (expected_state, validated_replacement):
+        if state["state_scope"] != "user":
+            raise ValueError("user cognition state must be user-scoped")
+        if state["owner_user_id"] != global_user_id:
+            raise ValueError("user cognition state owner does not match the row")
+    db = await get_db()
+    result = await db.user_profiles.update_one(
+        {
+            "global_user_id": global_user_id,
+            "cognition_state": expected_state,
+        },
+        {"$set": {"cognition_state": validated_replacement}},
+        upsert=False,
+    )
+    return result.matched_count == 1

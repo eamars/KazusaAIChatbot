@@ -275,6 +275,7 @@ _LAZY_USER_EXPORTS = {
     "list_users_by_display_name",
     "list_recent_user_profiles",
     "resolve_global_user_id",
+    "compare_and_replace_user_cognition_state",
     "replace_user_cognition_state",
     "search_users_by_display_name",
 }
@@ -405,7 +406,8 @@ __all__ = [
     "list_users_by_relationship",
     "list_users_by_display_name",
     "list_recent_user_profiles",
-    "resolve_global_user_id", "replace_user_cognition_state",
+    "resolve_global_user_id", "compare_and_replace_user_cognition_state",
+    "replace_user_cognition_state",
     "search_users_by_display_name",
     "build_user_memory_unit_doc", "get_user_memory_unit_by_unit_id",
     "insert_user_memory_units",

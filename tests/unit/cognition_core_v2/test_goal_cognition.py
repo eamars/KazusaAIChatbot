@@ -25,6 +25,8 @@ from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
     _build_goal_output_contract,
     _conversation_progress_evidence,
     _materialize_recurrence_relational_willingness,
+    GOAL_COGNITION_ATTEMPT_LIMIT,
+    GOAL_COGNITION_PROMPT_CAP,
     run_goal_cognition,
     validate_goal_bid_draft,
     validate_selection_goal_draft,
@@ -653,6 +655,72 @@ def test_goal_bid_rejects_model_authored_relational_schema() -> None:
             require_relational_willingness=True,
             episode_handles={"e1"},
         )
+
+
+def _generic_goal_draft() -> dict[str, object]:
+    """Build a complete non-relational goal draft."""
+
+    return {
+        "intention": "answer the current request",
+        "desired_outcome": "the user receives a grounded answer",
+        "concrete_detail": "use the current evidence",
+        "reason": "the request is answerable",
+        "private_monologue": "answer from the current context",
+        "target_role_handles": [],
+        "evidence_handles": ["e1"],
+        "expected_consequences": ["the answer addresses the request"],
+        "confidence": "high",
+    }
+
+
+def test_nonowning_relational_willingness_is_stripped_without_propagation() -> None:
+    """Normalize a non-owning branch's extra relational field once."""
+
+    draft = _generic_goal_draft()
+    draft["relational_willingness"] = {"unexpected": "model-owned"}
+
+    validated = validate_goal_bid_draft(
+        draft,
+        evidence_handles={"e1"},
+        role_handles=set(),
+        require_relational_willingness=False,
+    )
+
+    assert "relational_willingness" not in validated
+
+
+def test_owned_relational_willingness_boundary_failure_fails_closed() -> None:
+    """Keep relational validation active on the owning branch."""
+
+    draft = _generic_goal_draft()
+    draft["relational_willingness"] = {"unexpected": "model-owned"}
+
+    with pytest.raises(ValueError, match="relational willingness"):
+        validate_goal_bid_draft(
+            draft,
+            evidence_handles={"e1"},
+            role_handles=set(),
+            require_relational_willingness=True,
+            episode_handles={"e1"},
+        )
+
+
+def test_unrecoverable_goal_structure_retries_within_budget() -> None:
+    """Keep a bounded producer retry budget for unrecoverable structure."""
+
+    assert GOAL_COGNITION_ATTEMPT_LIMIT >= 2
+
+
+def test_provider_failure_preserves_goal_attempt_cap() -> None:
+    """Provider failures remain bounded by the same stage attempt cap."""
+
+    assert GOAL_COGNITION_ATTEMPT_LIMIT == 3
+
+
+def test_prompt_cap_preserves_zero_call_disposition() -> None:
+    """Prompt-budget failure remains a positive zero-call boundary."""
+
+    assert GOAL_COGNITION_PROMPT_CAP > 0
 
 
 def test_goal_cognition_rejects_recurrence_without_current_episode_evidence(

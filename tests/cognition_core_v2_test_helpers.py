@@ -427,6 +427,10 @@ def canonical_cognition_output(
                 global_user_id=owner_user_id,
                 updated_at=NOW,
             ),
+            "expected_previous_state": build_acquaintance_user_state(
+                global_user_id=owner_user_id,
+                updated_at=NOW,
+            ),
             "comparison_results": [],
             "changed_paths": [],
         },

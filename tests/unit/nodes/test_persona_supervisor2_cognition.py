@@ -4,10 +4,15 @@ from __future__ import annotations
 
 from importlib import import_module
 
+import pytest
+
 import kazusa_ai_chatbot.nodes.persona_supervisor2_cognition as cognition_module
 from kazusa_ai_chatbot.action_spec.registry import (
     FUTURE_SPEAK_CAPABILITY,
     SPEAK_CAPABILITY,
+)
+from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    build_acquaintance_user_state,
 )
 
 MODULE_PATH = "kazusa_ai_chatbot.nodes.persona_supervisor2_cognition"
@@ -30,6 +35,69 @@ def test_persona_supervisor2_cognition_exposes_owned_contract() -> None:
     assert not missing_symbols, (
         f"{MODULE_PATH} is missing owner symbols: {missing_symbols}"
     )
+
+
+@pytest.mark.asyncio
+async def test_user_cognition_commit_uses_compare_and_replace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Commit user cognition through the complete-state CAS boundary."""
+
+    previous = build_acquaintance_user_state(
+        global_user_id="node-cas-user",
+        updated_at="2026-08-18T00:00:00Z",
+    )
+    replacement = build_acquaintance_user_state(
+        global_user_id="node-cas-user",
+        updated_at="2026-08-18T00:01:00Z",
+    )
+    captured: dict[str, object] = {}
+
+    async def compare_and_replace(
+        owner_key: str,
+        expected_state: dict[str, object],
+        replacement_state: dict[str, object],
+    ) -> bool:
+        """Capture the state boundary and acknowledge the commit."""
+
+        captured.update({
+            "owner_key": owner_key,
+            "expected_state": expected_state,
+            "replacement_state": replacement_state,
+        })
+        return True
+
+    async def record_commit(*args: object, **kwargs: object) -> None:
+        """Keep the unit test focused on the persistence call."""
+
+        del args, kwargs
+
+    monkeypatch.setattr(
+        cognition_module,
+        "compare_and_replace_user_cognition_state",
+        compare_and_replace,
+    )
+    monkeypatch.setattr(
+        cognition_module,
+        "_record_state_commit_event",
+        record_commit,
+    )
+
+    await cognition_module._commit_cognition_state({
+        "intention": {"selected_branch_id": "ordinary_response"},
+        "state_update": {
+            "state_scope": "user",
+            "owner_key": "node-cas-user",
+            "expected_previous_state": previous,
+            "replacement_state": replacement,
+        },
+    })
+
+    assert captured == {
+        "owner_key": "node-cas-user",
+        "expected_state": previous,
+        "replacement_state": replacement,
+    }
 
 
 def test_group_self_cognition_proposal_materializes_existing_speak_surface(

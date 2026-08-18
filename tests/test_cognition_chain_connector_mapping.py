@@ -51,6 +51,10 @@ def _core_output() -> dict[str, object]:
             "state_scope": "user",
             "owner_key": "user-1",
             "replacement_state": replacement,
+            "expected_previous_state": build_acquaintance_user_state(
+                global_user_id="user-1",
+                updated_at=NOW,
+            ),
             "comparison_results": [],
             "changed_paths": [],
         },
@@ -339,6 +343,9 @@ async def test_group_self_cognition_reuses_snapshot_engagement_context(
             "state_scope": "character",
             "owner_key": "character:global",
             "replacement_state": build_character_production_state(
+                updated_at=NOW,
+            ),
+            "expected_previous_state": build_character_production_state(
                 updated_at=NOW,
             ),
             "comparison_results": [],
@@ -988,14 +995,18 @@ async def test_final_commit_emits_bounded_success_event(
 ) -> None:
     """A successful terminal commit records its bounded branch and scope."""
 
-    replace_state = AsyncMock()
+    compare_and_replace = AsyncMock()
     record_event = AsyncMock(return_value={"accepted": True})
-    monkeypatch.setattr(connector, "replace_user_cognition_state", replace_state)
+    monkeypatch.setattr(
+        connector,
+        "compare_and_replace_user_cognition_state",
+        compare_and_replace,
+    )
     monkeypatch.setattr(connector, "record_cognition_v2_event", record_event)
 
     await connector._commit_cognition_state(_core_output())
 
-    replace_state.assert_awaited_once()
+    compare_and_replace.assert_awaited_once()
     record_event.assert_awaited_once_with(
         component="nodes.persona_supervisor2_cognition",
         cognition_component="state_commit",
@@ -1014,9 +1025,15 @@ async def test_failed_final_commit_emits_failure_event_and_remains_authoritative
 ) -> None:
     """Persistence failure is re-raised after best-effort failure telemetry."""
 
-    replace_state = AsyncMock(side_effect=RuntimeError("database unavailable"))
+    compare_and_replace = AsyncMock(
+        side_effect=RuntimeError("database unavailable")
+    )
     record_event = AsyncMock(return_value={"accepted": True})
-    monkeypatch.setattr(connector, "replace_user_cognition_state", replace_state)
+    monkeypatch.setattr(
+        connector,
+        "compare_and_replace_user_cognition_state",
+        compare_and_replace,
+    )
     monkeypatch.setattr(connector, "record_cognition_v2_event", record_event)
 
     with pytest.raises(RuntimeError, match="database unavailable"):
@@ -1032,14 +1049,18 @@ async def test_event_write_failure_does_not_override_successful_commit(
 ) -> None:
     """The event sink remains non-authoritative after durable replacement."""
 
-    replace_state = AsyncMock()
+    compare_and_replace = AsyncMock()
     record_event = AsyncMock(side_effect=RuntimeError("event sink unavailable"))
-    monkeypatch.setattr(connector, "replace_user_cognition_state", replace_state)
+    monkeypatch.setattr(
+        connector,
+        "compare_and_replace_user_cognition_state",
+        compare_and_replace,
+    )
     monkeypatch.setattr(connector, "record_cognition_v2_event", record_event)
 
     await connector._commit_cognition_state(_core_output())
 
-    replace_state.assert_awaited_once()
+    compare_and_replace.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -1053,7 +1074,7 @@ async def test_intermediate_commit_false_cycle_emits_no_terminal_event(
         updated_at=NOW,
     )
     character_state = build_character_production_state(updated_at=NOW)
-    replace_state = AsyncMock()
+    compare_and_replace = AsyncMock()
     record_event = AsyncMock(return_value={"accepted": True})
     monkeypatch.setattr(
         connector,
@@ -1070,12 +1091,16 @@ async def test_intermediate_commit_false_cycle_emits_no_terminal_event(
         "run_cognition",
         AsyncMock(return_value=_core_output()),
     )
-    monkeypatch.setattr(connector, "replace_user_cognition_state", replace_state)
+    monkeypatch.setattr(
+        connector,
+        "compare_and_replace_user_cognition_state",
+        compare_and_replace,
+    )
     monkeypatch.setattr(connector, "record_cognition_v2_event", record_event)
 
     await connector.call_cognition_subgraph(_global_state(), commit=False)
 
-    replace_state.assert_not_awaited()
+    compare_and_replace.assert_not_awaited()
     record_event.assert_not_awaited()
 
 

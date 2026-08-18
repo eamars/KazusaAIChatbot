@@ -792,6 +792,47 @@ class SemanticAppraisalResultV2(TypedDict):
     explanation: str
 
 
+RelationshipAxisV2 = Literal[
+    "positive_regard",
+    "trust",
+    "attachment",
+    "desired_closeness",
+    "perceived_closeness",
+    "care",
+    "boundary_safety",
+    "exclusivity",
+    "unresolved_injury",
+]
+
+
+class SemanticDeltaReceiptV2(TypedDict):
+    """Authoritative result for one unique semantic delta target."""
+
+    target_path: str
+    relationship_axis: RelationshipAxisV2 | None
+    requested_delta: int
+    applied_delta: int
+    previous_value: int
+    next_value: int
+    evidence_refs: list[CognitionEvidenceV2]
+    duplicate_disposition: Literal["unique"]
+
+
+class SemanticDeltaRejectionReceiptV2(TypedDict):
+    """Deterministic rejection receipt for a duplicate semantic target."""
+
+    target_path: str
+    disposition: Literal["duplicate_target"]
+
+
+class SemanticDeltaApplicationResultV2(TypedDict):
+    """Native state and receipts returned by the semantic reducer."""
+
+    updated_state: dict[str, Any]
+    accepted_delta_receipts: list[SemanticDeltaReceiptV2]
+    rejected_delta_receipts: list[SemanticDeltaRejectionReceiptV2]
+
+
 class ActionBidV2(TypedDict):
     """Complete branch-owned bid copied without model-authored authority.
 
@@ -926,6 +967,7 @@ class StateUpdateV2(TypedDict):
 
     state_scope: Literal["user", "character"]
     owner_key: str
+    expected_previous_state: dict[str, Any]
     replacement_state: dict[str, Any]
     comparison_results: list[EventComparisonResultV2]
     changed_paths: list[str]
@@ -3960,6 +4002,7 @@ def _validate_state_update(value: Mapping[str, Any]) -> None:
         {
             "state_scope",
             "owner_key",
+            "expected_previous_state",
             "replacement_state",
             "comparison_results",
             "changed_paths",
@@ -3969,7 +4012,9 @@ def _validate_state_update(value: Mapping[str, Any]) -> None:
     if value["state_scope"] not in {"user", "character"}:
         raise CognitionContractError("state update scope is invalid")
     _require_text(value["owner_key"], "state_update.owner_key")
+    _validate_persistent_state(value["expected_previous_state"])
     _validate_persistent_state(value["replacement_state"])
+    expected_previous = value["expected_previous_state"]
     replacement = value["replacement_state"]
     expected_owner = (
         replacement.get("owner_user_id")
@@ -3981,6 +4026,18 @@ def _validate_state_update(value: Mapping[str, Any]) -> None:
         or expected_owner != value["owner_key"]
     ):
         raise CognitionContractError("state update owner does not match state")
+    expected_previous_owner = (
+        expected_previous.get("owner_user_id")
+        if expected_previous["state_scope"] == "user"
+        else "global"
+    )
+    if (
+        expected_previous["state_scope"] != value["state_scope"]
+        or expected_previous_owner != value["owner_key"]
+    ):
+        raise CognitionContractError(
+            "state update expected owner does not match state"
+        )
     if not isinstance(value["comparison_results"], list):
         raise CognitionContractError("comparison_results must be a list")
     for row in value["comparison_results"]:

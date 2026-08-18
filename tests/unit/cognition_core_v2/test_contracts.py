@@ -103,6 +103,34 @@ def test_contracts_exposes_owned_contract() -> None:
     assert callable(validate_relational_willingness)
 
 
+def test_state_update_requires_complete_expected_previous_state() -> None:
+    """Require the complete CAS base in the persistence envelope."""
+
+    previous = {
+        "schema_version": "cognition_state.v2",
+        "state_scope": "character",
+        "updated_at": "2026-08-18T00:00:00Z",
+        "drives": {},
+        "standards": [],
+        "meaning_state": {},
+        "goals": [],
+        "threats": [],
+        "active_events": [],
+        "knowledge_gaps": [],
+        "affect_activations": [],
+    }
+    update = {
+        "state_scope": "character",
+        "owner_key": "global",
+        "replacement_state": previous,
+        "comparison_results": [],
+        "changed_paths": [],
+    }
+
+    with pytest.raises(CognitionContractError, match="state_update fields"):
+        contracts_module._validate_state_update(update)
+
+
 def test_selected_response_operation_has_exact_contract() -> None:
     """Action bids accept the complete selected operation shape."""
 

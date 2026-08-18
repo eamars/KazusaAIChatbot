@@ -110,6 +110,7 @@ def build_state_update(
     return {
         "state_scope": normalized_replacement["state_scope"],
         "owner_key": owner_key,
+        "expected_previous_state": normalized_previous,
         "replacement_state": normalized_replacement,
         "comparison_results": normalized_comparisons,
         "changed_paths": changed_paths,

@@ -95,7 +95,14 @@
             "unresolved_injury": 0,
             "salience": 0,
             "updated_at": "2026-07-14T00:00:00Z",
-            "evidence_refs": []
+            "evidence_refs": [],
+            "relationship_maintenance": {
+              "schema_version": "relationship_maintenance.v1",
+              "last_interaction_date_utc": null,
+              "last_bonus_date_utc": null,
+              "last_source_id": null,
+              "processed_source_ids": []
+            }
           },
           "goals": [],
           "threats": [],
@@ -130,7 +137,14 @@
             "unresolved_injury": 0,
             "salience": 60,
             "updated_at": "2026-07-14T00:00:00Z",
-            "evidence_refs": []
+            "evidence_refs": [],
+            "relationship_maintenance": {
+              "schema_version": "relationship_maintenance.v1",
+              "last_interaction_date_utc": null,
+              "last_bonus_date_utc": null,
+              "last_source_id": null,
+              "processed_source_ids": []
+            }
           },
           "goals": [],
           "threats": [],

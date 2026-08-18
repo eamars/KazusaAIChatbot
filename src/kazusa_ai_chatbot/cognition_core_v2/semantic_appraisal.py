@@ -110,6 +110,27 @@ _PROPOSITION_SUBJECT_KIND_SETS = {
         "knowledge_gap",
     }),
 }
+_BOUNDARY_VALIDATION_ERROR_MARKERS = (
+    "does not match",
+    "not owned by question",
+    "not permitted",
+    "requires subject kind",
+    "requires two goal handles",
+    "candidate evidence",
+    "must cite originating evidence",
+    "contains unknown handles",
+    "handles are duplicated",
+    "duplicate target path",
+    "cannot duplicate a target path",
+    "proposition is duplicated",
+    "role_assignments[*].entity_handle",
+    "semantic role value is invalid",
+    "selected roles must match",
+)
+
+
+class _SemanticBoundaryValidationError(ValueError):
+    """Mark existing deterministic appraisal-boundary rejection."""
 
 
 def _delta_limit_for_state_field(state_field: str) -> int:
@@ -501,24 +522,20 @@ async def _appraise_semantic_item(
                 parsed_output,
                 accepted_result,
             )
-            result = validate_semantic_appraisal_result(
+            parsed_output = _normalize_structural_semantic_appraisal_result(
                 parsed_output,
-                item_question,
-                set(evidence_by_handle),
-                projection.handle_to_ref,
+                question_id=item_question["question_id"],
                 maximum_propositions=1,
                 maximum_deltas=1,
                 maximum_explanation_chars=(
                     SEMANTIC_APPRAISAL_ITEM_EXPLANATION_LIMIT
                 ),
             )
-            merged_result = _merge_semantic_appraisal_item(
+            result, merged_result = _validate_semantic_boundary_candidate(
+                parsed_output,
                 accepted_result,
-                result,
-            )
-            validate_semantic_appraisal_result(
-                merged_result,
                 question,
+                item_question,
                 set(evidence_by_handle),
                 projection.handle_to_ref,
             )
@@ -593,6 +610,40 @@ async def _appraise_semantic_item(
             ) from exc
         except (AttributeError, KeyError, TypeError, ValueError) as exc:
             ended_at = time.perf_counter()
+            if _is_boundary_validation_error(exc):
+                _record_semantic_appraisal_trace(
+                    config=config,
+                    question=question,
+                    messages=request_messages,
+                    response_text=str(raw_output),
+                    parsed_output=parsed_output,
+                    parse_status="boundary_error",
+                    status="failed",
+                    started_at=started_at,
+                    attempt_index=attempt_index + 1,
+                    item_index=item_index,
+                    validation_error=str(exc),
+                )
+                capture_validation_stage(
+                    stage_id=stage_id,
+                    config=config,
+                    system_prompt=SEMANTIC_APPRAISAL_PROMPT,
+                    human_payload=payload_text,
+                    raw_output=raw_output,
+                    parsed_output=parsed_output,
+                    parse_status="boundary_error",
+                    started_at=started_at,
+                    ended_at=ended_at,
+                    error=str(exc),
+                )
+                raise CognitionExecutionError(
+                    "semantic appraisal candidate failed a deterministic boundary",
+                    error_code="cognition_boundary_rejected",
+                    stage="semantic_appraisal",
+                    attempt_count=attempt_index + 1,
+                    safe_checkpoint="pre_state_commit",
+                    retryable=False,
+                ) from exc
             _record_semantic_appraisal_trace(
                 config=config,
                 question=question,
@@ -667,6 +718,52 @@ async def _appraise_semantic_item(
         return result, merged_result
 
     raise AssertionError("semantic appraisal item attempt loop did not terminate")
+
+
+def _is_boundary_validation_error(error: ValueError) -> bool:
+    """Classify deterministic boundary failures without semantic retries."""
+
+    message = str(error)
+    return isinstance(error, _SemanticBoundaryValidationError) or any(
+        marker in message for marker in _BOUNDARY_VALIDATION_ERROR_MARKERS
+    )
+
+
+def _validate_semantic_boundary_candidate(
+    parsed: object,
+    accepted_result: SemanticAppraisalResultV2 | None,
+    question: SemanticQuestionV2,
+    item_question: SemanticQuestionV2,
+    evidence_handles: set[str],
+    handle_to_ref: Mapping[str, Mapping[str, str]],
+) -> tuple[SemanticAppraisalResultV2, SemanticAppraisalResultV2]:
+    """Run existing provenance and boundary validators after structure admission."""
+
+    try:
+        result = validate_semantic_appraisal_result(
+            parsed,
+            item_question,
+            evidence_handles,
+            handle_to_ref,
+            maximum_propositions=1,
+            maximum_deltas=1,
+            maximum_explanation_chars=(
+                SEMANTIC_APPRAISAL_ITEM_EXPLANATION_LIMIT
+            ),
+        )
+        merged_result = _merge_semantic_appraisal_item(
+            accepted_result,
+            result,
+        )
+        validate_semantic_appraisal_result(
+            merged_result,
+            question,
+            evidence_handles,
+            handle_to_ref,
+        )
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        raise _SemanticBoundaryValidationError(str(exc)) from exc
+    return result, merged_result
 
 
 def _merge_semantic_appraisal_item(
@@ -821,6 +918,192 @@ def _derive_semantic_item_explanation(
         return "Structured semantic item."
     explanation = " ".join(dict.fromkeys(parts))
     return explanation[:SEMANTIC_APPRAISAL_ITEM_EXPLANATION_LIMIT]
+
+
+def _normalize_structural_semantic_appraisal_result(
+    parsed: object,
+    *,
+    question_id: str,
+    maximum_propositions: int,
+    maximum_deltas: int,
+    maximum_explanation_chars: int,
+) -> dict[str, Any]:
+    """Normalize the producer envelope without judging semantic meaning."""
+
+    if not isinstance(parsed, Mapping):
+        raise ValueError("semantic appraisal must return an object")
+    if set(parsed) != _SEMANTIC_APPRAISAL_RESULT_FIELDS:
+        raise ValueError("semantic appraisal fields are not exact")
+    if parsed["question_id"] != question_id:
+        raise ValueError("semantic appraisal routing identity is invalid")
+    propositions = parsed["propositions"]
+    deltas = parsed["deltas"]
+    if (
+        not isinstance(propositions, list)
+        or len(propositions) > maximum_propositions
+    ):
+        raise ValueError("semantic propositions are structurally invalid")
+    if not isinstance(deltas, list) or len(deltas) > maximum_deltas:
+        raise ValueError("semantic deltas are structurally invalid")
+    _validate_structural_handle_list(
+        parsed["selected_evidence_handles"],
+        label="selected evidence",
+        maximum=MAX_APPRAISAL_OBJECT_HANDLES,
+    )
+    _validate_structural_handle_list(
+        parsed["selected_role_handles"],
+        label="selected roles",
+        maximum=MAX_APPRAISAL_OBJECT_HANDLES * 2,
+    )
+    normalized_propositions = [
+        _normalize_structural_proposition(value)
+        for value in propositions
+    ]
+    normalized_deltas = [
+        _normalize_structural_delta(value)
+        for value in deltas
+    ]
+    explanation = parsed["explanation"]
+    if (
+        not isinstance(explanation, str)
+        or not 1 <= len(explanation) <= maximum_explanation_chars
+    ):
+        raise ValueError("semantic appraisal explanation is structurally invalid")
+    return {
+        "question_id": question_id,
+        "selected_evidence_handles": list(
+            parsed["selected_evidence_handles"]
+        ),
+        "selected_role_handles": list(parsed["selected_role_handles"]),
+        "propositions": normalized_propositions,
+        "deltas": normalized_deltas,
+        "explanation": explanation,
+    }
+
+
+def _normalize_structural_proposition(value: object) -> dict[str, Any]:
+    """Normalize one proposition's shape while preserving authored values."""
+
+    if not isinstance(value, Mapping):
+        raise ValueError("semantic proposition must be an object")
+    allowed = {
+        "proposition_kind",
+        "subject_handle",
+        "evidence_handles",
+        "role_assignments",
+        "semantic_value",
+    }
+    if "object_handle" in value:
+        allowed.add("object_handle")
+    if set(value) != allowed:
+        raise ValueError("semantic proposition fields are not exact")
+    for field_name in (
+        "proposition_kind",
+        "subject_handle",
+        "semantic_value",
+    ):
+        field_value = value[field_name]
+        if not isinstance(field_value, str) or not field_value.strip():
+            raise ValueError(
+                f"semantic proposition {field_name} is structurally invalid"
+            )
+    if len(value["semantic_value"]) > MAX_APPRAISAL_SEMANTIC_TEXT_CHARS:
+        raise ValueError("semantic proposition semantic_value is too long")
+    if "object_handle" in value and (
+        not isinstance(value["object_handle"], str)
+        or not value["object_handle"].strip()
+    ):
+        raise ValueError("semantic proposition object handle is structurally invalid")
+    evidence_handles = _validate_structural_handle_list(
+        value["evidence_handles"],
+        label="proposition evidence",
+        maximum=MAX_APPRAISAL_OBJECT_HANDLES,
+    )
+    assignments = value["role_assignments"]
+    if not isinstance(assignments, list) or len(assignments) > 8:
+        raise ValueError("semantic proposition roles are structurally invalid")
+    normalized_assignments: list[dict[str, str]] = []
+    for assignment in assignments:
+        if not isinstance(assignment, Mapping) or set(assignment) != {
+            "role",
+            "entity_handle",
+        }:
+            raise ValueError("semantic role assignment is structurally invalid")
+        role = assignment["role"]
+        entity_handle = assignment["entity_handle"]
+        if (
+            not isinstance(role, str)
+            or not role.strip()
+            or not isinstance(entity_handle, str)
+            or not entity_handle.strip()
+        ):
+            raise ValueError("semantic role assignment is structurally invalid")
+        normalized_assignments.append({
+            "role": role,
+            "entity_handle": entity_handle,
+        })
+    normalized = {
+        "proposition_kind": value["proposition_kind"],
+        "subject_handle": value["subject_handle"],
+        "evidence_handles": evidence_handles,
+        "role_assignments": normalized_assignments,
+        "semantic_value": value["semantic_value"],
+    }
+    if "object_handle" in value:
+        normalized["object_handle"] = value["object_handle"]
+    return normalized
+
+
+def _normalize_structural_delta(value: object) -> dict[str, Any]:
+    """Normalize one delta's shape without checking question ownership."""
+
+    if not isinstance(value, Mapping) or set(value) != {
+        "target_path",
+        "delta",
+        "evidence_handles",
+        "reason",
+    }:
+        raise ValueError("semantic delta fields are not exact")
+    target_path = value["target_path"]
+    delta = value["delta"]
+    reason = value["reason"]
+    if not isinstance(target_path, str) or not target_path.strip():
+        raise ValueError("semantic delta target is structurally invalid")
+    if (
+        isinstance(delta, bool)
+        or not isinstance(delta, int)
+        or not -DELTA_LIMIT_WIDE <= delta <= DELTA_LIMIT_WIDE
+    ):
+        raise ValueError("semantic delta value is structurally invalid")
+    if not isinstance(reason, str) or not 1 <= len(reason) <= MAX_APPRAISAL_DELTA_REASON_CHARS:
+        raise ValueError("semantic delta reason is structurally invalid")
+    return {
+        "target_path": target_path,
+        "delta": delta,
+        "evidence_handles": _validate_structural_handle_list(
+            value["evidence_handles"],
+            label="delta evidence",
+            maximum=MAX_APPRAISAL_OBJECT_HANDLES,
+        ),
+        "reason": reason,
+    }
+
+
+def _validate_structural_handle_list(
+    value: object,
+    *,
+    label: str,
+    maximum: int,
+) -> list[str]:
+    """Validate one bounded list of opaque producer handles."""
+
+    if not isinstance(value, list) or len(value) > maximum:
+        raise ValueError(f"{label} handles are structurally invalid")
+    if any(not isinstance(handle, str) or not handle.strip() for handle in value):
+        raise ValueError(f"{label} handles are structurally invalid")
+    if len(value) != len(set(value)):
+        raise ValueError(f"{label} handles are structurally duplicated")
+    return list(value)
 
 
 def _suppress_emitted_appraisal_components(

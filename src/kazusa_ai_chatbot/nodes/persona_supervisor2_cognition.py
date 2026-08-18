@@ -179,10 +179,10 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
 )
 from kazusa_ai_chatbot.cognition_resolver.state import validate_resolver_state
 from kazusa_ai_chatbot.db import (
+    compare_and_replace_user_cognition_state,
     compare_and_replace_character_cognition_state,
     get_character_cognition_state,
     get_user_cognition_state,
-    replace_user_cognition_state,
 )
 from kazusa_ai_chatbot.llm_interface import (
     LLInterface,
@@ -1127,10 +1127,15 @@ async def _commit_cognition_state(
     replacement = state_update["replacement_state"]
     try:
         if state_update["state_scope"] == "user":
-            await replace_user_cognition_state(
+            committed = await compare_and_replace_user_cognition_state(
                 state_update["owner_key"],
+                state_update["expected_previous_state"],
                 replacement,
             )
+            if not committed:
+                raise CognitionExecutionError(
+                    "user state commit encountered a version conflict"
+                )
         else:
             if not expected_character_updated_at:
                 raise CognitionExecutionError(

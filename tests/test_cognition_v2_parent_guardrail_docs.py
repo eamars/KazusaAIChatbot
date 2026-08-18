@@ -35,6 +35,38 @@ def test_core_readme_documents_two_epoch_owner_budget() -> None:
     assert "cognition_attempt_ledger.v2" in content
 
 
+def test_core_readme_documents_semantic_admission_and_boundary_contract() -> None:
+    """Core docs separate structural admission from deterministic boundaries."""
+
+    content = _read("src/kazusa_ai_chatbot/cognition_core_v2/README.md")
+
+    assert "Semantic Admission And Relationship Maintenance" in content
+    assert "semantic verdict, semantic omission, or semantic retry" in content
+    assert "relationship_maintenance.v1" in content
+    assert "expected_previous_state" in content
+
+
+def test_db_icd_documents_relationship_maintenance_ownership() -> None:
+    """DB docs identify runtime CAS and migration helper ownership."""
+
+    content = _read("src/kazusa_ai_chatbot/db/README.md")
+
+    assert "compare_and_replace_user_cognition_state" in content
+    assert "list_user_cognition_states_for_relationship_maintenance_migration" in content
+    assert "compare_and_replace_user_cognition_state_for_migration" in content
+    assert "relationship_maintenance.v1" in content
+
+
+def test_script_registry_documents_relationship_maintenance_migration() -> None:
+    """The script registry exposes the dry-run/apply migration contract."""
+
+    content = _read("src/scripts/README.md")
+
+    assert "migrate_cognition_relationship_maintenance.py" in content
+    assert "--dry-run|--apply" in content
+    assert "matching digest" in content
+
+
 def test_brain_service_readme_documents_shared_replay_token() -> None:
     """Service docs identify shared retry arbitration and exact eligibility."""
 
