@@ -35,7 +35,6 @@ import httpx
 from openai import OpenAIError
 
 from kazusa_ai_chatbot import llm_tracing
-from kazusa_ai_chatbot.cognition_core_v2.action_selection import plan_actions
 from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
     select_final_branches,
     select_preliminary_branches,
@@ -126,6 +125,7 @@ from kazusa_ai_chatbot.llm_interface.detection import detect_backend_descriptor
 from kazusa_ai_chatbot.llm_tracing import failure_capsule
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
+from kazusa_ai_chatbot.cognition_core_v3.action_selection import plan_actions
 from kazusa_ai_chatbot.cognition_core_v3.appraisal import (
     FAMILY_DELTA_AXES,
     FAMILY_IDENTITY_CATEGORY_SETS,
