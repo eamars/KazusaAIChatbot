@@ -1266,6 +1266,29 @@
     "tests/unit/cognition_core_v3/test_registry.py::test_registry_exposes_exact_appraisal_and_goal_topology"
    ],
    "supplemental_tests": []
+  },
+  {
+   "source": "src/kazusa_ai_chatbot/cognition_core_v3/transcript.py",
+   "owner": "V3 cache-affine transcript assembly owner",
+   "contract": "exact-prefix continuation, repair scrubbing, checkpoint restarts, and prompt-budget checks",
+   "required_unit_tests": [
+    "tests/unit/cognition_core_v3/test_transcript.py::test_accepted_same_domain_stage_extends_exact_prefix",
+    "tests/unit/cognition_core_v3/test_transcript.py::test_rejected_candidate_is_scrubbed_before_next_stage",
+    "tests/unit/cognition_core_v3/test_transcript.py::test_cache_domain_change_forces_canonical_checkpoint",
+    "tests/unit/cognition_core_v3/test_transcript.py::test_context_pressure_checkpoints_before_owner_cap"
+   ],
+   "supplemental_tests": []
+  },
+  {
+   "source": "src/kazusa_ai_chatbot/cognition_core_v3/execution.py",
+   "owner": "V3 bounded parallel chain executor owner",
+   "contract": "parallel chains, serial registered stages, global attempt caps, and cancellation without partial effects",
+   "required_unit_tests": [
+    "tests/unit/cognition_core_v3/test_execution.py::test_executor_runs_parallel_chains_and_serial_registered_stages",
+    "tests/unit/cognition_core_v3/test_execution.py::test_executor_preserves_global_attempt_caps",
+    "tests/unit/cognition_core_v3/test_execution.py::test_executor_cancels_owned_tasks_without_partial_effects"
+   ],
+   "supplemental_tests": []
   }
  ]
 }
