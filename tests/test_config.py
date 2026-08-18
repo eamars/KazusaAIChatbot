@@ -1357,3 +1357,66 @@ class TestCalendarSchedulerConfig:
 
             assert result.returncode != 0
             assert f"{name} must be >= 1" in result.stderr
+
+
+def test_cognition_core_engine_accepts_only_v2_or_v3(tmp_path):
+    for engine in ("v2", "v3"):
+        env = _configured_subprocess_env_without_dotenv()
+        env["COGNITION_CORE_ENGINE"] = engine
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import os\n"
+                    "from kazusa_ai_chatbot.config import COGNITION_CORE_ENGINE\n"
+                    "assert COGNITION_CORE_ENGINE == os.environ['COGNITION_CORE_ENGINE']\n"
+                ),
+            ],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stderr
+
+    env = _configured_subprocess_env_without_dotenv()
+    env["COGNITION_CORE_ENGINE"] = "v9"
+
+    result = subprocess.run(
+        [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "COGNITION_CORE_ENGINE must be one of" in result.stderr
+
+
+def test_cognition_core_engine_default_matches_cutover_state(tmp_path):
+    env = _configured_subprocess_env_without_dotenv()
+    env.pop("COGNITION_CORE_ENGINE", None)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from kazusa_ai_chatbot.config import COGNITION_CORE_ENGINE\n"
+                "assert COGNITION_CORE_ENGINE == 'v2'\n"
+            ),
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
