@@ -1327,6 +1327,18 @@
     "tests/unit/cognition_core_v3/test_workspace.py::test_workspace_admits_only_complete_current_matter_bids"
    ],
    "supplemental_tests": []
+  },
+  {
+   "source": "src/kazusa_ai_chatbot/cognition_core_v3/action_selection.py",
+   "owner": "V3 action planning and isolated authorization owner",
+   "contract": "fresh authorizer context projection, stance effect suppression, future-speak authority validation, selected-intention and goal-progress preservation",
+   "required_unit_tests": [
+    "tests/unit/cognition_core_v3/test_action_selection.py::test_non_accepting_stance_suppresses_effects",
+    "tests/unit/cognition_core_v3/test_action_selection.py::test_action_and_resolver_authorizers_receive_fresh_minimal_context",
+    "tests/unit/cognition_core_v3/test_action_selection.py::test_invalid_authority_proposal_denies_all_effects",
+    "tests/unit/cognition_core_v3/test_action_selection.py::test_selected_operation_and_goal_progress_are_preserved"
+   ],
+   "supplemental_tests": []
   }
  ]
 }
