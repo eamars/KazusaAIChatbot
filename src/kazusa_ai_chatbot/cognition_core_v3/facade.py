@@ -19,9 +19,14 @@ surfacing, and protected replay capture reuse the V2 behavior verbatim.
 
 Accepted appraisal content bridges into native state through code-owned rows:
 propositions attach to their source evidence row's candidate event root so the
-native materializer resolves them through causal-event provenance, while v3
-axis deltas are deliberately not translated into V2 increment shape and are
-recorded as deterministic omission warnings instead.
+native materializer resolves them through causal-event provenance, except
+terminal outcome propositions whose subject binds to the unique lifecycle-
+eligible entity of the asserted kind. Axis deltas translate into exact native
+increment rows only when their axis matches exactly one permitted concrete
+path for the stage's authorized evidence domain; every unbound or ambiguous
+delta is dropped with a deterministic warning instead of reaching the native
+reducer. Role assignments stay empty because the producer contract carries no
+role data, recorded as a documented parity gap in the package README.
 """
 
 from __future__ import annotations
@@ -101,9 +106,13 @@ from kazusa_ai_chatbot.cognition_core_v2.parallel_executor import (
     ParallelExecutionResult,
 )
 from kazusa_ai_chatbot.cognition_core_v2.semantic_source_planner import (
+    _goal_outcome_eligible_entities,
+    _index_projected_handles,
+    _permitted_delta_paths,
     plan_semantic_questions,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    ENTITY_LIST_FIELDS,
     validate_cognition_state,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
@@ -1194,25 +1203,58 @@ def _synthesize_branch_execution(
     )
 
 
+_TERMINAL_PROPOSITION_KINDS = {
+    "goal_completed": "goal",
+    "event_completed": "event",
+    "event_repaired": "event",
+    "threat_resolved": "threat",
+    "knowledge_answered": "knowledge_gap",
+}
+
+
 def _bridge_appraisal_rows(
     chains: Sequence[ChainSpec],
     outcomes_by_name: Mapping[str, ChainOutcome],
     question_by_kind: Mapping[str, Mapping[str, Any]],
     evidence_positions: Mapping[str, int],
+    handle_to_ref: Mapping[str, Mapping[str, str]],
+    preliminary_state: Mapping[str, Any],
 ) -> tuple[list[dict[str, Any]], dict[str, str], list[str]]:
     """Bridge accepted v3 stage content into native V2 appraisal rows.
 
-    Each planned question whose latest recorded stage result was accepted
-    contributes one row: propositions attach to their source evidence row's
-    candidate-event prompt root with code-owned provenance so the native
-    materializer resolves them through causal-event checks, and the bounded
-    semantic summary becomes the row explanation. A latest non-accepted result
-    carries its typed error code into the failure map; a stage that recorded
-    no attempt at all fails closed as contract exhaustion. Axis deltas are
-    deliberately omitted from the bridge and recorded as deterministic
-    warnings instead of being translated into V2 increment semantics this
-    engine does not own.
+    Every terminal-outcome stage contributes one row for its deterministic
+    ``q:<stage>`` identity even when no question was planned for it, so fresh
+    canonical terminal assertions still reach the final reduction; wave-A
+    stages without a planned question stay content-free and contribute none.
+    Propositions attach to their source evidence row's candidate event root
+    with code-owned provenance so the native materializer resolves them through
+    causal-event checks, except terminal outcome propositions whose subject
+    binds to the unique lifecycle-eligible entity of the asserted kind; a
+    terminal assertion without exactly one eligible entity is dropped as an
+    unbound warning instead of guessing its target. Axis deltas translate into
+    exact native increment rows only when their axis matches exactly one
+    permitted concrete path for the stage's authorized evidence domain, their
+    value is an integer, and selected evidence survives; every other delta is
+    dropped with a deterministic per-item warning so nothing unresolvable
+    reaches the native reducer. Role assignments stay empty: the producer
+    contract carries no role data, recorded as a documented parity gap in the
+    package README.
     """
+
+    handle_by_entity = {
+        ref["entity_id"]: handle for handle, ref in handle_to_ref.items()
+    }
+    terminal_handles_by_kind = {}
+    for entity_kind in ENTITY_LIST_FIELDS:
+        eligible = _goal_outcome_eligible_entities(
+            preliminary_state, entity_kind
+        )
+        terminal_handles_by_kind[entity_kind] = [
+            handle_by_entity[entity["entity_id"]]
+            for entity in eligible
+            if entity["entity_id"] in handle_by_entity
+        ]
+    handle_map = _index_projected_handles(handle_to_ref)
 
     rows: list[dict[str, Any]] = []
     failures: dict[str, str] = {}
@@ -1226,7 +1268,17 @@ def _bridge_appraisal_rows(
         for stage_name in chain.stages:
             question = question_by_kind.get(stage_name)
             if question is None:
-                continue
+                if chain.name != TERMINAL_OUTCOME_CHAIN.name:
+                    continue
+                question = {
+                    "question_id": f"q:{stage_name}",
+                    "permitted_delta_paths": _permitted_delta_paths(
+                        stage_name,
+                        handle_map,
+                        preliminary_state,
+                        list(evidence_positions),
+                    ),
+                }
             result = last_results.get(stage_name)
             if (
                 isinstance(result, StageResult)
@@ -1237,15 +1289,27 @@ def _bridge_appraisal_rows(
                 propositions: list[dict[str, Any]] = []
                 for item in local_state["propositions"]:
                     origin = item["origin_evidence_handle"]
-                    position = evidence_positions.get(origin)
-                    if position is None:
-                        raise ValueError(
-                            "appraisal proposition origin has no authorized"
-                            f" evidence row: {origin!r}"
-                        )
+                    entity_kind = _TERMINAL_PROPOSITION_KINDS.get(item["kind"])
+                    if entity_kind is None:
+                        position = evidence_positions.get(origin)
+                        if position is None:
+                            raise ValueError(
+                                "appraisal proposition origin has no authorized"
+                                f" evidence row: {origin!r}"
+                            )
+                        subject_handle = f"ce{position}"
+                    else:
+                        candidates = terminal_handles_by_kind[entity_kind]
+                        if len(candidates) != 1:
+                            warnings.append(
+                                f"v3_terminal_unbound:{stage_name}:"
+                                f"{item['kind']}"
+                            )
+                            continue
+                        subject_handle = candidates[0]
                     propositions.append({
                         "proposition_kind": item["kind"],
-                        "subject_handle": f"ce{position}",
+                        "subject_handle": subject_handle,
                         "evidence_handles": [origin],
                         "role_assignments": [],
                         "semantic_value": item["statement"],
@@ -1256,18 +1320,48 @@ def _bridge_appraisal_rows(
                         f"accepted appraisal stage has no bounded summary:"
                         f" {stage_name}"
                     )
+                selected = list(local_state["selected_evidence_handles"])
+                native_deltas: list[dict[str, Any]] = []
+                for item in local_state["deltas"]:
+                    axis = item["path"]
+                    matches = [
+                        path
+                        for path in question["permitted_delta_paths"]
+                        if path.rsplit(".", 1)[-1] == axis
+                    ]
+                    value = item["value"]
+                    if isinstance(value, bool) or not isinstance(value, int):
+                        warnings.append(
+                            f"v3_delta_non_integer:{stage_name}:{axis}"
+                        )
+                        continue
+                    if not selected:
+                        warnings.append(
+                            f"v3_delta_no_evidence:{stage_name}:{axis}"
+                        )
+                        continue
+                    if len(matches) != 1:
+                        warning_code = (
+                            "v3_delta_ambiguous" if matches else "v3_delta_unbound"
+                        )
+                        warnings.append(
+                            f"{warning_code}:{stage_name}:{axis}"
+                        )
+                        continue
+                    native_deltas.append({
+                        "target_path": matches[0],
+                        "delta": value,
+                        "evidence_handles": selected,
+                        "reason": item["reason"],
+                    })
                 rows.append({
                     "question_id": question["question_id"],
-                    "selected_evidence_handles": list(
-                        local_state["selected_evidence_handles"]
-                    ),
+                    "selected_evidence_handles": selected,
                     "selected_role_handles": [],
                     "propositions": propositions,
-                    "deltas": [],
+                    "deltas": native_deltas,
                     "explanation": explanation,
                 })
-                if local_state["deltas"]:
-                    warnings.append(f"v3_appraisal_delta_omitted:{stage_name}")
             else:
                 failures[question["question_id"]] = (
                     result.failure.error_code
@@ -1562,6 +1656,8 @@ async def _run_cognition(
         outcomes_by_name,
         question_by_kind,
         evidence_positions,
+        projection.handle_to_ref,
+        preliminary_state,
     )
     warnings.extend(bridge_warnings)
     stage_status["semantic_appraisal"] = "completed"
