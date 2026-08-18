@@ -172,6 +172,8 @@ from kazusa_ai_chatbot.cognition_core_v3.goal_cognition import (
     bind_selected_response_operation,
     build_goal_question_tail,
     build_goal_repair_instruction,
+    project_conversation_progress_evidence,
+    project_goal_evidence_row,
     project_required_selection_operations,
     resolve_goal_disposition,
     validate_goal_bid_draft,
@@ -779,6 +781,43 @@ def _validate_relational_carrier(
         ) from exc
 
 
+def _goal_semantic_context(context: Mapping[str, Any]) -> dict[str, Any]:
+    """Filter the branch context into prompt-safe goal-tail content.
+
+    Mirrors the V2 semantic-context contract: private underscore keys and the
+    separately rendered fields (evidence, projection, role summaries, appraisal
+    summaries) are excluded; character constraints drop their judgment field
+    and scene context drops its raw role labels so role facts stay handle-only.
+    """
+    filtered = {
+        key: value
+        for key, value in context.items()
+        if not str(key).startswith("_")
+        and key
+        not in {
+            "evidence",
+            "goal_projection",
+            "role_summaries",
+            "appraisal_summaries",
+        }
+    }
+    constraints = filtered.get("character_constraints")
+    if isinstance(constraints, Mapping):
+        filtered["character_constraints"] = {
+            key: value
+            for key, value in constraints.items()
+            if key != "personality_judgment"
+        }
+    scene_context = filtered.get("scene_context")
+    if isinstance(scene_context, Mapping):
+        filtered["scene_context"] = {
+            key: value
+            for key, value in scene_context.items()
+            if key not in {"character_role", "current_user_role"}
+        }
+    return filtered
+
+
 def _make_goal_stage_producer(
     services: CognitionCoreServicesV2,
     definition: BranchDefinition,
@@ -788,12 +827,16 @@ def _make_goal_stage_producer(
 ):
     """Bind one isolated goal chain producer over a wave's semantic inputs.
 
-    The tail carries only this kind's goal projection and the full authorized
-    evidence domain; required-selection mode is an episode-driven input fact
-    carried by code through its bounded draft contract. Recurrence turns with
-    an authoritative current-turn carrier revalidate it before any model call
-    and materialize that stance onto the accepted draft instead of accepting a
-    fresh model-decided one.
+    The tail carries this kind's goal projection, the full authorized evidence
+    domain with projected content, action tendencies and branch intent, role
+    handles with summaries, the filtered semantic context (identity,
+    constraints, affect, relationship state, continuity fields), accepted
+    appraisal summaries and required-selection facts in selection mode;
+    required-selection mode is an episode-driven input fact carried by code
+    through its bounded draft contract. Recurrence turns with an authoritative
+    current-turn carrier revalidate it before any model call and materialize
+    that stance onto the accepted draft instead of accepting a fresh
+    model-decided one.
     """
 
     goal_kind = definition.goal_kind
@@ -817,11 +860,39 @@ def _make_goal_stage_producer(
     )
     role_bindings: Mapping[str, Mapping[str, str]] = context["_role_bindings"]
     goal = _goal_for_branch(state, goal_kind)
+    progress_evidence = (
+        project_conversation_progress_evidence(payload["evidence"])
+        if selection_mode else []
+    )
+    partitioned_handles = {
+        operation["evidence_handle"] for operation in selection_operations
+    } | {row["evidence_handle"] for row in progress_evidence}
+    tail_rows = (
+        [
+            row for row in payload["evidence"]
+            if row["evidence_handle"] not in partitioned_handles
+        ]
+        if selection_mode else list(payload["evidence"])
+    )
     tail = build_goal_question_tail(
         goal_kind,
         _goal_projection(goal, goal_kind),
         evidence_handles,
         selection_mode=selection_mode,
+        action_tendencies=list(definition.action_tendencies),
+        branch_intent_guidance=(
+            definition.branch_intent_guidance
+            if not selection_mode and goal_kind != ORDINARY_GOAL_KIND else ""
+        ),
+        role_bindings=role_bindings,
+        role_summaries=context["role_summaries"],
+        semantic_context=_goal_semantic_context(context),
+        appraisal_summaries=list(context["appraisal_summaries"]),
+        evidence_rows=[project_goal_evidence_row(row) for row in tail_rows],
+        selection_operations=(
+            list(selection_operations) if selection_mode else []
+        ),
+        progress_evidence=progress_evidence,
     )
     transcript: dict[str, TranscriptState | None] = {"current": None}
     stage_base: dict[str, TranscriptState] = {}
