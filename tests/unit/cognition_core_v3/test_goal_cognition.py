@@ -12,8 +12,9 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
 from kazusa_ai_chatbot.cognition_core_v2.state_models import GOAL_KINDS
 from kazusa_ai_chatbot.cognition_core_v3 import goal_cognition as gc
 from kazusa_ai_chatbot.cognition_core_v3.contracts import (
-    APPRASAL_CONTRACT_EXHAUSTED_ERROR_CODE,
     EXHAUSTION_FAILURE_CLASS,
+    GOAL_BID_PROVIDER_EXHAUSTED_ERROR_CODE,
+    GOAL_BID_STRUCTURE_EXHAUSTED_ERROR_CODE,
     hash_static_prompt,
     validate_stage_result,
 )
@@ -301,13 +302,41 @@ def test_required_goal_exhaustion_preserves_existing_fail_closed_contract():
     assert not exhausted_stage.accepted
     assert exhausted_stage.failure is not None
     assert exhausted_stage.failure.failure_class == EXHAUSTION_FAILURE_CLASS
-    assert exhausted_stage.failure.error_code == APPRASAL_CONTRACT_EXHAUSTED_ERROR_CODE
+    assert (
+        exhausted_stage.failure.error_code
+        == GOAL_BID_STRUCTURE_EXHAUSTED_ERROR_CODE
+    )
     assert exhausted_stage.failure.repair_attempted is True
 
     disposition = gc.resolve_goal_disposition("loss_recovery", exhausted_outcome)
     assert disposition.available is False
     assert disposition.bid is None
-    assert disposition.error_code == APPRASAL_CONTRACT_EXHAUSTED_ERROR_CODE
+    assert (
+        disposition.error_code == GOAL_BID_STRUCTURE_EXHAUSTED_ERROR_CODE
+    )
+
+
+def test_required_goal_provider_exhaustion_uses_provider_error_code():
+    async def provider_exhaustion_scenario():
+        ledger = AttemptLedger({"loss_recovery": 2})
+
+        async def always_provider_failed(ctx):
+            return StageAttemptOutcome(False, None, None, "provider_error")
+
+        handle = start_wave(
+            [ChainTaskSpec("loss_recovery", ("loss_recovery",), {"loss_recovery": always_provider_failed})],
+            ledger=ledger,
+        )
+        result = await handle.complete()
+        return result.outcomes["loss_recovery"]
+
+    exhausted_outcome = asyncio.run(provider_exhaustion_scenario())
+    exhausted_stage = exhausted_outcome.results[0]
+    assert not exhausted_stage.accepted
+    assert (
+        exhausted_stage.failure.error_code
+        == GOAL_BID_PROVIDER_EXHAUSTED_ERROR_CODE
+    )
 
     async def accepted_scenario():
         ledger = AttemptLedger({"safety": 2})

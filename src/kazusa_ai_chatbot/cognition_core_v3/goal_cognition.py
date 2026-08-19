@@ -23,6 +23,7 @@ from typing import Any
 
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     RELATIONAL_WILLINGNESS_SCHEMA_VERSION,
+    project_evidence_provenance_role,
     validate_relational_willingness,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_models import GOAL_KINDS
@@ -527,28 +528,133 @@ def project_required_selection_operations(
     return operations
 
 
+CONVERSATION_PROGRESS_SOURCE_KIND = "conversation_evidence"
+CONVERSATION_PROGRESS_EVENT_SOURCE_PREFIX = (
+    "conversation-progress-event:"
+)
+
+
+def project_conversation_progress_evidence(
+    evidence_rows: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Project active conversation progress as model-visible factual context.
+
+    Args:
+        evidence_rows: V2-shaped evidence rows; only ``conversation_evidence``
+            kind rows whose source id carries the progress-event prefix
+            participate.
+
+    Returns:
+        The projected rows in input order, each keeping the episode-local
+        handle, semantic text and authority, plus temporal provenance when
+        present on the row.
+    """
+    progress_evidence: list[dict[str, Any]] = []
+    for row in evidence_rows:
+        evidence_ref = row["evidence_ref"]
+        if evidence_ref["source_kind"] != CONVERSATION_PROGRESS_SOURCE_KIND:
+            continue
+        source_id = evidence_ref["source_id"]
+        if not source_id.startswith(
+            CONVERSATION_PROGRESS_EVENT_SOURCE_PREFIX
+        ):
+            continue
+        projected_row: dict[str, Any] = {
+            "evidence_handle": row["evidence_handle"],
+            "semantic_text": row["semantic_text"],
+            "authority": row["authority"],
+        }
+        temporal_provenance = row.get("temporal_provenance")
+        if isinstance(temporal_provenance, Mapping):
+            projected_row["temporal_provenance"] = dict(
+                temporal_provenance
+            )
+        progress_evidence.append(projected_row)
+    return progress_evidence
+
+
+def project_goal_evidence_row(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Project one authorized evidence row into prompt-safe facts.
+
+    Mirrors the V2 goal-cognition evidence shape: handle, source kind,
+    semantic text, authority and the projected provenance role; memory scope
+    and temporal provenance travel only when present on the row.
+    """
+    ref = row["evidence_ref"]
+    projected: dict[str, Any] = {
+        "handle": row["evidence_handle"],
+        "source_kind": ref["source_kind"],
+        "semantic_text": row["semantic_text"],
+        "authority": row["authority"],
+        "provenance_role": project_evidence_provenance_role(
+            ref["source_kind"],
+            row.get("memory_scope"),
+        ),
+    }
+    if "memory_scope" in row:
+        projected["memory_scope"] = row["memory_scope"]
+    if "temporal_provenance" in row:
+        projected["temporal_provenance"] = dict(
+            row["temporal_provenance"]
+        )
+    return projected
+
+
 def build_goal_question_tail(
     goal_kind: str,
     state_projection: Mapping[str, Any],
     evidence_handles: Sequence[str],
     *,
     selection_mode: bool = False,
+    action_tendencies: Sequence[str] = (),
+    branch_intent_guidance: str = "",
+    role_bindings: Mapping[str, Mapping[str, str]] = {},
+    role_summaries: Mapping[str, str] = {},
+    semantic_context: Mapping[str, Any] | None = None,
+    appraisal_summaries: Sequence[Mapping[str, Any]] = (),
+    evidence_rows: Sequence[Mapping[str, Any]] = (),
+    selection_operations: Sequence[Mapping[str, Any]] = (),
+    progress_evidence: Sequence[Mapping[str, Any]] = (),
 ) -> str:
     """Build the deterministic human tail for one isolated goal chain.
 
-    The tail carries every dynamic fact for this chain: its kind label, output
-    shape and ownership note, authorized evidence handles and canonical state
-    projection. No sibling-goal, appraisal or action content may enter; other
-    chains run on their own fresh transcripts. Selection mode is an episode-
-    driven input fact (the authoritative operation requires a selection), not a
-    kind fact: in that shape the draft omits ``relational_willingness`` because
-    the stance was already determined earlier and travels by deterministic code.
+    The tail carries every dynamic fact the static branch prompt references:
+    the kind label and output shape, the full authorized evidence handle
+    domain, that kind's canonical state projection, the projected evidence
+    content (supporting rows only in selection mode), required-selection
+    operation facts and conversation progress evidence for selection drafts,
+    action tendencies and branch intent guidance, role handles with their
+    summaries, the filtered semantic context carrying identity, constraints,
+    affect, relationship state and continuity fields, and accepted appraisal
+    summaries. Sections without content are omitted; every section renders in
+    fixed order with structured values as single-line JSON so the tail stays
+    deterministic across attempts and cache checkpoints. Selection mode is an
+    episode-driven input fact (the authoritative operation requires a
+    selection), not a kind fact: in that shape the draft omits
+    ``relational_willingness`` because the stance was already determined
+    earlier and travels by deterministic code.
 
     Args:
         goal_kind: Goal kind label from the closed V2 ``GOAL_KINDS`` set.
         state_projection: Prompt-safe canonical state projection for this chain.
         evidence_handles: Authorized evidence handles for this call.
         selection_mode: True when this chain's output shape is a selection draft.
+        action_tendencies: Fixed tendency labels owned by the branch kind.
+        branch_intent_guidance: The fixed semantic focus of one non-ordinary
+            branch; empty when the caller's gating condition does not hold.
+        role_bindings: Private handle-to-role bindings for this context.
+        role_summaries: Prompt-safe one-line summaries per bound handle.
+        semantic_context: Filtered branch context content, already stripped of
+            private keys and separately rendered fields by the caller; None or
+            empty renders no section.
+        appraisal_summaries: Accepted appraisal rows from earlier reduction, in
+            reduction order; empty when no accepted prefix exists yet.
+        evidence_rows: Projected prompt-safe evidence rows for the evidence
+            section (supporting partition only in selection mode).
+        selection_operations: Required-selection operation facts for one
+            authoritative episode operation; non-empty only in selection mode.
+        progress_evidence: Projected conversation progress rows; non-empty
+            only in selection mode, where they render under their own section.
 
     Returns:
         The joined deterministic tail text.
@@ -558,20 +664,59 @@ def build_goal_question_tail(
     """
     goal_kind_owns_relational_willingness(goal_kind)
     lines = [
-        "# 目标类型",
+        '# 目标类型',
         goal_kind,
-        "# 输出形态",
+        '# 输出形态',
         "selection draft" if selection_mode else "goal bid",
     ]
 
     # Only the ordinary kind owns the relational stance in its goal-bid shape;
     # state that fact once and let selection mode travel the code-carried copy.
     if not selection_mode and goal_kind == ORDINARY_GOAL_KIND:
-        lines.append("本分支拥有 relational_willingness，必须输出完整关系立场。")
+        lines.append(
+            '本分支拥有 relational_willingness，必须输出完整关系立场。'
+        )
 
     handle_lines = [f"- {handle}" for handle in evidence_handles]
     if handle_lines:
         lines.extend(["# 授权证据 handle", *handle_lines])
+
+    projected_evidence_lines = [
+        f"- {row['handle']}={_json_line(row)}" for row in evidence_rows
+    ]
+    if projected_evidence_lines:
+        evidence_header = (
+            "# 支撑证据" if selection_mode else "# 对话证据"
+        )
+        lines.extend([evidence_header, *projected_evidence_lines])
+
+    operation_lines = [
+        f"- {operation['evidence_handle']}={_json_line(operation)}"
+        for operation in selection_operations
+    ]
+    if operation_lines:
+        lines.extend(["# 必需选择操作", *operation_lines])
+
+    progress_lines = [
+        f"- {row['evidence_handle']}={_json_line(row)}"
+        for row in progress_evidence
+    ]
+    if progress_lines:
+        lines.extend(["# 对话进度证据", *progress_lines])
+
+    tendency_lines = [f"- {tendency}" for tendency in action_tendencies]
+    if tendency_lines:
+        lines.extend(["# 行动倾向", *tendency_lines])
+
+    if branch_intent_guidance:
+        lines.extend(["# 分支关注点", str(branch_intent_guidance)])
+
+    role_lines = [
+        f"- {handle}: {role_summaries.get(handle, '')}"
+        for handle in sorted(role_bindings)
+    ]
+    if role_lines:
+        lines.extend(["# 角色 handle", *role_lines])
 
     state_lines = [
         f"{key}={value}" for key, value in dict(state_projection).items()
@@ -579,6 +724,85 @@ def build_goal_question_tail(
     if state_lines:
         lines.extend(["# 状态投影", *state_lines])
 
+    context_content = (
+        semantic_context if semantic_context is not None else {}
+    )
+    context_lines = [
+        f"- {key}={_json_line(value)}"
+        for key, value in dict(context_content).items()
+    ]
+    if context_lines:
+        lines.extend(["# 语义上下文", *context_lines])
+
+    summary_blocks: list[str] = []
+    for summary in appraisal_summaries:
+        block = [f"- {summary['question_id']}: {summary['explanation']}"]
+        block.extend(f"  - {value}" for value in summary["propositions"])
+        summary_blocks.append("\n".join(block))
+    if summary_blocks:
+        lines.extend(["# 已接受评价摘要", *summary_blocks])
+
+    return "\n".join(lines)
+
+
+def _json_line(value: Any) -> str:
+    """Render one structured value as a single deterministic JSON line."""
+    return json.dumps(value, ensure_ascii=False, separators=(", ", ": "))
+
+
+def build_goal_repair_instruction(
+    goal_kind: str,
+    selection_mode: bool,
+    detail: str | None,
+    role_handles: frozenset[str],
+) -> str:
+    """Render one bounded local repair instruction for a rejected goal draft.
+
+    Args:
+        goal_kind: The closed V2 goal kind owning the rejected chain; its field
+            contract is restated exactly as the validator owns it, including the
+            ordinary-response ``relational_willingness`` field when owned and
+            absent in selection mode.
+        selection_mode: True when the episode carries a required selection
+            operation and the draft follows the selection-draft field set
+            instead of the goal bid field set.
+        detail: The exact validator error of the rejected attempt, or None when
+            the raw output could not be parsed as a JSON object at all.
+        role_handles: Complete authorized role handle domain; the closed target
+            value set restated so replacement output stays in-domain.
+
+    Returns:
+        Deterministic instruction text carrying the exact violation, the closed
+            field and value sets, and a complete-replacement directive; no new
+            semantic guidance enters the message.
+    """
+    goal_kind_owns_relational_willingness(goal_kind)
+    error_text = detail if detail is not None else "原始输出无法解析为 JSON 对象"
+    if selection_mode:
+        field_lines = ", ".join(SELECTION_GOAL_DRAFT_FIELDS)
+    else:
+        field_names = list(GOAL_BID_FIELDS)
+        if goal_kind_owns_relational_willingness(goal_kind):
+            field_names.append("relational_willingness")
+        field_lines = ", ".join(field_names)
+    allowed_role_handles = (
+        ", ".join(sorted(role_handles)) if role_handles else "（无）"
+    )
+    lines: list[str] = [
+        "# 修复请求",
+        f"上一条输出未通过结构校验：{error_text}",
+        f"顶层字段集合必须恰为 {field_lines}。",
+        (
+            f"target_role_handles 只允许取值 [{allowed_role_handles}]，最多 "
+            f"{GOAL_BID_ROLE_HANDLE_LIMIT} 个；evidence_handles 只允许请求中列出的授权证据 handle。"
+        ),
+        (
+            f"confidence 最长 {GOAL_CONFIDENCE_CHAR_LIMIT} 字符；expected_consequences "
+            f"是字符串列表，最多 {EXPECTED_CONSEQUENCE_ITEM_LIMIT} 条，每条最长 "
+            f"{CONSEQUENCE_CHAR_LIMIT} 字符。"
+        ),
+        "现在重新输出一个完整替换的 JSON 对象，不要重复上一条错误内容。",
+    ]
     return "\n".join(lines)
 
 

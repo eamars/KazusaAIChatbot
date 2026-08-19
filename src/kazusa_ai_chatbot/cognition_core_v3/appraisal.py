@@ -462,23 +462,74 @@ def build_terminal_outcome_request(
     return "\n\n".join(parts)
 
 
-def _structural_failure() -> StageAttemptOutcome:
-    """Record a structural candidate defect requiring bounded replacement."""
+def build_repair_instruction(question_kind: str, detail: str | None) -> str:
+    """Render one bounded local repair instruction for a structural rejection.
+
+    Args:
+        question_kind: The registered family owning the rejected candidate; its
+            closed proposition vocabulary and delta axes are restated verbatim
+            so the replacement output stays inside the same write surface.
+        detail: The exact validator error of the rejected attempt, or None when
+            the raw output could not be parsed as a JSON object at all.
+
+    Returns:
+        Deterministic instruction text carrying the exact violation, every
+            closed allowed value set, and a complete-replacement directive; no
+            semantic re-decision guidance enters the message.
+    """
+    family_kinds = family_proposition_kinds(question_kind)
+    delta_axes = FAMILY_DELTA_AXES[question_kind]
+    error_text = (
+        detail if detail is not None else '原始输出无法解析为 JSON 对象'
+    )
+    lines: list[str] = [
+        '# 修复请求',
+        f'上一条输出未通过结构校验：{error_text}',
+        f'允许的 proposition kind 值：[{", ".join(sorted(family_kinds))}]',
+        f'允许的 delta path 值：[{", ".join(delta_axes)}]',
+        (
+            '顶层字段集合必须恰为 selected_evidence_handles, propositions, '
+            'deltas, explanation；每条 proposition 字段集合必须恰为 kind, '
+            f'statement, origin_evidence_handle；propositions 最多 {APPRASAL_PROPOSITION_LIMIT} '
+            f'条，deltas 最多 {APPRASAL_DELTA_LIMIT} 条，explanation 最长 '
+            f'{APPRASAL_EXPLANATION_CHAR_LIMIT} 字符。'
+        ),
+        '现在重新输出一个完整替换的 JSON 对象，不要重复上一条错误内容。',
+    ]
+    return '\n'.join(lines)
+
+
+def _structural_failure(detail: str) -> StageAttemptOutcome:
+    """Record a structural candidate defect requiring bounded replacement.
+
+    Args:
+        detail: The exact deterministic validator violation; a local repair
+            request restates it verbatim together with the closed allowed sets.
+    """
     return StageAttemptOutcome(
         accepted=False,
         local_state=None,
         semantic_summary=None,
         failure_class=STRUCTURAL_FAILURE_CLASS,
+        detail=detail,
     )
 
 
-def _boundary_failure(failure_class: str) -> StageAttemptOutcome:
-    """Record a terminal boundary rejection with zero repair calls."""
+def _boundary_failure(failure_class: str, detail: str) -> StageAttemptOutcome:
+    """Record a terminal boundary rejection with zero repair calls.
+
+    Args:
+        failure_class: One exact terminal boundary class from the closed
+            contract vocabulary.
+        detail: The deterministic context of the boundary violation for trace
+            review; boundary outcomes are never repaired.
+    """
     return StageAttemptOutcome(
         accepted=False,
         local_state=None,
         semantic_summary=None,
         failure_class=failure_class,
+        detail=detail,
     )
 
 
@@ -517,8 +568,14 @@ def classify_appaisal_candidate(
     family_kinds = family_proposition_kinds(question_kind)
     authorized_domain = frozenset(evidence_handles)
 
-    if not isinstance(candidate, Mapping) or set(candidate) != _CANDIDATE_FIELDS:
-        return _structural_failure()
+    if not isinstance(candidate, Mapping):
+        return _structural_failure("candidate 必须是单个 JSON 对象")
+    candidate_fields = set(candidate)
+    if candidate_fields != _CANDIDATE_FIELDS:
+        return _structural_failure(
+            "顶层字段集合必须恰为 [explanation, deltas, propositions, "
+            f"selected_evidence_handles]；实际 {sorted(candidate_fields)}"
+        )
 
     selected_handles = candidate["selected_evidence_handles"]
     propositions = candidate["propositions"]
@@ -528,26 +585,47 @@ def classify_appaisal_candidate(
     if not isinstance(selected_handles, list) or any(
         not isinstance(handle, str) or not handle for handle in selected_handles
     ):
-        return _structural_failure()
+        return _structural_failure(
+            "selected_evidence_handles 必须是非空字符串组成的列表"
+        )
+    if not isinstance(propositions, list):
+        return _structural_failure("propositions 必须是列表")
     if len(propositions) > APPRASAL_PROPOSITION_LIMIT:
-        return _structural_failure()
+        return _structural_failure(
+            f"propositions 最多 {APPRASAL_PROPOSITION_LIMIT} 条"
+        )
+    if not isinstance(deltas, list):
+        return _structural_failure("deltas 必须是列表")
     if len(deltas) > APPRASAL_DELTA_LIMIT:
-        return _structural_failure()
-    if not isinstance(explanation, str) or len(explanation) > APPRASAL_EXPLANATION_CHAR_LIMIT:
-        return _structural_failure()
+        return _structural_failure(f"deltas 最多 {APPRASAL_DELTA_LIMIT} 条")
+    if not isinstance(explanation, str):
+        return _structural_failure("explanation 必须是字符串")
+    if len(explanation) > APPRASAL_EXPLANATION_CHAR_LIMIT:
+        return _structural_failure(
+            f"explanation 最长 {APPRASAL_EXPLANATION_CHAR_LIMIT} 字符"
+        )
 
     normalized_propositions: list[dict[str, Any]] = []
     for item in propositions:
+        if not isinstance(item, Mapping) or set(item) != _PROPOSITION_ITEM_FIELDS:
+            return _structural_failure(
+                "每条 proposition 字段集合必须恰为 [kind, origin_evidence_handle, "
+                f"statement]；实际 {sorted(set(item)) if isinstance(item, Mapping) else type(item).__name__}"
+            )
         if (
-            not isinstance(item, Mapping)
-            or set(item) != _PROPOSITION_ITEM_FIELDS
-            or not isinstance(item["kind"], str)
+            not isinstance(item["kind"], str)
+            or not item["kind"]
             or not isinstance(item["statement"], str)
             or not item["statement"]
         ):
-            return _structural_failure()
+            return _structural_failure(
+                "proposition 的 kind 与 statement 必须都是非空字符串"
+            )
         if item["kind"] not in family_kinds:
-            return _structural_failure()
+            return _structural_failure(
+                f"proposition kind {item['kind']!r} 不在家族 {question_kind} 允许值 "
+                f"[{', '.join(sorted(family_kinds))}] 内"
+            )
         normalized_propositions.append(
             {
                 "kind": item["kind"],
@@ -558,32 +636,56 @@ def classify_appaisal_candidate(
 
     normalized_deltas: list[dict[str, Any]] = []
     for item in deltas:
+        if not isinstance(item, Mapping) or set(item) != _DELTA_ITEM_FIELDS:
+            return _structural_failure(
+                "每条 delta 字段集合必须恰为 [path, value, reason]；实际 "
+                f"{sorted(set(item)) if isinstance(item, Mapping) else type(item).__name__}"
+            )
         if (
-            not isinstance(item, Mapping)
-            or set(item) != _DELTA_ITEM_FIELDS
-            or not isinstance(item["path"], str)
+            not isinstance(item["path"], str)
             or not item["path"]
             or not isinstance(item["reason"], str)
             or len(item["reason"]) > APPRASAL_DELTA_REASON_CHAR_LIMIT
         ):
-            return _structural_failure()
+            return _structural_failure(
+                "delta 的 path 与 reason 必须都是非空字符串，且 reason 最长 "
+                f"{APPRASAL_DELTA_REASON_CHAR_LIMIT} 字符"
+            )
         if item["path"] not in permitted_delta_paths:
-            return _structural_failure()
+            return _structural_failure(
+                f"delta path {item['path']!r} 不在家族 {question_kind} 允许值 "
+                f"[{', '.join(sorted(permitted_delta_paths))}] 内"
+            )
+        delta_value = item["value"]
+        if isinstance(delta_value, bool) or not isinstance(
+            delta_value, (int, float, str)
+        ):
+            return _structural_failure("delta value 必须是数字或字符串")
         normalized_deltas.append(
-            {"path": item["path"], "value": item["value"], "reason": item["reason"]}
+            {"path": item["path"], "value": delta_value, "reason": item["reason"]}
         )
 
     selected_set = frozenset(selected_handles)
     for handle in selected_handles:
         if handle not in authorized_domain:
-            return _boundary_failure(PRODUCER_HANDLE_DOMAIN_INVALID)
+            return _boundary_failure(
+                PRODUCER_HANDLE_DOMAIN_INVALID,
+                f"selected_evidence_handle {handle!r} 不在授权证据域内",
+            )
 
     for proposition in normalized_propositions:
         origin = proposition["origin_evidence_handle"]
         if not isinstance(origin, str) or not origin or origin not in selected_set:
-            return _boundary_failure(CANDIDATE_ORIGIN_MISSING)
+            return _boundary_failure(
+                CANDIDATE_ORIGIN_MISSING,
+                f"proposition origin_evidence_handle {origin!r} 为空或不在 "
+                "selected_evidence_handles 内",
+            )
         if origin not in authorized_domain:
-            return _boundary_failure(PRODUCER_HANDLE_DOMAIN_INVALID)
+            return _boundary_failure(
+                PRODUCER_HANDLE_DOMAIN_INVALID,
+                f"proposition origin_evidence_handle {origin!r} 不在授权证据域内",
+            )
 
     if accepted_local_state is not None:
         accepted_items = accepted_local_state.get("propositions", [])
@@ -599,7 +701,10 @@ def classify_appaisal_candidate(
                 None,
             )
             if duplicate is not None:
-                return _boundary_failure(SEMANTIC_BOUNDARY_TERMINAL)
+                return _boundary_failure(
+                    SEMANTIC_BOUNDARY_TERMINAL,
+                    "proposition 与已接受检查点条目语义相同",
+                )
 
     local_state = {
         "selected_evidence_handles": list(selected_handles),

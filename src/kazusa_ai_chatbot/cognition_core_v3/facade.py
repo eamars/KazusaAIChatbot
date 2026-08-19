@@ -19,24 +19,28 @@ surfacing, and protected replay capture reuse the V2 behavior verbatim.
 
 Accepted appraisal content bridges into native state through code-owned rows:
 propositions attach to their source evidence row's candidate event root so the
-native materializer resolves them through causal-event provenance, while v3
-axis deltas are deliberately not translated into V2 increment shape and are
-recorded as deterministic omission warnings instead.
+native materializer resolves them through causal-event provenance, except
+terminal outcome propositions whose subject binds to the unique lifecycle-
+eligible entity of the asserted kind. Axis deltas translate into exact native
+increment rows only when their axis matches exactly one permitted concrete
+path for the stage's authorized evidence domain; every unbound or ambiguous
+delta is dropped with a deterministic warning instead of reaching the native
+reducer. Role assignments stay empty because the producer contract carries no
+role data, recorded as a documented parity gap in the package README.
 """
 
 from __future__ import annotations
 
 import time
 from collections.abc import Mapping, Sequence
+from contextvars import ContextVar, Token
 from dataclasses import replace
 from typing import Any
 
 import httpx
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from openai import OpenAIError
 
 from kazusa_ai_chatbot import llm_tracing
-from kazusa_ai_chatbot.cognition_core_v2.action_selection import plan_actions
 from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
     select_final_branches,
     select_preliminary_branches,
@@ -103,9 +107,13 @@ from kazusa_ai_chatbot.cognition_core_v2.parallel_executor import (
     ParallelExecutionResult,
 )
 from kazusa_ai_chatbot.cognition_core_v2.semantic_source_planner import (
+    _goal_outcome_eligible_entities,
+    _index_projected_handles,
+    _permitted_delta_paths,
     plan_semantic_questions,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    ENTITY_LIST_FIELDS,
     validate_cognition_state,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
@@ -122,17 +130,19 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     ResolverValidationError,
     validate_current_turn_relational_willingness,
 )
-from kazusa_ai_chatbot.cognition_core_v2.workspace import collapse_bids
 from kazusa_ai_chatbot.llm_interface.contracts import LLMCallConfig
+from kazusa_ai_chatbot.llm_interface.detection import detect_backend_descriptor
 from kazusa_ai_chatbot.llm_tracing import failure_capsule
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
+from kazusa_ai_chatbot.cognition_core_v3.action_selection import plan_actions
 from kazusa_ai_chatbot.cognition_core_v3.appraisal import (
     FAMILY_DELTA_AXES,
     FAMILY_IDENTITY_CATEGORY_SETS,
     FAMILY_IDENTITY_OPTIONAL_CATEGORY_SETS,
     STATIC_APPRAISAL_SYSTEM_PROMPT,
     build_family_question_tail,
+    build_repair_instruction,
     build_terminal_outcome_request,
     classify_appaisal_candidate,
     reduce_appraisal_results,
@@ -140,9 +150,12 @@ from kazusa_ai_chatbot.cognition_core_v3.appraisal import (
 )
 from kazusa_ai_chatbot.cognition_core_v3.contracts import (
     APPRASAL_CONTRACT_EXHAUSTED_ERROR_CODE,
+    CacheDomainIdentity,
     PROVIDER_FAILURE_CLASS,
     StageResult,
     STRUCTURAL_FAILURE_CLASS,
+    hash_credential_identity,
+    hash_static_prompt,
 )
 from kazusa_ai_chatbot.cognition_core_v3.diagnostics import (
     build_chain_trace_record,
@@ -159,6 +172,9 @@ from kazusa_ai_chatbot.cognition_core_v3.goal_cognition import (
     STATIC_GOAL_SYSTEM_PROMPT,
     bind_selected_response_operation,
     build_goal_question_tail,
+    build_goal_repair_instruction,
+    project_conversation_progress_evidence,
+    project_goal_evidence_row,
     project_required_selection_operations,
     resolve_goal_disposition,
     validate_goal_bid_draft,
@@ -170,8 +186,18 @@ from kazusa_ai_chatbot.cognition_core_v3.registry import (
     GOAL_CHAINS,
     TERMINAL_OUTCOME_CHAIN,
 )
+from kazusa_ai_chatbot.cognition_core_v3.transcript import (
+    TranscriptState,
+    build_repair_request,
+    domain_matches,
+    extend_accepted,
+    start_chain,
+    start_fresh_from_checkpoint,
+    to_invoker_messages,
+)
 from kazusa_ai_chatbot.cognition_core_v3.workspace import (
     collapse_authoritative_relational_bid,
+    collapse_bids_via_partition,
 )
 
 _PROVIDER_EXCEPTIONS = (
@@ -195,25 +221,40 @@ _STAGE_CONFIG_FIELDS: dict[str, str] = {
     "goal_threat_outcome": "appraisal_goal_threat_outcome_config",
 }
 
-_PROTECTED_CHAIN_RECORDS: list[dict[str, Any]] = []
+_CURRENT_PROTECTED_CHAIN_SCOPE: ContextVar[
+    list[dict[str, Any]] | None
+] = ContextVar("cognition_v3_protected_chain_records", default=None)
 
 
-def protected_chain_records() -> tuple[dict[str, Any], ...]:
-    """Return invocation-scoped protected chain trace records in order.
+def bind_protected_chain_records() -> Token:
+    """Bind a fresh per-trace protected chain record scope.
 
-    Records carry full internal content (raw model output and parsed
-    candidates) for the current process; callers clear between runs and
-    project one record through ``project_protected_chain_failure`` or
-    ``project_protected_chain_result`` before exposing it publicly.
+    The bound scope owns every trace record appended while it stays active in
+    the current execution context; ``run_cognition`` binds one when none is
+    already active so concurrent traces keep isolated record sets. Returns the
+    reset token for ``reset_protected_chain_records``.
     """
 
-    return tuple(_PROTECTED_CHAIN_RECORDS)
+    return _CURRENT_PROTECTED_CHAIN_SCOPE.set([])
 
 
-def clear_protected_chain_records() -> None:
-    """Drop every recorded protected chain trace from the current process."""
+def snapshot_protected_chain_records() -> tuple[dict[str, Any], ...]:
+    """Return the active scope's protected chain trace records in order.
 
-    _PROTECTED_CHAIN_RECORDS.clear()
+    Records carry full internal content (raw model output and parsed
+    candidates); callers project one record through
+    ``project_protected_chain_failure`` or ``project_protected_chain_result``
+    before exposing it publicly. Returns an empty tuple when no scope is bound.
+    """
+
+    records = _CURRENT_PROTECTED_CHAIN_SCOPE.get()
+    return tuple(records) if records is not None else ()
+
+
+def reset_protected_chain_records(token: Token) -> None:
+    """Drop the protected chain record scope bound by ``token``."""
+
+    _CURRENT_PROTECTED_CHAIN_SCOPE.reset(token)
 
 
 def _stage_config(stage_name: str, services: CognitionCoreServicesV2) -> LLMCallConfig:
@@ -234,6 +275,28 @@ def _goal_stage_config(
     if goal_kind == ORDINARY_GOAL_KIND:
         return services.goal_ordinary_response_config
     return services.goal_active_branch_config
+
+
+def _cache_domain_identity(
+    config: LLMCallConfig, static_system_prompt: str
+) -> CacheDomainIdentity:
+    """Derive the route cache-domain identity for one stage's model call.
+
+    Every component resolves deterministically from the injected route
+    configuration and the family-owned byte-identical static prompt, so two
+    attempts of one stage agree on their domain while a routed change to URL,
+    credential, backend kind, model, or template strategy changes it.
+    """
+
+    descriptor = detect_backend_descriptor(config=config, generation=1)
+    return CacheDomainIdentity(
+        normalized_backend_url=descriptor.normalized_base_url,
+        credential_identity_hash=hash_credential_identity(config.api_key),
+        backend_kind=descriptor.backend_kind,
+        model=descriptor.model,
+        template_strategy=descriptor.thinking_strategy,
+        static_system_prompt_hash=hash_static_prompt(static_system_prompt),
+    )
 
 
 def _family_state_projection(
@@ -287,9 +350,17 @@ def _record_chain_trace(
     attempt_number: int = 1,
     error: str | None = None,
 ) -> None:
-    """Append one protected chain trace record for the current invocation."""
+    """Append one protected chain trace record to the active per-trace scope.
 
-    _PROTECTED_CHAIN_RECORDS.append(
+    Producers called outside a bound scope (standalone unit tests) append
+    nothing, so every recorded trace belongs to exactly one invocation; bind
+    ``bind_protected_chain_records`` first when capture is required.
+    """
+
+    records = _CURRENT_PROTECTED_CHAIN_SCOPE.get()
+    if records is None:
+        return
+    records.append(
         build_chain_trace_record(
             chain_name=chain_name,
             stage_id=stage_id,
@@ -329,18 +400,56 @@ def _classify_stage_candidate(
     )
 
 
-def _make_appraisal_stage_producer(
+def _make_appraisal_stage_producers(
     services: CognitionCoreServicesV2,
     projection: Any,
     question_by_kind: Mapping[str, Mapping[str, Any]],
-):
-    """Bind one appraisal stage producer closure for the first wave.
+    chain: ChainSpec,
+) -> dict[str, StageProducer]:
+    """Bind transcript-isolated stage producers for one appraisal chain.
 
-    A stage whose family owns no planned question returns a deterministic
-    empty accepted state without any model call; every other attempt runs the
-    byte-identical static system prompt with the fresh family tail and records
-    provider, parse, and classification outcomes on the protected trace sidecar.
+    Every producer in the returned mapping shares one chain-local transcript
+    state: accepted continuations preserve their prefix byte-for-byte across
+    this chain's stages only, a structural rejection answers with a bounded
+    local repair request carrying the exact contract error and closed allowed
+    values, provider failures retry the stage's base request on the next
+    attempt, and a route cache-domain mismatch restarts from the canonical
+    checkpoint tail. Stages without an authorized question keep the
+    deterministic empty accepted state without any model call; their projection
+    travels through later tails' accepted-prefix summaries instead of assistant
+    text.
     """
+
+    stages_with_questions = [
+        stage for stage in chain.stages if stage in question_by_kind
+    ]
+    next_question_stage: dict[str, str | None] = {}
+    position = 0
+    while position < len(stages_with_questions):
+        current_stage = stages_with_questions[position]
+        following_stage = (
+            stages_with_questions[position + 1]
+            if position + 1 < len(stages_with_questions)
+            else None
+        )
+        next_question_stage[current_stage] = following_stage
+        position += 1
+
+    transcript: dict[str, TranscriptState | None] = {"current": None}
+    stage_base: dict[str, TranscriptState] = {}
+    pending_repair: dict[str, tuple[str, str | None]] = {}
+
+    def _question_tail(stage_name: str, accepted_prefix) -> str:
+        question = question_by_kind[stage_name]
+        return build_family_question_tail(
+            stage_name,
+            _family_state_projection(
+                stage_name,
+                projection.identity_by_question,
+            ),
+            question["evidence_handles"],
+            render_accepted_context(accepted_prefix),
+        )
 
     async def produce(context) -> StageAttemptOutcome:
         stage_name = context.stage_name
@@ -356,19 +465,57 @@ def _make_appraisal_stage_producer(
                 semantic_summary=None,
             )
         config = _stage_config(stage_name, services)
-        tail = build_family_question_tail(
-            stage_name,
-            _family_state_projection(
-                stage_name,
-                projection.identity_by_question,
-            ),
-            question["evidence_handles"],
-            render_accepted_context(context.accepted_prefix),
+        identity = _cache_domain_identity(
+            config, STATIC_APPRAISAL_SYSTEM_PROMPT
         )
-        messages: list[BaseMessage] = [
-            SystemMessage(content=STATIC_APPRAISAL_SYSTEM_PROMPT),
-            HumanMessage(content=tail),
-        ]
+        tail = _question_tail(stage_name, context.accepted_prefix)
+        sent_payload = tail
+        current = transcript["current"]
+        if current is None:
+            current = start_chain(
+                STATIC_APPRAISAL_SYSTEM_PROMPT, tail, identity
+            )
+            transcript["current"] = current
+            stage_base[stage_name] = current
+            messages = to_invoker_messages(
+                current.messages,
+                static_system_prompt=STATIC_APPRAISAL_SYSTEM_PROMPT,
+            )
+        elif not domain_matches(current, identity):
+            current = start_fresh_from_checkpoint(current, tail, identity)
+            transcript["current"] = current
+            stage_base[stage_name] = current
+            pending_repair.pop(stage_name, None)
+            messages = to_invoker_messages(
+                current.messages,
+                static_system_prompt=STATIC_APPRAISAL_SYSTEM_PROMPT,
+            )
+        else:
+            base_state = stage_base.get(stage_name)
+            if base_state is None:
+                stage_base[stage_name] = current
+                base_state = current
+                messages = to_invoker_messages(
+                    base_state.messages,
+                    static_system_prompt=STATIC_APPRAISAL_SYSTEM_PROMPT,
+                )
+            else:
+                repair_entry = pending_repair.pop(stage_name, None)
+                if repair_entry is not None and repair_entry[0]:
+                    invalid_raw, failure_detail = repair_entry
+                    instruction = build_repair_instruction(
+                        stage_name, failure_detail
+                    )
+                    sent_payload = instruction
+                    messages = to_invoker_messages(
+                        build_repair_request(base_state, invalid_raw, instruction),
+                        static_system_prompt=STATIC_APPRAISAL_SYSTEM_PROMPT,
+                    )
+                else:
+                    messages = to_invoker_messages(
+                        base_state.messages,
+                        static_system_prompt=STATIC_APPRAISAL_SYSTEM_PROMPT,
+                    )
         started_at = time.monotonic()
         try:
             response = await services.llm.ainvoke(messages, config=config)
@@ -379,7 +526,7 @@ def _make_appraisal_stage_producer(
                 stage_id=f"{context.chain_name}:{stage_name}",
                 config=config,
                 system_prompt=STATIC_APPRAISAL_SYSTEM_PROMPT,
-                human_payload=tail,
+                human_payload=sent_payload,
                 raw_output=None,
                 parsed_output=None,
                 parse_status="provider_error",
@@ -398,12 +545,14 @@ def _make_appraisal_stage_producer(
         try:
             candidate = parse_llm_json_output(raw_output, deterministic_only=True)
         except _CANONICALIZE_EXCEPTIONS as exc:
+            parse_detail = f"原始输出无法解析为 JSON 对象：{exc}"
+            pending_repair[stage_name] = (raw_output, parse_detail)
             _record_chain_trace(
                 chain_name=context.chain_name,
                 stage_id=f"{context.chain_name}:{stage_name}",
                 config=config,
                 system_prompt=STATIC_APPRAISAL_SYSTEM_PROMPT,
-                human_payload=tail,
+                human_payload=sent_payload,
                 raw_output=raw_output,
                 parsed_output=None,
                 parse_status="parse_failed",
@@ -417,6 +566,7 @@ def _make_appraisal_stage_producer(
                 local_state=None,
                 semantic_summary=None,
                 failure_class=STRUCTURAL_FAILURE_CLASS,
+                detail=parse_detail,
             )
         accepted_states = [
             result.local_state
@@ -434,39 +584,128 @@ def _make_appraisal_stage_producer(
             stage_id=f"{context.chain_name}:{stage_name}",
             config=config,
             system_prompt=STATIC_APPRAISAL_SYSTEM_PROMPT,
-            human_payload=tail,
+            human_payload=sent_payload,
             raw_output=raw_output,
             parsed_output=candidate,
             parse_status="accepted" if outcome.accepted else "rejected",
             started_at=started_at,
             ended_at=time.monotonic(),
             attempt_number=context.attempt_number,
+            error=None if outcome.accepted else outcome.detail,
+        )
+        if not outcome.accepted:
+            if outcome.failure_class == STRUCTURAL_FAILURE_CLASS:
+                pending_repair[stage_name] = (raw_output, outcome.detail)
+            return outcome
+        base_state = stage_base[stage_name]
+        following_stage = next_question_stage.get(stage_name)
+        if following_stage is None:
+            extension_tail: str | None = None
+        else:
+            successor_result = StageResult(
+                chain_name=chain.name,
+                stage_name=stage_name,
+                accepted=True,
+                local_state=outcome.local_state,
+                semantic_summary=outcome.semantic_summary,
+            )
+            successor_prefix = context.accepted_prefix + (successor_result,)
+            extension_tail = _question_tail(following_stage, successor_prefix)
+        transcript["current"] = extend_accepted(
+            base_state, raw_output, extension_tail
         )
         return outcome
 
-    return produce
+    return {stage_name: produce for stage_name in chain.stages}
 
 
 def _make_terminal_stage_producer(
     services: CognitionCoreServicesV2,
     provisional_state: Any,
     evidence_handles: Sequence[str],
-):
+    question_by_kind: Mapping[str, Mapping[str, Any]],
+) -> dict[str, StageProducer]:
     """Bind the fresh canonical terminal-outcome stage producer.
 
     The terminal chain runs on a clean transcript: no prior wave history enters
     its tail beyond the accepted-prefix reduction and typed omissions recorded
-    by the provisional state it is built from.
+    by the provisional state it is built from. Structural rejections answer with
+    a bounded local repair request; provider failures retry the base request.
+    When the planner planned no ``goal_threat_outcome`` question for this
+    episode, the stage keeps the deterministic contentless accepted state
+    without any model call, mirroring wave-A stages without an authorized
+    question.
     """
 
+    outcome_question = question_by_kind.get("goal_threat_outcome")
+    transcript: dict[str, TranscriptState | None] = {"current": None}
+    stage_base: dict[str, TranscriptState] = {}
+    pending_repair: dict[str, tuple[str, str | None]] = {}
+
     async def produce(context) -> StageAttemptOutcome:
+        if outcome_question is None:
+            return StageAttemptOutcome(
+                accepted=True,
+                local_state={
+                    "selected_evidence_handles": [],
+                    "propositions": [],
+                    "deltas": [],
+                },
+                semantic_summary=None,
+            )
         stage_name = context.stage_name
         config = _stage_config(stage_name, services)
+        identity = _cache_domain_identity(
+            config, STATIC_APPRAISAL_SYSTEM_PROMPT
+        )
         tail = build_terminal_outcome_request(provisional_state, evidence_handles)
-        messages: list[BaseMessage] = [
-            SystemMessage(content=STATIC_APPRAISAL_SYSTEM_PROMPT),
-            HumanMessage(content=tail),
-        ]
+        sent_payload = tail
+        current = transcript["current"]
+        if current is None:
+            current = start_chain(
+                STATIC_APPRAISAL_SYSTEM_PROMPT, tail, identity
+            )
+            transcript["current"] = current
+            stage_base[stage_name] = current
+            messages = to_invoker_messages(
+                current.messages,
+                static_system_prompt=STATIC_APPRAISAL_SYSTEM_PROMPT,
+            )
+        elif not domain_matches(current, identity):
+            current = start_fresh_from_checkpoint(current, tail, identity)
+            transcript["current"] = current
+            stage_base[stage_name] = current
+            pending_repair.pop(stage_name, None)
+            messages = to_invoker_messages(
+                current.messages,
+                static_system_prompt=STATIC_APPRAISAL_SYSTEM_PROMPT,
+            )
+        else:
+            base_state = stage_base.get(stage_name)
+            if base_state is None:
+                stage_base[stage_name] = current
+                base_state = current
+                messages = to_invoker_messages(
+                    base_state.messages,
+                    static_system_prompt=STATIC_APPRAISAL_SYSTEM_PROMPT,
+                )
+            else:
+                repair_entry = pending_repair.pop(stage_name, None)
+                if repair_entry is not None and repair_entry[0]:
+                    invalid_raw, failure_detail = repair_entry
+                    instruction = build_repair_instruction(
+                        stage_name, failure_detail
+                    )
+                    sent_payload = instruction
+                    messages = to_invoker_messages(
+                        build_repair_request(base_state, invalid_raw, instruction),
+                        static_system_prompt=STATIC_APPRAISAL_SYSTEM_PROMPT,
+                    )
+                else:
+                    messages = to_invoker_messages(
+                        base_state.messages,
+                        static_system_prompt=STATIC_APPRAISAL_SYSTEM_PROMPT,
+                    )
         started_at = time.monotonic()
         try:
             response = await services.llm.ainvoke(messages, config=config)
@@ -477,7 +716,7 @@ def _make_terminal_stage_producer(
                 stage_id=f"{context.chain_name}:{stage_name}",
                 config=config,
                 system_prompt=STATIC_APPRAISAL_SYSTEM_PROMPT,
-                human_payload=tail,
+                human_payload=sent_payload,
                 raw_output=None,
                 parsed_output=None,
                 parse_status="provider_error",
@@ -496,12 +735,14 @@ def _make_terminal_stage_producer(
         try:
             candidate = parse_llm_json_output(raw_output, deterministic_only=True)
         except _CANONICALIZE_EXCEPTIONS as exc:
+            parse_detail = f"原始输出无法解析为 JSON 对象：{exc}"
+            pending_repair[stage_name] = (raw_output, parse_detail)
             _record_chain_trace(
                 chain_name=context.chain_name,
                 stage_id=f"{context.chain_name}:{stage_name}",
                 config=config,
                 system_prompt=STATIC_APPRAISAL_SYSTEM_PROMPT,
-                human_payload=tail,
+                human_payload=sent_payload,
                 raw_output=raw_output,
                 parsed_output=None,
                 parse_status="parse_failed",
@@ -515,6 +756,7 @@ def _make_terminal_stage_producer(
                 local_state=None,
                 semantic_summary=None,
                 failure_class=STRUCTURAL_FAILURE_CLASS,
+                detail=parse_detail,
             )
         outcome = _classify_stage_candidate(
             stage_name, candidate, evidence_handles, None
@@ -524,17 +766,21 @@ def _make_terminal_stage_producer(
             stage_id=f"{context.chain_name}:{stage_name}",
             config=config,
             system_prompt=STATIC_APPRAISAL_SYSTEM_PROMPT,
-            human_payload=tail,
+            human_payload=sent_payload,
             raw_output=raw_output,
             parsed_output=candidate,
             parse_status="accepted" if outcome.accepted else "rejected",
             started_at=started_at,
             ended_at=time.monotonic(),
             attempt_number=context.attempt_number,
+            error=None if outcome.accepted else outcome.detail,
         )
+        if not outcome.accepted:
+            if outcome.failure_class == STRUCTURAL_FAILURE_CLASS:
+                pending_repair[stage_name] = (raw_output, outcome.detail)
         return outcome
 
-    return produce
+    return {stage_name: produce for stage_name in TERMINAL_OUTCOME_CHAIN.stages}
 
 
 def _validate_relational_carrier(
@@ -575,6 +821,43 @@ def _validate_relational_carrier(
         ) from exc
 
 
+def _goal_semantic_context(context: Mapping[str, Any]) -> dict[str, Any]:
+    """Filter the branch context into prompt-safe goal-tail content.
+
+    Mirrors the V2 semantic-context contract: private underscore keys and the
+    separately rendered fields (evidence, projection, role summaries, appraisal
+    summaries) are excluded; character constraints drop their judgment field
+    and scene context drops its raw role labels so role facts stay handle-only.
+    """
+    filtered = {
+        key: value
+        for key, value in context.items()
+        if not str(key).startswith("_")
+        and key
+        not in {
+            "evidence",
+            "goal_projection",
+            "role_summaries",
+            "appraisal_summaries",
+        }
+    }
+    constraints = filtered.get("character_constraints")
+    if isinstance(constraints, Mapping):
+        filtered["character_constraints"] = {
+            key: value
+            for key, value in constraints.items()
+            if key != "personality_judgment"
+        }
+    scene_context = filtered.get("scene_context")
+    if isinstance(scene_context, Mapping):
+        filtered["scene_context"] = {
+            key: value
+            for key, value in scene_context.items()
+            if key not in {"character_role", "current_user_role"}
+        }
+    return filtered
+
+
 def _make_goal_stage_producer(
     services: CognitionCoreServicesV2,
     definition: BranchDefinition,
@@ -584,12 +867,16 @@ def _make_goal_stage_producer(
 ):
     """Bind one isolated goal chain producer over a wave's semantic inputs.
 
-    The tail carries only this kind's goal projection and the full authorized
-    evidence domain; required-selection mode is an episode-driven input fact
-    carried by code through its bounded draft contract. Recurrence turns with
-    an authoritative current-turn carrier revalidate it before any model call
-    and materialize that stance onto the accepted draft instead of accepting a
-    fresh model-decided one.
+    The tail carries this kind's goal projection, the full authorized evidence
+    domain with projected content, action tendencies and branch intent, role
+    handles with summaries, the filtered semantic context (identity,
+    constraints, affect, relationship state, continuity fields), accepted
+    appraisal summaries and required-selection facts in selection mode;
+    required-selection mode is an episode-driven input fact carried by code
+    through its bounded draft contract. Recurrence turns with an authoritative
+    current-turn carrier revalidate it before any model call and materialize
+    that stance onto the accepted draft instead of accepting a fresh
+    model-decided one.
     """
 
     goal_kind = definition.goal_kind
@@ -613,16 +900,43 @@ def _make_goal_stage_producer(
     )
     role_bindings: Mapping[str, Mapping[str, str]] = context["_role_bindings"]
     goal = _goal_for_branch(state, goal_kind)
+    progress_evidence = (
+        project_conversation_progress_evidence(payload["evidence"])
+        if selection_mode else []
+    )
+    partitioned_handles = {
+        operation["evidence_handle"] for operation in selection_operations
+    } | {row["evidence_handle"] for row in progress_evidence}
+    tail_rows = (
+        [
+            row for row in payload["evidence"]
+            if row["evidence_handle"] not in partitioned_handles
+        ]
+        if selection_mode else list(payload["evidence"])
+    )
     tail = build_goal_question_tail(
         goal_kind,
         _goal_projection(goal, goal_kind),
         evidence_handles,
         selection_mode=selection_mode,
+        action_tendencies=list(definition.action_tendencies),
+        branch_intent_guidance=(
+            definition.branch_intent_guidance
+            if not selection_mode and goal_kind != ORDINARY_GOAL_KIND else ""
+        ),
+        role_bindings=role_bindings,
+        role_summaries=context["role_summaries"],
+        semantic_context=_goal_semantic_context(context),
+        appraisal_summaries=list(context["appraisal_summaries"]),
+        evidence_rows=[project_goal_evidence_row(row) for row in tail_rows],
+        selection_operations=(
+            list(selection_operations) if selection_mode else []
+        ),
+        progress_evidence=progress_evidence,
     )
-    messages: list[BaseMessage] = [
-        SystemMessage(content=STATIC_GOAL_SYSTEM_PROMPT),
-        HumanMessage(content=tail),
-    ]
+    transcript: dict[str, TranscriptState | None] = {"current": None}
+    stage_base: dict[str, TranscriptState] = {}
+    pending_repair: dict[str, tuple[str, str | None]] = {}
 
     async def produce(context_) -> StageAttemptOutcome:
         if goal_kind == ORDINARY_GOAL_KIND:
@@ -637,6 +951,55 @@ def _make_goal_stage_producer(
                 raise CognitionExecutionError(
                     "current-turn relational carrier is missing on recurrence"
                 )
+        identity = _cache_domain_identity(config, STATIC_GOAL_SYSTEM_PROMPT)
+        sent_payload = tail
+        current = transcript["current"]
+        if current is None:
+            current = start_chain(
+                STATIC_GOAL_SYSTEM_PROMPT, tail, identity
+            )
+            transcript["current"] = current
+            stage_base[goal_kind] = current
+            messages = to_invoker_messages(
+                current.messages, static_system_prompt=STATIC_GOAL_SYSTEM_PROMPT
+            )
+        elif not domain_matches(current, identity):
+            current = start_fresh_from_checkpoint(current, tail, identity)
+            transcript["current"] = current
+            stage_base[goal_kind] = current
+            pending_repair.pop(goal_kind, None)
+            messages = to_invoker_messages(
+                current.messages, static_system_prompt=STATIC_GOAL_SYSTEM_PROMPT
+            )
+        else:
+            base_state = stage_base.get(goal_kind)
+            if base_state is None:
+                stage_base[goal_kind] = current
+                base_state = current
+                messages = to_invoker_messages(
+                    base_state.messages,
+                    static_system_prompt=STATIC_GOAL_SYSTEM_PROMPT,
+                )
+            else:
+                repair_entry = pending_repair.pop(goal_kind, None)
+                if repair_entry is not None and repair_entry[0]:
+                    invalid_raw, failure_detail = repair_entry
+                    instruction = build_goal_repair_instruction(
+                        goal_kind,
+                        selection_mode,
+                        failure_detail,
+                        frozenset(role_bindings),
+                    )
+                    sent_payload = instruction
+                    messages = to_invoker_messages(
+                        build_repair_request(base_state, invalid_raw, instruction),
+                        static_system_prompt=STATIC_GOAL_SYSTEM_PROMPT,
+                    )
+                else:
+                    messages = to_invoker_messages(
+                        base_state.messages,
+                        static_system_prompt=STATIC_GOAL_SYSTEM_PROMPT,
+                    )
         started_at = time.monotonic()
         try:
             response = await services.llm.ainvoke(messages, config=config)
@@ -647,7 +1010,7 @@ def _make_goal_stage_producer(
                 stage_id=f"{goal_kind}:{goal_kind}",
                 config=config,
                 system_prompt=STATIC_GOAL_SYSTEM_PROMPT,
-                human_payload=tail,
+                human_payload=sent_payload,
                 raw_output=None,
                 parsed_output=None,
                 parse_status="provider_error",
@@ -667,12 +1030,14 @@ def _make_goal_stage_producer(
         try:
             candidate = parse_llm_json_output(raw_output, deterministic_only=True)
         except _CANONICALIZE_EXCEPTIONS as exc:
+            parse_detail = f"原始输出无法解析为 JSON 对象：{exc}"
+            pending_repair[goal_kind] = (raw_output, parse_detail)
             _record_chain_trace(
                 chain_name=goal_kind,
                 stage_id=f"{goal_kind}:{goal_kind}",
                 config=config,
                 system_prompt=STATIC_GOAL_SYSTEM_PROMPT,
-                human_payload=tail,
+                human_payload=sent_payload,
                 raw_output=raw_output,
                 parsed_output=None,
                 parse_status="parse_failed",
@@ -687,6 +1052,7 @@ def _make_goal_stage_producer(
                 local_state=None,
                 semantic_summary=None,
                 failure_class=STRUCTURAL_FAILURE_CLASS,
+                detail=parse_detail,
             )
         evidence_domain = set(evidence_handles)
         role_domain = set(role_bindings)
@@ -711,12 +1077,13 @@ def _make_goal_stage_producer(
                     role_handles=role_domain,
                 )
         except ValueError as exc:
+            pending_repair[goal_kind] = (raw_output, str(exc))
             _record_chain_trace(
                 chain_name=goal_kind,
                 stage_id=f"{goal_kind}:{goal_kind}",
                 config=config,
                 system_prompt=STATIC_GOAL_SYSTEM_PROMPT,
-                human_payload=tail,
+                human_payload=sent_payload,
                 raw_output=raw_output,
                 parsed_output=candidate,
                 parse_status="rejected",
@@ -731,6 +1098,7 @@ def _make_goal_stage_producer(
                 local_state=None,
                 semantic_summary=None,
                 failure_class=STRUCTURAL_FAILURE_CLASS,
+                detail=str(exc),
             )
         if goal_kind == ORDINARY_GOAL_KIND:
             relational_carrier = payload.get(
@@ -752,7 +1120,7 @@ def _make_goal_stage_producer(
             stage_id=f"{goal_kind}:{goal_kind}",
             config=config,
             system_prompt=STATIC_GOAL_SYSTEM_PROMPT,
-            human_payload=tail,
+            human_payload=sent_payload,
             raw_output=raw_output,
             parsed_output=candidate,
             parse_status="accepted",
@@ -946,25 +1314,59 @@ def _synthesize_branch_execution(
     )
 
 
+_TERMINAL_PROPOSITION_KINDS = {
+    "goal_completed": "goal",
+    "event_completed": "event",
+    "event_repaired": "event",
+    "threat_resolved": "threat",
+    "knowledge_answered": "knowledge_gap",
+}
+
+
 def _bridge_appraisal_rows(
     chains: Sequence[ChainSpec],
     outcomes_by_name: Mapping[str, ChainOutcome],
     question_by_kind: Mapping[str, Mapping[str, Any]],
     evidence_positions: Mapping[str, int],
+    handle_to_ref: Mapping[str, Mapping[str, str]],
+    preliminary_state: Mapping[str, Any],
 ) -> tuple[list[dict[str, Any]], dict[str, str], list[str]]:
     """Bridge accepted v3 stage content into native V2 appraisal rows.
 
-    Each planned question whose latest recorded stage result was accepted
-    contributes one row: propositions attach to their source evidence row's
-    candidate-event prompt root with code-owned provenance so the native
-    materializer resolves them through causal-event checks, and the bounded
-    semantic summary becomes the row explanation. A latest non-accepted result
-    carries its typed error code into the failure map; a stage that recorded
-    no attempt at all fails closed as contract exhaustion. Axis deltas are
-    deliberately omitted from the bridge and recorded as deterministic
-    warnings instead of being translated into V2 increment semantics this
-    engine does not own.
+    Every accepted terminal-outcome stage with bounded content contributes one
+    row for its deterministic ``q:<stage>`` identity so fresh canonical
+    terminal assertions reach the final reduction; a terminal stage skipped
+    because no outcome question was planned stays contentless and contributes
+    none, mirroring wave-A stages without a planned question.
+    Propositions attach to their source evidence row's candidate event root
+    with code-owned provenance so the native materializer resolves them through
+    causal-event checks, except terminal outcome propositions whose subject
+    binds to the unique lifecycle-eligible entity of the asserted kind; a
+    terminal assertion without exactly one eligible entity is dropped as an
+    unbound warning instead of guessing its target. Axis deltas translate into
+    exact native increment rows only when their axis matches exactly one
+    permitted concrete path for the stage's authorized evidence domain, their
+    value is an integer, and selected evidence survives; every other delta is
+    dropped with a deterministic per-item warning so nothing unresolvable
+    reaches the native reducer. Role assignments stay empty: the producer
+    contract carries no role data, recorded as a documented parity gap in the
+    package README.
     """
+
+    handle_by_entity = {
+        ref["entity_id"]: handle for handle, ref in handle_to_ref.items()
+    }
+    terminal_handles_by_kind = {}
+    for entity_kind in ENTITY_LIST_FIELDS:
+        eligible = _goal_outcome_eligible_entities(
+            preliminary_state, entity_kind
+        )
+        terminal_handles_by_kind[entity_kind] = [
+            handle_by_entity[entity["entity_id"]]
+            for entity in eligible
+            if entity["entity_id"] in handle_by_entity
+        ]
+    handle_map = _index_projected_handles(handle_to_ref)
 
     rows: list[dict[str, Any]] = []
     failures: dict[str, str] = {}
@@ -978,26 +1380,49 @@ def _bridge_appraisal_rows(
         for stage_name in chain.stages:
             question = question_by_kind.get(stage_name)
             if question is None:
-                continue
+                if chain.name != TERMINAL_OUTCOME_CHAIN.name:
+                    continue
+                question = {
+                    "question_id": f"q:{stage_name}",
+                    "permitted_delta_paths": _permitted_delta_paths(
+                        stage_name,
+                        handle_map,
+                        preliminary_state,
+                        list(evidence_positions),
+                    ),
+                }
             result = last_results.get(stage_name)
             if (
                 isinstance(result, StageResult)
                 and result.accepted
+                and result.semantic_summary is not None
                 and isinstance(result.local_state, Mapping)
             ):
                 local_state = result.local_state
                 propositions: list[dict[str, Any]] = []
                 for item in local_state["propositions"]:
                     origin = item["origin_evidence_handle"]
-                    position = evidence_positions.get(origin)
-                    if position is None:
-                        raise ValueError(
-                            "appraisal proposition origin has no authorized"
-                            f" evidence row: {origin!r}"
-                        )
+                    entity_kind = _TERMINAL_PROPOSITION_KINDS.get(item["kind"])
+                    if entity_kind is None:
+                        position = evidence_positions.get(origin)
+                        if position is None:
+                            raise ValueError(
+                                "appraisal proposition origin has no authorized"
+                                f" evidence row: {origin!r}"
+                            )
+                        subject_handle = f"ce{position}"
+                    else:
+                        candidates = terminal_handles_by_kind[entity_kind]
+                        if len(candidates) != 1:
+                            warnings.append(
+                                f"v3_terminal_unbound:{stage_name}:"
+                                f"{item['kind']}"
+                            )
+                            continue
+                        subject_handle = candidates[0]
                     propositions.append({
                         "proposition_kind": item["kind"],
-                        "subject_handle": f"ce{position}",
+                        "subject_handle": subject_handle,
                         "evidence_handles": [origin],
                         "role_assignments": [],
                         "semantic_value": item["statement"],
@@ -1008,19 +1433,49 @@ def _bridge_appraisal_rows(
                         f"accepted appraisal stage has no bounded summary:"
                         f" {stage_name}"
                     )
+                selected = list(local_state["selected_evidence_handles"])
+                native_deltas: list[dict[str, Any]] = []
+                for item in local_state["deltas"]:
+                    axis = item["path"]
+                    matches = [
+                        path
+                        for path in question["permitted_delta_paths"]
+                        if path.rsplit(".", 1)[-1] == axis
+                    ]
+                    value = item["value"]
+                    if isinstance(value, bool) or not isinstance(value, int):
+                        warnings.append(
+                            f"v3_delta_non_integer:{stage_name}:{axis}"
+                        )
+                        continue
+                    if not selected:
+                        warnings.append(
+                            f"v3_delta_no_evidence:{stage_name}:{axis}"
+                        )
+                        continue
+                    if len(matches) != 1:
+                        warning_code = (
+                            "v3_delta_ambiguous" if matches else "v3_delta_unbound"
+                        )
+                        warnings.append(
+                            f"{warning_code}:{stage_name}:{axis}"
+                        )
+                        continue
+                    native_deltas.append({
+                        "target_path": matches[0],
+                        "delta": value,
+                        "evidence_handles": selected,
+                        "reason": item["reason"],
+                    })
                 rows.append({
                     "question_id": question["question_id"],
-                    "selected_evidence_handles": list(
-                        local_state["selected_evidence_handles"]
-                    ),
+                    "selected_evidence_handles": selected,
                     "selected_role_handles": [],
                     "propositions": propositions,
-                    "deltas": [],
+                    "deltas": native_deltas,
                     "explanation": explanation,
                 })
-                if local_state["deltas"]:
-                    warnings.append(f"v3_appraisal_delta_omitted:{stage_name}")
-            else:
+            elif not (isinstance(result, StageResult) and result.accepted):
                 failures[question["question_id"]] = (
                     result.failure.error_code
                     if isinstance(result, StageResult)
@@ -1040,7 +1495,9 @@ async def run_cognition(
     The shell mirrors the V2 facade: one shared attempt ledger bound for the
     whole run, a failure capsule that records only terminal or partial-failure
     evidence, and deterministic success-path capture owned by the native
-    validation event pipeline.
+    validation event pipeline. Protected chain trace records are per-trace
+    scopes: each call binds its own scope when none is active so concurrent
+    calls keep isolated record sets.
     """
 
     ledger_token = None
@@ -1049,6 +1506,9 @@ async def run_cognition(
             create_v2_attempt_ledger(),
             graph_attempt=1,
         )
+    records_token = None
+    if _CURRENT_PROTECTED_CHAIN_SCOPE.get() is None:
+        records_token = bind_protected_chain_records()
     try:
         session = failure_capsule.begin_failure_capsule(
             trace_id=llm_tracing.current_trace_id(),
@@ -1083,6 +1543,8 @@ async def run_cognition(
     finally:
         if ledger_token is not None:
             reset_v2_attempt_ledger(ledger_token)
+        if records_token is not None:
+            reset_protected_chain_records(records_token)
 
 
 async def _run_cognition(
@@ -1197,16 +1659,16 @@ async def _run_cognition(
             and not payload["evidence"]
         )
     ]
-    appraisal_producer = _make_appraisal_stage_producer(
-        services,
-        projection,
-        question_by_kind,
-    )
     wave_a_specs: list[ChainTaskSpec] = [
         ChainTaskSpec(
             chain.name,
             chain.stages,
-            {stage_name: appraisal_producer for stage_name in chain.stages},
+            _make_appraisal_stage_producers(
+                services,
+                projection,
+                question_by_kind,
+                chain,
+            ),
         )
         for chain in APPRAISAL_FIRST_WAVE_CHAINS
     ]
@@ -1267,20 +1729,18 @@ async def _run_cognition(
     ]
     provisional_state = reduce_appraisal_results(appraisal_chain_outcomes)
     evidence_handles = [row["evidence_handle"] for row in payload["evidence"]]
-    terminal_producer = _make_terminal_stage_producer(
+    terminal_producers = _make_terminal_stage_producer(
         services,
         provisional_state,
         evidence_handles,
+        question_by_kind,
     )
     terminal_wave = await start_wave(
         [
             ChainTaskSpec(
                 TERMINAL_OUTCOME_CHAIN.name,
                 TERMINAL_OUTCOME_CHAIN.stages,
-                {
-                    stage_name: terminal_producer
-                    for stage_name in TERMINAL_OUTCOME_CHAIN.stages
-                },
+                terminal_producers,
             )
         ],
         ledger=ledger,
@@ -1317,6 +1777,8 @@ async def _run_cognition(
         outcomes_by_name,
         question_by_kind,
         evidence_positions,
+        projection.handle_to_ref,
+        preliminary_state,
     )
     warnings.extend(bridge_warnings)
     stage_status["semantic_appraisal"] = "completed"
@@ -1485,7 +1947,7 @@ async def _run_cognition(
         warnings.append("authoritative_relational_willingness")
     else:
         try:
-            collapse = await collapse_bids(
+            collapse = await collapse_bids_via_partition(
                 eligible_bids,
                 services,
                 current_event=_workspace_current_event(payload["evidence"]),

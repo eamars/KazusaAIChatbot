@@ -454,6 +454,9 @@ actions, deliver messages, schedule work, or reopen cognition.
 - `persona_supervisor2_l3_surface.call_l3_text_surface_handler(...)`
 - `dialog_agent.dialog_agent(...)`
 
-The public cognition APIs themselves live in `kazusa_ai_chatbot.cognition_core_v2`:
-`run_cognition(...)`, `run_text_surface_planning(...)`, and
-`run_visual_surface_planning(...)`.
+The cognition entrypoint the connector binds resolves through the closed
+process-level selector `kazusa_ai_chatbot.cognition_core_selector`:
+`COGNITION_CORE_ENGINE` accepts exactly `v2` or `v3` (default `v2`) and is
+resolved once at import, so every live/idle/self-cognition call site runs the
+single selected engine. The surface planning APIs (`run_text_surface_planning(...)`,
+`run_visual_surface_planning(...)`) remain in `kazusa_ai_chatbot.cognition_core_v2`.
