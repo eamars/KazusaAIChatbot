@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping, Sequence
+from contextvars import ContextVar, Token
 from dataclasses import replace
 from typing import Any
 
@@ -220,25 +221,40 @@ _STAGE_CONFIG_FIELDS: dict[str, str] = {
     "goal_threat_outcome": "appraisal_goal_threat_outcome_config",
 }
 
-_PROTECTED_CHAIN_RECORDS: list[dict[str, Any]] = []
+_CURRENT_PROTECTED_CHAIN_SCOPE: ContextVar[
+    list[dict[str, Any]] | None
+] = ContextVar("cognition_v3_protected_chain_records", default=None)
 
 
-def protected_chain_records() -> tuple[dict[str, Any], ...]:
-    """Return invocation-scoped protected chain trace records in order.
+def bind_protected_chain_records() -> Token:
+    """Bind a fresh per-trace protected chain record scope.
 
-    Records carry full internal content (raw model output and parsed
-    candidates) for the current process; callers clear between runs and
-    project one record through ``project_protected_chain_failure`` or
-    ``project_protected_chain_result`` before exposing it publicly.
+    The bound scope owns every trace record appended while it stays active in
+    the current execution context; ``run_cognition`` binds one when none is
+    already active so concurrent traces keep isolated record sets. Returns the
+    reset token for ``reset_protected_chain_records``.
     """
 
-    return tuple(_PROTECTED_CHAIN_RECORDS)
+    return _CURRENT_PROTECTED_CHAIN_SCOPE.set([])
 
 
-def clear_protected_chain_records() -> None:
-    """Drop every recorded protected chain trace from the current process."""
+def snapshot_protected_chain_records() -> tuple[dict[str, Any], ...]:
+    """Return the active scope's protected chain trace records in order.
 
-    _PROTECTED_CHAIN_RECORDS.clear()
+    Records carry full internal content (raw model output and parsed
+    candidates); callers project one record through
+    ``project_protected_chain_failure`` or ``project_protected_chain_result``
+    before exposing it publicly. Returns an empty tuple when no scope is bound.
+    """
+
+    records = _CURRENT_PROTECTED_CHAIN_SCOPE.get()
+    return tuple(records) if records is not None else ()
+
+
+def reset_protected_chain_records(token: Token) -> None:
+    """Drop the protected chain record scope bound by ``token``."""
+
+    _CURRENT_PROTECTED_CHAIN_SCOPE.reset(token)
 
 
 def _stage_config(stage_name: str, services: CognitionCoreServicesV2) -> LLMCallConfig:
@@ -334,9 +350,17 @@ def _record_chain_trace(
     attempt_number: int = 1,
     error: str | None = None,
 ) -> None:
-    """Append one protected chain trace record for the current invocation."""
+    """Append one protected chain trace record to the active per-trace scope.
 
-    _PROTECTED_CHAIN_RECORDS.append(
+    Producers called outside a bound scope (standalone unit tests) append
+    nothing, so every recorded trace belongs to exactly one invocation; bind
+    ``bind_protected_chain_records`` first when capture is required.
+    """
+
+    records = _CURRENT_PROTECTED_CHAIN_SCOPE.get()
+    if records is None:
+        return
+    records.append(
         build_chain_trace_record(
             chain_name=chain_name,
             stage_id=stage_id,
@@ -599,6 +623,7 @@ def _make_terminal_stage_producer(
     services: CognitionCoreServicesV2,
     provisional_state: Any,
     evidence_handles: Sequence[str],
+    question_by_kind: Mapping[str, Mapping[str, Any]],
 ) -> dict[str, StageProducer]:
     """Bind the fresh canonical terminal-outcome stage producer.
 
@@ -606,13 +631,28 @@ def _make_terminal_stage_producer(
     its tail beyond the accepted-prefix reduction and typed omissions recorded
     by the provisional state it is built from. Structural rejections answer with
     a bounded local repair request; provider failures retry the base request.
+    When the planner planned no ``goal_threat_outcome`` question for this
+    episode, the stage keeps the deterministic contentless accepted state
+    without any model call, mirroring wave-A stages without an authorized
+    question.
     """
 
+    outcome_question = question_by_kind.get("goal_threat_outcome")
     transcript: dict[str, TranscriptState | None] = {"current": None}
     stage_base: dict[str, TranscriptState] = {}
     pending_repair: dict[str, tuple[str, str | None]] = {}
 
     async def produce(context) -> StageAttemptOutcome:
+        if outcome_question is None:
+            return StageAttemptOutcome(
+                accepted=True,
+                local_state={
+                    "selected_evidence_handles": [],
+                    "propositions": [],
+                    "deltas": [],
+                },
+                semantic_summary=None,
+            )
         stage_name = context.stage_name
         config = _stage_config(stage_name, services)
         identity = _cache_domain_identity(
@@ -1293,10 +1333,11 @@ def _bridge_appraisal_rows(
 ) -> tuple[list[dict[str, Any]], dict[str, str], list[str]]:
     """Bridge accepted v3 stage content into native V2 appraisal rows.
 
-    Every terminal-outcome stage contributes one row for its deterministic
-    ``q:<stage>`` identity even when no question was planned for it, so fresh
-    canonical terminal assertions still reach the final reduction; wave-A
-    stages without a planned question stay content-free and contribute none.
+    Every accepted terminal-outcome stage with bounded content contributes one
+    row for its deterministic ``q:<stage>`` identity so fresh canonical
+    terminal assertions reach the final reduction; a terminal stage skipped
+    because no outcome question was planned stays contentless and contributes
+    none, mirroring wave-A stages without a planned question.
     Propositions attach to their source evidence row's candidate event root
     with code-owned provenance so the native materializer resolves them through
     causal-event checks, except terminal outcome propositions whose subject
@@ -1354,6 +1395,7 @@ def _bridge_appraisal_rows(
             if (
                 isinstance(result, StageResult)
                 and result.accepted
+                and result.semantic_summary is not None
                 and isinstance(result.local_state, Mapping)
             ):
                 local_state = result.local_state
@@ -1433,7 +1475,7 @@ def _bridge_appraisal_rows(
                     "deltas": native_deltas,
                     "explanation": explanation,
                 })
-            else:
+            elif not (isinstance(result, StageResult) and result.accepted):
                 failures[question["question_id"]] = (
                     result.failure.error_code
                     if isinstance(result, StageResult)
@@ -1453,7 +1495,9 @@ async def run_cognition(
     The shell mirrors the V2 facade: one shared attempt ledger bound for the
     whole run, a failure capsule that records only terminal or partial-failure
     evidence, and deterministic success-path capture owned by the native
-    validation event pipeline.
+    validation event pipeline. Protected chain trace records are per-trace
+    scopes: each call binds its own scope when none is active so concurrent
+    calls keep isolated record sets.
     """
 
     ledger_token = None
@@ -1462,6 +1506,9 @@ async def run_cognition(
             create_v2_attempt_ledger(),
             graph_attempt=1,
         )
+    records_token = None
+    if _CURRENT_PROTECTED_CHAIN_SCOPE.get() is None:
+        records_token = bind_protected_chain_records()
     try:
         session = failure_capsule.begin_failure_capsule(
             trace_id=llm_tracing.current_trace_id(),
@@ -1496,6 +1543,8 @@ async def run_cognition(
     finally:
         if ledger_token is not None:
             reset_v2_attempt_ledger(ledger_token)
+        if records_token is not None:
+            reset_protected_chain_records(records_token)
 
 
 async def _run_cognition(
@@ -1684,6 +1733,7 @@ async def _run_cognition(
         services,
         provisional_state,
         evidence_handles,
+        question_by_kind,
     )
     terminal_wave = await start_wave(
         [
