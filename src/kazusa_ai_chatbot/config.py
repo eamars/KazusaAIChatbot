@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import math
 import os
+from dataclasses import dataclass, field
+from typing import Literal, cast
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
@@ -31,6 +33,20 @@ def _bounded_int_from_env(
     value = int(raw_value)
     if value < minimum or value > maximum:
         raise ValueError(f"{name} must be between {minimum} and {maximum}")
+    return value
+
+
+def _minimum_int_from_env(
+    name: str,
+    default: str,
+    *,
+    minimum: int,
+) -> int:
+    """Read an integer at or above one inclusive minimum."""
+
+    value = _positive_int_from_env(name, default)
+    if value < minimum:
+        raise ValueError(f"{name} must be >= {minimum}")
     return value
 
 
@@ -240,6 +256,178 @@ def _optional_local_period_from_env(name: str, default: str) -> str:
     return value
 
 
+@dataclass(frozen=True)
+class CognitionRouteSettingV1:
+    """Immutable endpoint and generation settings for one cognition route."""
+
+    base_url: str
+    api_key: str = field(repr=False)
+    model: str
+    max_completion_tokens: int
+    thinking_enabled: bool
+    context_window_tokens: int | None
+
+
+@dataclass(frozen=True)
+class CognitionV3RouteSettingsV1:
+    """Closed selected-engine settings for the V3 chain and sidecar."""
+
+    chain: CognitionRouteSettingV1
+    sidecar: CognitionRouteSettingV1 | None
+    subconscious_enabled: bool
+    appraisal_group_count: Literal[1, 2, 3, 6]
+    turn_deadline_seconds: int
+
+
+def load_cognition_v2_route_settings() -> dict[str, CognitionRouteSettingV1]:
+    """Load the exact twelve selected Cognition V2 route bundles."""
+
+    settings: dict[str, CognitionRouteSettingV1] = {}
+    for key, route_prefix, default_completion, maximum_completion in (
+        _COGNITION_V2_ROUTE_SPECS
+    ):
+        setting = CognitionRouteSettingV1(
+            base_url=_non_empty_string_from_env(
+                f"{route_prefix}_BASE_URL",
+                "",
+            ),
+            api_key=_non_empty_string_from_env(
+                f"{route_prefix}_API_KEY",
+                "",
+            ),
+            model=_non_empty_string_from_env(
+                f"{route_prefix}_MODEL",
+                "",
+            ),
+            max_completion_tokens=_capped_int_from_env(
+                f"{route_prefix}_MAX_COMPLETION_TOKENS",
+                default_completion,
+                maximum=maximum_completion,
+            ),
+            thinking_enabled=_bool_from_env(
+                f"{route_prefix}_THINKING_ENABLED",
+                "false",
+            ),
+            context_window_tokens=None,
+        )
+        settings[key] = setting
+    return settings
+
+
+def _load_cognition_v3_route_setting(
+    route_prefix: str,
+    *,
+    context_window_tokens: int | None,
+) -> CognitionRouteSettingV1:
+    """Load one complete non-thinking V3 lane route."""
+
+    base_url_name = f"{route_prefix}_BASE_URL"
+    base_url = _optional_http_url_from_env(base_url_name, "")
+    if not base_url:
+        raise ValueError(f"{base_url_name} must be a non-empty HTTP(S) URL")
+
+    thinking_name = f"{route_prefix}_THINKING_ENABLED"
+    thinking_enabled = _bool_from_env(thinking_name, "false")
+    if thinking_enabled:
+        raise ValueError(f"{thinking_name} must be false")
+
+    setting = CognitionRouteSettingV1(
+        base_url=base_url,
+        api_key=_non_empty_string_from_env(
+            f"{route_prefix}_API_KEY",
+            "",
+        ),
+        model=_non_empty_string_from_env(
+            f"{route_prefix}_MODEL",
+            "",
+        ),
+        max_completion_tokens=_minimum_int_from_env(
+            f"{route_prefix}_MAX_COMPLETION_TOKENS",
+            "8192",
+            minimum=8_192,
+        ),
+        thinking_enabled=thinking_enabled,
+        context_window_tokens=context_window_tokens,
+    )
+    return setting
+
+
+def load_cognition_v3_route_settings() -> CognitionV3RouteSettingsV1:
+    """Load and validate the selected V3 chain and optional sidecar bundle."""
+
+    context_window_name = "COGNITION_V3_CHAIN_LLM_CONTEXT_WINDOW_TOKENS"
+    raw_context_window = os.getenv(context_window_name)
+    if raw_context_window is None or not raw_context_window.strip():
+        raise ValueError(f"{context_window_name} must be non-empty")
+    context_window_tokens = _positive_int_from_value(
+        context_window_name,
+        raw_context_window,
+    )
+    if context_window_tokens < 50_000:
+        raise ValueError(f"{context_window_name} must be >= 50000")
+
+    chain = _load_cognition_v3_route_setting(
+        "COGNITION_V3_CHAIN_LLM",
+        context_window_tokens=context_window_tokens,
+    )
+    sidecar_required_names = (
+        "COGNITION_V3_SIDECAR_LLM_BASE_URL",
+        "COGNITION_V3_SIDECAR_LLM_API_KEY",
+        "COGNITION_V3_SIDECAR_LLM_MODEL",
+    )
+    sidecar_raw_values = {
+        name: os.getenv(name)
+        for name in sidecar_required_names
+    }
+    if any(value is not None for value in sidecar_raw_values.values()):
+        for name, value in sidecar_raw_values.items():
+            if value is None or not value.strip():
+                raise ValueError(
+                    f"{name} must be non-empty when the V3 sidecar is configured"
+                )
+        sidecar = _load_cognition_v3_route_setting(
+            "COGNITION_V3_SIDECAR_LLM",
+            context_window_tokens=None,
+        )
+    else:
+        sidecar = None
+
+    subconscious_enabled = _bool_from_env(
+        "COGNITION_V3_SUBCONSCIOUS_ENABLED",
+        "false",
+    )
+    if subconscious_enabled and sidecar is None:
+        raise ValueError(
+            "COGNITION_V3_SUBCONSCIOUS_ENABLED requires a V3 sidecar route"
+        )
+
+    appraisal_group_value = int(
+        os.getenv("COGNITION_V3_APPRAISAL_GROUP_COUNT", "2")
+    )
+    if appraisal_group_value not in {1, 2, 3, 6}:
+        raise ValueError(
+            "COGNITION_V3_APPRAISAL_GROUP_COUNT must be one of: 1, 2, 3, 6"
+        )
+    appraisal_group_count = cast(
+        Literal[1, 2, 3, 6],
+        appraisal_group_value,
+    )
+    turn_deadline_seconds = _bounded_int_from_env(
+        "COGNITION_V3_TURN_DEADLINE_SECONDS",
+        "240",
+        minimum=30,
+        maximum=600,
+    )
+    settings = CognitionV3RouteSettingsV1(
+        chain=chain,
+        sidecar=sidecar,
+        subconscious_enabled=subconscious_enabled,
+        appraisal_group_count=appraisal_group_count,
+        turn_deadline_seconds=turn_deadline_seconds,
+    )
+    return settings
+
+
 load_dotenv()
 
 KAZUSA_CONTROL_BRAIN_SHARED_SECRET = os.getenv(
@@ -257,6 +445,81 @@ COGNITION_SEMANTIC_DEFAULT_MAX_COMPLETION_TOKENS = 8_192
 SURFACE_CONTENT_DEFAULT_MAX_COMPLETION_TOKENS = 8_192
 SURFACE_PREFERENCE_DEFAULT_MAX_COMPLETION_TOKENS = 4_096
 SURFACE_VISUAL_DEFAULT_MAX_COMPLETION_TOKENS = 2_048
+
+_COGNITION_V2_ROUTE_SPECS = (
+    (
+        "appraisal_event_agency",
+        "COGNITION_LLM_APPRAISAL_EVENT_AGENCY",
+        str(SEMANTIC_APPRAISAL_DEFAULT_MAX_COMPLETION_TOKENS),
+        2_048,
+    ),
+    (
+        "appraisal_relationship_social",
+        "COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL",
+        str(SEMANTIC_APPRAISAL_DEFAULT_MAX_COMPLETION_TOKENS),
+        2_048,
+    ),
+    (
+        "appraisal_moral_identity",
+        "COGNITION_LLM_APPRAISAL_MORAL_IDENTITY",
+        str(SEMANTIC_APPRAISAL_DEFAULT_MAX_COMPLETION_TOKENS),
+        2_048,
+    ),
+    (
+        "appraisal_goal_threat_outcome",
+        "COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME",
+        str(SEMANTIC_APPRAISAL_DEFAULT_MAX_COMPLETION_TOKENS),
+        2_048,
+    ),
+    (
+        "appraisal_epistemic_comparison_memory",
+        "COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY",
+        str(SEMANTIC_APPRAISAL_DEFAULT_MAX_COMPLETION_TOKENS),
+        2_048,
+    ),
+    (
+        "appraisal_existential_drive",
+        "COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE",
+        str(SEMANTIC_APPRAISAL_DEFAULT_MAX_COMPLETION_TOKENS),
+        2_048,
+    ),
+    (
+        "goal_ordinary_response",
+        "COGNITION_LLM_GOAL_ORDINARY_RESPONSE",
+        str(COGNITION_SEMANTIC_DEFAULT_MAX_COMPLETION_TOKENS),
+        8_192,
+    ),
+    (
+        "goal_active_branch",
+        "COGNITION_LLM_GOAL_ACTIVE_BRANCH",
+        str(COGNITION_SEMANTIC_DEFAULT_MAX_COMPLETION_TOKENS),
+        8_192,
+    ),
+    (
+        "workspace_collapse",
+        "COGNITION_LLM_WORKSPACE_COLLAPSE",
+        str(COGNITION_STRUCTURED_DEFAULT_MAX_COMPLETION_TOKENS),
+        1_024,
+    ),
+    (
+        "action_planning",
+        "COGNITION_LLM_ACTION_PLANNING",
+        str(COGNITION_SEMANTIC_DEFAULT_MAX_COMPLETION_TOKENS),
+        8_192,
+    ),
+    (
+        "action_authorization",
+        "COGNITION_LLM_ACTION_AUTHORIZATION",
+        str(COGNITION_STRUCTURED_DEFAULT_MAX_COMPLETION_TOKENS),
+        1_024,
+    ),
+    (
+        "resolver_authorization",
+        "COGNITION_LLM_RESOLVER_AUTHORIZATION",
+        str(COGNITION_STRUCTURED_DEFAULT_MAX_COMPLETION_TOKENS),
+        1_024,
+    ),
+)
 
 COGNITION_CORE_ENGINE = _choice_from_env(
     "COGNITION_CORE_ENGINE",
@@ -314,114 +577,178 @@ COGNITION_LLM_CHARACTER_CARRYOVER_MODEL = os.environ[
     "COGNITION_LLM_CHARACTER_CARRYOVER_MODEL"
 ]
 
-COGNITION_LLM_APPRAISAL_EVENT_AGENCY_BASE_URL = os.environ[
-    "COGNITION_LLM_APPRAISAL_EVENT_AGENCY_BASE_URL"
-]
-COGNITION_LLM_APPRAISAL_EVENT_AGENCY_API_KEY = os.environ[
-    "COGNITION_LLM_APPRAISAL_EVENT_AGENCY_API_KEY"
-]
-COGNITION_LLM_APPRAISAL_EVENT_AGENCY_MODEL = os.environ[
-    "COGNITION_LLM_APPRAISAL_EVENT_AGENCY_MODEL"
-]
-COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_BASE_URL = os.environ[
-    "COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_BASE_URL"
-]
-COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_API_KEY = os.environ[
-    "COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_API_KEY"
-]
-COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_MODEL = os.environ[
-    "COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_MODEL"
-]
-COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_BASE_URL = os.environ[
-    "COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_BASE_URL"
-]
-COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_API_KEY = os.environ[
-    "COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_API_KEY"
-]
-COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_MODEL = os.environ[
-    "COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_MODEL"
-]
-COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_BASE_URL = os.environ[
-    "COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_BASE_URL"
-]
-COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_API_KEY = os.environ[
-    "COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_API_KEY"
-]
-COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_MODEL = os.environ[
-    "COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_MODEL"
-]
-COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_BASE_URL = os.environ[
-    "COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_BASE_URL"
-]
-COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_API_KEY = os.environ[
-    "COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_API_KEY"
-]
-COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_MODEL = os.environ[
-    "COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_MODEL"
-]
-COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_BASE_URL = os.environ[
-    "COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_BASE_URL"
-]
-COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_API_KEY = os.environ[
-    "COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_API_KEY"
-]
-COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_MODEL = os.environ[
-    "COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_MODEL"
-]
-COGNITION_LLM_GOAL_ORDINARY_RESPONSE_BASE_URL = os.environ[
-    "COGNITION_LLM_GOAL_ORDINARY_RESPONSE_BASE_URL"
-]
-COGNITION_LLM_GOAL_ORDINARY_RESPONSE_API_KEY = os.environ[
-    "COGNITION_LLM_GOAL_ORDINARY_RESPONSE_API_KEY"
-]
-COGNITION_LLM_GOAL_ORDINARY_RESPONSE_MODEL = os.environ[
-    "COGNITION_LLM_GOAL_ORDINARY_RESPONSE_MODEL"
-]
-COGNITION_LLM_GOAL_ACTIVE_BRANCH_BASE_URL = os.environ[
-    "COGNITION_LLM_GOAL_ACTIVE_BRANCH_BASE_URL"
-]
-COGNITION_LLM_GOAL_ACTIVE_BRANCH_API_KEY = os.environ[
-    "COGNITION_LLM_GOAL_ACTIVE_BRANCH_API_KEY"
-]
-COGNITION_LLM_GOAL_ACTIVE_BRANCH_MODEL = os.environ[
-    "COGNITION_LLM_GOAL_ACTIVE_BRANCH_MODEL"
-]
-COGNITION_LLM_WORKSPACE_COLLAPSE_BASE_URL = os.environ[
-    "COGNITION_LLM_WORKSPACE_COLLAPSE_BASE_URL"
-]
-COGNITION_LLM_WORKSPACE_COLLAPSE_API_KEY = os.environ[
-    "COGNITION_LLM_WORKSPACE_COLLAPSE_API_KEY"
-]
-COGNITION_LLM_WORKSPACE_COLLAPSE_MODEL = os.environ[
-    "COGNITION_LLM_WORKSPACE_COLLAPSE_MODEL"
-]
-COGNITION_LLM_ACTION_PLANNING_BASE_URL = os.environ[
-    "COGNITION_LLM_ACTION_PLANNING_BASE_URL"
-]
-COGNITION_LLM_ACTION_PLANNING_API_KEY = os.environ[
-    "COGNITION_LLM_ACTION_PLANNING_API_KEY"
-]
-COGNITION_LLM_ACTION_PLANNING_MODEL = os.environ[
-    "COGNITION_LLM_ACTION_PLANNING_MODEL"
-]
-COGNITION_LLM_ACTION_AUTHORIZATION_BASE_URL = os.environ[
-    "COGNITION_LLM_ACTION_AUTHORIZATION_BASE_URL"
-]
-COGNITION_LLM_ACTION_AUTHORIZATION_API_KEY = os.environ[
-    "COGNITION_LLM_ACTION_AUTHORIZATION_API_KEY"
-]
-COGNITION_LLM_ACTION_AUTHORIZATION_MODEL = os.environ[
-    "COGNITION_LLM_ACTION_AUTHORIZATION_MODEL"
-]
-COGNITION_LLM_RESOLVER_AUTHORIZATION_BASE_URL = os.environ[
-    "COGNITION_LLM_RESOLVER_AUTHORIZATION_BASE_URL"
-]
-COGNITION_LLM_RESOLVER_AUTHORIZATION_API_KEY = os.environ[
-    "COGNITION_LLM_RESOLVER_AUTHORIZATION_API_KEY"
-]
-COGNITION_LLM_RESOLVER_AUTHORIZATION_MODEL = os.environ[
-    "COGNITION_LLM_RESOLVER_AUTHORIZATION_MODEL"
-]
+if COGNITION_CORE_ENGINE == "v2":
+    _COGNITION_V2_ROUTE_SETTINGS = load_cognition_v2_route_settings()
+
+    _event_agency = _COGNITION_V2_ROUTE_SETTINGS["appraisal_event_agency"]
+    COGNITION_LLM_APPRAISAL_EVENT_AGENCY_BASE_URL = _event_agency.base_url
+    COGNITION_LLM_APPRAISAL_EVENT_AGENCY_API_KEY = _event_agency.api_key
+    COGNITION_LLM_APPRAISAL_EVENT_AGENCY_MODEL = _event_agency.model
+    COGNITION_LLM_APPRAISAL_EVENT_AGENCY_MAX_COMPLETION_TOKENS = (
+        _event_agency.max_completion_tokens
+    )
+    COGNITION_LLM_APPRAISAL_EVENT_AGENCY_THINKING_ENABLED = (
+        _event_agency.thinking_enabled
+    )
+
+    _relationship_social = _COGNITION_V2_ROUTE_SETTINGS[
+        "appraisal_relationship_social"
+    ]
+    COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_BASE_URL = (
+        _relationship_social.base_url
+    )
+    COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_API_KEY = (
+        _relationship_social.api_key
+    )
+    COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_MODEL = (
+        _relationship_social.model
+    )
+    COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_MAX_COMPLETION_TOKENS = (
+        _relationship_social.max_completion_tokens
+    )
+    COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_THINKING_ENABLED = (
+        _relationship_social.thinking_enabled
+    )
+
+    _moral_identity = _COGNITION_V2_ROUTE_SETTINGS["appraisal_moral_identity"]
+    COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_BASE_URL = _moral_identity.base_url
+    COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_API_KEY = _moral_identity.api_key
+    COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_MODEL = _moral_identity.model
+    COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_MAX_COMPLETION_TOKENS = (
+        _moral_identity.max_completion_tokens
+    )
+    COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_THINKING_ENABLED = (
+        _moral_identity.thinking_enabled
+    )
+
+    _goal_threat_outcome = _COGNITION_V2_ROUTE_SETTINGS[
+        "appraisal_goal_threat_outcome"
+    ]
+    COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_BASE_URL = (
+        _goal_threat_outcome.base_url
+    )
+    COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_API_KEY = (
+        _goal_threat_outcome.api_key
+    )
+    COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_MODEL = (
+        _goal_threat_outcome.model
+    )
+    COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_MAX_COMPLETION_TOKENS = (
+        _goal_threat_outcome.max_completion_tokens
+    )
+    COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_THINKING_ENABLED = (
+        _goal_threat_outcome.thinking_enabled
+    )
+
+    _epistemic_comparison_memory = _COGNITION_V2_ROUTE_SETTINGS[
+        "appraisal_epistemic_comparison_memory"
+    ]
+    COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_BASE_URL = (
+        _epistemic_comparison_memory.base_url
+    )
+    COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_API_KEY = (
+        _epistemic_comparison_memory.api_key
+    )
+    COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_MODEL = (
+        _epistemic_comparison_memory.model
+    )
+    COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_MAX_COMPLETION_TOKENS = (
+        _epistemic_comparison_memory.max_completion_tokens
+    )
+    COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_THINKING_ENABLED = (
+        _epistemic_comparison_memory.thinking_enabled
+    )
+
+    _existential_drive = _COGNITION_V2_ROUTE_SETTINGS[
+        "appraisal_existential_drive"
+    ]
+    COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_BASE_URL = (
+        _existential_drive.base_url
+    )
+    COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_API_KEY = (
+        _existential_drive.api_key
+    )
+    COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_MODEL = _existential_drive.model
+    COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_MAX_COMPLETION_TOKENS = (
+        _existential_drive.max_completion_tokens
+    )
+    COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_THINKING_ENABLED = (
+        _existential_drive.thinking_enabled
+    )
+
+    _ordinary_response = _COGNITION_V2_ROUTE_SETTINGS["goal_ordinary_response"]
+    COGNITION_LLM_GOAL_ORDINARY_RESPONSE_BASE_URL = _ordinary_response.base_url
+    COGNITION_LLM_GOAL_ORDINARY_RESPONSE_API_KEY = _ordinary_response.api_key
+    COGNITION_LLM_GOAL_ORDINARY_RESPONSE_MODEL = _ordinary_response.model
+    COGNITION_LLM_GOAL_ORDINARY_RESPONSE_MAX_COMPLETION_TOKENS = (
+        _ordinary_response.max_completion_tokens
+    )
+    COGNITION_LLM_GOAL_ORDINARY_RESPONSE_THINKING_ENABLED = (
+        _ordinary_response.thinking_enabled
+    )
+
+    _active_branch = _COGNITION_V2_ROUTE_SETTINGS["goal_active_branch"]
+    COGNITION_LLM_GOAL_ACTIVE_BRANCH_BASE_URL = _active_branch.base_url
+    COGNITION_LLM_GOAL_ACTIVE_BRANCH_API_KEY = _active_branch.api_key
+    COGNITION_LLM_GOAL_ACTIVE_BRANCH_MODEL = _active_branch.model
+    COGNITION_LLM_GOAL_ACTIVE_BRANCH_MAX_COMPLETION_TOKENS = (
+        _active_branch.max_completion_tokens
+    )
+    COGNITION_LLM_GOAL_ACTIVE_BRANCH_THINKING_ENABLED = (
+        _active_branch.thinking_enabled
+    )
+
+    _workspace_collapse = _COGNITION_V2_ROUTE_SETTINGS["workspace_collapse"]
+    COGNITION_LLM_WORKSPACE_COLLAPSE_BASE_URL = _workspace_collapse.base_url
+    COGNITION_LLM_WORKSPACE_COLLAPSE_API_KEY = _workspace_collapse.api_key
+    COGNITION_LLM_WORKSPACE_COLLAPSE_MODEL = _workspace_collapse.model
+    COGNITION_LLM_WORKSPACE_COLLAPSE_MAX_COMPLETION_TOKENS = (
+        _workspace_collapse.max_completion_tokens
+    )
+    COGNITION_LLM_WORKSPACE_COLLAPSE_THINKING_ENABLED = (
+        _workspace_collapse.thinking_enabled
+    )
+
+    _action_planning = _COGNITION_V2_ROUTE_SETTINGS["action_planning"]
+    COGNITION_LLM_ACTION_PLANNING_BASE_URL = _action_planning.base_url
+    COGNITION_LLM_ACTION_PLANNING_API_KEY = _action_planning.api_key
+    COGNITION_LLM_ACTION_PLANNING_MODEL = _action_planning.model
+    COGNITION_LLM_ACTION_PLANNING_MAX_COMPLETION_TOKENS = (
+        _action_planning.max_completion_tokens
+    )
+    COGNITION_LLM_ACTION_PLANNING_THINKING_ENABLED = (
+        _action_planning.thinking_enabled
+    )
+
+    _action_authorization = _COGNITION_V2_ROUTE_SETTINGS["action_authorization"]
+    COGNITION_LLM_ACTION_AUTHORIZATION_BASE_URL = _action_authorization.base_url
+    COGNITION_LLM_ACTION_AUTHORIZATION_API_KEY = _action_authorization.api_key
+    COGNITION_LLM_ACTION_AUTHORIZATION_MODEL = _action_authorization.model
+    COGNITION_LLM_ACTION_AUTHORIZATION_MAX_COMPLETION_TOKENS = (
+        _action_authorization.max_completion_tokens
+    )
+    COGNITION_LLM_ACTION_AUTHORIZATION_THINKING_ENABLED = (
+        _action_authorization.thinking_enabled
+    )
+
+    _resolver_authorization = _COGNITION_V2_ROUTE_SETTINGS[
+        "resolver_authorization"
+    ]
+    COGNITION_LLM_RESOLVER_AUTHORIZATION_BASE_URL = (
+        _resolver_authorization.base_url
+    )
+    COGNITION_LLM_RESOLVER_AUTHORIZATION_API_KEY = (
+        _resolver_authorization.api_key
+    )
+    COGNITION_LLM_RESOLVER_AUTHORIZATION_MODEL = _resolver_authorization.model
+    COGNITION_LLM_RESOLVER_AUTHORIZATION_MAX_COMPLETION_TOKENS = (
+        _resolver_authorization.max_completion_tokens
+    )
+    COGNITION_LLM_RESOLVER_AUTHORIZATION_THINKING_ENABLED = (
+        _resolver_authorization.thinking_enabled
+    )
+else:
+    _COGNITION_V3_ROUTE_SETTINGS = load_cognition_v3_route_settings()
 
 DIALOG_GENERATOR_LLM_BASE_URL = os.environ["DIALOG_GENERATOR_LLM_BASE_URL"]
 DIALOG_GENERATOR_LLM_API_KEY = os.environ["DIALOG_GENERATOR_LLM_API_KEY"]
@@ -584,140 +911,6 @@ COGNITION_LLM_CHARACTER_CARRYOVER_MAX_COMPLETION_TOKENS = (
 )
 COGNITION_LLM_CHARACTER_CARRYOVER_THINKING_ENABLED = _bool_from_env(
     "COGNITION_LLM_CHARACTER_CARRYOVER_THINKING_ENABLED",
-    "false",
-)
-COGNITION_LLM_APPRAISAL_EVENT_AGENCY_MAX_COMPLETION_TOKENS = (
-    _capped_int_from_env(
-        "COGNITION_LLM_APPRAISAL_EVENT_AGENCY_MAX_COMPLETION_TOKENS",
-        str(SEMANTIC_APPRAISAL_DEFAULT_MAX_COMPLETION_TOKENS),
-        maximum=2_048,
-    )
-)
-COGNITION_LLM_APPRAISAL_EVENT_AGENCY_THINKING_ENABLED = _bool_from_env(
-    "COGNITION_LLM_APPRAISAL_EVENT_AGENCY_THINKING_ENABLED",
-    "false",
-)
-COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_MAX_COMPLETION_TOKENS = (
-    _capped_int_from_env(
-        "COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_MAX_COMPLETION_TOKENS",
-        str(SEMANTIC_APPRAISAL_DEFAULT_MAX_COMPLETION_TOKENS),
-        maximum=2_048,
-    )
-)
-COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_THINKING_ENABLED = _bool_from_env(
-    "COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_THINKING_ENABLED",
-    "false",
-)
-COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_MAX_COMPLETION_TOKENS = (
-    _capped_int_from_env(
-        "COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_MAX_COMPLETION_TOKENS",
-        str(SEMANTIC_APPRAISAL_DEFAULT_MAX_COMPLETION_TOKENS),
-        maximum=2_048,
-    )
-)
-COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_THINKING_ENABLED = _bool_from_env(
-    "COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_THINKING_ENABLED",
-    "false",
-)
-COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_MAX_COMPLETION_TOKENS = (
-    _capped_int_from_env(
-        "COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_MAX_COMPLETION_TOKENS",
-        str(SEMANTIC_APPRAISAL_DEFAULT_MAX_COMPLETION_TOKENS),
-        maximum=2_048,
-    )
-)
-COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_THINKING_ENABLED = _bool_from_env(
-    "COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_THINKING_ENABLED",
-    "false",
-)
-COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_MAX_COMPLETION_TOKENS = (
-    _capped_int_from_env(
-        (
-            "COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY"
-            "_MAX_COMPLETION_TOKENS"
-        ),
-        str(SEMANTIC_APPRAISAL_DEFAULT_MAX_COMPLETION_TOKENS),
-        maximum=2_048,
-    )
-)
-COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_THINKING_ENABLED = (
-    _bool_from_env(
-        (
-            "COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY"
-            "_THINKING_ENABLED"
-        ),
-        "false",
-    )
-)
-COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_MAX_COMPLETION_TOKENS = (
-    _capped_int_from_env(
-        "COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_MAX_COMPLETION_TOKENS",
-        str(SEMANTIC_APPRAISAL_DEFAULT_MAX_COMPLETION_TOKENS),
-        maximum=2_048,
-    )
-)
-COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_THINKING_ENABLED = _bool_from_env(
-    "COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_THINKING_ENABLED",
-    "false",
-)
-COGNITION_LLM_GOAL_ORDINARY_RESPONSE_MAX_COMPLETION_TOKENS = (
-    _capped_int_from_env(
-        "COGNITION_LLM_GOAL_ORDINARY_RESPONSE_MAX_COMPLETION_TOKENS",
-        str(COGNITION_SEMANTIC_DEFAULT_MAX_COMPLETION_TOKENS),
-        maximum=8_192,
-    )
-)
-COGNITION_LLM_GOAL_ORDINARY_RESPONSE_THINKING_ENABLED = _bool_from_env(
-    "COGNITION_LLM_GOAL_ORDINARY_RESPONSE_THINKING_ENABLED",
-    "false",
-)
-COGNITION_LLM_GOAL_ACTIVE_BRANCH_MAX_COMPLETION_TOKENS = _capped_int_from_env(
-    "COGNITION_LLM_GOAL_ACTIVE_BRANCH_MAX_COMPLETION_TOKENS",
-    str(COGNITION_SEMANTIC_DEFAULT_MAX_COMPLETION_TOKENS),
-    maximum=8_192,
-)
-COGNITION_LLM_GOAL_ACTIVE_BRANCH_THINKING_ENABLED = _bool_from_env(
-    "COGNITION_LLM_GOAL_ACTIVE_BRANCH_THINKING_ENABLED",
-    "false",
-)
-COGNITION_LLM_WORKSPACE_COLLAPSE_MAX_COMPLETION_TOKENS = _capped_int_from_env(
-    "COGNITION_LLM_WORKSPACE_COLLAPSE_MAX_COMPLETION_TOKENS",
-    str(COGNITION_STRUCTURED_DEFAULT_MAX_COMPLETION_TOKENS),
-    maximum=1_024,
-)
-COGNITION_LLM_WORKSPACE_COLLAPSE_THINKING_ENABLED = _bool_from_env(
-    "COGNITION_LLM_WORKSPACE_COLLAPSE_THINKING_ENABLED",
-    "false",
-)
-COGNITION_LLM_ACTION_PLANNING_MAX_COMPLETION_TOKENS = _capped_int_from_env(
-    "COGNITION_LLM_ACTION_PLANNING_MAX_COMPLETION_TOKENS",
-    str(COGNITION_SEMANTIC_DEFAULT_MAX_COMPLETION_TOKENS),
-    maximum=8_192,
-)
-COGNITION_LLM_ACTION_PLANNING_THINKING_ENABLED = _bool_from_env(
-    "COGNITION_LLM_ACTION_PLANNING_THINKING_ENABLED",
-    "false",
-)
-COGNITION_LLM_ACTION_AUTHORIZATION_MAX_COMPLETION_TOKENS = (
-    _capped_int_from_env(
-        "COGNITION_LLM_ACTION_AUTHORIZATION_MAX_COMPLETION_TOKENS",
-        str(COGNITION_STRUCTURED_DEFAULT_MAX_COMPLETION_TOKENS),
-        maximum=1_024,
-    )
-)
-COGNITION_LLM_ACTION_AUTHORIZATION_THINKING_ENABLED = _bool_from_env(
-    "COGNITION_LLM_ACTION_AUTHORIZATION_THINKING_ENABLED",
-    "false",
-)
-COGNITION_LLM_RESOLVER_AUTHORIZATION_MAX_COMPLETION_TOKENS = (
-    _capped_int_from_env(
-        "COGNITION_LLM_RESOLVER_AUTHORIZATION_MAX_COMPLETION_TOKENS",
-        str(COGNITION_STRUCTURED_DEFAULT_MAX_COMPLETION_TOKENS),
-        maximum=1_024,
-    )
-)
-COGNITION_LLM_RESOLVER_AUTHORIZATION_THINKING_ENABLED = _bool_from_env(
-    "COGNITION_LLM_RESOLVER_AUTHORIZATION_THINKING_ENABLED",
     "false",
 )
 DIALOG_GENERATOR_LLM_MAX_COMPLETION_TOKENS = _positive_int_from_env(

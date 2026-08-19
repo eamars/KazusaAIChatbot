@@ -10,6 +10,7 @@ import pytest
 from kazusa_ai_chatbot.cognition_core_v2.workspace import (
     collapse_authoritative_relational_bid,
     collapse_bids,
+    validate_workspace_partition,
 )
 
 
@@ -79,6 +80,22 @@ def test_workspace_exposes_owned_contract() -> None:
 
     assert callable(collapse_authoritative_relational_bid)
     assert callable(collapse_bids)
+
+
+def test_public_workspace_partition_validator_preserves_exact_partition() -> None:
+    """The public validator requires one exact complete handle partition."""
+
+    partition = {
+        "primary_bid_handle": "b1",
+        "supporting_bid_handles": ["b2"],
+        "suppressed_bid_handles": ["b3"],
+    }
+
+    validated = validate_workspace_partition(partition, {"b1", "b2", "b3"})
+
+    assert validated == partition
+    with pytest.raises(ValueError, match="incomplete"):
+        validate_workspace_partition(partition, {"b1", "b2", "b3", "b4"})
 
 
 @pytest.mark.asyncio

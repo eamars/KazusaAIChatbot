@@ -162,10 +162,11 @@ recall. A capability failure returns a fixed semantic failure observation;
 exception type may be logged, while exception text and operational details stay
 outside cognition evidence and prompts.
 
-## Cognition Core V2 Boundary
+## Engine-Selected Cognition Boundary
 
-`persona_supervisor2_cognition.py` maps graph state into the exact public V2
-contract. Its input includes:
+`persona_supervisor2_cognition.py` maps graph state into the exact public
+`CognitionCoreInputV2` contract shared by both cognition engines. Its input
+includes:
 
 - the validated canonical episode;
 - one validated mutable cognition state and separate character constraints;
@@ -212,8 +213,8 @@ intention, admitted/supporting bids, semantic affect and relationship
 projections, action requests, resolver requests, progress, expression policy,
 diagnostics, and bounded residue.
 
-The connector constructs twelve independent required Core V2 route
-bindings:
+With `COGNITION_CORE_ENGINE=v2`, the connector constructs twelve independent
+required Core V2 route bindings:
 
 ```text
 COGNITION_LLM_APPRAISAL_EVENT_AGENCY
@@ -233,10 +234,15 @@ COGNITION_LLM_RESOLVER_AUTHORIZATION
 Each binding has its own endpoint, credential, model, completion budget, and
 thinking setting. Missing required values stop configuration loading. The
 connector passes the bindings directly to their semantic owners, including
-the same owner config for retries, repairs, and traces. The generic
-`COGNITION_LLM` route remains available to callers outside the Core V2
-boundary. The connector adds no route inheritance, endpoint selection logic,
-or fallback.
+the same owner config for retries, repairs, and traces.
+
+With `COGNITION_CORE_ENGINE=v3`, the connector constructs one required
+`COGNITION_V3_CHAIN_LLM` binding and one optional all-or-nothing
+`COGNITION_V3_SIDECAR_LLM` binding. The chain declares a served context window
+of at least 50,000 tokens, both lanes require an 8,192-token completion
+capacity, and thinking stays disabled. Only the selected core family is read.
+The generic `COGNITION_LLM` route remains a required shared non-core binding
+for carry-over and memory-lifecycle consumers under either engine.
 
 Persistent identifiers and raw numeric state remain behind deterministic
 handle bindings. Model-facing projections use semantic roles and qualitative

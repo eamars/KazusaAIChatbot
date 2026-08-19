@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from importlib import import_module
 
+import pytest
+
 from kazusa_ai_chatbot.cognition_core_v2.action_authorization import (
     derive_action_route,
+    validate_authorization_decisions,
 )
 
 MODULE_PATH = "kazusa_ai_chatbot.cognition_core_v2.action_authorization"
@@ -25,6 +28,26 @@ def test_action_authorization_exposes_owned_contract() -> None:
     assert not missing_symbols, (
         f"{MODULE_PATH} is missing owner symbols: {missing_symbols}"
     )
+
+
+def test_public_authorization_validator_requires_exact_boolean_coverage() -> None:
+    """The public validator preserves exact candidate and boolean checks."""
+
+    decisions = validate_authorization_decisions(
+        {"decisions": {"c1": True, "c2": False}},
+        candidate_handles=["c1", "c2"],
+    )
+
+    assert decisions == {"c1": True, "c2": False}
+
+    with pytest.raises(
+        ValueError,
+        match="action authorization decision must be boolean",
+    ):
+        validate_authorization_decisions(
+            {"decisions": {"c1": 1, "c2": False}},
+            candidate_handles=["c1", "c2"],
+        )
 
 
 def test_group_self_cognition_response_decision_derives_speech_or_silence() -> None:

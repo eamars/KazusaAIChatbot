@@ -1,15 +1,24 @@
 # Cognition V3 Cache-Affine Semantic Chain Big-Bang Plan
 
+## Supersession Notice
+
+- **Status:** superseded on 2026-08-19.
+- **Superseded by:**
+  [`cognition_v3_hybrid_agentic_loop_reconciliation_plan.md`](../../active/short_term/cognition_v3_hybrid_agentic_loop_reconciliation_plan.md).
+- This record preserves the former plan, owner-directed Gate 1 skip, and
+  partial implementation execution log as historical evidence. Future V3
+  implementation follows the superseding plan.
+
 ## Summary
 
 - Goal: create Cognition V3 as a bounded cache-affine semantic-chain engine
   that preserves the complete Cognition Core V2 input, output, state,
   emotion, relationship, goal, action, resolver, and surface handoff
   contracts while replacing the parallel-appraisal execution topology.
-- Status: in_progress on `feature/cognition_core_v3_cache_affine`, forked from
+- Status: superseded on `feature/cognition_core_v3_cache_affine`, forked from
   main at commit `5b2a0230` with the approved plan and registry committed as
-  `607dbb52`. Production implementation runs on that branch; production code
-  changes stay authorized only under this execution.
+  `607dbb52`. Production implementation ran under this former execution
+  record; its implementation authority ended at supersession.
 - Plan class: high-risk cognition architecture and local-LLM behavior change.
 - Scope boundary: a new `cognition_core_v3` semantic execution package, one
   process-level V2/V3 selector, the live and idle connector import reached

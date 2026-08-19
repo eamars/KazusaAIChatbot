@@ -18,13 +18,15 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
 from kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal import (
     SEMANTIC_APPRAISAL_ATTEMPT_LIMIT,
     SEMANTIC_APPRAISAL_PROMPT_CAP,
-    _canonicalize_semantic_appraisal_item,
     _fit_appraisal_payload,
     _normalize_structural_semantic_appraisal_result,
     _project_question_state,
     _SemanticBoundaryValidationError,
     appraise_semantic_question,
+    canonicalize_semantic_appraisal_item,
+    merge_semantic_appraisal_item,
     validate_semantic_appraisal_result,
+    validate_semantic_boundary_candidate,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
@@ -680,7 +682,7 @@ async def test_unmapped_boundary_error_propagates_without_structural_retry(
 
     monkeypatch.setattr(
         semantic_appraisal_module,
-        "_validate_semantic_boundary_candidate",
+        "validate_semantic_boundary_candidate",
         raise_unmapped_boundary_error,
     )
     llm = _ScriptedSemanticLLM([_empty_item_response()])
@@ -798,7 +800,7 @@ async def test_structurally_usable_semantic_content_passes_runtime_without_retry
 def test_recoverable_structure_does_not_trigger_producer_retry() -> None:
     """A canonical producer object continues through structural admission."""
 
-    canonical = _canonicalize_semantic_appraisal_item({
+    canonical = canonicalize_semantic_appraisal_item({
         "question_id": "q:event_agency",
         "proposition": None,
         "delta": None,
@@ -864,7 +866,7 @@ def test_boundary_validation_preserves_existing_rejection_behavior() -> None:
     }
 
     with pytest.raises(_SemanticBoundaryValidationError) as error_info:
-        semantic_appraisal_module._validate_semantic_boundary_candidate(
+        semantic_appraisal_module.validate_semantic_boundary_candidate(
             parsed,
             None,
             question,
@@ -874,3 +876,27 @@ def test_boundary_validation_preserves_existing_rejection_behavior() -> None:
         )
 
     assert error_info.value.failure_kind == "semantic_boundary_terminal"
+
+
+def test_public_micro_item_helpers_preserve_existing_v2_contract() -> None:
+    """Public micro-item helpers retain the existing V2 item contract."""
+
+    question = _execution_question()
+    canonical = canonicalize_semantic_appraisal_item({
+        "question_id": question["question_id"],
+        "proposition": None,
+        "delta": None,
+    })
+    item_result, merged_result = validate_semantic_boundary_candidate(
+        canonical,
+        None,
+        question,
+        question,
+        {"e1"},
+        _execution_projection().handle_to_ref,
+    )
+    directly_merged = merge_semantic_appraisal_item(None, item_result)
+
+    assert item_result == canonical
+    assert merged_result == canonical
+    assert directly_merged == canonical

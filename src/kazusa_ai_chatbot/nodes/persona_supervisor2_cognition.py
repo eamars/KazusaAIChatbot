@@ -38,73 +38,17 @@ from kazusa_ai_chatbot.config import (
     CALENDAR_SCHEDULER_ENABLED,
     CHARACTER_SLEEP_LOCAL_PERIOD,
     CHARACTER_TIME_ZONE,
+    COGNITION_CORE_ENGINE,
     COGNITION_LLM_API_KEY,
     COGNITION_LLM_BASE_URL,
     COGNITION_LLM_MAX_COMPLETION_TOKENS,
     COGNITION_LLM_MODEL,
     COGNITION_LLM_THINKING_ENABLED,
     COGNITION_STAGE_TIMEOUT_SECONDS,
-    COGNITION_LLM_ACTION_AUTHORIZATION_API_KEY,
-    COGNITION_LLM_ACTION_AUTHORIZATION_BASE_URL,
-    COGNITION_LLM_ACTION_AUTHORIZATION_MAX_COMPLETION_TOKENS,
-    COGNITION_LLM_ACTION_AUTHORIZATION_MODEL,
-    COGNITION_LLM_ACTION_AUTHORIZATION_THINKING_ENABLED,
-    COGNITION_LLM_ACTION_PLANNING_API_KEY,
-    COGNITION_LLM_ACTION_PLANNING_BASE_URL,
-    COGNITION_LLM_ACTION_PLANNING_MAX_COMPLETION_TOKENS,
-    COGNITION_LLM_ACTION_PLANNING_MODEL,
-    COGNITION_LLM_ACTION_PLANNING_THINKING_ENABLED,
-    COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_API_KEY,
-    COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_BASE_URL,
-    COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_MAX_COMPLETION_TOKENS,
-    COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_MODEL,
-    COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_THINKING_ENABLED,
-    COGNITION_LLM_APPRAISAL_EVENT_AGENCY_API_KEY,
-    COGNITION_LLM_APPRAISAL_EVENT_AGENCY_BASE_URL,
-    COGNITION_LLM_APPRAISAL_EVENT_AGENCY_MAX_COMPLETION_TOKENS,
-    COGNITION_LLM_APPRAISAL_EVENT_AGENCY_MODEL,
-    COGNITION_LLM_APPRAISAL_EVENT_AGENCY_THINKING_ENABLED,
-    COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_API_KEY,
-    COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_BASE_URL,
-    COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_MAX_COMPLETION_TOKENS,
-    COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_MODEL,
-    COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_THINKING_ENABLED,
-    COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_API_KEY,
-    COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_BASE_URL,
-    COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_MAX_COMPLETION_TOKENS,
-    COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_MODEL,
-    COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_THINKING_ENABLED,
-    COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_API_KEY,
-    COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_BASE_URL,
-    COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_MAX_COMPLETION_TOKENS,
-    COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_MODEL,
-    COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_THINKING_ENABLED,
-    COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_API_KEY,
-    COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_BASE_URL,
-    COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_MAX_COMPLETION_TOKENS,
-    COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_MODEL,
-    COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_THINKING_ENABLED,
-    COGNITION_LLM_GOAL_ACTIVE_BRANCH_API_KEY,
-    COGNITION_LLM_GOAL_ACTIVE_BRANCH_BASE_URL,
-    COGNITION_LLM_GOAL_ACTIVE_BRANCH_MAX_COMPLETION_TOKENS,
-    COGNITION_LLM_GOAL_ACTIVE_BRANCH_MODEL,
-    COGNITION_LLM_GOAL_ACTIVE_BRANCH_THINKING_ENABLED,
-    COGNITION_LLM_GOAL_ORDINARY_RESPONSE_API_KEY,
-    COGNITION_LLM_GOAL_ORDINARY_RESPONSE_BASE_URL,
-    COGNITION_LLM_GOAL_ORDINARY_RESPONSE_MAX_COMPLETION_TOKENS,
-    COGNITION_LLM_GOAL_ORDINARY_RESPONSE_MODEL,
-    COGNITION_LLM_GOAL_ORDINARY_RESPONSE_THINKING_ENABLED,
-    COGNITION_LLM_RESOLVER_AUTHORIZATION_API_KEY,
-    COGNITION_LLM_RESOLVER_AUTHORIZATION_BASE_URL,
-    COGNITION_LLM_RESOLVER_AUTHORIZATION_MAX_COMPLETION_TOKENS,
-    COGNITION_LLM_RESOLVER_AUTHORIZATION_MODEL,
-    COGNITION_LLM_RESOLVER_AUTHORIZATION_THINKING_ENABLED,
-    COGNITION_LLM_WORKSPACE_COLLAPSE_API_KEY,
-    COGNITION_LLM_WORKSPACE_COLLAPSE_BASE_URL,
-    COGNITION_LLM_WORKSPACE_COLLAPSE_MAX_COMPLETION_TOKENS,
-    COGNITION_LLM_WORKSPACE_COLLAPSE_MODEL,
-    COGNITION_LLM_WORKSPACE_COLLAPSE_THINKING_ENABLED,
     CODING_AGENT_WORKSPACE_ROOT,
+    CognitionRouteSettingV1,
+    load_cognition_v2_route_settings,
+    load_cognition_v3_route_settings,
 )
 from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisodeValidationError,
@@ -142,6 +86,9 @@ from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
     project_duration,
     project_relationship_context,
     select_character_operational_context,
+)
+from kazusa_ai_chatbot.cognition_core_v3.contracts import (
+    CognitionChainServicesV3,
 )
 from kazusa_ai_chatbot.cognition_resolver.capabilities import (
     merge_shared_memory_prewarm_result,
@@ -229,248 +176,134 @@ _cognition_llm_config = LLMCallConfig(
     presence_penalty=None,
     thinking=LLMThinkingConfig(enabled=COGNITION_LLM_THINKING_ENABLED),
 )
-_appraisal_event_agency_config = LLMCallConfig(
-    stage_name="cognition_core_v2.appraisal_event_agency",
-    route_name="COGNITION_LLM_APPRAISAL_EVENT_AGENCY",
-    base_url=COGNITION_LLM_APPRAISAL_EVENT_AGENCY_BASE_URL,
-    api_key=COGNITION_LLM_APPRAISAL_EVENT_AGENCY_API_KEY,
-    model=COGNITION_LLM_APPRAISAL_EVENT_AGENCY_MODEL,
-    temperature=0.1,
-    top_p=0.7,
-    top_k=None,
-    max_completion_tokens=(
-        COGNITION_LLM_APPRAISAL_EVENT_AGENCY_MAX_COMPLETION_TOKENS
-    ),
-    presence_penalty=None,
-    timeout_seconds=COGNITION_STAGE_TIMEOUT_SECONDS,
-    thinking=LLMThinkingConfig(
-        enabled=COGNITION_LLM_APPRAISAL_EVENT_AGENCY_THINKING_ENABLED
-    ),
-)
-_appraisal_relationship_social_config = LLMCallConfig(
-    stage_name="cognition_core_v2.appraisal_relationship_social",
-    route_name="COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL",
-    base_url=COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_BASE_URL,
-    api_key=COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_API_KEY,
-    model=COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_MODEL,
-    temperature=0.1,
-    top_p=0.7,
-    top_k=None,
-    max_completion_tokens=(
-        COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_MAX_COMPLETION_TOKENS
-    ),
-    presence_penalty=None,
-    timeout_seconds=COGNITION_STAGE_TIMEOUT_SECONDS,
-    thinking=LLMThinkingConfig(
-        enabled=COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_THINKING_ENABLED
-    ),
-)
-_appraisal_moral_identity_config = LLMCallConfig(
-    stage_name="cognition_core_v2.appraisal_moral_identity",
-    route_name="COGNITION_LLM_APPRAISAL_MORAL_IDENTITY",
-    base_url=COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_BASE_URL,
-    api_key=COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_API_KEY,
-    model=COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_MODEL,
-    temperature=0.1,
-    top_p=0.7,
-    top_k=None,
-    max_completion_tokens=(
-        COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_MAX_COMPLETION_TOKENS
-    ),
-    presence_penalty=None,
-    timeout_seconds=COGNITION_STAGE_TIMEOUT_SECONDS,
-    thinking=LLMThinkingConfig(
-        enabled=COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_THINKING_ENABLED
-    ),
-)
-_appraisal_goal_threat_outcome_config = LLMCallConfig(
-    stage_name="cognition_core_v2.appraisal_goal_threat_outcome",
-    route_name="COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME",
-    base_url=COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_BASE_URL,
-    api_key=COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_API_KEY,
-    model=COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_MODEL,
-    temperature=0.1,
-    top_p=0.7,
-    top_k=None,
-    max_completion_tokens=(
-        COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_MAX_COMPLETION_TOKENS
-    ),
-    presence_penalty=None,
-    timeout_seconds=COGNITION_STAGE_TIMEOUT_SECONDS,
-    thinking=LLMThinkingConfig(
-        enabled=COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_THINKING_ENABLED
-    ),
-)
-_appraisal_epistemic_comparison_memory_config = LLMCallConfig(
-    stage_name="cognition_core_v2.appraisal_epistemic_comparison_memory",
-    route_name="COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY",
-    base_url=COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_BASE_URL,
-    api_key=COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_API_KEY,
-    model=COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_MODEL,
-    temperature=0.1,
-    top_p=0.7,
-    top_k=None,
-    max_completion_tokens=(
-        COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_MAX_COMPLETION_TOKENS
-    ),
-    presence_penalty=None,
-    timeout_seconds=COGNITION_STAGE_TIMEOUT_SECONDS,
-    thinking=LLMThinkingConfig(
-        enabled=(
-            COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_THINKING_ENABLED
-        )
-    ),
-)
-_appraisal_existential_drive_config = LLMCallConfig(
-    stage_name="cognition_core_v2.appraisal_existential_drive",
-    route_name="COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE",
-    base_url=COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_BASE_URL,
-    api_key=COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_API_KEY,
-    model=COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_MODEL,
-    temperature=0.1,
-    top_p=0.7,
-    top_k=None,
-    max_completion_tokens=(
-        COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_MAX_COMPLETION_TOKENS
-    ),
-    presence_penalty=None,
-    timeout_seconds=COGNITION_STAGE_TIMEOUT_SECONDS,
-    thinking=LLMThinkingConfig(
-        enabled=COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_THINKING_ENABLED
-    ),
-)
-_goal_ordinary_response_config = LLMCallConfig(
-    stage_name="cognition_core_v2.goal_ordinary_response",
-    route_name="COGNITION_LLM_GOAL_ORDINARY_RESPONSE",
-    base_url=COGNITION_LLM_GOAL_ORDINARY_RESPONSE_BASE_URL,
-    api_key=COGNITION_LLM_GOAL_ORDINARY_RESPONSE_API_KEY,
-    model=COGNITION_LLM_GOAL_ORDINARY_RESPONSE_MODEL,
-    temperature=0.1,
-    top_p=0.7,
-    top_k=None,
-    max_completion_tokens=(
-        COGNITION_LLM_GOAL_ORDINARY_RESPONSE_MAX_COMPLETION_TOKENS
-    ),
-    presence_penalty=None,
-    timeout_seconds=COGNITION_STAGE_TIMEOUT_SECONDS,
-    thinking=LLMThinkingConfig(
-        enabled=COGNITION_LLM_GOAL_ORDINARY_RESPONSE_THINKING_ENABLED
-    ),
-)
-_goal_active_branch_config = LLMCallConfig(
-    stage_name="cognition_core_v2.goal_active_branch",
-    route_name="COGNITION_LLM_GOAL_ACTIVE_BRANCH",
-    base_url=COGNITION_LLM_GOAL_ACTIVE_BRANCH_BASE_URL,
-    api_key=COGNITION_LLM_GOAL_ACTIVE_BRANCH_API_KEY,
-    model=COGNITION_LLM_GOAL_ACTIVE_BRANCH_MODEL,
-    temperature=0.1,
-    top_p=0.7,
-    top_k=None,
-    max_completion_tokens=(
-        COGNITION_LLM_GOAL_ACTIVE_BRANCH_MAX_COMPLETION_TOKENS
-    ),
-    presence_penalty=None,
-    timeout_seconds=COGNITION_STAGE_TIMEOUT_SECONDS,
-    thinking=LLMThinkingConfig(
-        enabled=COGNITION_LLM_GOAL_ACTIVE_BRANCH_THINKING_ENABLED
-    ),
-)
-_workspace_collapse_config = LLMCallConfig(
-    stage_name="cognition_core_v2.workspace_collapse",
-    route_name="COGNITION_LLM_WORKSPACE_COLLAPSE",
-    base_url=COGNITION_LLM_WORKSPACE_COLLAPSE_BASE_URL,
-    api_key=COGNITION_LLM_WORKSPACE_COLLAPSE_API_KEY,
-    model=COGNITION_LLM_WORKSPACE_COLLAPSE_MODEL,
-    temperature=0.1,
-    top_p=0.7,
-    top_k=None,
-    max_completion_tokens=(
-        COGNITION_LLM_WORKSPACE_COLLAPSE_MAX_COMPLETION_TOKENS
-    ),
-    presence_penalty=None,
-    timeout_seconds=COGNITION_STAGE_TIMEOUT_SECONDS,
-    thinking=LLMThinkingConfig(
-        enabled=COGNITION_LLM_WORKSPACE_COLLAPSE_THINKING_ENABLED
-    ),
-)
-_action_planning_config = LLMCallConfig(
-    stage_name="cognition_core_v2.action_planning",
-    route_name="COGNITION_LLM_ACTION_PLANNING",
-    base_url=COGNITION_LLM_ACTION_PLANNING_BASE_URL,
-    api_key=COGNITION_LLM_ACTION_PLANNING_API_KEY,
-    model=COGNITION_LLM_ACTION_PLANNING_MODEL,
-    temperature=0.1,
-    top_p=0.7,
-    top_k=None,
-    max_completion_tokens=COGNITION_LLM_ACTION_PLANNING_MAX_COMPLETION_TOKENS,
-    presence_penalty=None,
-    timeout_seconds=COGNITION_STAGE_TIMEOUT_SECONDS,
-    thinking=LLMThinkingConfig(
-        enabled=COGNITION_LLM_ACTION_PLANNING_THINKING_ENABLED
-    ),
-)
-_action_authorization_config = LLMCallConfig(
-    stage_name="cognition_core_v2.action_authorization",
-    route_name="COGNITION_LLM_ACTION_AUTHORIZATION",
-    base_url=COGNITION_LLM_ACTION_AUTHORIZATION_BASE_URL,
-    api_key=COGNITION_LLM_ACTION_AUTHORIZATION_API_KEY,
-    model=COGNITION_LLM_ACTION_AUTHORIZATION_MODEL,
-    temperature=0.1,
-    top_p=0.7,
-    top_k=None,
-    max_completion_tokens=(
-        COGNITION_LLM_ACTION_AUTHORIZATION_MAX_COMPLETION_TOKENS
-    ),
-    presence_penalty=None,
-    timeout_seconds=COGNITION_STAGE_TIMEOUT_SECONDS,
-    thinking=LLMThinkingConfig(
-        enabled=COGNITION_LLM_ACTION_AUTHORIZATION_THINKING_ENABLED
-    ),
-)
-_resolver_authorization_config = LLMCallConfig(
-    stage_name="cognition_core_v2.resolver_authorization",
-    route_name="COGNITION_LLM_RESOLVER_AUTHORIZATION",
-    base_url=COGNITION_LLM_RESOLVER_AUTHORIZATION_BASE_URL,
-    api_key=COGNITION_LLM_RESOLVER_AUTHORIZATION_API_KEY,
-    model=COGNITION_LLM_RESOLVER_AUTHORIZATION_MODEL,
-    temperature=0.1,
-    top_p=0.7,
-    top_k=None,
-    max_completion_tokens=(
-        COGNITION_LLM_RESOLVER_AUTHORIZATION_MAX_COMPLETION_TOKENS
-    ),
-    presence_penalty=None,
-    timeout_seconds=COGNITION_STAGE_TIMEOUT_SECONDS,
-    thinking=LLMThinkingConfig(
-        enabled=COGNITION_LLM_RESOLVER_AUTHORIZATION_THINKING_ENABLED
-    ),
-)
 
 
-def build_cognition_core_services() -> CognitionCoreServicesV2:
-    """Build the injected V2 model bindings."""
+def _cognition_route_config(
+    setting: CognitionRouteSettingV1,
+    *,
+    stage_name: str,
+    route_name: str,
+) -> LLMCallConfig:
+    """Build one selected-engine cognition model binding."""
 
-    return CognitionCoreServicesV2(
-        llm=_llm_interface,
-        appraisal_event_agency_config=_appraisal_event_agency_config,
-        appraisal_relationship_social_config=(
-            _appraisal_relationship_social_config
-        ),
-        appraisal_moral_identity_config=_appraisal_moral_identity_config,
-        appraisal_goal_threat_outcome_config=(
-            _appraisal_goal_threat_outcome_config
-        ),
-        appraisal_epistemic_comparison_memory_config=(
-            _appraisal_epistemic_comparison_memory_config
-        ),
-        appraisal_existential_drive_config=_appraisal_existential_drive_config,
-        goal_ordinary_response_config=_goal_ordinary_response_config,
-        goal_active_branch_config=_goal_active_branch_config,
-        workspace_collapse_config=_workspace_collapse_config,
-        action_planning_config=_action_planning_config,
-        action_authorization_config=_action_authorization_config,
-        resolver_authorization_config=_resolver_authorization_config,
+    config = LLMCallConfig(
+        stage_name=stage_name,
+        route_name=route_name,
+        base_url=setting.base_url,
+        api_key=setting.api_key,
+        model=setting.model,
+        temperature=0.1,
+        top_p=0.7,
+        top_k=None,
+        max_completion_tokens=setting.max_completion_tokens,
+        presence_penalty=None,
+        timeout_seconds=COGNITION_STAGE_TIMEOUT_SECONDS,
+        thinking=LLMThinkingConfig(enabled=setting.thinking_enabled),
+        context_window_tokens=setting.context_window_tokens,
     )
+    return config
+
+
+def build_cognition_core_services(
+) -> CognitionCoreServicesV2 | CognitionChainServicesV3:
+    """Build only the selected cognition engine's injected model bindings."""
+
+    if COGNITION_CORE_ENGINE == "v2":
+        route_settings = load_cognition_v2_route_settings()
+        services = CognitionCoreServicesV2(
+            llm=_llm_interface,
+            appraisal_event_agency_config=_cognition_route_config(
+                route_settings["appraisal_event_agency"],
+                stage_name="cognition_core_v2.appraisal_event_agency",
+                route_name="COGNITION_LLM_APPRAISAL_EVENT_AGENCY",
+            ),
+            appraisal_relationship_social_config=_cognition_route_config(
+                route_settings["appraisal_relationship_social"],
+                stage_name="cognition_core_v2.appraisal_relationship_social",
+                route_name="COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL",
+            ),
+            appraisal_moral_identity_config=_cognition_route_config(
+                route_settings["appraisal_moral_identity"],
+                stage_name="cognition_core_v2.appraisal_moral_identity",
+                route_name="COGNITION_LLM_APPRAISAL_MORAL_IDENTITY",
+            ),
+            appraisal_goal_threat_outcome_config=_cognition_route_config(
+                route_settings["appraisal_goal_threat_outcome"],
+                stage_name="cognition_core_v2.appraisal_goal_threat_outcome",
+                route_name="COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME",
+            ),
+            appraisal_epistemic_comparison_memory_config=(
+                _cognition_route_config(
+                    route_settings["appraisal_epistemic_comparison_memory"],
+                    stage_name=(
+                        "cognition_core_v2."
+                        "appraisal_epistemic_comparison_memory"
+                    ),
+                    route_name=(
+                        "COGNITION_LLM_"
+                        "APPRAISAL_EPISTEMIC_COMPARISON_MEMORY"
+                    ),
+                )
+            ),
+            appraisal_existential_drive_config=_cognition_route_config(
+                route_settings["appraisal_existential_drive"],
+                stage_name="cognition_core_v2.appraisal_existential_drive",
+                route_name="COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE",
+            ),
+            goal_ordinary_response_config=_cognition_route_config(
+                route_settings["goal_ordinary_response"],
+                stage_name="cognition_core_v2.goal_ordinary_response",
+                route_name="COGNITION_LLM_GOAL_ORDINARY_RESPONSE",
+            ),
+            goal_active_branch_config=_cognition_route_config(
+                route_settings["goal_active_branch"],
+                stage_name="cognition_core_v2.goal_active_branch",
+                route_name="COGNITION_LLM_GOAL_ACTIVE_BRANCH",
+            ),
+            workspace_collapse_config=_cognition_route_config(
+                route_settings["workspace_collapse"],
+                stage_name="cognition_core_v2.workspace_collapse",
+                route_name="COGNITION_LLM_WORKSPACE_COLLAPSE",
+            ),
+            action_planning_config=_cognition_route_config(
+                route_settings["action_planning"],
+                stage_name="cognition_core_v2.action_planning",
+                route_name="COGNITION_LLM_ACTION_PLANNING",
+            ),
+            action_authorization_config=_cognition_route_config(
+                route_settings["action_authorization"],
+                stage_name="cognition_core_v2.action_authorization",
+                route_name="COGNITION_LLM_ACTION_AUTHORIZATION",
+            ),
+            resolver_authorization_config=_cognition_route_config(
+                route_settings["resolver_authorization"],
+                stage_name="cognition_core_v2.resolver_authorization",
+                route_name="COGNITION_LLM_RESOLVER_AUTHORIZATION",
+            ),
+        )
+        return services
+
+    route_settings_v3 = load_cognition_v3_route_settings()
+    chain_lane = _cognition_route_config(
+        route_settings_v3.chain,
+        stage_name="cognition_core_v3.chain",
+        route_name="COGNITION_V3_CHAIN_LLM",
+    )
+    if route_settings_v3.sidecar is None:
+        sidecar_lane = None
+    else:
+        sidecar_lane = _cognition_route_config(
+            route_settings_v3.sidecar,
+            stage_name="cognition_core_v3.sidecar",
+            route_name="COGNITION_V3_SIDECAR_LLM",
+        )
+    services = CognitionChainServicesV3(
+        llm=_llm_interface,
+        chain_lane=chain_lane,
+        sidecar_lane=sidecar_lane,
+        subconscious_enabled=route_settings_v3.subconscious_enabled,
+    )
+    return services
 
 
 def build_scene_context_from_global_state(

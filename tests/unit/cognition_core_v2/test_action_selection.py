@@ -10,6 +10,7 @@ from kazusa_ai_chatbot.cognition_core_v2.action_selection import (
     ACTION_PLANNING_PROMPT,
     _validate_goal_progress_choice,
     plan_actions,
+    validate_action_plan_decision,
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     EVIDENCE_SOURCE_QUESTION_IDS,
@@ -248,6 +249,31 @@ def test_action_selection_exposes_owned_contract() -> None:
     """Keep the action planner entrypoint attached to this owner."""
 
     assert callable(plan_actions)
+
+
+def test_public_action_plan_validator_preserves_existing_normalization() -> None:
+    """The public validator preserves the canonical empty planning envelope."""
+
+    decision = validate_action_plan_decision(
+        {
+            "action_requests": [],
+            "resolver_requests": [],
+            "goal_resolution": "answerable_now",
+            "resolver_pending_resolution": None,
+            "resolver_goal_progress": None,
+        },
+        bid_handles={},
+        action_handles={},
+        resolver_handles={},
+    )
+
+    assert decision == {
+        "action_requests": [],
+        "resolver_requests": [],
+        "goal_resolution": "answerable_now",
+        "resolver_pending_resolution": None,
+        "resolver_goal_progress": None,
+    }
 
 
 def test_action_planning_keeps_confidence_descriptor_advisory() -> None:

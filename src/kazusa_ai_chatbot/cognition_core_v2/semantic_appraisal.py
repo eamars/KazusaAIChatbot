@@ -574,7 +574,7 @@ async def _appraise_semantic_item(
                         failure_capsule.append_json_repair_attempt
                     ),
                 )
-                parsed_output = _canonicalize_semantic_appraisal_item(
+                parsed_output = canonicalize_semantic_appraisal_item(
                     parsed_output
                 )
             except (AttributeError, KeyError, TypeError, ValueError) as exc:
@@ -597,7 +597,7 @@ async def _appraise_semantic_item(
             except (AttributeError, KeyError, TypeError, ValueError) as exc:
                 raise _SemanticStructuralOutputError(str(exc)) from exc
 
-            result, merged_result = _validate_semantic_boundary_candidate(
+            result, merged_result = validate_semantic_boundary_candidate(
                 parsed_output,
                 accepted_result,
                 question,
@@ -803,7 +803,7 @@ async def _appraise_semantic_item(
     raise AssertionError("semantic appraisal item attempt loop did not terminate")
 
 
-def _validate_semantic_boundary_candidate(
+def validate_semantic_boundary_candidate(
     parsed: object,
     accepted_result: SemanticAppraisalResultV2 | None,
     question: SemanticQuestionV2,
@@ -823,7 +823,7 @@ def _validate_semantic_boundary_candidate(
         maximum_explanation_chars=SEMANTIC_APPRAISAL_ITEM_EXPLANATION_LIMIT,
         enforce_semantic_ownership=False,
     )
-    merged_result = _merge_semantic_appraisal_item(
+    merged_result = merge_semantic_appraisal_item(
         accepted_result,
         result,
     )
@@ -840,7 +840,7 @@ def _validate_semantic_boundary_candidate(
     return result, merged_result
 
 
-def _merge_semantic_appraisal_item(
+def merge_semantic_appraisal_item(
     accepted_result: SemanticAppraisalResultV2 | None,
     item_result: SemanticAppraisalResultV2,
 ) -> SemanticAppraisalResultV2:
@@ -947,7 +947,7 @@ def _derive_appraisal_selection_metadata(parsed: object) -> object:
     return normalized
 
 
-def _canonicalize_semantic_appraisal_item(parsed: object) -> object:
+def canonicalize_semantic_appraisal_item(parsed: object) -> object:
     """Convert one singular model item into the public aggregate shape."""
 
     if not isinstance(parsed, Mapping):

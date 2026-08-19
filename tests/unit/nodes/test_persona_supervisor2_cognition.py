@@ -11,12 +11,22 @@ from kazusa_ai_chatbot.action_spec.registry import (
     FUTURE_SPEAK_CAPABILITY,
     SPEAK_CAPABILITY,
 )
+from kazusa_ai_chatbot.cognition_core_selector import (
+    run_cognition as selected_run_cognition,
+)
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    CognitionCoreServicesV2,
+)
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
 )
-from kazusa_ai_chatbot.cognition_core_selector import (
-    run_cognition as selected_run_cognition,
+from kazusa_ai_chatbot.cognition_core_v3.contracts import (
+    CognitionChainServicesV3,
+)
+from kazusa_ai_chatbot.config import (
+    CognitionRouteSettingV1,
+    CognitionV3RouteSettingsV1,
 )
 from tests.test_cognition_chain_connector_mapping import (
     NOW,
@@ -29,6 +39,20 @@ EXPECTED_SYMBOLS = [
     "build_cognition_input_from_global_state",
     "build_scene_context_from_global_state",
 ]
+COGNITION_V2_ROUTE_KEYS = (
+    "appraisal_event_agency",
+    "appraisal_relationship_social",
+    "appraisal_moral_identity",
+    "appraisal_goal_threat_outcome",
+    "appraisal_epistemic_comparison_memory",
+    "appraisal_existential_drive",
+    "goal_ordinary_response",
+    "goal_active_branch",
+    "workspace_collapse",
+    "action_planning",
+    "action_authorization",
+    "resolver_authorization",
+)
 
 
 def test_persona_supervisor2_cognition_exposes_owned_contract() -> None:
@@ -44,6 +68,83 @@ def test_persona_supervisor2_cognition_exposes_owned_contract() -> None:
     assert not missing_symbols, (
         f"{MODULE_PATH} is missing owner symbols: {missing_symbols}"
     )
+
+
+def test_connector_builds_selected_engine_services_without_inactive_routes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only the selected engine loader contributes model bindings."""
+
+    v2_settings = {
+        key: CognitionRouteSettingV1(
+            base_url=f"http://{key}.example/v1",
+            api_key=f"{key}-key",
+            model=f"{key}-model",
+            max_completion_tokens=8_192,
+            thinking_enabled=False,
+            context_window_tokens=None,
+        )
+        for key in COGNITION_V2_ROUTE_KEYS
+    }
+    v3_settings = CognitionV3RouteSettingsV1(
+        chain=CognitionRouteSettingV1(
+            base_url="http://chain.example/v1",
+            api_key="chain-key",
+            model="chain-model",
+            max_completion_tokens=8_192,
+            thinking_enabled=False,
+            context_window_tokens=50_176,
+        ),
+        sidecar=None,
+        subconscious_enabled=False,
+        appraisal_group_count=2,
+        turn_deadline_seconds=240,
+    )
+
+    def inactive_v3_loader() -> CognitionV3RouteSettingsV1:
+        raise AssertionError("V2 construction read the inactive V3 family")
+
+    monkeypatch.setattr(cognition_module, "COGNITION_CORE_ENGINE", "v2")
+    monkeypatch.setattr(
+        cognition_module,
+        "load_cognition_v2_route_settings",
+        lambda: v2_settings,
+    )
+    monkeypatch.setattr(
+        cognition_module,
+        "load_cognition_v3_route_settings",
+        inactive_v3_loader,
+    )
+
+    v2_services = cognition_module.build_cognition_core_services()
+
+    assert isinstance(v2_services, CognitionCoreServicesV2)
+    assert v2_services.appraisal_event_agency_config.context_window_tokens is None
+    assert v2_services.goal_active_branch_config.model == (
+        "goal_active_branch-model"
+    )
+
+    def inactive_v2_loader() -> dict[str, CognitionRouteSettingV1]:
+        raise AssertionError("V3 construction read the inactive V2 family")
+
+    monkeypatch.setattr(cognition_module, "COGNITION_CORE_ENGINE", "v3")
+    monkeypatch.setattr(
+        cognition_module,
+        "load_cognition_v2_route_settings",
+        inactive_v2_loader,
+    )
+    monkeypatch.setattr(
+        cognition_module,
+        "load_cognition_v3_route_settings",
+        lambda: v3_settings,
+    )
+
+    v3_services = cognition_module.build_cognition_core_services()
+
+    assert isinstance(v3_services, CognitionChainServicesV3)
+    assert v3_services.chain_lane.route_name == "COGNITION_V3_CHAIN_LLM"
+    assert v3_services.chain_lane.context_window_tokens == 50_176
+    assert v3_services.sidecar_lane is None
 
 
 @pytest.mark.asyncio

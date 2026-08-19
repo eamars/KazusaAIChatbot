@@ -49,6 +49,15 @@ dependency-ready goal branches, complete-bid collapse, route validation, and
 one replacement-state update. The caller commits that update before action,
 surface, resolver, or dialog work.
 
+The canonical pure semantic substrate also exposes these reusable helpers from
+their owning modules: `canonicalize_semantic_appraisal_item`,
+`validate_semantic_boundary_candidate`, `merge_semantic_appraisal_item`,
+`selection_goal_draft_to_goal_bid`, `validate_workspace_partition`,
+`validate_action_plan_decision`, and `validate_authorization_decisions`.
+They are the same implementations used by V2 itself. Consumers import them
+directly from their owning modules; there is no copied validator or alternate
+contract vocabulary.
+
 ## Required-Selection Role Operation
 
 The episode-level `response_operation` is input provenance. It records who

@@ -16,7 +16,9 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
 from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
     _ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT,
     CONTINUITY_AUTHORITY_INSTRUCTIONS,
+    GOAL_COGNITION_ATTEMPT_LIMIT,
     GOAL_COGNITION_PROMPT,
+    GOAL_COGNITION_PROMPT_CAP,
     NON_ORDINARY_GOAL_COGNITION_PROMPT,
     ORDINARY_RECURRENCE_GOAL_COGNITION_PROMPT,
     ORDINARY_RECURRENCE_SELECTION_GOAL_COGNITION_PROMPT,
@@ -25,9 +27,8 @@ from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
     _build_goal_output_contract,
     _conversation_progress_evidence,
     _materialize_recurrence_relational_willingness,
-    GOAL_COGNITION_ATTEMPT_LIMIT,
-    GOAL_COGNITION_PROMPT_CAP,
     run_goal_cognition,
+    selection_goal_draft_to_goal_bid,
     validate_goal_bid_draft,
     validate_selection_goal_draft,
 )
@@ -173,6 +174,39 @@ def test_required_selection_emits_selected_response_operation() -> None:
     )
 
     assert validated["selected_response_operation"] == {
+        **_input_operation(),
+        **selected_operation,
+    }
+
+
+def test_public_selection_materializer_preserves_roles_and_evidence() -> None:
+    """The public materializer preserves validated selection ownership."""
+
+    selected_operation = {
+        "operation": "the user gives the selected reward to the character",
+        "embedded_actor_role": CURRENT_USER_ROLE,
+        "embedded_target_role": CURRENT_CHARACTER_ROLE,
+    }
+    selection_draft = validate_selection_goal_draft(
+        _selection_draft(selected_operation),
+        evidence_handles={"e1"},
+        role_handles=set(),
+        required_evidence_handles={"e1"},
+        required_operations=[{
+            "evidence_handle": "e1",
+            "response_operation": _input_operation(),
+        }],
+        maximum_evidence_handles=4,
+    )
+    bid = selection_goal_draft_to_goal_bid(
+        selection_draft,
+        branch_id="ordinary_response",
+        include_relational_willingness=False,
+    )
+
+    assert bid["target_role_handles"] == []
+    assert bid["evidence_handles"] == ["e1"]
+    assert bid["selected_response_operation"] == {
         **_input_operation(),
         **selected_operation,
     }

@@ -229,7 +229,7 @@ async def collapse_bids(
                     failure_capsule.append_json_repair_attempt
                 ),
             )
-            partition = _validate_partition(parsed, set(handles))
+            partition = validate_workspace_partition(parsed, set(handles))
         except (AttributeError, KeyError, TypeError, ValueError) as exc:
             _record_workspace_trace(
                 services=services,
@@ -432,7 +432,10 @@ def _record_workspace_trace(
     )
 
 
-def _validate_partition(parsed: object, handles: set[str]) -> dict[str, Any]:
+def validate_workspace_partition(
+    parsed: object,
+    handles: set[str],
+) -> dict[str, Any]:
     """Validate exact handle partition output from workspace collapse."""
 
     if not isinstance(parsed, Mapping):

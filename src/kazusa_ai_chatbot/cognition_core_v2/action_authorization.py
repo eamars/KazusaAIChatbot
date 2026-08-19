@@ -380,7 +380,7 @@ async def invoke_semantic_authorizer(
                     llm_tracing.failure_capsule.append_json_repair_attempt
                 ),
             )
-            decisions = _validate_authorization_decisions(
+            decisions = validate_authorization_decisions(
                 parsed,
                 candidate_handles=candidate_handles,
             )
@@ -440,7 +440,7 @@ async def invoke_semantic_authorizer(
     raise AssertionError("action-authorization attempt loop did not terminate")
 
 
-def _validate_authorization_decisions(
+def validate_authorization_decisions(
     parsed: object,
     *,
     candidate_handles: list[str],

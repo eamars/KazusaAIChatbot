@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 
@@ -29,6 +30,7 @@ EXPECTED_ROUTE_TABLE_ROWS = (
     "RAG_SUBAGENT_LLM",
     "WEB_SEARCH_LLM",
     "COGNITION_LLM",
+    "COGNITION_LLM_CHARACTER_CARRYOVER",
     *COGNITION_CORE_V2_ROUTE_ROWS,
     "DIALOG_GENERATOR_LLM",
     "CONSOLIDATION_LLM",
@@ -260,3 +262,65 @@ def test_cognition_builder_uses_independent_stage_routes(tmp_path) -> None:
         "COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL|"
         "http://social.example/v1|social-model"
     )
+
+
+def test_route_report_includes_only_selected_cognition_engine_routes_and_shared_generic_cognition_route(
+    tmp_path,
+) -> None:
+    """Diagnostics include one selected core family plus shared cognition."""
+
+    from tests.test_config import (
+        COGNITION_V3_ROUTE_ENV_VARS,
+        _configured_subprocess_env_without_dotenv,
+        _v3_configured_subprocess_env_without_dotenv,
+    )
+
+    script = (
+        "import json\n"
+        "from kazusa_ai_chatbot.llm_interface.route_report import "
+        "_table_rows, configured_route_diagnostics\n"
+        "print(json.dumps(_table_rows(configured_route_diagnostics())))\n"
+    )
+    v2_env = _configured_subprocess_env_without_dotenv()
+    v2_env["COGNITION_CORE_ENGINE"] = "v2"
+    for name in COGNITION_V3_ROUTE_ENV_VARS:
+        v2_env.pop(name, None)
+    v3_env = _v3_configured_subprocess_env_without_dotenv(
+        include_sidecar=True,
+    )
+
+    rows_by_engine: dict[str, list[dict[str, str]]] = {}
+    for engine, env in (("v2", v2_env), ("v3", v3_env)):
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        rows_by_engine[engine] = json.loads(result.stdout)
+
+    v2_rows = {
+        row["route_name"]: row
+        for row in rows_by_engine["v2"]
+    }
+    v3_rows = {
+        row["route_name"]: row
+        for row in rows_by_engine["v3"]
+    }
+
+    assert set(COGNITION_CORE_V2_ROUTE_ROWS) <= set(v2_rows)
+    assert "COGNITION_V3_CHAIN_LLM" not in v2_rows
+    assert "COGNITION_V3_SIDECAR_LLM" not in v2_rows
+    assert not set(COGNITION_CORE_V2_ROUTE_ROWS) & set(v3_rows)
+    assert v3_rows["COGNITION_V3_CHAIN_LLM"]["route_group"] == (
+        "v3_cognition"
+    )
+    assert v3_rows["COGNITION_V3_SIDECAR_LLM"]["route_group"] == (
+        "v3_cognition"
+    )
+    for rows in (v2_rows, v3_rows):
+        assert rows["COGNITION_LLM"]["route_group"] == "shared_non_core"
+        assert "COGNITION_LLM_CHARACTER_CARRYOVER" in rows

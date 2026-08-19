@@ -7,6 +7,120 @@ import dataclasses
 import pytest
 
 from kazusa_ai_chatbot.cognition_core_v3 import contracts
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
+)
+
+
+def _lane_config(
+    *,
+    route_name: str = "COGNITION_V3_CHAIN_LLM",
+    base_url: str = "http://chain.example/v1",
+    model: str = "chain-model",
+    max_completion_tokens: int = 8_192,
+    context_window_tokens: int | None = 50_176,
+    thinking_enabled: bool = False,
+) -> LLMCallConfig:
+    """Build one lane config for direct service-contract validation."""
+
+    config = LLMCallConfig(
+        stage_name="cognition_core_v3.chain",
+        route_name=route_name,
+        base_url=base_url,
+        api_key="test-key",
+        model=model,
+        temperature=0.1,
+        top_p=0.7,
+        top_k=None,
+        max_completion_tokens=max_completion_tokens,
+        presence_penalty=None,
+        thinking=LLMThinkingConfig(enabled=thinking_enabled),
+        context_window_tokens=context_window_tokens,
+    )
+    return config
+
+
+def test_v3_contracts_reject_unknown_fields_types_and_enums() -> None:
+    """The V3 service boundary is exact, bounded, and lane-distinct."""
+
+    chain_lane = _lane_config()
+    services = contracts.CognitionChainServicesV3(
+        llm=LLInterface(),
+        chain_lane=chain_lane,
+        sidecar_lane=None,
+    )
+
+    assert [field.name for field in dataclasses.fields(services)] == [
+        "llm",
+        "chain_lane",
+        "sidecar_lane",
+        "subconscious_enabled",
+    ]
+    with pytest.raises(TypeError):
+        contracts.CognitionChainServicesV3(
+            llm=LLInterface(),
+            chain_lane=chain_lane,
+            sidecar_lane=None,
+            invented=True,
+        )
+    with pytest.raises(ValueError, match="chain route"):
+        contracts.CognitionChainServicesV3(
+            llm=LLInterface(),
+            chain_lane=dataclasses.replace(chain_lane, route_name=""),
+            sidecar_lane=None,
+        )
+    with pytest.raises(ValueError, match="thinking"):
+        contracts.CognitionChainServicesV3(
+            llm=LLInterface(),
+            chain_lane=_lane_config(thinking_enabled=True),
+            sidecar_lane=None,
+        )
+    with pytest.raises(ValueError, match="context window"):
+        contracts.CognitionChainServicesV3(
+            llm=LLInterface(),
+            chain_lane=_lane_config(context_window_tokens=49_999),
+            sidecar_lane=None,
+        )
+    with pytest.raises(ValueError, match="completion cap"):
+        contracts.CognitionChainServicesV3(
+            llm=LLInterface(),
+            chain_lane=_lane_config(max_completion_tokens=8_191),
+            sidecar_lane=None,
+        )
+
+    sidecar_lane = _lane_config(
+        route_name="COGNITION_V3_SIDECAR_LLM",
+        base_url="http://sidecar.example/v1",
+        model="sidecar-model",
+        context_window_tokens=None,
+    )
+    distinct_services = contracts.CognitionChainServicesV3(
+        llm=LLInterface(),
+        chain_lane=chain_lane,
+        sidecar_lane=sidecar_lane,
+        subconscious_enabled=True,
+    )
+    assert distinct_services.sidecar_lane is sidecar_lane
+
+    with pytest.raises(ValueError, match="distinct"):
+        contracts.CognitionChainServicesV3(
+            llm=LLInterface(),
+            chain_lane=chain_lane,
+            sidecar_lane=dataclasses.replace(
+                sidecar_lane,
+                base_url="http://chain.example/v1/",
+                model="CHAIN-MODEL",
+            ),
+        )
+    with pytest.raises(ValueError, match="sidecar"):
+        contracts.CognitionChainServicesV3(
+            llm=LLInterface(),
+            chain_lane=chain_lane,
+            sidecar_lane=None,
+            subconscious_enabled=True,
+        )
 
 
 def _accepted_result() -> contracts.StageResult:

@@ -1008,7 +1008,7 @@ async def _run_goal_cognition(
                     ),
                     maximum_evidence_handles=maximum_evidence_handles,
                 )
-                draft = _selection_goal_draft_to_goal_bid(
+                draft = selection_goal_draft_to_goal_bid(
                     selection_draft,
                     branch_id=definition.branch_id,
                     include_relational_willingness=(
@@ -1584,7 +1584,7 @@ def _bind_selected_response_operation(
     return bound_operation
 
 
-def _selection_goal_draft_to_goal_bid(
+def selection_goal_draft_to_goal_bid(
     selection_draft: Mapping[str, Any],
     *,
     branch_id: str,

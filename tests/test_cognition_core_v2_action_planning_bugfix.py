@@ -8,20 +8,20 @@ from types import SimpleNamespace
 import pytest
 from langchain_core.messages import HumanMessage
 
-from kazusa_ai_chatbot.cognition_episode import build_goal_continuation_ref
 from kazusa_ai_chatbot.cognition_core_v2.action_authorization import (
     ACTION_AUTHORIZATION_PROMPT_CAP,
     invoke_semantic_authorizer,
 )
-from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
-    GOAL_COGNITION_PROMPT,
-)
 from kazusa_ai_chatbot.cognition_core_v2.action_selection import (
     ACTION_PLANNING_ATTEMPT_LIMIT,
     ACTION_PLANNING_PROMPT,
-    _validate_action_plan_decision,
     plan_actions,
+    validate_action_plan_decision,
 )
+from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
+    GOAL_COGNITION_PROMPT,
+)
+from kazusa_ai_chatbot.cognition_episode import build_goal_continuation_ref
 
 
 def _bid(branch_id: str) -> dict[str, object]:
@@ -842,7 +842,7 @@ def test_action_plan_caps_rows_and_drops_unknown_bids() -> None:
         "reason": "grounded reason",
     } for index in range(1, 5)])
 
-    decision = _validate_action_plan_decision(
+    decision = validate_action_plan_decision(
         response,
         bid_handles={"b1": _bid("ordinary_response")},
         action_handles={"a1": _action("background_work_request")},
@@ -872,7 +872,7 @@ def test_action_plan_rejects_mixed_action_and_resolver_semantics() -> None:
     )
 
     with pytest.raises(ValueError, match="mutually exclusive"):
-        _validate_action_plan_decision(
+        validate_action_plan_decision(
             response,
             bid_handles={"b1": _bid("ordinary_response")},
             action_handles={"a1": _action("background_work_request")},
@@ -885,7 +885,7 @@ def test_action_plan_ignores_model_authored_route() -> None:
 
     response = _planner_response()
     response["route"] = "speech"
-    decision = _validate_action_plan_decision(
+    decision = validate_action_plan_decision(
         response,
         bid_handles={"b1": _bid("ordinary_response")},
         action_handles={"a1": _action("background_work_request")},
@@ -909,7 +909,7 @@ def test_action_plan_merges_semantic_goal_progress_delta() -> None:
         "current_focus": "retrieve the relevant character memory",
     }
 
-    decision = _validate_action_plan_decision(
+    decision = validate_action_plan_decision(
         response,
         bid_handles={"b1": _bid("ordinary_response")},
         action_handles={},
@@ -954,7 +954,7 @@ def test_empty_goal_progress_shell_rejects_new_checklist() -> None:
         ValueError,
         match="cannot update an empty shell",
     ):
-        _validate_action_plan_decision(
+        validate_action_plan_decision(
             response,
             bid_handles={"b1": _bid("ordinary_response")},
             action_handles={},
@@ -975,7 +975,7 @@ def test_action_plan_rejects_invalid_registry_decision_format() -> None:
         ValueError,
         match="every proposed action request row was unusable",
     ):
-        _validate_action_plan_decision(
+        validate_action_plan_decision(
             _planner_response(
                 actions=[{
                     "bid_handle": "b1",
@@ -1021,7 +1021,7 @@ def test_closed_action_with_unknown_decision_invalidates_candidate() -> None:
         ValueError,
         match="every proposed action request row was unusable",
     ):
-        _validate_action_plan_decision(
+        validate_action_plan_decision(
             _planner_response(
                 actions=[{
                     "bid_handle": "b1",
@@ -1055,7 +1055,7 @@ def test_invalid_resolver_row_invalidates_valid_sibling() -> None:
         },
     ])
 
-    decision = _validate_action_plan_decision(
+    decision = validate_action_plan_decision(
         response,
         bid_handles={"b1": _bid("ordinary_response")},
         action_handles={},
@@ -1083,7 +1083,7 @@ def test_action_plan_strips_extra_resolver_fields() -> None:
         "priority": "now",
     }])
 
-    decision = _validate_action_plan_decision(
+    decision = validate_action_plan_decision(
         response,
         bid_handles={"b1": _bid("ordinary_response")},
         action_handles={},
@@ -1113,7 +1113,7 @@ def test_task_resolution_row_requires_exact_routing_boolean() -> None:
             ValueError,
             match="every proposed resolver request row was unusable",
         ):
-            _validate_action_plan_decision(
+            validate_action_plan_decision(
                 response,
                 bid_handles={"b1": _bid("ordinary_response")},
                 action_handles={},
@@ -1137,7 +1137,7 @@ def test_inline_only_runtime_rejects_background_task_resolution() -> None:
         ValueError,
         match="every proposed resolver request row was unusable",
     ):
-        _validate_action_plan_decision(
+        validate_action_plan_decision(
             response,
             bid_handles={"b1": _bid("ordinary_response")},
             action_handles={},
@@ -1154,7 +1154,7 @@ def test_inline_only_runtime_rejects_background_task_resolution() -> None:
         **response["resolver_requests"][0],
         "start_in_background": False,
     }])
-    decision = _validate_action_plan_decision(
+    decision = validate_action_plan_decision(
         inline_response,
         bid_handles={"b1": _bid("ordinary_response")},
         action_handles={},
@@ -1180,7 +1180,7 @@ def test_task_resolution_row_rejects_missing_or_extra_route_fields() -> None:
         ValueError,
         match="every proposed resolver request row was unusable",
     ):
-        _validate_action_plan_decision(
+        validate_action_plan_decision(
             missing_boolean,
             bid_handles={"b1": _bid("ordinary_response")},
             action_handles={},
@@ -1199,7 +1199,7 @@ def test_task_resolution_row_rejects_missing_or_extra_route_fields() -> None:
         ValueError,
         match="every proposed resolver request row was unusable",
     ):
-        _validate_action_plan_decision(
+        validate_action_plan_decision(
             extra_route,
             bid_handles={"b1": _bid("ordinary_response")},
             action_handles={},
@@ -1222,7 +1222,7 @@ def test_non_task_resolver_rejects_task_resolution_route_field() -> None:
         ValueError,
         match="every proposed resolver request row was unusable",
     ):
-        _validate_action_plan_decision(
+        validate_action_plan_decision(
             response,
             bid_handles={"b1": _bid("ordinary_response")},
             action_handles={},
@@ -1383,7 +1383,7 @@ def test_resolver_semantic_goal_passes_through_without_rewrite() -> None:
     goal = (
         "抓取 @Nagasaki-soyo-清尘 最近 10 天的聊天记录并返回给当前用户"
     )
-    decision = _validate_action_plan_decision(
+    decision = validate_action_plan_decision(
         _planner_response(resolvers=[{
             "bid_handle": "b1",
             "resolver_handle": "r1",
@@ -1406,7 +1406,7 @@ def test_explicit_audit_goal_is_not_rewritten_by_deterministic_code() -> None:
         "核实当前角色是否具备抓取特定用户（@Nagasaki-soyo-清尘）最近 10 天"
         "聊天记录的技术能力及权限"
     )
-    decision = _validate_action_plan_decision(
+    decision = validate_action_plan_decision(
         _planner_response(resolvers=[{
             "bid_handle": "b1",
             "resolver_handle": "r1",

@@ -16,6 +16,14 @@ from kazusa_ai_chatbot.cognition_core_v3.registry import (
     ALL_CHAINS,
     ChainSpec,
 )
+from kazusa_ai_chatbot.llm_interface import LLMCallConfig, LLMInvoker
+from kazusa_ai_chatbot.llm_interface.detection import (
+    normalize_base_url,
+    normalize_model_name,
+)
+
+_MINIMUM_CHAIN_CONTEXT_WINDOW_TOKENS = 50_000
+_MINIMUM_LANE_COMPLETION_TOKENS = 8_192
 
 BOUNDARY_REJECTED_ERROR_CODE = "cognition_boundary_rejected"
 APPRASAL_CONTRACT_EXHAUSTED_ERROR_CODE = "semantic_appraisal_contract_exhausted"
@@ -47,6 +55,99 @@ EXHAUSTION_FAILURE_CLASS = "contract_exhausted"
 FAILURE_CLASSES: frozenset[str] = frozenset(
     {STRUCTURAL_FAILURE_CLASS, PROVIDER_FAILURE_CLASS, EXHAUSTION_FAILURE_CLASS}
 ) | TERMINAL_BOUNDARY_CLASSES
+
+
+@dataclass(frozen=True)
+class CognitionChainServicesV3:
+    """Injected primary and optional sidecar bindings for Cognition V3."""
+
+    llm: LLMInvoker
+    chain_lane: LLMCallConfig
+    sidecar_lane: LLMCallConfig | None
+    subconscious_enabled: bool = False
+
+    def __post_init__(self) -> None:
+        """Fail construction when a lane cannot satisfy the V3 contract."""
+
+        if self.llm is None:
+            raise TypeError("V3 services require an LLM invoker")
+        if not isinstance(self.subconscious_enabled, bool):
+            raise TypeError("subconscious_enabled must be a bool")
+
+        _validate_lane_config(
+            self.chain_lane,
+            lane_label="chain",
+            require_context_window=True,
+        )
+        if self.sidecar_lane is None:
+            if self.subconscious_enabled:
+                raise ValueError(
+                    "V3 subconscious execution requires a sidecar lane"
+                )
+            return
+
+        _validate_lane_config(
+            self.sidecar_lane,
+            lane_label="sidecar",
+            require_context_window=False,
+        )
+        chain_identity = (
+            normalize_base_url(self.chain_lane.base_url),
+            normalize_model_name(self.chain_lane.model),
+        )
+        sidecar_identity = (
+            normalize_base_url(self.sidecar_lane.base_url),
+            normalize_model_name(self.sidecar_lane.model),
+        )
+        if sidecar_identity == chain_identity:
+            raise ValueError(
+                "V3 chain and sidecar lanes must have distinct endpoint/model identities"
+            )
+
+
+def _validate_lane_config(
+    config: LLMCallConfig,
+    *,
+    lane_label: str,
+    require_context_window: bool,
+) -> None:
+    """Validate one complete non-thinking lane binding and its capacity."""
+
+    if not isinstance(config, LLMCallConfig):
+        raise TypeError(f"V3 {lane_label} lane must be an LLMCallConfig")
+    for field_name in ("route_name", "base_url", "api_key", "model"):
+        value = getattr(config, field_name)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(
+                f"V3 {lane_label} route {field_name} must be non-empty"
+            )
+    if config.thinking.enabled:
+        raise ValueError(f"V3 {lane_label} lane thinking must be disabled")
+
+    completion_cap = config.max_completion_tokens
+    if (
+        not isinstance(completion_cap, int)
+        or isinstance(completion_cap, bool)
+        or completion_cap < _MINIMUM_LANE_COMPLETION_TOKENS
+    ):
+        raise ValueError(
+            f"V3 {lane_label} lane completion cap must be at least "
+            f"{_MINIMUM_LANE_COMPLETION_TOKENS}"
+        )
+
+    if not require_context_window:
+        return
+
+    context_window = config.context_window_tokens
+    if (
+        not isinstance(context_window, int)
+        or isinstance(context_window, bool)
+        or context_window < _MINIMUM_CHAIN_CONTEXT_WINDOW_TOKENS
+    ):
+        raise ValueError(
+            "V3 chain context window must be at least "
+            f"{_MINIMUM_CHAIN_CONTEXT_WINDOW_TOKENS}"
+        )
 
 
 @dataclass(frozen=True)

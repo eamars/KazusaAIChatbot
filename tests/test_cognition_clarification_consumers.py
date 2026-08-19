@@ -26,7 +26,7 @@ def test_clarification_validation_does_not_classify_user_text() -> None:
     """Code validates handles while the model owns semantic interpretation."""
 
     source = inspect.getsource(
-        action_selection._validate_action_plan_decision
+        action_selection.validate_action_plan_decision
     )
 
     assert "bid_handle" in source

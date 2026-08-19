@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import fields
+from dataclasses import fields, replace
 
 from langchain_core.messages import AIMessage, HumanMessage
 
@@ -12,6 +12,9 @@ from kazusa_ai_chatbot.llm_interface import (
     LLMThinkingConfig,
 )
 from kazusa_ai_chatbot.llm_interface import session as session_module
+from kazusa_ai_chatbot.llm_interface.providers.openai_compatible import (
+    OpenAICompatibleProvider,
+)
 from kazusa_ai_chatbot.llm_interface.session import (
     build_diagnostic_fingerprint,
 )
@@ -51,6 +54,42 @@ def test_call_config_uses_explicit_completion_budget_and_redacts_key() -> None:
     assert "max_tokens" not in field_names
     assert _call_config().thinking == LLMThinkingConfig()
     assert "secret-api-key" not in repr(_call_config())
+
+
+def test_call_config_declares_context_window_without_transporting_it() -> None:
+    """The serving-window declaration remains caller-owned metadata."""
+
+    created_kwargs: list[dict[str, object]] = []
+
+    class _ChatModel:
+        """Capture provider construction without making a model request."""
+
+        def __init__(self, **kwargs: object) -> None:
+            created_kwargs.append(kwargs)
+
+        def invoke(self, messages: list[object]) -> AIMessage:
+            del messages
+            response = AIMessage(content="ok")
+            return response
+
+    def _factory(**kwargs: object) -> _ChatModel:
+        model = _ChatModel(**kwargs)
+        return model
+
+    config = replace(_call_config(), context_window_tokens=50_176)
+    field_names = [field.name for field in fields(LLMCallConfig)]
+    provider = OpenAICompatibleProvider(chat_model_factory=_factory)
+    backend = LLInterface().describe_backend(config=config)
+
+    provider.invoke(
+        [HumanMessage(content="inspect caller-owned context metadata")],
+        config=config,
+        backend=backend,
+    )
+
+    assert field_names[-1] == "context_window_tokens"
+    assert config.context_window_tokens == 50_176
+    assert "context_window_tokens" not in created_kwargs[0]
 
 
 def test_describe_backend_detects_gemma4_thinking_strategy() -> None:

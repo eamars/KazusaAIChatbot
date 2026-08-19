@@ -14,7 +14,7 @@ import pytest
 
 from kazusa_ai_chatbot.cognition_core_v2 import facade
 from kazusa_ai_chatbot.cognition_core_v2.action_selection import (
-    _validate_action_plan_decision,
+    validate_action_plan_decision,
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     validate_cognition_core_input,
@@ -33,7 +33,7 @@ from kazusa_ai_chatbot.cognition_core_v2.parallel_executor import (
     ParallelExecutionResult,
 )
 from kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal import (
-    _canonicalize_semantic_appraisal_item,
+    canonicalize_semantic_appraisal_item,
     validate_semantic_appraisal_result,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
@@ -706,7 +706,7 @@ def test_semantic_micro_appraisal_fields_not_exact_is_rejected() -> None:
     """The generation boundary accepts only the singular item contract."""
 
     _assert_value_error(
-        lambda: _canonicalize_semantic_appraisal_item({
+        lambda: canonicalize_semantic_appraisal_item({
             "question_id": "q:relationship_social",
             "proposition": None,
         }),
@@ -870,7 +870,7 @@ def test_pending_resolution_invalid_is_rejected() -> None:
         "resolver_goal_progress": None,
     }
     _assert_value_error(
-        lambda: _validate_action_plan_decision(
+        lambda: validate_action_plan_decision(
             parsed,
             bid_handles={},
             action_handles={},

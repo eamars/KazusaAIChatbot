@@ -108,6 +108,8 @@ HOWTO. One working-style configuration looks like this:
 | `WEB_SEARCH_LLM`           | `local-model`                            | `http://localhost:1234/v1` |
 | `COGNITION_LLM`            | `local-model`                            | `http://localhost:1234/v1` |
 | `COGNITION_LLM_CHARACTER_CARRYOVER` | `local-model`                     | `http://localhost:1234/v1` |
+| `COGNITION_V3_CHAIN_LLM`   | `local-model`                            | `http://localhost:1234/v1` |
+| `COGNITION_V3_SIDECAR_LLM` | `sidecar-model`                          | `http://localhost:1234/v1` |
 | `COGNITION_LLM_APPRAISAL_EVENT_AGENCY` | `local-model`                | `http://localhost:1234/v1` |
 | `COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL` | `local-model`          | `http://localhost:1234/v1` |
 | `COGNITION_LLM_APPRAISAL_MORAL_IDENTITY` | `local-model`              | `http://localhost:1234/v1` |
@@ -132,10 +134,14 @@ The table is an example, not a fixed requirement. Any route can point to any
 OpenAI-compatible endpoint that can satisfy that stage's latency and quality
 needs.
 
-`COGNITION_LLM` remains the generic cognition route for callers outside
-Cognition Core V2. Core V2 uses the thirteen independent stage routes above;
-each route owns a complete endpoint, credential, model, completion-budget, and
-thinking bundle with no route inheritance or fallback.
+`COGNITION_LLM` remains a required shared non-core cognition route under both
+engines. With `COGNITION_CORE_ENGINE=v2`, Core V2 requires the twelve
+independent `COGNITION_LLM_APPRAISAL_*`, goal, workspace, planning, and
+authorization bundles above. With `COGNITION_CORE_ENGINE=v3`, Cognition V3
+requires only `COGNITION_V3_CHAIN_LLM`, accepts one complete optional
+`COGNITION_V3_SIDECAR_LLM` bundle, and leaves the twelve V2 core bundles
+inactive. Each selected route owns a complete endpoint, credential, model,
+completion-budget, and thinking bundle.
 `COGNITION_LLM_CHARACTER_CARRYOVER` is the dedicated state-only background
 operational carry-over route and has a maximum completion budget of 8,192
 tokens.

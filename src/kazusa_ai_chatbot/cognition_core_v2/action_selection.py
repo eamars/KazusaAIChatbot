@@ -735,7 +735,7 @@ async def _invoke_action_planner(
                     llm_tracing.failure_capsule.append_json_repair_attempt
                 ),
             )
-            decision = _validate_action_plan_decision(
+            decision = validate_action_plan_decision(
                 parsed,
                 bid_handles=bid_handles,
                 action_handles=action_handles,
@@ -948,7 +948,7 @@ def _bounded_repair_output(response_text: str) -> str:
     return return_value
 
 
-def _validate_action_plan_decision(
+def validate_action_plan_decision(
     parsed: object,
     *,
     bid_handles: Mapping[str, ActionBidV2],

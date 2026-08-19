@@ -8,8 +8,7 @@ import sys
 
 import pytest
 
-
-REQUIRED_ROUTE_PREFIXES = (
+SHARED_REQUIRED_ROUTE_PREFIXES = (
     "RELEVANCE_AGENT_LLM",
     "VISION_DESCRIPTOR_LLM",
     "MSG_DECONTEXTUALIZER_LLM",
@@ -18,6 +17,14 @@ REQUIRED_ROUTE_PREFIXES = (
     "WEB_SEARCH_LLM",
     "COGNITION_LLM",
     "COGNITION_LLM_CHARACTER_CARRYOVER",
+    "DIALOG_GENERATOR_LLM",
+    "CONSOLIDATION_LLM",
+    "JSON_REPAIR_LLM",
+    "BACKGROUND_WORK_LLM",
+    "CODING_AGENT_PM_LLM",
+    "CODING_AGENT_PROGRAMMER_LLM",
+)
+COGNITION_CORE_V2_ROUTE_PREFIXES = (
     "COGNITION_LLM_APPRAISAL_EVENT_AGENCY",
     "COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL",
     "COGNITION_LLM_APPRAISAL_MORAL_IDENTITY",
@@ -30,17 +37,31 @@ REQUIRED_ROUTE_PREFIXES = (
     "COGNITION_LLM_ACTION_PLANNING",
     "COGNITION_LLM_ACTION_AUTHORIZATION",
     "COGNITION_LLM_RESOLVER_AUTHORIZATION",
-    "DIALOG_GENERATOR_LLM",
-    "CONSOLIDATION_LLM",
-    "JSON_REPAIR_LLM",
-    "BACKGROUND_WORK_LLM",
-    "CODING_AGENT_PM_LLM",
-    "CODING_AGENT_PROGRAMMER_LLM",
+)
+REQUIRED_ROUTE_PREFIXES = (
+    *SHARED_REQUIRED_ROUTE_PREFIXES,
+    *COGNITION_CORE_V2_ROUTE_PREFIXES,
 )
 REQUIRED_ROUTE_ENV_VARS = tuple(
     f"{route_prefix}_{suffix}"
     for route_prefix in REQUIRED_ROUTE_PREFIXES
     for suffix in ("BASE_URL", "API_KEY", "MODEL")
+)
+COGNITION_V3_ROUTE_ENV_VARS = (
+    "COGNITION_V3_CHAIN_LLM_BASE_URL",
+    "COGNITION_V3_CHAIN_LLM_API_KEY",
+    "COGNITION_V3_CHAIN_LLM_MODEL",
+    "COGNITION_V3_CHAIN_LLM_MAX_COMPLETION_TOKENS",
+    "COGNITION_V3_CHAIN_LLM_CONTEXT_WINDOW_TOKENS",
+    "COGNITION_V3_CHAIN_LLM_THINKING_ENABLED",
+    "COGNITION_V3_SIDECAR_LLM_BASE_URL",
+    "COGNITION_V3_SIDECAR_LLM_API_KEY",
+    "COGNITION_V3_SIDECAR_LLM_MODEL",
+    "COGNITION_V3_SIDECAR_LLM_MAX_COMPLETION_TOKENS",
+    "COGNITION_V3_SIDECAR_LLM_THINKING_ENABLED",
+    "COGNITION_V3_SUBCONSCIOUS_ENABLED",
+    "COGNITION_V3_APPRAISAL_GROUP_COUNT",
+    "COGNITION_V3_TURN_DEADLINE_SECONDS",
 )
 REMOVED_RESOLVER_ENABLE_FLAG = "COGNITION_" + "RESOLVER_ENABLED"
 REMOVED_BOUNDARY_ROUTE = "BOUNDARY_CORE_" + "LLM"
@@ -75,6 +96,43 @@ def _configured_subprocess_env_without_dotenv() -> dict[str, str]:
     env["EMBEDDING_API_KEY"] = "configured"
     env["EMBEDDING_MODEL"] = "configured"
     env["CHARACTER_GLOBAL_USER_ID"] = "character-global"
+    return env
+
+
+def _v3_configured_subprocess_env_without_dotenv(
+    *,
+    include_sidecar: bool = False,
+) -> dict[str, str]:
+    """Return complete shared and V3 settings without any V2 core bundle."""
+
+    env = _configured_subprocess_env_without_dotenv()
+    env["COGNITION_CORE_ENGINE"] = "v3"
+    for route_prefix in COGNITION_CORE_V2_ROUTE_PREFIXES:
+        for suffix in (
+            "BASE_URL",
+            "API_KEY",
+            "MODEL",
+            "MAX_COMPLETION_TOKENS",
+            "THINKING_ENABLED",
+        ):
+            env.pop(f"{route_prefix}_{suffix}", None)
+    for name in COGNITION_V3_ROUTE_ENV_VARS:
+        env.pop(name, None)
+
+    env.update({
+        "COGNITION_V3_CHAIN_LLM_BASE_URL": "http://chain.example/v1",
+        "COGNITION_V3_CHAIN_LLM_API_KEY": "chain-key",
+        "COGNITION_V3_CHAIN_LLM_MODEL": "chain-model",
+        "COGNITION_V3_CHAIN_LLM_CONTEXT_WINDOW_TOKENS": "50176",
+    })
+    if include_sidecar:
+        env.update({
+            "COGNITION_V3_SIDECAR_LLM_BASE_URL": (
+                "http://sidecar.example/v1"
+            ),
+            "COGNITION_V3_SIDECAR_LLM_API_KEY": "sidecar-key",
+            "COGNITION_V3_SIDECAR_LLM_MODEL": "sidecar-model",
+        })
     return env
 
 
@@ -1361,7 +1419,10 @@ class TestCalendarSchedulerConfig:
 
 def test_cognition_core_engine_accepts_only_v2_or_v3(tmp_path):
     for engine in ("v2", "v3"):
-        env = _configured_subprocess_env_without_dotenv()
+        if engine == "v3":
+            env = _v3_configured_subprocess_env_without_dotenv()
+        else:
+            env = _configured_subprocess_env_without_dotenv()
         env["COGNITION_CORE_ENGINE"] = engine
 
         result = subprocess.run(
@@ -1420,3 +1481,95 @@ def test_cognition_core_engine_default_matches_cutover_state(tmp_path):
     )
 
     assert result.returncode == 0, result.stderr
+
+
+def test_v3_service_import_succeeds_with_shared_routes_and_without_twelve_v2_stage_bundles(
+    tmp_path,
+) -> None:
+    """The real service graph imports at normal and extended V3 windows."""
+
+    for context_window_tokens in ("50176", "65000"):
+        env = _v3_configured_subprocess_env_without_dotenv()
+        env["COGNITION_V3_CHAIN_LLM_CONTEXT_WINDOW_TOKENS"] = (
+            context_window_tokens
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", "import kazusa_ai_chatbot.service"],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stderr
+
+
+def test_v2_service_import_succeeds_without_v3_routes(tmp_path) -> None:
+    """The real service graph imports from shared plus selected V2 routes."""
+
+    env = _configured_subprocess_env_without_dotenv()
+    env["COGNITION_CORE_ENGINE"] = "v2"
+    for name in COGNITION_V3_ROUTE_ENV_VARS:
+        env.pop(name, None)
+
+    result = subprocess.run(
+        [sys.executable, "-c", "import kazusa_ai_chatbot.service"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_v3_route_settings_reject_invalid_selected_bundle(tmp_path) -> None:
+    """Selected V3 lane and runtime settings fail closed at import."""
+
+    invalid_cases = (
+        (
+            {"COGNITION_V3_CHAIN_LLM_CONTEXT_WINDOW_TOKENS": "49999"},
+            "COGNITION_V3_CHAIN_LLM_CONTEXT_WINDOW_TOKENS must be >= 50000",
+        ),
+        (
+            {"COGNITION_V3_CHAIN_LLM_MAX_COMPLETION_TOKENS": "8191"},
+            "COGNITION_V3_CHAIN_LLM_MAX_COMPLETION_TOKENS must be >= 8192",
+        ),
+        (
+            {"COGNITION_V3_CHAIN_LLM_THINKING_ENABLED": "true"},
+            "COGNITION_V3_CHAIN_LLM_THINKING_ENABLED must be false",
+        ),
+        (
+            {"COGNITION_V3_SIDECAR_LLM_BASE_URL": "http://sidecar.example/v1"},
+            "COGNITION_V3_SIDECAR_LLM_API_KEY must be non-empty",
+        ),
+        (
+            {"COGNITION_V3_SUBCONSCIOUS_ENABLED": "true"},
+            "COGNITION_V3_SUBCONSCIOUS_ENABLED requires a V3 sidecar route",
+        ),
+        (
+            {"COGNITION_V3_APPRAISAL_GROUP_COUNT": "4"},
+            "COGNITION_V3_APPRAISAL_GROUP_COUNT must be one of: 1, 2, 3, 6",
+        ),
+        (
+            {"COGNITION_V3_TURN_DEADLINE_SECONDS": "29"},
+            "COGNITION_V3_TURN_DEADLINE_SECONDS must be between 30 and 600",
+        ),
+    )
+    for mutations, expected_error in invalid_cases:
+        env = _v3_configured_subprocess_env_without_dotenv()
+        env.update(mutations)
+
+        result = subprocess.run(
+            [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode != 0
+        assert expected_error in result.stderr
