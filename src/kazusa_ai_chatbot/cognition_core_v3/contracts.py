@@ -19,6 +19,14 @@ from kazusa_ai_chatbot.cognition_core_v3.registry import (
 
 BOUNDARY_REJECTED_ERROR_CODE = "cognition_boundary_rejected"
 APPRASAL_CONTRACT_EXHAUSTED_ERROR_CODE = "semantic_appraisal_contract_exhausted"
+GOAL_BID_STRUCTURE_EXHAUSTED_ERROR_CODE = "goal_bid_structure_exhausted"
+GOAL_BID_PROVIDER_EXHAUSTED_ERROR_CODE = "goal_bid_provider_exhausted"
+
+EXHAUSTION_ERROR_CODES: frozenset[str] = frozenset({
+    APPRASAL_CONTRACT_EXHAUSTED_ERROR_CODE,
+    GOAL_BID_STRUCTURE_EXHAUSTED_ERROR_CODE,
+    GOAL_BID_PROVIDER_EXHAUSTED_ERROR_CODE,
+})
 
 CANDIDATE_ORIGIN_MISSING = "candidate_origin_missing"
 PRODUCER_HANDLE_DOMAIN_INVALID = "producer_handle_domain_invalid"
@@ -209,9 +217,11 @@ def validate_stage_result(result: StageResult) -> StageResult:
         _validate_boundary_failure(failure)
     elif (
         failure.failure_class == EXHAUSTION_FAILURE_CLASS
-        and failure.error_code != APPRASAL_CONTRACT_EXHAUSTED_ERROR_CODE
+        and failure.error_code not in EXHAUSTION_ERROR_CODES
     ):
-        raise ValueError("Exhaustion reuses the semantic-appraisal contract-exhausted error code")
+        raise ValueError(
+            "Exhaustion reuses an owner-specific exhaustion error code"
+        )
 
     return result
 

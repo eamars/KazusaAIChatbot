@@ -135,19 +135,22 @@ def test_boundary_class_failures_are_terminal_without_repair_calls():
             repair_attempted=True,
         )
     )
-    with pytest.raises(ValueError, match="contract-exhausted"):
+    with pytest.raises(ValueError, match="owner-specific exhaustion"):
         contracts.validate_stage_result(exhausted_wrong_code)
 
-    exhausted_replacement_issued = _rejected_result(
-        contracts.StageFailure(
-            chain_name="epistemic_meaning",
-            stage_name="existential_drive",
-            failure_class=contracts.EXHAUSTION_FAILURE_CLASS,
-            error_code=contracts.APPRASAL_CONTRACT_EXHAUSTED_ERROR_CODE,
-            repair_attempted=True,
+    for exhausted_code in sorted(contracts.EXHAUSTION_ERROR_CODES):
+        valid_exhaustion = _rejected_result(
+            contracts.StageFailure(
+                chain_name="epistemic_meaning",
+                stage_name="existential_drive",
+                failure_class=contracts.EXHAUSTION_FAILURE_CLASS,
+                error_code=exhausted_code,
+                repair_attempted=True,
+            )
         )
-    )
-    assert contracts.validate_stage_result(exhausted_replacement_issued).failure is not None
+        assert (
+            contracts.validate_stage_result(valid_exhaustion).failure is not None
+        )
 
 
 def test_cache_domain_identity_is_deterministic_and_credential_free():
