@@ -22,7 +22,9 @@ def _complete_bid(
         "concrete_detail": f"{branch_id} detail",
         "reason": f"{branch_id} reason",
         "private_monologue": f"{branch_id} monologue",
-        "target_roles": ["self"],
+        "target_roles": [
+            {"role": "actor", "entity_kind": "character", "entity_id": "character:global"},
+        ],
         "evidence_handles": ["ev_1"],
         "expected_consequences": [f"{branch_id} consequence"],
         "confidence": confidence,
@@ -244,3 +246,21 @@ def test_workspace_admits_only_complete_current_matter_bids():
 
     with pytest.raises(ValueError, match="at least one bid"):
         ws.fallback_partition_envelope([])
+
+
+def test_target_roles_require_structured_role_refs():
+    """Admission accepts materialized RoleRefV2 entries and rejects legacy handles.
+
+    The goal-bid materializer emits the V2 ``RoleRefV2`` shape, so a complete
+    bid carrying structured refs must be admitted unchanged while the retired
+    string-handle shape fails closed with an entry-level error.
+    """
+    admitted = ws.validate_complete_bids([_complete_bid("bond_protection")])
+    assert admitted[0]["target_roles"] == [
+        {"role": "actor", "entity_kind": "character", "entity_id": "character:global"},
+    ]
+
+    string_handle = _complete_bid("loss_recovery")
+    string_handle["target_roles"] = ["self"]
+    with pytest.raises(ValueError, match="has an invalid target_role entry at 0"):
+        ws.validate_complete_bids([string_handle])

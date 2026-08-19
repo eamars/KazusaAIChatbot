@@ -26,6 +26,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from openai import OpenAIError
 
 from kazusa_ai_chatbot.cognition_core_v2.branch_activation import branch_order_key
+from kazusa_ai_chatbot.cognition_core_v2.contracts import ROLE_ENTITY_KINDS, ROLE_VALUES
 from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
     V2_MODEL_TOTAL_ATTEMPTS,
 )
@@ -106,6 +107,34 @@ def _bid_label(bid: Mapping[str, Any]) -> str:
     return f"workspace bid {branch_id!r}"
 
 
+def _validate_bid_target_roles(value: object, label: str) -> None:
+    """Validate the structured role references carried by one complete bid.
+
+    Each entry mirrors the V2 ``RoleRefV2`` shape produced by goal-bid
+    materialization: an exact key set with closed enum values and a non-empty
+    entity id, so admitted bids pass the V2 action-bid contract unchanged.
+    """
+    if not isinstance(value, list):
+        raise ValueError(f"{label} has invalid target_roles")
+    for index, role in enumerate(value):
+        if (
+            not isinstance(role, Mapping)
+            or set(role) != {"role", "entity_kind", "entity_id"}
+        ):
+            raise ValueError(f"{label} has an invalid target_role entry at {index}")
+        if role["role"] not in ROLE_VALUES:
+            raise ValueError(f"{label} has an invalid target_role value at {index}")
+        if role["entity_kind"] not in ROLE_ENTITY_KINDS:
+            raise ValueError(
+                f"{label} has an invalid target_role entity kind at {index}"
+            )
+        if (
+            not isinstance(role["entity_id"], str)
+            or not role["entity_id"].strip()
+        ):
+            raise ValueError(f"{label} has an empty target_role entity id at {index}")
+
+
 def validate_complete_bids(
     bids: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -115,6 +144,9 @@ def validate_complete_bids(
     admission before any partition work. Ordinary bids must carry their
     relational-willingness decision; persistent-goal bids must carry a typed
     ``goal_ref`` whose matter context the caller provides at partition time.
+    Target-role entries mirror the V2 ``RoleRefV2`` shape carried by goal-bid
+    materialization, so admitted bids stay valid under the V2 action-bid
+    contract without translation.
 
     Args:
         bids: Candidate branch-owned bid mappings for this turn.
@@ -159,14 +191,16 @@ def validate_complete_bids(
             if not isinstance(bid[field_name], str) or not bid[field_name].strip():
                 raise ValueError(f"{label} has an invalid {field_name}")
 
-        handle_fields = ("target_roles", "evidence_handles", "expected_consequences")
-        for field_name in handle_fields:
+        string_handle_fields = ("evidence_handles", "expected_consequences")
+        for field_name in string_handle_fields:
             values = bid[field_name]
             if (
                 not isinstance(values, list)
                 or any(not isinstance(value, str) or not value.strip() for value in values)
             ):
                 raise ValueError(f"{label} has invalid {field_name}")
+
+        _validate_bid_target_roles(bid["target_roles"], label)
 
         if not isinstance(bid["confidence"], str) or not bid["confidence"].strip():
             raise ValueError(f"{label} has an invalid confidence")

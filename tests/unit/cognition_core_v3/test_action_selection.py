@@ -39,7 +39,9 @@ def _primary_bid(
         "branch_id": "ordinary_response",
         "intention": "respond to the request",
         "goal_ref": {"scope": "character", "kind": "goal", "entity_id": "g1"},
-        "target_roles": ["self"],
+        "target_roles": [
+            {"role": "actor", "entity_kind": "character", "entity_id": "character:global"},
+        ],
         "reason": "the turn is relationship-sensitive",
     }
     if stance is not None:
