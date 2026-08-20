@@ -11,7 +11,10 @@ from kazusa_ai_chatbot.cognition_core_selector import (
     _ENGINE_MODULE_NAMES,
     resolve_engine_module,
 )
-from tests.test_config import _configured_subprocess_env_without_dotenv
+from tests.test_config import (
+    _configured_subprocess_env_without_dotenv,
+    _v3_configured_subprocess_env_without_dotenv,
+)
 
 
 def test_selector_resolves_exact_v2_and_v3_modules():
@@ -70,8 +73,7 @@ def test_v3_failure_never_invokes_v2(tmp_path):
         'print("OK")',
     ]
 
-    env = _configured_subprocess_env_without_dotenv()
-    env["COGNITION_CORE_ENGINE"] = "v3"
+    env = _v3_configured_subprocess_env_without_dotenv()
 
     result = subprocess.run(
         [sys.executable, "-c", "\n".join(script_lines)],

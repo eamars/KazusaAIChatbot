@@ -11,14 +11,14 @@ import httpx
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from openai import OpenAIError
 
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
-    ActionBidV2,
-    CollapsedIntentionV2,
-    CognitionCoreServicesV2,
-    RelationalWillingnessV2,
-)
 from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
     branch_order_key,
+)
+from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    ActionBidV2,
+    CognitionCoreServicesV2,
+    CollapsedIntentionV2,
+    RelationalWillingnessV2,
 )
 from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
     V2_MODEL_TOTAL_ATTEMPTS,
@@ -29,7 +29,6 @@ from kazusa_ai_chatbot.cognition_core_v2.prompt_budget import (
 )
 from kazusa_ai_chatbot.llm_tracing import failure_capsule
 from kazusa_ai_chatbot.utils import parse_llm_json_output
-
 
 WORKSPACE_COLLAPSE_ATTEMPT_LIMIT = V2_MODEL_TOTAL_ATTEMPTS
 WORKSPACE_COLLAPSE_PROMPT_CAP = 24000

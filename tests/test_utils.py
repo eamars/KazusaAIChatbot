@@ -4,13 +4,13 @@ import httpx
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from kazusa_ai_chatbot.config import JSON_REPAIR_LLM_BASE_URL
 from kazusa_ai_chatbot import utils as utils_module
+from kazusa_ai_chatbot.config import JSON_REPAIR_LLM_BASE_URL
+from kazusa_ai_chatbot.llm_interface import LLMCallConfig
 from kazusa_ai_chatbot.utils import (
     parse_llm_json_output,
 )
 from tests.llm_trace import write_llm_trace
-
 
 _TOOL_CALLS_EXPECTED_OUTPUT_FORMAT = """{
   "tool_calls": [
@@ -373,8 +373,16 @@ Wait, I need to provide the full valid JSON.
 def test_parse_llm_json_output_returns_empty_dict_for_repaired_list(monkeypatch):
     """Non-object repair results should fail closed to an empty object."""
 
-    def _list_repair(_broken_string: str, *, expected_output_format=None):
+    def _list_repair(
+        _broken_string: str,
+        *,
+        expected_output_format=None,
+        repair_llm=None,
+        repair_config=None,
+    ):
         del expected_output_format
+        del repair_llm
+        del repair_config
         return []
 
     monkeypatch.setattr(utils_module, "parse_json_with_llm", _list_repair)
@@ -413,6 +421,69 @@ def test_parse_llm_json_output_does_not_use_expected_format_on_success(monkeypat
     )
 
     assert result == {"answer": True}
+
+
+def test_parse_llm_json_output_uses_injected_repair_pair_only_after_deterministic_failure(
+    monkeypatch,
+):
+    """Injected sidecar repair is used only for residual non-object failures."""
+
+    captured = {}
+
+    def _repair_pair(
+        broken_string: str,
+        *,
+        expected_output_format=None,
+        repair_trace_hook=None,
+        repair_llm=None,
+        repair_config=None,
+    ):
+        del expected_output_format, repair_trace_hook
+        captured["broken_string"] = broken_string
+        captured["repair_llm"] = repair_llm
+        captured["repair_config"] = repair_config
+        return {"repaired": True}
+
+    monkeypatch.setattr(utils_module, "parse_json_with_llm", _repair_pair)
+
+    repair_llm = type(
+        "_RepairLLM",
+        (),
+        {
+            "invoke": lambda self, messages, *, config: (
+                type("_Response", (), {"content": "{\"repaired\": true}"})()
+            ),
+        },
+    )()
+    repair_config = LLMCallConfig(
+        stage_name="test_repair",
+        route_name="SIDECAR_REPAIR",
+        base_url="http://sidecar.test/v1",
+        api_key="test-key",
+        model="sidecar-model",
+        temperature=0.0,
+        top_p=1.0,
+        top_k=None,
+        max_completion_tokens=1024,
+        presence_penalty=None,
+    )
+
+    valid_result = parse_llm_json_output(
+        "{\"answer\": true}",
+        repair_llm=repair_llm,
+        repair_config=repair_config,
+    )
+    assert valid_result == {"answer": True}
+    assert captured == {}
+
+    malformed_result = parse_llm_json_output(
+        "not-json",
+        repair_llm=repair_llm,
+        repair_config=repair_config,
+    )
+    assert malformed_result == {"repaired": True}
+    assert captured["repair_llm"] is repair_llm
+    assert captured["repair_config"] is repair_config
 
 
 def test_parse_llm_json_output_deterministic_only_never_calls_repair_llm(

@@ -8,7 +8,9 @@
   on 2026-08-19. The later owner-directed execution-governance amendment and
   total-context budget clarification are parent-reviewed. The later owner-
   directed execution-integrity, semantic-failure, diagnostic-order, and data-
-  provenance amendment is also parent-reviewed. Execution is parent-only.
+  provenance amendment is also parent-reviewed. The 2026-08-20 owner
+  execution amendment permits delegation and fixes one reusable subagent as
+  the sole production-code implementation executor.
   This document is a closed approved implementation contract. The owner
   authorized implementation on 2026-08-19, the exact closure goal is active,
   Gate 0 passed on 2026-08-19T12:18:06Z, Gate 1 passed on
@@ -16,11 +18,14 @@
 - **Plan class:** high-risk cognition architecture reconciliation, LLM prompt
   and orchestration replacement, persistence addition, and evidence-gated
   engine cutover.
-- **Execution constraint:** the sole root parent owns the complete implementation
-  flight, creates and retains the plan-closure goal, makes in-scope decisions
-  from the fixed authority order without mid-flight questions, and performs
-  the mandatory recovery re-read after every compaction. Every execution action
-  and review checkpoint remains parent-owned.
+- **Execution constraint:** the root parent owns scope, the plan-closure goal,
+  executor handoffs, checkpoints, evidence, gate decisions, review, cutover,
+  and lifecycle closure. Exactly one reusable subagent is the sole executor
+  permitted to modify production code during the remaining implementation
+  flight. The parent may perform read-only inspection and may edit plans,
+  evidence, tests, governed artifacts, and documentation; production-code
+  remediation returns to the same implementation subagent whenever practical
+  to preserve context and cache affinity.
 - **Authored:** 2026-08-19 from repository HEAD `047bed95` on branch
   `feature/cognition_core_v3_cache_affine`.
 - **Governing architecture:**
@@ -167,8 +172,9 @@ fallback mappers, dual V3 schemas, or adapter translations are introduced.
 
 ## Mandatory Skills
 
-The parent reads and applies these skills directly before their matching work
-and re-applies triggered skills after compaction recovery:
+The responsible executor reads and applies these skills directly before its
+matching work and re-applies triggered skills after compaction recovery or a
+handoff:
 
 1. `development-plan` for eligibility, checkpoints, evidence, parent audit,
    sign-off, and plan status changes.
@@ -192,12 +198,16 @@ and re-applies triggered skills after compaction recovery:
 
 ## Mandatory Rules
 
-1. **Fixed parent-only execution constraint:** the active root parent performs
-   every read, decision, edit, command, test, live probe, artifact review,
-   scoring pass, remediation, code audit, cutover check, and lifecycle update
-   directly. The parent retains every responsibility rather than assigning an
-   agent or subagent. The parent keeps one coherent workspace, goal, context,
-   and evidence record from Gate 0 through archive closure.
+1. **Fixed single production-implementation subagent constraint:** the root
+   parent maintains one coherent workspace, goal, scope, and evidence record
+   from the current checkpoint through archive closure. Exactly one reusable
+   subagent owns all remaining production-code edits. The parent supplies
+   bounded handoffs with explicit owned files, acceptance checks, applicable
+   skills, baseline state, and next checkpoint, reviews every returned diff,
+   and reuses that subagent for remediation while it remains available. The
+   parent may directly change plans, execution evidence, tests, fixtures,
+   governed artifacts, and documentation. Any production-code correction is
+   handed back to the same implementation subagent.
 2. **Goal contract:** immediately after owner approval and explicit production
    authorization, the parent checks the thread goal state and creates the goal
    `Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all
@@ -210,9 +220,8 @@ and re-applies triggered skills after compaction recovery:
    disposition. During that interval the parent makes every in-scope decision
    directly and proceeds without requesting user input. Decision precedence is
    current system/developer/`AGENTS.md` safety and authorization rules; the
-   owner's fixed parent-only, goal, question-free, and compaction rules here
-   (which expressly replace generic executor-resolution, review-separation,
-   handoff, and mid-flight clarification guidance); the rest of this approved
+   owner's fixed single-production-subagent, goal, question-free, and
+   compaction rules here; the rest of this approved
    plan; the governing architecture; canonical V2 contracts; current
    source/tests/ICDs; then the smallest deterministic implementation that
    preserves those authorities.
@@ -231,7 +240,7 @@ and re-applies triggered skills after compaction recovery:
    read the current goal; run `git status --short`; re-read Summary, Scope And
    Change Direction, Mandatory Skills, Mandatory Rules, Change Surface, Agent
    Autonomy Boundaries, the current Execution Gate, Acceptance Criteria,
-   Progress Checklist, Execution Evidence, and Parent Execution Continuity;
+   Progress Checklist, Execution Evidence, and Execution Continuity;
    re-read the Confirmed Decisions, Contracts And Data Shapes, Runtime Or
    Resource Constraints, Test Impact rows, governing-architecture sections,
    subsystem ICDs, source, and tests relevant to the active work item; and
@@ -820,14 +829,19 @@ class CognitionChainServicesV3:
     chain_lane: LLMCallConfig
     sidecar_lane: LLMCallConfig | None
     subconscious_enabled: bool = False
+    appraisal_group_count: Literal[1, 2, 3, 6] = 2
+    turn_deadline_seconds: int = 240
 ```
 
 Construction validates exact dataclass fields, a non-empty chain route, chain
 thinking disabled, `context_window_tokens >= 50000`, each step completion cap,
 normal total-ceiling admission, conditional extended-tier availability only
 when `context_window_tokens >= 65000`, sidecar completeness, sidecar thinking
-disabled, sidecar/chain identity inequality, and required lane caps. API keys
-remain excluded from repr, diagnostics, persistence, and cache identity.
+disabled, sidecar/chain identity inequality, required lane caps, the closed
+appraisal-group domain, and the `30..600` turn-deadline range. The selected
+connector injects both runtime values from `CognitionV3RouteSettingsV1`; the
+facade never rereads route environment. API keys remain excluded from repr,
+diagnostics, persistence, and cache identity.
 
 Configuration is engine-conditional and exact:
 
@@ -1461,23 +1475,26 @@ the fixed formula remains authoritative for the parent.
 
 ## Execution Roles
 
-### Parent execution owner — plan-scoped fixed constraint
+### Root execution owner
 
 - **Responsibility:** close the complete plan. The parent owns readiness
-  probing, baseline sealing, implementation, fixtures/tests, persistence and
-  console work, live-model evidence, scoring, remediation, final code audit,
+  probing, baseline sealing, scope and handoff control, fixtures/tests,
+  live-model evidence, scoring, final code audit,
   evaluation-integrity auditing, semantic root-cause resets, production-data
   provenance, inherited-residual disposition, cutover, observation,
   documentation, plan status, and archive closure.
-- **Owned surface:** every Create/Modify path, governed artifact, protected test
-  artifact, read-only readiness boundary, named V3 runtime-environment bundle,
-  and lifecycle record named by this plan. Existing credentials remain in
+- **Owned surface:** plans, lifecycle records, governed artifacts, protected
+  test artifacts, read-only readiness boundaries, named V3 runtime-environment
+  bundles, verification, and review. Production source paths are read-only to
+  this role and are assigned to the production implementation role below.
+  Existing credentials remain in
   protected configuration and may be referenced under new V3 variable names;
   evidence records keys and sanitized fingerprints only. Keep paths remain
   read-only except when the parent first records an architecture-required plan
   amendment and exact impact row under Mandatory Rule 4.
 - **Authority:** after owner approval and explicit production authorization,
-  edit the complete Change Surface, run all deterministic/live/browser checks,
+  assign the complete Change Surface, directly edit non-production portions of
+  it, run all deterministic/live/browser checks,
   perform sanitized read-only service/DB/LLM probes, apply the specified
   diagnostic schema/index additions, load or reload only the sealed candidate
   model identities to the plan-required context and simultaneous residency,
@@ -1492,12 +1509,11 @@ the fixed formula remains authoritative for the parent.
   orchestration, V2/V3 cognition and resolver contracts, Mongo/index safety,
   API/telemetry redaction, frontend/browser QA, protected live evidence,
   deterministic statistics, deployment, rollback, and lifecycle management.
-- **Independence requirement:** `none`, as an owner-supplied plan-scoped fixed
-  execution constraint. This controlling constraint assigns implementation
-  review, blinded quality scoring, calculation verification, and remediation
-  re-checks to distinct sealed parent passes. The earlier independent plan
-  review remains historical pre-execution evidence and is represented only as
-  such.
+- **Independence requirement:** the parent does not author production-code
+  changes and reviews the production subagent's diff and evidence. Blinded
+  quality scoring and calculation verification remain distinct sealed parent
+  passes. The earlier independent plan review remains historical pre-execution
+  evidence and is represented only as such.
 - **Acceptance output:** sealed baseline and environment fingerprint; complete
   scoped source/test/docs diff; all exact mapped nodes collected and passing;
   live quality/performance/overflow artifacts and sealed parent score sheet;
@@ -1512,11 +1528,43 @@ the fixed formula remains authoritative for the parent.
   The parent role exits only when Gates 0–8 and every Acceptance Criterion pass
   and the goal is marked complete after archive closure.
 
-The parent executes these logical checkpoints sequentially: baseline/evidence,
-shared substrate, cold chain, sidecar/recurrence, observability/console,
-deterministic impact verification, blinded live evidence, final audit, cutover,
-and observation. They remain work partitions inside one parent-owned goal and
-one parent execution role.
+### Production implementation owner — plan-scoped fixed constraint
+
+- **Responsibility:** implement and remediate the remaining production-code
+  surface in bounded checkpoints, together with the directly coupled tests
+  needed to prove each changed production boundary.
+- **Owned surface:** only the explicit production and test files named in each
+  parent handoff, within this plan's Create/Modify surface. Ownership returns
+  to the parent at every checkpoint.
+- **Authority:** modify assigned production and coupled test files, run the
+  specified deterministic checks, and report exact diffs, results, deviations,
+  and remaining risks. The role cannot change architecture, plan thresholds,
+  gate meanings, cutover policy, credentials, production data, or lifecycle
+  state.
+- **Applicable skills:** every Mandatory Skill triggered by the assigned file
+  set or verification activity.
+- **Capability floor:** senior Python/async and local-LLM pipeline reasoning,
+  exact contract preservation, repository-aware testing, and safe operation in
+  a dirty shared worktree.
+- **Independence requirement:** one reusable subagent performs all production
+  code changes. It preserves concurrent work and never reverts edits outside
+  its assigned slice. The root parent remains the accepting reviewer.
+- **Resolved executor constraint:** for production-code handoffs after the
+  2026-08-20 owner amendment below, use one reusable `gpt-5.6-luna` subagent
+  with maximum reasoning at normal speed. A different model requires a later
+  owner amendment.
+- **Acceptance output:** a scoped production/test diff, exact mapped test
+  evidence, style/static results, and a concise handback naming unresolved
+  issues and the next safe checkpoint.
+- **Gate:** entry requires a parent handoff containing the current baseline,
+  exact owned file set, applicable skills and contracts, completed evidence,
+  and acceptance checks. Exit requires parent inspection and acceptance of the
+  returned diff and evidence.
+
+The root parent advances the logical checkpoints sequentially and reuses the
+same production implementation subagent across checkpoints whenever it remains
+available. Review, live evidence, cutover, observation, and lifecycle closure
+remain parent-owned.
 
 ## Test Impact And Traceability
 
@@ -1583,6 +1631,7 @@ path, wildcard path, or nonzero collection result fails the gate.
 | `src/control_console/contracts.py` | console contract / strict bounded paired V3 run | `tests/test_control_console_contracts.py::test_chain_run_projection_is_strict_bounded_and_optional` | deterministic unit | permissive/raw service payload |
 | `src/control_console/kazusa_client.py` | console client / paired optional projection | `tests/test_control_console_kazusa_client.py::test_kazusa_client_projects_correlated_live_and_self_chain_runs` | deterministic unit | dropped or conflated correlation fields |
 | `src/control_console/brain_model_routes.py` | operator routes / both core families editable, selected active, generic cognition shared | `tests/test_control_console_web_surface.py::test_model_routes_mark_only_selected_core_family_active_and_generic_cognition_shared` | patched E2E | inactive core routes reported required or shared route hidden |
+| `src/control_console/service_config.py` | descriptor defaults / unconfigured inactive core routes remain visible without becoming required or fabricating model values | `tests/test_control_console_service_config.py::test_brain_config_allows_unconfigured_inactive_core_routes` | deterministic unit | inactive V3 or V2 model variables causing authenticated config reads and bootstrap to return 422 |
 | `src/control_console/static/index.html` | console view / paired chain panels | `tests/test_control_console_web_surface.py::test_cognition_chain_panels_render_correlated_sanitized_runs` | patched E2E | missing live/self panel ownership |
 | `src/control_console/static/console.js` | console renderer / absent-safe strict rendering | `tests/test_control_console_web_surface.py::test_cognition_chain_panels_render_correlated_sanitized_runs` | patched E2E | fallback to stale/global run or unsafe HTML |
 | `src/control_console/static/console.css` | console layout / responsive bounded panel | `tests/control_console_e2e/test_cognition_graph_e2e.py::test_v3_chain_panels_are_responsive_and_correlated` | browser E2E | unreadable or overlapping operator evidence |
@@ -1591,20 +1640,24 @@ path, wildcard path, or nonzero collection result fails the gate.
 
 ### Governed artifact impact matrix
 
-| Exact repository-relative governed path | Owner / contract | Exact static pytest node | Regression prevented |
+Documentation artifacts use a recorded parent ICD/source audit. Per the
+2026-08-20 user amendment, documentation prose is not enforced through a unit
+test. Executable governed artifacts retain exact pytest ownership.
+
+| Exact repository-relative governed path | Owner / contract | Acceptance evidence | Regression prevented |
 |---|---|---|---|
-| `src/kazusa_ai_chatbot/cognition_core_v3/README.md` | V3 ICD / serial hybrid chain | `tests/test_cognition_core_v3_documentation.py::test_documentation_matches_hybrid_chain_contract` | stale parallel/checkpoint documentation |
-| `src/kazusa_ai_chatbot/cognition_core_v2/README.md` | shared-substrate ICD / public helper names | `tests/test_cognition_core_v3_documentation.py::test_documentation_matches_hybrid_chain_contract` | undocumented canonical ownership |
-| `src/kazusa_ai_chatbot/llm_interface/README.md` | LLM ICD / context declaration and non-streaming timing limit | `tests/test_cognition_core_v3_documentation.py::test_documentation_matches_hybrid_chain_contract` | unsupported TTFT/prefill claim |
-| `src/kazusa_ai_chatbot/nodes/README.md` | connector ICD / engine-conditional services | `tests/test_cognition_core_v3_documentation.py::test_documentation_matches_hybrid_chain_contract` | eager inactive-route contract |
-| `src/kazusa_ai_chatbot/cognition_resolver/README.md` | resolver ICD / V3 recurrence and engine-neutral guardrail | `tests/test_cognition_core_v3_documentation.py::test_documentation_matches_hybrid_chain_contract` | V2-only service/attempt description |
-| `src/kazusa_ai_chatbot/db/README.md` | DB ICD / chain-run IDs, correlation, retention | `tests/test_cognition_core_v3_documentation.py::test_documentation_matches_hybrid_chain_contract` | global-latest read guidance |
-| `src/kazusa_ai_chatbot/llm_tracing/README.md` | trace ICD / protected chain capture | `tests/test_cognition_core_v3_documentation.py::test_documentation_matches_hybrid_chain_contract` | raw prompt in ordinary telemetry |
-| `src/kazusa_ai_chatbot/event_logging/README.md` | event ICD / bounded cognition-chain family | `tests/test_cognition_core_v3_documentation.py::test_documentation_matches_hybrid_chain_contract` | unregistered/unbounded events |
-| `src/kazusa_ai_chatbot/brain_service/README.md` | service ICD / paired exact-correlated projections | `tests/test_cognition_core_v3_documentation.py::test_documentation_matches_hybrid_chain_contract` | ambiguous response correlation |
-| `src/control_console/README.md` | console ICD / paired sanitized panels | `tests/test_cognition_core_v3_documentation.py::test_documentation_matches_hybrid_chain_contract` | console global fallback |
-| `README.md` | operator entry / selected-engine startup and cutover | `tests/test_cognition_core_v3_documentation.py::test_documentation_matches_hybrid_chain_contract` | wrong deployment requirements |
-| `docs/HOWTO.md` | operator procedure / V3 variables, evidence, rollback | `tests/test_cognition_core_v3_documentation.py::test_documentation_matches_hybrid_chain_contract` | non-reproducible runbook |
+| `src/kazusa_ai_chatbot/cognition_core_v3/README.md` | V3 ICD / serial hybrid chain | parent Gate 5 ICD/source audit | stale parallel/checkpoint documentation |
+| `src/kazusa_ai_chatbot/cognition_core_v2/README.md` | shared-substrate ICD / public helper names | parent Gate 5 ICD/source audit | undocumented canonical ownership |
+| `src/kazusa_ai_chatbot/llm_interface/README.md` | LLM ICD / context declaration and non-streaming timing limit | parent Gate 5 ICD/source audit | unsupported TTFT/prefill claim |
+| `src/kazusa_ai_chatbot/nodes/README.md` | connector ICD / engine-conditional services | parent Gate 5 ICD/source audit | eager inactive-route contract |
+| `src/kazusa_ai_chatbot/cognition_resolver/README.md` | resolver ICD / V3 recurrence and engine-neutral guardrail | parent Gate 5 ICD/source audit | V2-only service/attempt description |
+| `src/kazusa_ai_chatbot/db/README.md` | DB ICD / chain-run IDs, correlation, retention | parent Gate 5 ICD/source audit | global-latest read guidance |
+| `src/kazusa_ai_chatbot/llm_tracing/README.md` | trace ICD / protected chain capture | parent Gate 5 ICD/source audit | raw prompt in ordinary telemetry |
+| `src/kazusa_ai_chatbot/event_logging/README.md` | event ICD / bounded cognition-chain family | parent Gate 5 ICD/source audit | unregistered/unbounded events |
+| `src/kazusa_ai_chatbot/brain_service/README.md` | service ICD / paired exact-correlated projections | parent Gate 5 ICD/source audit | ambiguous response correlation |
+| `src/control_console/README.md` | console ICD / paired sanitized panels | parent Gate 5 ICD/source audit | console global fallback |
+| `README.md` | operator entry / selected-engine startup and cutover | parent Gate 5 ICD/source audit | wrong deployment requirements |
+| `docs/HOWTO.md` | operator procedure / V3 variables, evidence, rollback | parent Gate 5 ICD/source audit | non-reproducible runbook |
 | `tests/ownership/source_test_impact_manifest.json` | impact owner / exact changed-path mapping | `tests/test_cognition_core_v3_manifest_contract.py::test_source_impact_manifest_has_exact_owned_paths_and_collectable_nodes` | wildcard/unowned production changes |
 | `tests/fixtures/cognition_core_v3_architecture_manifest.json` | baseline owner / exact architecture contract and hashes | `tests/test_cognition_core_v3_manifest_contract.py::test_architecture_manifest_has_exact_owned_paths` | incomplete sealed baseline |
 | `tests/fixtures/cognition_core_v3_live_case_manifest.json` | quality owner / closed cases, groups, dimensions, hard gates, fixed 72-trial semantic floor | `tests/test_cognition_core_v3_manifest_contract.py::test_live_case_manifest_is_complete_and_closed`; `tests/test_cognition_core_v3_manifest_contract.py::test_live_case_manifest_fixes_72_trial_floor_and_inherited_defect_schema` | movable quality rubric or post-result failure waiver |
@@ -1682,6 +1735,30 @@ Manifest values are mechanical and closed. `fixture_id` is
 The manifest stores the complete canonical input payload; the builder accepts
 only a manifest row and performs no DB, clock, random, network, or environment
 read. The row's `primary_capability_group` is exactly the group in the table.
+
+#### Gate 7 additive candidate-harness amendment
+
+The owner approved this bounded amendment on 2026-08-20 after Gate 6 exposed
+that the Gate 1-sealed `tests/test_cognition_core_v3_live_llm.py` invokes the
+V2 baseline runner exclusively. The sealed live module remains the immutable
+V2 control and is not repurposed or edited. Gate 7 adds
+`tests/test_cognition_core_v3_candidate_live_llm.py`, containing exactly one
+V3 candidate node for each of the 24 fixed case ids. Each candidate node uses
+the same sealed manifest row, canonical input renderer, trial identity,
+effect-free capture boundary, artifact root, invalidation rules, and trial
+count as its V2 control. Candidate node ids replace only the module and test
+name prefix; case ids and all scoring contracts remain unchanged.
+
+This path is an explicit additive ownership exception to the sealed Gate 1
+architecture path closure. The architecture manifest, live case manifest,
+comparison harness, and V2 live module remain byte-identical to their sealed
+hashes. The candidate module passes an explicit sanitized V3 route fingerprint
+because the sealed V2 fingerprint helper is typed to the twelve-field V2
+services contract. It asserts the selected services are V3 before any live
+call, exposes no credential or raw endpoint, and writes `engine="v3"` artifacts
+into exclusive existing raw-trial paths. Collection must prove exactly 24
+candidate nodes before the first live execution. Documentation tests are
+outside this amendment and are not created.
 
 `applicable_dimensions`, `hard_gates`, `acceptable_variation`, and
 `forbidden_failure_modes` are the exact set union of the following group row
@@ -1879,9 +1956,9 @@ Deterministic/integration tests:
 - `tests/test_llm_chain_transcript.py`
 - `tests/test_cognition_core_v3_calibration_scripts.py`
 - `tests/test_cognition_core_v3_comparison_contract.py`
-- `tests/test_cognition_core_v3_documentation.py`
 - `tests/test_cognition_core_v3_manifest_contract.py`
 - `tests/test_cognition_core_v3_live_llm.py`
+- `tests/test_cognition_core_v3_candidate_live_llm.py`
 - `tests/test_cognition_core_v3_performance_live_llm.py`
 - `tests/fixtures/cognition_core_v3_architecture_manifest.json`
 - `tests/fixtures/cognition_core_v3_live_case_manifest.json`
@@ -1950,6 +2027,7 @@ Persistence, tracing, telemetry, service, and console:
 - `src/control_console/contracts.py`
 - `src/control_console/kazusa_client.py`
 - `src/control_console/brain_model_routes.py`
+- `src/control_console/service_config.py`
 - `src/control_console/static/index.html`
 - `src/control_console/static/console.js`
 - `src/control_console/static/console.css`
@@ -1986,6 +2064,7 @@ Tests and project docs:
 - `tests/test_service_cognition_graph.py`
 - `tests/test_control_console_contracts.py`
 - `tests/test_control_console_kazusa_client.py`
+- `tests/test_control_console_service_config.py`
 - `tests/test_control_console_cognition_graph.py`
 - `tests/test_control_console_web_surface.py`
 - `tests/control_console_e2e/test_cognition_graph_e2e.py`
@@ -2021,7 +2100,7 @@ listed under Modify:
 
 ## Agent Autonomy Boundaries
 
-The parent may:
+The responsible executor may, within its assigned role and owned surface:
 
 - implement the exact contracts and paths above after authorization;
 - rename private V2 helper functions to the public names specified by tests,
@@ -2069,8 +2148,8 @@ outside autonomous implementation choice.
 For any such boundary, the parent applies the authority precedence in Mandatory
 Rule 3. When that authority already fixes a compliant answer inside the
 approved goal, the parent records the decision and continues. Otherwise the
-applicable gate remains open and the blocker is recorded. The parent retains
-the full flight without a mid-flight user question or agent assignment.
+applicable gate remains open and the blocker is recorded. Production-code work
+continues through the single reusable implementation subagent.
 
 ## Execution Gates
 
@@ -2388,8 +2467,10 @@ permits the fixed matched-pair rerun described by the protocol.
 - [x] Current targeted deterministic suite recorded (`60 passed`).
 - [x] Independent plan review complete (PASS; reviewed SHA-256
   `2431E632B2DF4482A391AD6234F461A47B0F230483893655DF726AB8AB285367`).
-- [x] Owner-directed parent-only execution, goal, question-free flight,
+- [x] Owner-directed execution governance, goal, question-free flight,
   compaction recovery, and readiness-probe rules encoded and parent-audited.
+- [x] Owner amended execution on 2026-08-20 to permit delegation and require
+  one reusable subagent for all remaining production-code changes.
 - [x] Owner clarified 50k/65k as total request-window ceilings; completion
   reservation, readiness, extension, and overflow rules are parent-audited.
 - [x] Owner fixed evaluation-integrity, two-consecutive semantic reset,
@@ -2400,11 +2481,11 @@ permits the fixed matched-pair rerun described by the protocol.
 - [x] Exact plan-closure goal created and active.
 - [x] Gate 0 sanitized readiness probes pass.
 - [x] Gate 1 baseline and architecture manifest sealed.
-- [ ] Gate 2 shared infrastructure and calibration accepted.
-- [ ] Gate 3 cold primary chain accepted.
-- [ ] Gate 4 sidecar and recurrence accepted.
-- [ ] Gate 5 observability and console accepted.
-- [ ] Gate 6 deterministic/impact verification accepted.
+- [x] Gate 2 shared infrastructure and calibration accepted.
+- [x] Gate 3 cold primary chain accepted.
+- [x] Gate 4 sidecar and recurrence accepted.
+- [x] Gate 5 observability and console accepted.
+- [x] Gate 6 deterministic/impact verification accepted.
 - [ ] Gate 7 live quality/serving/performance accepted.
 - [ ] Gate 8 cutover/observation/final parent audit accepted.
 - [ ] Plan archived as completed.
@@ -2880,6 +2961,838 @@ exit disposition: recovery complete; Gate 2 remains in progress; the prompt-safe
 ending commit and git status: HEAD remains 047bed9500111e44872b96c5445b6a64686f5803; this record is the only recovery mutation and all pre-existing execution-owned changes remain preserved
 ```
 
+### Gate 2 budget/transcript/parser checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 2 - shared contracts, lane, anchor, and budget (in progress)
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. The parent resumed after the prompt-safe carrier checkpoint and re-read the governing architecture transcript/budget/re-anchor sections, exact plan contracts, current V3 transcript/lane/contracts, canonical parser, manifest, and impacted tests. Next checkpoint is protected chain-transcript capture and token-estimator calibration/holdout, then exact Gate 2 mapped-node collection
+starting commit and git status: HEAD c8b0881c; modified prompt.py, transcript.py, utils.py, test_prompt.py, test_transcript.py, test_utils.py, manifest; new budget.py and test_budget.py
+owned files: src/kazusa_ai_chatbot/cognition_core_v3/budget.py; src/kazusa_ai_chatbot/cognition_core_v3/transcript.py; src/kazusa_ai_chatbot/utils.py; tests/unit/cognition_core_v3/test_budget.py; tests/unit/cognition_core_v3/test_transcript.py; tests/test_utils.py; tests/ownership/source_test_impact_manifest.json; this plan evidence record
+commands: exact pytest nodes for prompt/anchor/budget/transcript and parser injection; py_compile; focused Ruff; manifest JSON validation
+test/artifact results: prompt/anchor 3/3, transcript 5/5 including the new tail-rollback node, budget 1/1, full regular test_utils.py 17 passed, manifest contract 4/4; focused Ruff passed on the V3 files; py_compile passed
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged; no model invocation occurred
+active total context ceiling, completion reservation, and extension state: unchanged from the sealed Gate 0/1 evidence
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice. All changes are deterministic structural contracts or parser plumbing; no runtime prompt, fixture answer, rubric, score, rerun, or model-output handling changed
+local semantic reset ids and smallest-component evidence: none; no eligible real-model invocation occurred
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: chain-level append-only transcript with tail rollback, interlude queue, and one re-anchor; CJK-aware 50k/65k budget ledger with per-step completion reservation and serving-window defense; injected sidecar repair pair only after deterministic parse failure
+unexpected findings: pre-existing broad-Ruff warnings in utils.py and CJK punctuation RUF001 findings are outside this slice; focused style checks used the project-specific files that are clean
+sealed parent audit pass and findings: bounded checkpoint accepted; full Gate 2 closure remains pending
+exit disposition: Gate 2 remains in progress
+ending commit and git status: HEAD c8b0881c; modified/new files limited to the approved Change Surface
+```
+
+### Gate 2 protected tracing and calibration checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 2 - shared contracts, lane, anchor, and budget (in progress)
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. The parent resumed after the budget/transcript/parser checkpoint and implemented protected chain-transcript capture, calibration/holdout calculation, and overflow-probe dry-run. Next checkpoint is exact Gate 2 mapped-node collection and the remaining cold-chain/sidecar/recurrence gates
+starting commit and git status: HEAD c8b0881c; new/modified files are limited to llm_tracing, V3 budget/transcript/parser, scripts, tests, and manifest within the approved Change Surface
+owned files: src/kazusa_ai_chatbot/llm_tracing/chain_transcript.py; src/kazusa_ai_chatbot/llm_tracing/__init__.py; src/scripts/calibrate_cognition_v3_token_estimator.py; src/scripts/probe_cognition_v3_context_overflow.py; tests/test_llm_chain_transcript.py; tests/test_cognition_core_v3_calibration_scripts.py; tests/ownership/source_test_impact_manifest.json; this plan evidence record
+commands: exact pytest nodes for chain transcript, calibration scripts, llm tracing, manifest contract, and prior V3 owners; py_compile; focused Ruff; manifest JSON validation
+test/artifact results: chain-transcript capture 2/2, calibration scripts 2/2, existing llm tracing 18/18, manifest contract 4/4, prior V3 owners 10/10; combined 26 passed in the tracing/manifest batch
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged; no model invocation occurred
+active total context ceiling, completion reservation, and extension state: unchanged from the sealed Gate 0/1 evidence
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice. Protected capture and calibration code are deterministic and contain no runtime prompt, fixture answer, rubric, score, rerun, or model-output handling
+local semantic reset ids and smallest-component evidence: none; no eligible real-model invocation occurred
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: protected off/metadata/full chain-transcript capture; scoped trace facade; deterministic calibration with zero-underestimate holdout; effect-free overflow-probe dry run
+unexpected findings: broad-Ruff BLE001 findings remain pre-existing in the tracing facade; the new capture function uses the project-specific bounded exception tuple
+sealed parent audit pass and findings: bounded checkpoint accepted; full Gate 2 closure remains pending
+exit disposition: Gate 2 remains in progress
+ending commit and git status: HEAD c8b0881c; modified/new files limited to the approved Change Surface
+```
+
+### Gate 2 impact validation and calibration preflight evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 2 - shared contracts, lane, anchor, and budget (in progress)
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. The parent resolved the manifest source-root and facade-entry gaps, validated the ownership manifest programmatically, collected and ran the exact changed-impact nodes, and executed the deterministic calibration/overflow preflight. Next checkpoint is real-model calibration when the eligible environment is available, then Gate 3 cold-chain replacement
+starting commit and git status: HEAD c8b0881c; changes remain limited to the approved Gate 2 Change Surface
+owned files: tests/ownership/source_test_impact_manifest.json; scripts/validate_test_impact.py read-only; test_artifacts/cognition_core_v3/synthetic_calibration_observations.json ignored preflight artifact; this plan evidence record
+commands: python -m scripts.validate_test_impact --base-ref HEAD; python -m scripts.validate_test_impact --base-ref HEAD --run; python -m scripts.calibrate_cognition_v3_token_estimator --observations test_artifacts/cognition_core_v3/synthetic_calibration_observations.json; python -m scripts.probe_cognition_v3_context_overflow --route-name COGNITION_V3_CHAIN_LLM --context-window-tokens 50000 --payload-char-count 260000
+test/artifact results: manifest validation returned zero errors; changed-impact collection found 9 exact nodes and all 9 passed; synthetic calibration selected multiplier 1.0 with zero underestimates and accepted=true; overflow dry-run estimated 65048 tokens and reported payload_exceeds_declared_window=true
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged; synthetic observations are a deterministic preflight, not server-reported token evidence
+active total context ceiling, completion reservation, and extension state: unchanged from the sealed Gate 0/1 evidence
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice. Preflight observations were generated deterministically and are not represented as live calibration evidence
+local semantic reset ids and smallest-component evidence: none; no eligible real-model invocation occurred
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: exact source-test impact validation, changed-node collection/execution, deterministic calibration preflight, and effect-free overflow dry run
+unexpected findings: --check-all exceeds the Windows command-line length limit; changed-node impact validation is the usable Gate 2 collection path until Gate 6 full collection is chunked
+sealed parent audit pass and findings: bounded checkpoint accepted; full Gate 2 closure remains pending real-model calibration and remaining gates
+exit disposition: Gate 2 remains in progress
+ending commit and git status: HEAD c8b0881c; modified/new files limited to the approved Change Surface
+```
+
+### Gate 2 full V3 unit and impact-validator evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 2 - shared contracts, lane, anchor, and budget (in progress)
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. The parent fixed the ownership manifest source-root/facade gaps, ran the changed-path exact impact validator with execution, ran the full V3 unit suite, and executed the synthetic calibration/overflow preflight. Next checkpoint is real-model calibration and holdout when the eligible environment is available, then Gate 3
+starting commit and git status: HEAD c8b0881c; changes remain within the approved Gate 2 Change Surface
+owned files: tests/ownership/source_test_impact_manifest.json; test_artifacts/cognition_core_v3/synthetic_calibration_observations.json ignored preflight artifact; this plan evidence record
+commands: python -m scripts.validate_test_impact --base-ref HEAD --run; python -m pytest tests/unit/cognition_core_v3 -q; python -m scripts.calibrate_cognition_v3_token_estimator --observations test_artifacts/cognition_core_v3/synthetic_calibration_observations.json; python -m scripts.probe_cognition_v3_context_overflow ...
+test/artifact results: changed-path impact validation collected and ran 9 exact nodes (9 passed); full V3 unit suite passed 52/52; synthetic calibration selected 1.0 with accepted=true; overflow dry-run estimated 65048 tokens above the declared 50000 window
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged; synthetic observations are deterministic preflight evidence only
+active total context ceiling, completion reservation, and extension state: unchanged from the sealed Gate 0/1 evidence
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice; no runtime prompt, score, rerun, or model output was changed or hidden
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: exact changed-node impact execution, full V3 deterministic suite, deterministic calibration/overflow preflight
+unexpected findings: --check-all exceeds the Windows command-line length limit; the changed-node path remains the usable Gate 2 verification surface until Gate 6 chunking
+sealed parent audit pass and findings: bounded checkpoint accepted; full Gate 2 closure remains pending real-model calibration
+exit disposition: Gate 2 remains in progress
+ending commit and git status: HEAD c8b0881c; modified/new files limited to the approved Change Surface
+```
+
+### Gate 2 V2 shared-substrate regression evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 2 - shared contracts, lane, anchor, and budget (in progress)
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. The parent ran the complete V2 unit suite and classified the two known failures against the sealed Gate 1 baseline records. Next checkpoint is the real-model calibration/collection, then Gate 3
+starting commit and git status: HEAD c8b0881c; no V2 production source was modified in this slice
+owned files: this plan evidence record
+commands: venv\Scripts\python -m pytest tests\unit\cognition_core_v2 -q
+test/artifact results: 133 passed and 2 failed. The failures are the sealed Gate 1 baseline drift rows test_goal_progress_model_output_omits_protocol_metadata and test_calibration_artifact_requires_owner_specific_threshold; neither changed V2 production source was involved in the Gate 2 helper extraction
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged
+active total context ceiling, completion reservation, and extension state: unchanged
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice; failures were not hidden or reclassified
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: full V2 unit suite regression check for shared-substrate extraction
+unexpected findings: none new; the same two baseline drift rows remain visible
+sealed parent audit pass and findings: bounded checkpoint accepted; Gate 2 remains in progress
+exit disposition: Gate 2 remains in progress
+ending commit and git status: HEAD c8b0881c; no V2 source change
+```
+
+### Gate 3 transition checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 3 - cold primary chain (not yet in progress)
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: the parent completed Gate 2 deterministic infrastructure verification and inspected the current registry/execution/facade topology. The superseded parallel-wave topology is still fully present and must be replaced as one coherent slice with the serial A1→A2→I1→G1a→G1b→I2→W1→P1 chain
+starting commit and git status: HEAD c8b0881c; no Gate 3 production edit has started
+owned files: this plan evidence record
+commands: none state-changing; read-only topology inspection only
+test/artifact results: no Gate 3 implementation or tests exist yet
+readiness-probe sanitized fingerprint and health: none
+live environment fingerprint: unchanged
+active total context ceiling, completion reservation, and extension state: unchanged
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: not applicable to this read-only transition checkpoint
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: Gate 3 requires removing parallel-wave/isolated-goal/route-checkpoint behavior from source and tests in one coherent replacement
+unexpected findings: the old facade remains coupled to the old registry/execution symbols, so the serial replacement cannot be split into isolated registry-only edits without leaving dual schemas
+sealed parent audit pass and findings: bounded checkpoint accepted; Gate 2 remains open and Gate 3 has not begun
+exit disposition: Gate 3 remains pending
+ending commit and git status: HEAD c8b0881c; no Gate 3 source change
+```
+
+### Gate 2 collection and selector-regression evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 2 - shared contracts, lane, anchor, and budget (in progress)
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. The parent chunked the complete manifest node collection, removed one stale node, fixed the selector subprocess to use the V3 configuration helper, and reran the exact changed-node validator. Next checkpoint is real-model calibration and Gate 3
+starting commit and git status: HEAD c8b0881c; changes remain limited to Gate 2 verification and test ownership
+owned files: tests/ownership/source_test_impact_manifest.json; tests/unit/test_cognition_core_selector.py; test_artifacts/gate2_manifest_nodes.json ignored helper artifact; this plan evidence record
+commands: chunked pytest --collect-only over 430 manifest nodes; pytest exact shared-owner batch; pytest selector regression; scripts.validate_test_impact --base-ref HEAD --run
+test/artifact results: all 430 manifest nodes collected after removing the stale semantic-terminalization node; changed-node impact validation 9/9 passed; shared-owner batch 112 passed and one selector regression fixed to pass; V2 and V3 unit suites already recorded separately
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged
+active total context ceiling, completion reservation, and extension state: unchanged
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice; no semantic output, rerun, or hidden failure was introduced
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: complete manifest collection, stale node removal, exact selector subprocess config, changed-node execution
+unexpected findings: --check-all exceeds the Windows command-line length limit, so the parent used chunked collection
+sealed parent audit pass and findings: bounded checkpoint accepted; full Gate 2 closure remains pending real-model calibration
+exit disposition: Gate 2 remains in progress
+ending commit and git status: HEAD c8b0881c; changes limited to Gate 2 verification and test ownership
+```
+
+### Gate 2 full-suite collection classification
+
+```text
+date/time: 2026-08-20
+gate: Gate 2 - shared contracts, lane, anchor, and budget (in progress)
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. The parent attempted the default full suite and classified the collection error as a pre-existing live-LLM fixture defect outside the Gate 2 change boundary. Next checkpoint is real-model calibration and Gate 3
+starting commit and git status: HEAD c8b0881c; no production boundary was changed by the failed collection attempt
+owned files: this plan evidence record
+commands: venv\Scripts\python -m pytest -q
+test/artifact results: collection interrupted by NameError in tests/test_cognition_core_v2_transition_coherence_live_llm.py at line 73: _CAPTURED_ACCOMPLICE_INPUT is not defined. This file was not touched by the Gate 2 work and is a pre-existing live-LLM fixture defect. One identity-growth live cohort also skipped normally due to an unavailable replay manifest.
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged
+active total context ceiling, completion reservation, and extension state: unchanged
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice; no result was hidden or changed
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: unrelated pre-existing collection failure is classified separately from changed-boundary failures
+unexpected findings: default pytest collection is blocked by an unrelated live fixture before deterministic selection
+sealed parent audit pass and findings: bounded checkpoint accepted; full Gate 2 closure remains pending
+exit disposition: Gate 2 remains in progress
+ending commit and git status: HEAD c8b0881c; no production boundary changed
+```
+
+### Chain-session registry checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 2/4 infrastructure - process-local chain-session registry
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. The parent implemented the independent process-local ChainSessionV1 and registry, exhaustive immutable/cycle classification, prior-replacement state check, and next-admissible cycle index. Next checkpoint is L1 subconscious or the Gate 3 serial-chain replacement
+starting commit and git status: HEAD c8b0881c; new session.py/test_session.py and manifest mapping only
+owned files: src/kazusa_ai_chatbot/cognition_core_v3/session.py; tests/unit/cognition_core_v3/test_session.py; tests/ownership/source_test_impact_manifest.json; this plan evidence record
+commands: pytest tests/unit/cognition_core_v3/test_session.py -q; ruff; py_compile; scripts.validate_test_impact --base-ref HEAD --run
+test/artifact results: session tests 4/4 passed; exact changed-node impact validation 13/13 passed; focused Ruff and py_compile passed; manifest JSON valid
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged
+active total context ceiling, completion reservation, and extension state: unchanged
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice; deterministic structural implementation only
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: exact ChainSessionV1 fields, exhaustive immutable/cycle classification, prior validated replacement state, expected_cycle_index means next admissible input
+unexpected findings: none
+sealed parent audit pass and findings: bounded checkpoint accepted; full Gate 2/3/4 closure remains pending
+exit disposition: chain-session registry accepted for this checkpoint
+ending commit and git status: HEAD c8b0881c; new session source/test and manifest mapping within Change Surface
+```
+
+### Advisory L1 residue checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 4 infrastructure - advisory L1 residue
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. The parent implemented the closed nonblocking L1ResidueV1 validator with bounded supplied-handle membership. Next checkpoint is the Gate 3 serial-chain replacement or remaining sidecar integration
+starting commit and git status: HEAD c8b0881c; new subconscious.py/test_subconscious.py and manifest mapping only
+owned files: src/kazusa_ai_chatbot/cognition_core_v3/subconscious.py; tests/unit/cognition_core_v3/test_subconscious.py; tests/ownership/source_test_impact_manifest.json; this plan evidence record
+commands: pytest tests/unit/cognition_core_v3/test_subconscious.py -q; ruff; py_compile; scripts.validate_test_impact --base-ref HEAD --run
+test/artifact results: L1 test 1/1 passed; exact changed-node impact validation 14/14 passed; focused Ruff and py_compile passed; manifest JSON valid
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged
+active total context ceiling, completion reservation, and extension state: unchanged
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice; deterministic structural implementation only
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: exact L1ResidueV1 fields and limits, closed risk flags, supplied-handle subset, duplicate-free lists, no invented authority
+unexpected findings: none
+sealed parent audit pass and findings: bounded checkpoint accepted; full Gate 2/3/4 closure remains pending
+exit disposition: advisory L1 residue accepted for this checkpoint
+ending commit and git status: HEAD c8b0881c; new subconscious source/test and manifest mapping within Change Surface
+```
+
+### Persisted chain-run checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 5 infrastructure - persisted sanitized chain-run owner
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. The parent implemented the chain-run persistence owner, bootstrap indexes, and public DB exports. Next checkpoint is the remaining serial-chain replacement and service/console projection
+starting commit and git status: HEAD c8b0881c; new db/cognition_chain_runs.py, test_db_cognition_chain_runs.py, db/__init__.py/bootstrap edits, and manifest mappings
+owned files: src/kazusa_ai_chatbot/db/cognition_chain_runs.py; src/kazusa_ai_chatbot/db/__init__.py; src/kazusa_ai_chatbot/db/bootstrap.py; tests/test_db_cognition_chain_runs.py; tests/ownership/source_test_impact_manifest.json; this plan evidence record
+commands: pytest tests/test_db_cognition_chain_runs.py -q; ruff on new files; py_compile; scripts.validate_test_impact --base-ref HEAD --run
+test/artifact results: chain-run tests 4/4 passed; exact changed-node impact validation 20/20 passed; focused Ruff and py_compile passed; manifest JSON valid
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged
+active total context ceiling, completion reservation, and extension state: unchanged
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice; deterministic persistence implementation only
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: idempotent chain_run_id upsert, immutable correlation conflict rejection, exact dual-key read, exact indexes and TTL, public DB facade exports
+unexpected findings: none
+sealed parent audit pass and findings: bounded checkpoint accepted; full Gate 2/3/5 closure remains pending
+exit disposition: persisted chain-run owner accepted for this checkpoint
+ending commit and git status: HEAD c8b0881c; new DB source/test and manifest mapping within Change Surface
+```
+
+### Serial topology registry checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 3 preparation - serial topology registry
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. The parent added the exact serial A1..P1 chain and frozen 1/2/3/6 appraisal grouping maps to the registry while retaining old symbols until the facade cutover. Next checkpoint is the serial executor and facade replacement
+starting commit and git status: HEAD c8b0881c; registry.py/test_registry.py/manifest changes only
+owned files: src/kazusa_ai_chatbot/cognition_core_v3/registry.py; tests/unit/cognition_core_v3/test_registry.py; tests/ownership/source_test_impact_manifest.json; this plan evidence record
+commands: pytest tests/unit/cognition_core_v3/test_registry.py -q; ruff; scripts.validate_test_impact --base-ref HEAD --run
+test/artifact results: registry tests 2/2 passed; exact changed-node impact validation 21/21 passed; focused Ruff and manifest JSON valid
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged
+active total context ceiling, completion reservation, and extension state: unchanged
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice; deterministic structural implementation only
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: frozen family order event_agency, goal_threat_outcome, epistemic_comparison_memory, relationship_social, moral_identity, existential_drive; exact 1/2/3/6 grouping maps
+unexpected findings: none
+sealed parent audit pass and findings: bounded checkpoint accepted; full Gate 3 closure remains pending
+exit disposition: serial topology registry accepted for this checkpoint
+ending commit and git status: HEAD c8b0881c; registry serial additions within Change Surface
+```
+
+### Serial primary-chain executor checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 3 preparation - serial primary-chain executor
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. The parent added a serial-chain runner to execution.py that runs exact serial steps under shared attempt arithmetic while retaining the old wave symbols until the facade cutover. Next checkpoint is the serial facade replacement
+starting commit and git status: HEAD c8b0881c; execution.py/test_execution.py/manifest changes only
+owned files: src/kazusa_ai_chatbot/cognition_core_v3/execution.py; tests/unit/cognition_core_v3/test_execution.py; tests/ownership/source_test_impact_manifest.json; this plan evidence record
+commands: pytest tests/unit/cognition_core_v3/test_execution.py -q; ruff; py_compile; scripts.validate_test_impact --base-ref HEAD --run
+test/artifact results: execution tests 4/4 passed; exact changed-node impact validation 22/22 passed; focused Ruff and py_compile passed
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged
+active total context ceiling, completion reservation, and extension state: unchanged
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice; deterministic implementation only
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: one serial primary chain, exact step identity, shared attempt ledger without reset
+unexpected findings: none
+sealed parent audit pass and findings: bounded checkpoint accepted; full Gate 3 closure remains pending
+exit disposition: serial primary-chain executor accepted for this checkpoint
+ending commit and git status: HEAD c8b0881c; execution additions within Change Surface
+```
+
+### Serial primary-chain facade cutover pending checkpoint
+
+```text
+date/time: 2026-08-20
+gate: Gate 3 - cold primary chain (in progress, cutover pending)
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. The parent added the serial registry and executor primitives and verified them independently. The old facade still imports the parallel-wave symbols, so the final serial facade replacement must be one coherent edit. Next checkpoint is the serial facade and old-path removal
+starting commit and git status: HEAD c8b0881c; no facade source change in this slice
+owned files: this plan evidence record
+commands: read-only facade/producer inspection only
+test/artifact results: no facade implementation change; current V3 unit suite remains green at 59/59
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged
+active total context ceiling, completion reservation, and extension state: unchanged
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: not applicable to read-only pending-checkpoint record
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: keep the facade cutover coherent rather than introducing a parallel V3 executor
+unexpected findings: the old producer helpers are deeply coupled to the old transcript/wave topology and require replacement with the serial chain
+sealed parent audit pass and findings: bounded checkpoint accepted; Gate 3 facade cutover remains pending
+exit disposition: Gate 3 remains in progress
+ending commit and git status: HEAD c8b0881c; no facade source change
+```
+
+### Cognition-chain event logging checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 5 infrastructure - cognition-chain event family
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. The parent added the bounded cognition-chain event family, recorder, sanitizer, schema, and facade export. Next checkpoint is the serial facade replacement or service/console projection
+starting commit and git status: HEAD c8b0881c; event_logging model/recording/sanitization/schema/facade and test/manifest changes only
+owned files: src/kazusa_ai_chatbot/event_logging/__init__.py; src/kazusa_ai_chatbot/event_logging/models.py; src/kazusa_ai_chatbot/event_logging/recording.py; src/kazusa_ai_chatbot/event_logging/sanitization.py; src/kazusa_ai_chatbot/event_logging/schemas.py; tests/test_cognition_chain_event_logging.py; tests/ownership/source_test_impact_manifest.json; this plan evidence record
+commands: pytest tests/test_cognition_chain_event_logging.py -q; ruff; py_compile; scripts.validate_test_impact --base-ref HEAD --run
+test/artifact results: cognition-chain event tests 4/4 passed; exact changed-node impact validation 31/31 passed; focused Ruff and py_compile passed; manifest JSON valid
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged
+active total context ceiling, completion reservation, and extension state: unchanged
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice; deterministic telemetry implementation only
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: exact allowed cognition-chain fields, keyword-only best-effort recorder, no generic payload, secret/raw-content exclusion
+unexpected findings: none within this slice
+sealed parent audit pass and findings: bounded checkpoint accepted; full Gate 5 closure remains pending
+exit disposition: cognition-chain event family accepted for this checkpoint
+ending commit and git status: HEAD c8b0881c; event-logging additions within Change Surface
+```
+
+### Brain-service chain-run projection checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 5 infrastructure - brain-service chain-run projection
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. The parent added paired optional live/self chain-run fields to the latest-graph response and exact dual-key DB resolution. Next checkpoint is the serial facade replacement or control-console projection
+starting commit and git status: HEAD c8b0881c; brain_service/contracts.py, service.py, test_service_cognition_graph.py, and manifest changes only
+owned files: src/kazusa_ai_chatbot/brain_service/contracts.py; src/kazusa_ai_chatbot/service.py; tests/test_service_cognition_graph.py; tests/ownership/source_test_impact_manifest.json; this plan evidence record
+commands: pytest exact service graph nodes -q; py_compile; scripts.validate_test_impact --base-ref HEAD --run
+test/artifact results: new service graph nodes 2/2 passed; exact changed-node impact validation 38/38 passed; py_compile passed; manifest JSON valid
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged
+active total context ceiling, completion reservation, and extension state: unchanged
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice; deterministic projection implementation only
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: paired optional fields, exact run_id+llm_trace_id lookup, no global latest fallback
+unexpected findings: service.py retains pre-existing broad-Ruff findings; the new projection code is py_compile-clean and covered by exact nodes
+sealed parent audit pass and findings: bounded checkpoint accepted; full Gate 5 closure remains pending
+exit disposition: brain-service chain-run projection accepted for this checkpoint
+ending commit and git status: HEAD c8b0881c; service projection additions within Change Surface
+```
+
+### Control-console chain-run projection checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 5 infrastructure - control-console chain-run projection
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. The parent added a strict optional CognitionChainRunSnapshot and paired client projection. Next checkpoint is the serial facade replacement or console rendering/browser validation
+starting commit and git status: HEAD c8b0881c; control_console/contracts.py, kazusa_client.py, tests, and manifest changes only
+owned files: src/control_console/contracts.py; src/control_console/kazusa_client.py; tests/test_control_console_contracts.py; tests/test_control_console_kazusa_client.py; tests/ownership/source_test_impact_manifest.json; this plan evidence record
+commands: pytest exact console nodes -q; ruff; py_compile; scripts.validate_test_impact --base-ref HEAD --run
+test/artifact results: new console nodes 2/2 passed; exact changed-node impact validation 40/40 passed; focused Ruff and py_compile passed
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged
+active total context ceiling, completion reservation, and extension state: unchanged
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice; deterministic projection implementation only
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: strict optional chain-run snapshot, exact paired live/self projection, no raw payload passthrough
+unexpected findings: none
+sealed parent audit pass and findings: bounded checkpoint accepted; full Gate 5 closure remains pending browser/panel work
+exit disposition: control-console chain-run projection accepted for this checkpoint
+ending commit and git status: HEAD c8b0881c; console contract/client additions within Change Surface
+```
+
+### Control-console selected-family route checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 5 infrastructure - control-console operator route family
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. The parent added V3 route descriptors and selected-family active marking while keeping generic COGNITION_LLM shared. Next checkpoint is the serial facade replacement or static panel/browser work
+starting commit and git status: HEAD c8b0881c; brain_model_routes.py, test_control_console_web_surface.py, and manifest changes only
+owned files: src/control_console/brain_model_routes.py; tests/test_control_console_web_surface.py; tests/ownership/source_test_impact_manifest.json; this plan evidence record
+commands: pytest exact route node -q; ruff on new source; scripts.validate_test_impact --base-ref HEAD --run
+test/artifact results: route test 1/1 passed; exact changed-node impact validation 41/41 passed; focused Ruff on brain_model_routes passed with only pre-existing test-file inline-import warning
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged
+active total context ceiling, completion reservation, and extension state: unchanged
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice; deterministic route projection only
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: both core families editable, selected family active, generic cognition shared_non_core
+unexpected findings: none
+sealed parent audit pass and findings: bounded checkpoint accepted; full Gate 5 closure remains pending panel/browser work
+exit disposition: selected-family route projection accepted for this checkpoint
+ending commit and git status: HEAD c8b0881c; console route additions within Change Surface
+```
+
+### First-packet producer checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 3 preparation - canonical first-packet producer
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. The parent added build_first_packet_sections to prompt.py, using project_model_visible_percepts and canonical projected carriers. Next checkpoint remains the serial facade replacement
+starting commit and git status: HEAD c8b0881c; prompt.py/test_prompt.py changes only
+owned files: src/kazusa_ai_chatbot/cognition_core_v3/prompt.py; tests/unit/cognition_core_v3/test_prompt.py; this plan evidence record
+commands: pytest tests/unit/cognition_core_v3/test_prompt.py -q; ruff; scripts.validate_test_impact --base-ref HEAD --run
+test/artifact results: prompt tests 3/3 passed; exact changed-node impact validation 41/41 passed; focused Ruff and py_compile passed
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged
+active total context ceiling, completion reservation, and extension state: unchanged
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice; deterministic projection only
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: canonical projection owners feed the validated first packet
+unexpected findings: none
+sealed parent audit pass and findings: bounded checkpoint accepted; full Gate 3 closure remains pending
+exit disposition: first-packet producer accepted for this checkpoint
+ending commit and git status: HEAD c8b0881c; prompt.py/test_prompt.py additions within Change Surface
+```
+
+### Serial-chain message assembler checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 3 preparation - serial-chain message assembler
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. The parent added build_initial_chain_messages pairing the static anchor with the validated first user packet. Next checkpoint remains the serial facade replacement
+starting commit and git status: HEAD c8b0881c; prompt.py/test_prompt.py changes only
+owned files: src/kazusa_ai_chatbot/cognition_core_v3/prompt.py; tests/unit/cognition_core_v3/test_prompt.py; this plan evidence record
+commands: pytest tests/unit/cognition_core_v3/test_prompt.py -q; ruff
+test/artifact results: prompt tests 4/4 passed; focused Ruff and py_compile passed
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged
+active total context ceiling, completion reservation, and extension state: unchanged
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice; deterministic message assembly only
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: one system head plus one first human packet
+unexpected findings: none
+sealed parent audit pass and findings: bounded checkpoint accepted; full Gate 3 closure remains pending
+exit disposition: serial-chain message assembler accepted for this checkpoint
+ending commit and git status: HEAD c8b0881c; prompt.py/test_prompt.py additions within Change Surface
+```
+
+### Grouped appraisal question-payload checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 3 preparation - grouped appraisal question payload
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. The parent added build_appraisal_question_payload for grouped A1/A2 questions. Next checkpoint remains the serial facade replacement
+starting commit and git status: HEAD c8b0881c; prompt.py/test_prompt.py changes only
+owned files: src/kazusa_ai_chatbot/cognition_core_v3/prompt.py; tests/unit/cognition_core_v3/test_prompt.py; this plan evidence record
+commands: pytest tests/unit/cognition_core_v3/test_prompt.py -q; ruff
+test/artifact results: prompt tests 5/5 passed; focused Ruff and py_compile passed
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged
+active total context ceiling, completion reservation, and extension state: unchanged
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice; deterministic payload construction only
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: grouped appraisal payload from planned family questions plus optional advisory L1
+unexpected findings: none
+sealed parent audit pass and findings: bounded checkpoint accepted; full Gate 3 closure remains pending
+exit disposition: grouped appraisal question-payload builder accepted for this checkpoint
+ending commit and git status: HEAD c8b0881c; prompt.py/test_prompt.py additions within Change Surface
+```
+
+### Deterministic I1 notice checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 3 preparation - deterministic I1 notice
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. The parent added a bounded deterministic I1 notice builder to the facade. Next checkpoint remains the serial facade replacement
+starting commit and git status: HEAD c8b0881c; facade.py/test_facade.py changes only
+owned files: src/kazusa_ai_chatbot/cognition_core_v3/facade.py; tests/unit/cognition_core_v3/test_facade.py; this plan evidence record
+commands: pytest tests/unit/cognition_core_v3/test_facade.py::test_i1_notice_is_bounded_and_deterministic -q; py_compile
+test/artifact results: I1 notice test 1/1 passed; py_compile passed; broad Ruff on facade retains pre-existing import/type findings
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged
+active total context ceiling, completion reservation, and extension state: unchanged
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice; deterministic notice construction only
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: bounded 600-char deterministic I1 notice
+unexpected findings: none within this slice
+sealed parent audit pass and findings: bounded checkpoint accepted; full Gate 3 closure remains pending
+exit disposition: deterministic I1 notice accepted for this checkpoint
+ending commit and git status: HEAD c8b0881c; facade.py/test_facade.py additions within Change Surface
+```
+
+### Serial harness checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 3 preparation - serial harness
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. The parent added SerialChainHarness owning the append-only transcript, attempt ledger, and budget reference. Next checkpoint remains the serial facade replacement
+starting commit and git status: HEAD c8b0881c; execution.py/test_execution.py changes only
+owned files: src/kazusa_ai_chatbot/cognition_core_v3/execution.py; tests/unit/cognition_core_v3/test_execution.py; this plan evidence record
+commands: pytest tests/unit/cognition_core_v3/test_execution.py -q; ruff
+test/artifact results: execution tests 5/5 passed; focused Ruff and py_compile passed
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged
+active total context ceiling, completion reservation, and extension state: unchanged
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice; deterministic harness behavior only
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: one owned append-only transcript with rollback/interludes and shared attempt ledger
+unexpected findings: none
+sealed parent audit pass and findings: bounded checkpoint accepted; full Gate 3 closure remains pending
+exit disposition: serial harness accepted for this checkpoint
+ending commit and git status: HEAD c8b0881c; execution.py/test_execution.py additions within Change Surface
+```
+
+### Serial harness step-runner checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 3 preparation - serial harness step runner
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. The parent added run_serial_harness_step reserving shared attempts and updating the append-only transcript. Next checkpoint remains the serial facade replacement
+starting commit and git status: HEAD c8b0881c; execution.py/test_execution.py changes only
+owned files: src/kazusa_ai_chatbot/cognition_core_v3/execution.py; tests/unit/cognition_core_v3/test_execution.py; this plan evidence record
+commands: pytest tests/unit/cognition_core_v3/test_execution.py -q; ruff
+test/artifact results: execution tests 6/6 passed; focused Ruff and py_compile passed
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged
+active total context ceiling, completion reservation, and extension state: unchanged
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice; deterministic step runner only
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: shared attempt reserve per serial step, transcript acceptance, fail-closed typed failure
+unexpected findings: none
+sealed parent audit pass and findings: bounded checkpoint accepted; full Gate 3 closure remains pending
+exit disposition: serial harness step-runner accepted for this checkpoint
+ending commit and git status: HEAD c8b0881c; execution.py/test_execution.py additions within Change Surface
+```
+
+### Serial model-step invoker checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 3 preparation - serial model-step invoker
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. The parent added invoke_serial_model_step, sending the exact static head plus append-only transcript and parsing structured output. Next checkpoint remains the serial facade replacement
+starting commit and git status: HEAD c8b0881c; execution.py/test_execution.py changes only
+owned files: src/kazusa_ai_chatbot/cognition_core_v3/execution.py; tests/unit/cognition_core_v3/test_execution.py; this plan evidence record
+commands: pytest tests/unit/cognition_core_v3/test_execution.py -q; ruff
+test/artifact results: execution tests 7/7 passed; focused Ruff and py_compile passed
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged
+active total context ceiling, completion reservation, and extension state: unchanged
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice; deterministic invoker behavior only
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: exact static head plus append-only transcript, deterministic-only parse option
+unexpected findings: none
+sealed parent audit pass and findings: bounded checkpoint accepted; full Gate 3 closure remains pending
+exit disposition: serial model-step invoker accepted for this checkpoint
+ending commit and git status: HEAD c8b0881c; execution.py/test_execution.py additions within Change Surface
+```
+
+### Serial initial-context builder checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 3 preparation - serial initial-context builder
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. The parent added _build_serial_initial_context, reusing the canonical V2 deterministic head, goal-cognition identity, and new prompt-safe first-packet producer. Next checkpoint remains the serial facade replacement
+starting commit and git status: HEAD c8b0881c; facade.py and test_deterministic_head.py changes only
+owned files: src/kazusa_ai_chatbot/cognition_core_v3/facade.py; tests/integration/cognition_core_v3/test_deterministic_head.py; this plan evidence record
+commands: pytest exact serial-initial-context node -q; py_compile
+test/artifact results: serial-initial-context test 1/1 passed; py_compile passed; broad Ruff on facade retains pre-existing findings
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged
+active total context ceiling, completion reservation, and extension state: unchanged
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice; deterministic context construction only
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: canonical projected state, goal-cognition identity, and prompt-safe percepts for the cold-chain head
+unexpected findings: none
+sealed parent audit pass and findings: bounded checkpoint accepted; full Gate 3 closure remains pending
+exit disposition: serial initial-context builder accepted for this checkpoint
+ending commit and git status: HEAD c8b0881c; facade.py/test additions within Change Surface
+```
+
+### Grouped appraisal sequence builder checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 3 preparation - grouped appraisal sequence builder
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. The parent added build_grouped_appraisal_questions using the frozen registry grouping maps. Next checkpoint remains the serial facade replacement
+starting commit and git status: HEAD c8b0881c; prompt.py/test_prompt.py changes only
+owned files: src/kazusa_ai_chatbot/cognition_core_v3/prompt.py; tests/unit/cognition_core_v3/test_prompt.py; this plan evidence record
+commands: pytest tests/unit/cognition_core_v3/test_prompt.py -q; ruff
+test/artifact results: prompt tests 6/6 passed; focused Ruff and py_compile passed
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged
+active total context ceiling, completion reservation, and extension state: unchanged
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice; deterministic question mapping only
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: frozen 1/2/3/6 appraisal grouping maps
+unexpected findings: none
+sealed parent audit pass and findings: bounded checkpoint accepted; full Gate 3 closure remains pending
+exit disposition: grouped appraisal sequence builder accepted for this checkpoint
+ending commit and git status: HEAD c8b0881c; prompt.py/test_prompt.py additions within Change Surface
+```
+
+### Registered step payload-builder checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 3 preparation - registered step payload builders
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. The parent added goal, active-group, workspace, and action-plan payload builders. Next checkpoint remains the serial facade replacement
+starting commit and git status: HEAD c8b0881c; prompt.py/test_prompt.py changes only
+owned files: src/kazusa_ai_chatbot/cognition_core_v3/prompt.py; tests/unit/cognition_core_v3/test_prompt.py; this plan evidence record
+commands: pytest tests/unit/cognition_core_v3/test_prompt.py -q; ruff
+test/artifact results: prompt tests 7/7 passed; focused Ruff and py_compile passed
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged
+active total context ceiling, completion reservation, and extension state: unchanged
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice; deterministic payload construction only
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: code-owned payload constructors for every serial question owner
+unexpected findings: none
+sealed parent audit pass and findings: bounded checkpoint accepted; full Gate 3 closure remains pending
+exit disposition: registered step payload builders accepted for this checkpoint
+ending commit and git status: HEAD c8b0881c; prompt.py/test_prompt.py additions within Change Surface
+```
+
+### Serial question-sequence builder checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 3 preparation - serial question sequence
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. The parent added build_serial_question_sequence mapping the deterministic head into registered serial questions. Next checkpoint remains the serial facade replacement
+starting commit and git status: HEAD c8b0881c; prompt.py/test_prompt.py changes only
+owned files: src/kazusa_ai_chatbot/cognition_core_v3/prompt.py; tests/unit/cognition_core_v3/test_prompt.py; this plan evidence record
+commands: pytest tests/unit/cognition_core_v3/test_prompt.py -q; ruff
+test/artifact results: prompt tests 8/8 passed; focused Ruff and py_compile passed
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged
+active total context ceiling, completion reservation, and extension state: unchanged
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice; deterministic question ordering only
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: A1/G1a/G1b/W1/P1 registered question order
+unexpected findings: none
+sealed parent audit pass and findings: bounded checkpoint accepted; full Gate 3 closure remains pending
+exit disposition: serial question-sequence builder accepted for this checkpoint
+ending commit and git status: HEAD c8b0881c; prompt.py/test_prompt.py additions within Change Surface
+```
+
+### Serial question-sequence invoker checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 3 preparation - serial question-sequence invoker
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. The parent added invoke_serial_question_sequence driving registered questions through the primary lane. Next checkpoint remains the serial facade replacement
+starting commit and git status: HEAD c8b0881c; execution.py/test_execution.py changes only
+owned files: src/kazusa_ai_chatbot/cognition_core_v3/execution.py; tests/unit/cognition_core_v3/test_execution.py; this plan evidence record
+commands: pytest exact serial-sequence node -q; ruff
+test/artifact results: serial-sequence invoker test 1/1 passed; focused Ruff and py_compile passed
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged
+active total context ceiling, completion reservation, and extension state: unchanged
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice; deterministic invocation order only
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: exact registered question order with shared attempt reservation
+unexpected findings: none
+sealed parent audit pass and findings: bounded checkpoint accepted; full Gate 3 closure remains pending
+exit disposition: serial question-sequence invoker accepted for this checkpoint
+ending commit and git status: HEAD c8b0881c; execution.py/test_execution.py additions within Change Surface
+```
+
+### Serial step-payload wiring checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 3 preparation - serial step-payload wiring
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. The parent added _build_serial_step_payloads connecting the deterministic head to registered serial questions. Next checkpoint remains the serial facade replacement
+starting commit and git status: HEAD c8b0881c; facade.py/prompt.py/test_deterministic_head.py changes only
+owned files: src/kazusa_ai_chatbot/cognition_core_v3/facade.py; src/kazusa_ai_chatbot/cognition_core_v3/prompt.py; tests/integration/cognition_core_v3/test_deterministic_head.py; this plan evidence record
+commands: pytest exact serial-payload node -q; py_compile
+test/artifact results: serial step-payload test 1/1 passed; py_compile passed
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged
+active total context ceiling, completion reservation, and extension state: unchanged
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice; deterministic payload wiring only
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: current-run payloads are closed and private-metadata-free at the ChainQuestion boundary
+unexpected findings: initial wiring used empty projected carriers; semantic enrichment remains in the facade orchestration checkpoint
+sealed parent audit pass and findings: bounded checkpoint accepted; full Gate 3 closure remains pending
+exit disposition: serial step-payload wiring accepted for this checkpoint
+ending commit and git status: HEAD c8b0881c; facade/prompt/test additions within Change Surface
+```
+
+### Grouped appraisal validator checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 3 preparation - grouped appraisal validator
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. The parent added validate_grouped_appraisal_output enforcing exact family keys and micro-item shape. Next checkpoint remains the serial facade replacement
+starting commit and git status: HEAD c8b0881c; appraisal.py/test_appraisal.py changes only
+owned files: src/kazusa_ai_chatbot/cognition_core_v3/appraisal.py; tests/unit/cognition_core_v3/test_appraisal.py; this plan evidence record
+commands: pytest exact grouped-validator node -q; ruff
+test/artifact results: grouped-validator test 1/1 passed; focused Ruff and py_compile passed
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged
+active total context ceiling, completion reservation, and extension state: unchanged
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice; deterministic structural validation only
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: exact planned-family coverage, question_id binding, proposition/delta object-or-null, max eight items
+unexpected findings: none
+sealed parent audit pass and findings: bounded checkpoint accepted; full Gate 3 closure remains pending
+exit disposition: grouped appraisal validator accepted for this checkpoint
+ending commit and git status: HEAD c8b0881c; appraisal.py/test_appraisal.py additions within Change Surface
+```
+
 ### Execution evidence template
 
 Each gate appends:
@@ -2906,6 +3819,32 @@ unexpected findings:
 sealed parent audit pass and findings:
 exit disposition:
 ending commit and git status:
+```
+
+### Gate 2 prompt-safe carrier checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 2 - shared contracts, lane, anchor, and budget (in progress)
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice; the parent resumed at the recorded prompt-safe carrier checkpoint and re-read the active goal, plan registry, root README/HOWTO, prompt/anchor source/tests, py-style constraints, test execution guidance, CJK safety, local-LLM boundaries, and no-prepost-user-input guidance before editing. Next checkpoint is fresh canonical-input rendering against the real V2 projection owners, then continuing the remaining Gate 2 transcript/budget/parser/tracing/calibration work
+starting commit and git status: HEAD c8b0881c Partial implementation; changes are limited to src/kazusa_ai_chatbot/cognition_core_v3/prompt.py and tests/unit/cognition_core_v3/test_prompt.py
+owned files: src/kazusa_ai_chatbot/cognition_core_v3/prompt.py; tests/unit/cognition_core_v3/test_prompt.py
+commands: venv\Scripts\python -m pytest tests\unit\cognition_core_v3\test_prompt.py tests\unit\cognition_core_v3\test_anchor.py -q; venv\Scripts\python -m py_compile ...; venv\Scripts\python -m ruff check ...
+test/artifact results: exact mapped prompt/anchor nodes passed 3/3; py_compile and Ruff passed; git diff --check reported only informational LF-to-CRLF working-copy warnings
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged; no model invocation occurred
+active total context ceiling, completion reservation, and extension state: unchanged from the sealed Gate 0/1 evidence
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice. The change adds deterministic structural rejection only; it contains no runtime prompt text, fixture answer, rubric, score, rerun, or model-output handling
+local semantic reset ids and smallest-component evidence: none; no eligible real-model invocation occurred
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: exact first-packet interior key sets for character constraints, operational context, relationship, visible percept rows, and evidence rows; recursive private-metadata rejection retained
+unexpected findings: none beyond the existing informational line-ending warnings
+sealed parent audit pass and findings: this checkpoint is bounded to the prompt-safe carrier contract and is not a full Gate 2 closure audit
+exit disposition: prompt-safe carrier contract accepted for this checkpoint; Gate 2 remains in progress
+ending commit and git status: HEAD c8b0881c; only the two prompt.py files are modified in this slice
 ```
 
 ## Historical Independent Plan Review
@@ -2975,8 +3914,10 @@ ending commit and git status:
   debug-LLM, database-data-pull, and test-execution contracts plus the governing
   architecture. The 95.00% allowance applies only to at most three presealed
   inherited model-semantic trials; hard boundaries retain zero tolerance. The
-  fixed no-subagent rule supersedes any earlier implementation-time reviewer or
-  adjudicator wording.
+  That no-subagent rule was superseded by the owner's 2026-08-20 execution
+  amendment. Historical evidence above remains factual; current execution uses
+  the single reusable production implementation subagent defined in Execution
+  Roles.
 - **Residual gated preconditions:** explicit production-code authorization,
   goal creation, Gate 0 readiness, Gate 1 baseline sealing, and
   an eligible stable real-model environment for Gates 1 and 7. These remain
@@ -3009,9 +3950,9 @@ ending commit and git status:
   evidence, and performs a fresh audit pass. Gate 8 closure requires zero open
   findings; this checkpoint is parent-owned and carries no independence claim.
 
-## Parent Execution Continuity
+## Execution Continuity
 
-The root parent retains execution across the complete flight. After approval
+The root parent retains orchestration across the complete flight. After approval
 and explicit production authorization, it creates the exact closure goal in
 Mandatory Rule 2 and starts Gate 0. This plan, the governing architecture, the
 archived superseded plan, the sealed Gate 1 baseline, and Execution Evidence
@@ -3019,9 +3960,392 @@ remain the continuity package across turns. At every checkpoint the parent
 updates the plan before advancing. After each compaction it completes and
 records the Mandatory Rule 5 recovery re-read before further work. During the
 execution flight it resolves in-scope decisions through the fixed authority
-order, preserves every semantic failure as evidence, applies component-first
-diagnosis, and records genuine blockers while retaining question-free
-execution. The exact 95.00% floor permits bulk delivery before follow-up repair
-of accepted inherited residuals; each residual is fixed or transferred to a
-new active bugfix draft before archive closure. The parent marks the goal
-complete only after Gate 8 acceptance and completed-plan archive closure.
+order, hands every production-code mutation to the same reusable implementation
+subagent while available, reviews each returned checkpoint, preserves every
+semantic failure as evidence, applies component-first diagnosis, and records
+genuine blockers while retaining question-free execution. The exact 95.00%
+floor permits bulk delivery before follow-up repair of accepted inherited
+residuals; each residual is fixed or transferred to a new active bugfix draft
+before archive closure. The parent marks the goal complete only after Gate 8
+acceptance and completed-plan archive closure.
+
+### 2026-08-20 execution-governance amendment
+
+```text
+date/time: 2026-08-20
+gate: execution-governance amendment before continuation
+parent executor: /root
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+starting commit and git status: dirty shared worktree containing the ongoing V3 implementation and evidence listed by git status
+owned files: this plan only
+decision: owner removed the parent-only implementation constraint, permitted subagents, and fixed exactly one reusable subagent as the sole production-code implementation executor
+review boundary: root parent retains scope, handoffs, evidence, verification, review, cutover, and lifecycle closure; production-code edits and remediations are assigned to the same subagent whenever available
+historical evidence disposition: prior parent-only records remain unchanged as factual execution history and no longer govern future checkpoints
+exit disposition: amendment accepted; execution may continue under the Root execution owner and Production implementation owner role contracts
+```
+
+### 2026-08-20 production-executor model amendment
+
+```text
+date/time: 2026-08-20
+gate: execution-governance amendment during Gate 3/4 review
+parent executor: /root
+owner decision: all production-code changes from this checkpoint forward use a gpt-5.6-luna subagent with maximum reasoning at normal speed
+prior executor disposition: /root/v3_implementation completed its assigned Terra checkpoints and remains historical implementation evidence; it receives no further production-code handoff
+fixed reusable executor rule: root creates one Luna production implementation subagent because the model change makes replacement necessary, then reuses that Luna subagent for subsequent production edits while available
+review and lifecycle boundary: unchanged; root retains plan/evidence/verification/review/cutover/archive authority and independently accepts every returned production checkpoint
+exit disposition: amendment accepted before the next production mutation
+```
+
+### 2026-08-20 V3 runtime-policy injection amendment
+
+```text
+date/time: 2026-08-20
+gate: Gate 2 service-injection contract amendment
+authorizer: user
+root reviewer: /root
+authorized change: extend CognitionChainServicesV3 with appraisal_group_count and turn_deadline_seconds, validate their closed domains, inject both values from the already selected CognitionV3RouteSettingsV1 connector branch, and consume them in the V3 facade without rereading route environment
+architectural disposition: explicit dependency injection is accepted; hidden context-local policy and duplicate route loading are excluded
+downstream contract: configured grouping replaces hard-coded group_count=2 in cold and recurrence appraisal; one invocation-wide monotonic deadline is checked at every Decision 41 admission boundary; Decision 36 session TTL uses the injected deadline term
+production implementation owner: /root/v3_luna_implementation, the reusable gpt-5.6-luna max-reasoning normal-speed production subagent
+exit disposition: amendment accepted; Gate 2 runtime propagation may proceed after the active bounded static-remediation slice
+```
+
+### Gate 5 control-console config-read scope amendment
+
+```text
+date/time: 2026-08-20
+gate: Gate 5 partial - inactive cognition-route config read
+parent executor: /root
+reproduction: GET /api/services/brain/config returned 422 with `cognition_v3_chain_llm_model: value must not be empty` while V2 was selected; the browser E2E recorded the same 422 resource failure
+scope finding: brain_model_routes.py registered both V2 and V3 families as required descriptor defaults, while the generic service-config owner had no representation for an intentionally unconfigured inactive route
+plan amendment: add src/control_console/service_config.py and tests/test_control_console_service_config.py to Change Surface and map the exact deterministic owner node test_brain_config_allows_unconfigured_inactive_core_routes
+fixed contract: both core families remain visible/editable, only the selected required family is required, optional/inactive routes expose an honest unconfigured state, and no placeholder model value, route alias, or runtime fallback is introduced
+next checkpoint: one reusable production implementation subagent owns the bounded service-config/route fix and coupled tests; root reviews the diff and reruns the two reproduced failures
+```
+
+### Gate 5 control-console config-read checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 5 partial - inactive cognition-route config read accepted
+root reviewer: /root
+production implementation owner: /root/v3_implementation, the fixed reusable production-code subagent
+owned files: src/control_console/brain_model_routes.py; src/control_console/service_config.py; tests/test_control_console_service_config.py; tests/test_control_console_web_surface.py; tests/ownership/source_test_impact_manifest.json
+root cause and disposition: route descriptors treated both V2 and V3 core model families as simultaneously required; requiredness is now derived from the selected engine for config reads and route projection while shared routes remain required and optional sidecar routes remain optional
+exact deterministic verification: `venv\Scripts\python -m pytest tests\test_control_console_service_config.py::test_brain_config_allows_unconfigured_inactive_core_routes tests\test_control_console_web_surface.py::test_model_routes_mark_only_selected_core_family_active_and_generic_cognition_shared tests\test_control_console_web_surface.py::test_character_identity_surface_and_pace_api_contract -q` -> 3 passed
+exact browser E2E verification: `venv\Scripts\python -m pytest tests\control_console_e2e\test_cognition_graph_e2e.py::test_native_v2_failure_states_render_with_typed_evidence -q -s` -> 1 passed
+impact verification: `venv\Scripts\python -m scripts.validate_test_impact --base-ref HEAD --run` -> 63 exact mapped tests collected and passed
+static artifact verification: changed Python sources/tests compiled; ownership manifest parsed as JSON; owned diff check passed
+style review: Ruff reported only pre-existing findings in the touched modules and no new finding attributable to this checkpoint
+live environment and evaluation-integrity disposition: no live LLM call occurred; the browser E2E used its patched deterministic service boundary
+sealed root audit: accepted after one remediation returned to the same production subagent so projected route metadata uses selected-engine requiredness as well as config-field loading
+exit disposition: the reproduced 422 failures are closed; Gate 5 remains open for its remaining API/event/transcript/service evidence
+next checkpoint: reconcile Gate 4 recurrence status against the current facade/session implementation and add the missing bounded recurrence tail with the same production subagent
+```
+
+### Serial baseline recovery checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 3 recovery checkpoint
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: restored serialized V3 registry/execution/prompt/appraisal/contracts/facade and V3 fixtures after an accidental file truncation; next checkpoint is G1b/W1/recurrence parity
+starting commit and git status: working tree dirty; V3 serial path restored and deterministic suites green
+owned files: V3 serialized source and test files listed above; plan evidence record
+commands: venv\Scripts\python -m pytest tests\unit\cognition_core_v3 -q; venv\Scripts\python -m pytest tests\integration\cognition_core_v3 -q
+test/artifact results: 50 V3 unit tests passed; 10 V3 integration tests passed
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged
+active total context ceiling, completion reservation, and extension state: unchanged
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this recovery slice; deterministic serial path and test fixtures only
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: serial registry, serial execution, V3 lane services, and serial prompt carriers
+unexpected findings: accidental truncation required restoration; no semantic change was introduced
+sealed parent audit pass and findings: recovery accepted; full Gate 3 closure remains pending
+exit disposition: serial baseline recovered and green
+ending commit and git status: working tree dirty; serial baseline recovered
+```
+
+### Serial G1b/W1 checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 3 - active-branch and workspace serial steps
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. Added G1b materialization and serial W1 partition; next checkpoint is resolver recurrence continuation
+starting commit and git status: serial baseline recovered; facade.py modified in this slice
+owned files: src/kazusa_ai_chatbot/cognition_core_v3/facade.py; this plan evidence record
+commands: venv\Scripts\python -m pytest tests\unit\cognition_core_v3 -q; venv\Scripts\python -m pytest tests\integration\cognition_core_v3 -q; py_compile
+test/artifact results: 50 V3 unit tests passed; 10 V3 integration tests passed; py_compile passed
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged
+active total context ceiling, completion reservation, and extension state: unchanged
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice; deterministic G1b validation and serial W1 validation/materialization
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: active roster order, exact workspace partition handles, deterministic fallback
+unexpected findings: none
+sealed parent audit pass and findings: bounded checkpoint accepted; resolver recurrence remains open
+exit disposition: G1b/W1 serial steps accepted for this checkpoint
+ending commit and git status: facade.py modified; V3 serial baseline remains green
+```
+
+### Gate 6 impact-validation checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 6 partial - exact source-test impact validation
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. Updated ownership manifest to serial node names and ran impact validator; next checkpoint remains resolver recurrence tail and full deterministic suite
+starting commit and git status: serial baseline recovered and V3 fixtures migrated
+owned files: tests/ownership/source_test_impact_manifest.json; this plan evidence record
+commands: venv\Scripts\python -m scripts.validate_test_impact --base-ref HEAD --run
+test/artifact results: Validated 62 exact impact-test node(s)
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged
+active total context ceiling, completion reservation, and extension state: unchanged
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice; manifest and exact node collection only
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: exact mapped source-test nodes updated to current serial topology
+unexpected findings: none
+sealed parent audit pass and findings: bounded checkpoint accepted; full Gate 6 remains pending full regular suite
+exit disposition: impact validation accepted for this checkpoint
+ending commit and git status: manifest updated; serial baseline remains green
+```
+
+### Gate 6 full-suite attempt evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 6 attempt - full regular suite
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. Attempted full pytest; next checkpoint remains classify full-suite pre-existing failures and run a bounded regular suite
+starting commit and git status: serial baseline green before this attempt
+owned files: this plan evidence record
+commands: venv\Scripts\python -m pytest -q; venv\Scripts\python -m pytest -q --ignore=tests\test_cognition_core_v2_transition_coherence_live_llm.py
+test/artifact results: first full pytest collection failed on pre-existing NameError `_CAPTURED_ACCOMPLICE_INPUT` in tests/test_cognition_core_v2_transition_coherence_live_llm.py; bounded full run excluding that file exceeded the 300s command timeout
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred in this checkpoint
+live environment fingerprint: unchanged
+active total context ceiling, completion reservation, and extension state: unchanged
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice; no result suppression, pre-existing collection failure recorded separately
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: full regular suite attempt, not relying on focused suite as full-suite proof
+unexpected findings: full pytest collection fails in an existing live-LLM module; ignoring that module still did not finish within 300s
+sealed parent audit pass and findings: bounded checkpoint accepted; full regular-suite evidence remains incomplete
+exit disposition: full regular suite not yet proven; no changed-boundary failure observed before timeout
+ending commit and git status: unchanged
+```
+
+### Gate 4 session-persistence checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 4 partial - chain-session persistence integration
+parent executor: sole root owner, parent-only execution constraint
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+compaction recovery event, reread sections/references, and next checkpoint: none in this slice. Added cold session creation, recurrence reattachment classification, and terminal session advance to _run_serial_cognition; next checkpoint remains short recurrence tail
+starting commit and git status: serial baseline recovered; facade.py modified
+owned files: src/kazusa_ai_chatbot/cognition_core_v3/facade.py; this plan evidence record
+commands: venv\Scripts\python -m pytest tests\unit\cognition_core_v3 -q; venv\Scripts\python -m pytest tests\integration\cognition_core_v3 -q; py_compile
+test/artifact results: 50 V3 unit tests passed; 10 V3 integration tests passed; py_compile passed
+readiness-probe sanitized fingerprint and health: no live service, DB, LLM, or browser operation occurred
+live environment fingerprint: unchanged
+active total context ceiling, completion reservation, and extension state: unchanged
+production-data extract ids, exact provenance hashes, and redactions: none required
+evaluation-integrity audit result: PASS for this slice; process-local session carrier and diagnostics only
+local semantic reset ids and smallest-component evidence: none
+semantic successes/72, inherited residual ids, and baseline-clean means: pending Gate 7
+decisions mechanically applied from plan: session key, cold store, digest reattachment, and terminal advance
+unexpected findings: recurrence still cold-runs because the short re-decision tail is not implemented yet
+sealed parent audit pass and findings: bounded checkpoint accepted; full Gate 4 remains pending recurrence tail
+exit disposition: session persistence accepted for this checkpoint
+ending commit and git status: facade.py modified; serial baseline remains green
+```
+
+### Gate 4 sidecar and recurrence internal checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 4 partial - V3-internal sidecar and recurrence accepted
+root reviewer: /root
+production implementation owner: /root/v3_implementation, the fixed reusable production-code subagent
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+owned implementation surface: src/kazusa_ai_chatbot/cognition_core_v3/action_selection.py; execution.py; facade.py; prompt.py; session.py; subconscious.py; utils.py; V3 unit/integration tests; tests/ownership/source_test_impact_manifest.json
+implemented contract: complete cold and recurrence primary sequences retain FIFO ownership; L1 starts before primary admission and is observed without waiting at A1/G1a; one sidecar coordinator and admission ledger serialize L1, canonical JSON repair, X1, and X2; X1 finishes before X2; absent, failed, or malformed sidecar work denies authority without suppressing otherwise valid speech planning; exact session reattachment, prior-replacement consumption, live admitted-roster advancement, divergent/concurrent cold rebuild, and parent epoch arithmetic are covered
+exact Gate 4 verification: tests/integration/cognition_core_v3/test_sidecar_failure.py::test_l1_repair_x1_x2_preemption_order_cancellation_and_failure_are_bounded plus the complete tests/integration/cognition_core_v3/test_resolver_recurrence.py module -> 6 passed
+adjacent deterministic verification: tests/unit/cognition_core_v3 -> 50 passed; tests/integration/cognition_core_v3 -> 16 passed
+impact verification: venv\Scripts\python -m scripts.validate_test_impact --base-ref HEAD --run -> 68 exact mapped tests collected and passed
+static review: the changed Gate 4 functional surface compiles and executes; the broader V3 Ruff F/I sweep reports eleven inherited current-worktree findings, including the existing undefined ChainOutcome annotation in appraisal.py, which remain mandatory Gate 6 remediation and prevent a repository-static seal
+evaluation-integrity disposition: deterministic and patched-LLM orchestration only; no live LLM call, semantic scoring change, fixture-conditioned production branch, or production-data write occurred
+sealed root code audit: PASS for the V3-internal sidecar/session/recurrence slice. The root inspected lane admission, L1 cancellation/drain, lane-scoped parser injection, fresh authorization calls, exact boolean materialization, session claim/release, and primary ownership directly
+exit disposition: this bounded internal checkpoint is accepted. Gate 4 remains open for substantive live/idle connector, resolver guardrail, external one-final-state-commit/effect-idempotency, required-selection, and group-self-cognition integration evidence. Gate 2 remains open for configured appraisal-group and turn-deadline propagation
+next checkpoint: the same production subagent owns the missing exact Gate 3/4 acceptance nodes and external connector lifecycle proof within the plan-listed connector/guardrail surface
+```
+
+### Gate 3/4 connector and recurrence acceptance checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gates: Gate 3 deterministic contract surface complete; Gate 4 deterministic sidecar, recurrence, and connector lifecycle accepted
+root reviewer: /root
+production implementation owners: /root/v3_implementation for the historical Gate 3/4 implementation; /root/v3_luna_implementation for the subsequent bounded Python-style remediation under the production-executor model amendment
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+implemented contract: cold and recurrence paths execute the exact serial V3 chain; required-selection nested-role drafts reach the unchanged dialog boundary; sensitive ordinary-primary bids record ordered G1b and collapse after I2; targetless group turns can silence or emit a grounded reply proposal; live and idle connectors construct the selected engine family; recurrence preserves one action and resolver across parent epochs and performs one terminal external commit-boundary call
+canonical helper boundary: V2 build_goal_output_contract is public and all V2/V3 callers use it; zero _build_goal_output_contract occurrences remain
+exact acceptance verification: the five planned Gate 3 matrix nodes plus the recurrence and parent-retry nodes collected eight parametrized cases and passed
+adjacent deterministic verification: tests/unit/cognition_core_v3 plus tests/integration/cognition_core_v3 -> 73 passed; tests/unit/cognition_resolver plus tests/unit/nodes -> 35 passed
+impact verification: venv\Scripts\python -m scripts.validate_test_impact --base-ref HEAD --run -> 101 exact mapped tests collected and passed
+static review: the root found and closed the private V2-helper import and the py-style P-005/N-006 wrapper-return findings; the remaining broader V3 Ruff findings stay assigned to Gate 6
+evaluation-integrity disposition: deterministic and patched-LLM orchestration only; no live LLM call, semantic scoring change, fixture-conditioned production branch, or production-data write occurred
+sealed root code audit: PASS for the completed Gate 3/4 deterministic and connector lifecycle surface
+exit disposition: Gate 4 deterministic acceptance is complete, with formal checklist sealing ordered after Gate 2 and Gate 3 predecessor closure. Gate 3 remains dependent on Gate 2 configured appraisal-group and turn-deadline propagation
+next checkpoint: complete the remaining Gate 5 control-console chain panels, exact documentation/observability nodes, and browser evidence with the reusable gpt-5.6-luna production subagent
+```
+
+### Gate 5 control-console chain-panel checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 5 partial - paired sanitized chain panels accepted
+root reviewer: /root
+production implementation owner: /root/v3_luna_implementation, the reusable gpt-5.6-luna max-reasoning normal-speed production subagent
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+implemented contract: bootstrap, Overview, and Debug expose strict bounded chain-run snapshots; one service read projects exact-correlated live/self graph and chain pairs; mismatch and absence fail closed to not_reported without a global or stale fallback; the static renderer allowlists and escapes every approved field; missing values including step_count render not_reported; mobile and desktop layouts remain bounded
+focused deterministic verification: console contracts, client, web surface, and manifest contract -> 23 passed; Ruff F/I, JavaScript syntax, and git diff checks passed
+exact Gate 5 browser E2E: tests/control_console_e2e/test_cognition_graph_e2e.py::test_v3_chain_panels_are_responsive_and_correlated -> 1 passed
+browser environment: the in-app Browser runtime was selected first for http://127.0.0.1:8765, but no backend was connected and agent.browsers.list() returned empty after the prescribed recovery check; the plan-mapped repository Playwright E2E was used as the explicit fallback
+visual evidence: v3_chain_panels_overview_correlated.png shows distinct mobile live/self rows with exact run and trace correlation and no overlap; v3_chain_panels_debug_absent_safe.png shows the desktop Debug absent-safe table with every missing field rendered not_reported; the root inspected both screenshots
+redaction evidence: the renderer exposes only status, chain_run_id, run_id, llm_trace_id, cognition_invocation_id, chain_model_name, sidecar_model_name, terminal_disposition, started_at, completed_at, step_count, and warning_codes; the exact test rejects raw_prompt, raw_output, endpoint leakage, and cross-run substitution
+sealed root code and visual audit: PASS for the control-console panel slice
+exit disposition: this bounded checkpoint is accepted. Gate 5 remains open for the exact protected/sanitized cross-owner observability integration node and governed documentation contract
+next checkpoint: add the missing Gate 5 observability and documentation acceptance nodes and align only the stale governed ICD sections with the same Luna worker
+```
+
+### Gate 5 observability and governed-document checkpoint evidence
+
+```text
+date/time: 2026-08-20
+gate: Gate 5 deterministic observability surface accepted; formal sequential seal pending predecessor gates
+root reviewer: /root
+production implementation owner: /root/v3_luna_implementation, the reusable gpt-5.6-luna max-reasoning normal-speed production subagent
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+implemented contract: protected full-mode transcript content stays behind the protected trace boundary; the cognition_chain event, persisted cognition_chain_run.v1 row, brain-service live/self projection, and console projection contain bounded sanitized fields only; DB and service reads require exact run_id plus llm_trace_id; mismatched/global-latest substitution fails closed; trace, event, and DB write failures remain best effort and do not propagate into cognition-facing completion
+exact Gate 5 integration: tests/integration/cognition_core_v3/test_chain_observability.py::test_protected_and_sanitized_records_share_exact_service_console_correlation -> 1 passed
+adjacent deterministic verification: tracing, event, DB, service graph, console contract, and console client suites -> 30 passed including the exact integration node
+impact/static verification: Ruff F/I passed for the new integration test; scripts.validate_test_impact --base-ref HEAD validated 102 exact nodes; git diff --check passed with line-ending notices only
+governed documentation amendment: per the user's 2026-08-20 instruction, no documentation unit test exists or is referenced. The root manually audited every governed ICD against its source owner and the approved target contract; the impact matrix records parent Gate 5 ICD/source audit evidence instead of a prose unit test
+manual ICD/source audit findings closed: removed the obsolete empty-role-assignment parity limitation; documented selected-engine service construction, serial primary/single-stream sidecar topology, recurrence and one terminal commit, V2 public helper reuse, context/timing ownership, exact DB/service/console correlation, protected versus sanitized observability, and operator cutover/rollback procedures
+sealed root code and documentation audit: PASS for the protected/sanitized correlation, persistence, service pairing, console panel, and governed-document ownership slice
+exit disposition: this Gate 5 slice is accepted. Gate 5 remains open for the plan-required cognition_engine_descriptor.v1 runtime-status field and its read-only console overview projection. The checklist remains ordered behind Gate 2, Gate 3, and Gate 4; configured appraisal grouping and turn-deadline claims become runtime-current only when Gate 2 propagation is closed
+next checkpoint: propagate the authorized Gate 2 appraisal grouping and turn deadline, then implement the bounded Gate 5 engine-descriptor service/console slice before sequential sealing
+```
+
+### Gate 2 runtime-policy closure and sequential Gate 3/4 seal
+
+```text
+date/time: 2026-08-20
+gates: Gate 2 accepted; Gate 3 accepted; Gate 4 accepted
+root reviewer: /root
+production implementation owner: /root/v3_luna_implementation, the reusable gpt-5.6-luna max-reasoning normal-speed production subagent
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+implemented amendment: CognitionChainServicesV3 owns validated appraisal_group_count and turn_deadline_seconds; the selected V3 connector injects both from its one already-loaded route-settings object; cold and recurrence appraisal grouping use the injected count; each public invocation creates one absolute monotonic deadline; FIFO primary/sidecar admission, semantic attempts, canonical JSON repair, L1, X1, and X2 all receive the same deadline and clamp provider timeout to the smaller of route timeout and remaining turn time; deterministic cleanup and validation remain available after model admission closes; chain-session expiry uses COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS * COGNITION_RESOLVER_MAX_CYCLES + services.turn_deadline_seconds + 30
+production hashes: contracts.py 629E8E223B87851D4A2F5744770AECB534F0D8D5795BE20C259B751F631E5960; execution.py AF85A5C78D21BA6579D988D378D292C467D39EC851CA307A53661BFC379FDB09; facade.py E0DD783966209EE02204A677D4BE180D6542650B043729AA8A234F80DE801E6D; persona_supervisor2_cognition.py 5744916274730A198CB11CA34BBE27206180E28C4C7CE9EB2E19397A59AA45DE
+subagent verification: 103 owned tests passed; 16 focused sidecar/recurrence tests passed; Ruff F/I, compileall, 111-node impact validation, and git diff --check passed
+independent root verification: tests/unit/cognition_core_v3, tests/unit/nodes/test_persona_supervisor2_cognition.py, deterministic-head integration, and resolver-recurrence integration -> 70 passed; focused Ruff F/I and compileall passed; git diff --check passed with line-ending notices only
+sealed root code audit: PASS. The root inspected public deadline construction, cold and recurrence propagation, every direct model and repair call, FIFO admission, timeout clamping, configured grouping, connector injection, transcript rehydration, and exact session TTL
+sequential predecessor seal: the previously accepted Gate 3 cold-chain and Gate 4 sidecar/recurrence/connector evidence no longer have an open Gate 2 dependency. Gates 2, 3, and 4 are accepted in order
+evaluation-integrity disposition: deterministic and patched-LLM verification only; no live LLM call, semantic scoring change, production-data read, or production-data write occurred
+exit disposition: Gates 2, 3, and 4 accepted; Gate 5 remains open only for cognition_engine_descriptor.v1 and its read-only console overview projection
+next checkpoint: implement and verify the bounded Gate 5 engine-descriptor service/console slice with the same Luna production subagent
+```
+
+### Gate 5 cognition-engine descriptor closure
+
+```text
+date/time: 2026-08-20
+gate: Gate 5 accepted
+root reviewer: /root
+production implementation owner: /root/v3_luna_implementation, the reusable gpt-5.6-luna max-reasoning normal-speed production subagent
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+implemented contract: config.py exposes the already-loaded selected cognition route settings without environment reread or engine query and defensively copies the mutable V2 mapping; OpsRuntimeStatusResponse adds the strict optional cognition_engine_descriptor.v1 field; the service boundary renders deterministic selected V2/V3 model and chain-policy values without endpoint, API key, credential, or secret; V2 uses its stable sorted unique model set and zeroed chain-only fields; V3 uses exact selected chain/sidecar/group/context/budget/deadline values; the console allowlists exact fields, ignores additive future fields, fails unknown or incomplete schemas to not_reported, escapes all rendered values, and exposes one read-only Overview configuration card without switching controls
+contract remediation: the root audit rejected broad numeric-only validation. CognitionEngineDescriptorResponse now closes engine_id to v2/v3, rejects booleans for numeric fields, closes grouping to 0/1/2/3/6, requires all V2 disabled/zero invariants, and enforces V3 budget, context, deadline, sidecar/model coupling, and subconscious-sidecar dependency
+subagent verification: 92 owned tests passed; exact responsive browser E2E passed; 121 impact nodes passed; Ruff F/I, compileall, node --check, and git diff --check passed
+independent root deterministic verification: config, runtime status, console contract/client/web, and exact cross-owner observability suites -> 98 passed with one Starlette/httpx deprecation warning; exact browser E2E -> 1 passed; expected best-effort tracing/event backend warnings remained non-propagating
+root static verification: Ruff F/I passed; compileall passed; node --check passed; git diff --check passed with working-copy line-ending notices only; repository search found no descriptor projection of API key, endpoint, credential, or secret fields and no runtime engine switch
+browser environment and visual audit: the in-app Browser backend remained unavailable from the earlier Gate 5 recovery check, so the approved repository Playwright fallback was rerun with external temp isolation. The root inspected v3_chain_panels_overview_correlated.png and v3_chain_panels_debug_absent_safe.png; the mobile Overview shows distinct live/self/engine cards with the exact configured values and no horizontal overflow, while the desktop Debug panel renders every absent chain field as not_reported
+environmental test note: one initial root rerun placed pytest basetemp under the repository, so three subprocess config tests legitimately discovered the repository dotenv and failed their empty-environment assertions. The same tests passed under normal external temp isolation; this harness-geometry result is retained and is not a product failure
+production hashes: config.py 553ABB9892DE311FED4F4BF27378BCD4984A042075C69BDEF6E54944B8230C3E; brain_service/contracts.py 3F3F1B40FB7B7EE84DA3905F0B601198CD1BBDD38CF6EE661B2D1105ED5E0464; service.py E511C93457F2D1B21C2CFE943353810A34091BB475AAB7510B7C0AFD530CFB6B; control_console/app.py 720CA37511C2BFF46DF4852F4010DE347D0723CE04BCD9B88AEE8CA3360416C9; static/index.html 133A8CF30805C5E192D090EEED1A8E9B4EB0E0E4E19ED829D008ADD13DFC3543; static/console.js FDC0A1D252CC349329E3C5684C1DADB5E03A3E08FC4C90A065B8BD8BC5AB2540
+sealed root code and visual audit: PASS. All Gate 5 observability, persistence, service, documentation, console, redaction, absent-state, and responsive-layout requirements are accepted
+exit disposition: Gate 5 accepted; proceed to Gate 6 full deterministic, impact, and static verification
+```
+
+### Gate 6 deterministic, impact, static, and regular-suite closure
+
+```text
+date/time: 2026-08-20
+gate: Gate 6 accepted
+root reviewer: /root
+production implementation owner: /root/v3_luna_implementation, reused for the bounded V2 import-order cleanup under the owner's gpt-5.6-luna max-reasoning normal-speed rule
+goal objective and state: Close cognition_v3_hybrid_agentic_loop_reconciliation_plan.md through all Gates 0-8, cutover evidence, final audit, and archive completion; active; no token budget
+fixed verification sequence: V2 unit -> 133 passed with the two Gate 1 baseline failures retained; V3 unit -> 50 passed; V3 integration -> 24 passed; resolver/node -> 35 passed; shared parsing/config/selector -> 107 passed; persistence/event/service graph -> 22 passed; console -> 33 passed with one Starlette/httpx deprecation warning
+impact verification: scripts.validate_test_impact --base-ref 047bed9500111e44872b96c5445b6a64686f5803 --run collected and passed all 165 exact mapped nodes
+collection disposition: unmodified full collection still fails on the pre-existing NameError _CAPTURED_ACCOMPLICE_INPUT in tests/test_cognition_core_v2_transition_coherence_live_llm.py; explicit exclusion yields clean collection of 4,825 selected regular tests from 5,845 collected with 1,020 live-mode deselections
+regular-suite disposition: the complete unit/integration/control-console-E2E segment passed 287 tests with 3 skips and only the two sealed V2 failures deselected; bounded top-level segmentation produced 4,386 additional passes. Unchanged failures were retained and classified by exact owner family: action-spec fixtures missing surface_role; stale V2 intention, continuation, scene-context, conversation-progress, task-resolution, and reproduction fixtures; one missing captured diagnostic export; one migration-script clock audit; and one unchanged baseline owner-matrix omission. No changed cognition V3 boundary failed
+environmental stall: tests/test_service_background_consolidation.py::test_chat_queues_background_consolidation_for_mapping_state times out alone. The external artifact C:\Temp\kazusa_gate6_bg_stall.log records an idle Windows asyncio I/O loop with Mongo monitor threads active and no Python frame executing changed cognition logic. This reproduces the earlier pre-existing full-suite timeout; changed service graph/status/input-queue coverage passed 115 focused tests outside that stalled legacy module
+changed-boundary remediation: the newly added COGNITION_V3_CHAIN_LLM and COGNITION_V3_SIDECAR_LLM routes were missing from two console test catalogs. The tests now assert 28 routes, 89 derived fields, and the exact two-route Cognition Core V3 group; 5 exact console nodes pass. No documentation unit test was created or modified for this plan
+static remediation: the reused Luna production agent applied import-only Ruff ordering fixes in cognition_core_v2/action_selection.py and workspace.py. Final changed-file Ruff F/I, compileall, node --check, git diff --check, and stale V3 topology search pass
+final hashes: cognition_core_v2/action_selection.py 07BBEE660448D29D6F003DD019DF19E47CE78143E9602869656C4A6501A3E8C7; cognition_core_v2/workspace.py D7149CBED945739C7374860957E1498E60C0BFCB3FDCED447E5B2DEB115542C4; test_control_console_brain_model_routes.py E8F90B34579F1CFA176A6B48393869AD4BFE8610FA95CF63D079F4FF0C13E28A; test_control_console_config_routes.py 2DA322BC3F8C5FD2353B13A9FC546B2ACFF861480CF1EBF9B9D265B1CE206EAE
+evaluation-integrity disposition: deterministic, patched-LLM, and browser-harness verification only; no live semantic score, production-data read, production-data write, hidden production branch, or result suppression occurred. Every baseline failure and environmental stall remains visible
+sealed root audit: PASS for every changed production boundary and its mapped deterministic evidence; impact coverage is 100%; no undocumented production source change remains
+exit disposition: Gate 6 accepted; Gate 7 remains unopened pending a bounded test-contract amendment because the sealed 24-case live module invokes only the V2 baseline runner and the five-node performance module named by the architecture manifest does not exist
+next checkpoint: obtain owner approval for the exact Gate 7 test-contract amendment, then run live nodes one at a time with artifact inspection
+```
+
+### Gate 7 additive test-contract amendment approval
+
+```text
+date/time: 2026-08-20
+owner decision: approved
+amendment scope: add tests/test_cognition_core_v3_candidate_live_llm.py for the exact 24 V3 candidate cases and create the already-declared tests/test_cognition_core_v3_performance_live_llm.py for the five fixed performance nodes
+sealed boundary: tests/fixtures/cognition_core_v3_architecture_manifest.json, tests/fixtures/cognition_core_v3_live_case_manifest.json, tests/cognition_core_v3_comparison_harness.py, and tests/test_cognition_core_v3_live_llm.py remain byte-identical to their Gate 1 hashes
+ownership exception: the candidate live module is additive and Gate 7-only; it reuses the immutable case rows and effect-free trial contract without changing scoring, rerun, denominator, or hard-gate rules
+executor constraint: production remediation, if live evidence exposes a production defect, remains owned by the single reusable gpt-5.6-luna max-reasoning normal-speed subagent; test harness and parent-authored review artifacts remain root-owned
+documentation-test disposition: no documentation unit test may be created; any such test discovered during this gate is removed
+entry disposition: Gate 7 opened for harness implementation, collection sealing, readiness probes, one-node-at-a-time live execution, artifact inspection, blinded scoring, performance evidence, and parent calculation audit
+```
+
+### Gate 7 batch-first live-execution amendment
+
+The owner changed Gate 7 execution order on 2026-08-21. The parent must first
+run the complete fixed Gate 7 real-LLM inventory without interleaving further
+production remediation: the already-sealed V2 controls, all fixed V3 candidate
+trials, the five performance nodes, and the serving/long-context evidence.
+Every node still runs one at a time, every raw result remains retained, and no
+valid semantic result is rerun or suppressed. After the full inventory is
+frozen, the parent performs one failure-mode collection pass, groups findings
+by semantic or deterministic owner, and then remediates those owner groups one
+by one through the applicable component-first ladder before any verification
+rerun.
+
+This amendment changes scheduling only. It preserves the sealed manifests,
+three-trial denominator, blinding, score rubric, hard gates, exact 69/72 floor,
+performance thresholds, serving requirements, countercase requirement,
+production-code ownership, and evaluation-integrity rules. The earlier
+two-failure stop in Gate 7 is superseded only for completing this batch-first
+initial evidence flight; every triggered `local_semantic_reset.v1` stays open
+and must close before Gate 7 acceptance. The interrupted dynamic appraisal-
+domain prompt correction was removed before the batch began, leaving the last
+reviewed first-packet remediation as the candidate baseline. Documentation
+prose remains audited by the parent and has no documentation unit test.

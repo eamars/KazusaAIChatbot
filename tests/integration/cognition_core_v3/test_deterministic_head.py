@@ -9,6 +9,10 @@ content to pin cross-run stage-order stability.
 
 from __future__ import annotations
 
+import json
+from copy import deepcopy
+from dataclasses import replace
+
 import pytest
 
 from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
@@ -18,6 +22,7 @@ from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     SEMANTIC_QUESTION_KINDS,
     validate_cognition_core_input,
+    validate_cognition_core_output,
 )
 from kazusa_ai_chatbot.cognition_core_v2.facade import (
     _cognition_elapsed_seconds,
@@ -25,9 +30,6 @@ from kazusa_ai_chatbot.cognition_core_v2.facade import (
     _fact_without_producer,
     _native_relationship_context,
     plan_semantic_questions,
-)
-from kazusa_ai_chatbot.cognition_core_v3.facade import (
-    _make_terminal_stage_producer,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     validate_cognition_state,
@@ -39,26 +41,21 @@ from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
     apply_state_update,
     create_deterministic_goals,
 )
+from kazusa_ai_chatbot.cognition_core_v3 import facade as v3_facade
 from kazusa_ai_chatbot.cognition_core_v3 import run_cognition
 from tests.integration.cognition_core_v3.conftest import (
     ScriptedLLMInvoker,
     default_scripted_responses,
     episode_evidence_handle,
     make_v3_services,
+    ordinary_goal_draft,
 )
 
-# Registry-ordered ainvoke sequence for one canonical scripted run: the first
-# wave chains in registry order, then the isolated ordinary goal chain and the
-# terminal outcome chain, ending with the single accepted action plan.
 EXPECTED_STAGE_CALL_SEQUENCE = (
-    "event_agency",
-    "moral_identity",
-    "relationship_social",
-    "epistemic_comparison_memory",
-    "existential_drive",
-    "goal_ordinary_response",
-    "goal_threat_outcome",
-    "action_planning",
+    "A1",
+    "A2",
+    "G1a",
+    "P1",
 )
 
 
@@ -118,6 +115,37 @@ def _deterministic_head(payload):
     return preliminary_state, questions
 
 
+def _active_joy_event(evidence_ref):
+    """Build one complete retained event that deterministically derives joy."""
+
+    return {
+        "entity_id": "event:joy",
+        "description": "A meaningful success remains active.",
+        "salience": 80,
+        "role_refs": [],
+        "evidence_refs": [dict(evidence_ref)],
+        "created_at": "2026-07-14T00:00:00Z",
+        "updated_at": "2026-07-14T00:00:00Z",
+        "status": "active",
+        "outcome_impact": 80,
+        "responsibility": 70,
+        "intentionality": 0,
+        "harm": 0,
+        "unfairness": 0,
+        "exposure": 0,
+        "repair_need": 0,
+        "reparability": 100,
+        "expectation_mismatch": 0,
+        "norm_violation": 0,
+        "contamination_risk": 0,
+        "identity_threat": 0,
+        "comparison_gap": 0,
+        "vastness": 0,
+        "memory_warmth": 0,
+        "temporal_loss": 0,
+    }
+
+
 def test_deterministic_head_plans_all_six_questions_for_episode_evidence(
     cognition_payload,
 ):
@@ -161,28 +189,6 @@ def test_branch_selection_without_persistent_goals_selects_ordinary_response_onl
 
 
 @pytest.mark.asyncio
-async def test_terminal_outcome_stage_skips_model_call_without_planned_question(
-    cognition_payload, v3_services
-):
-    """The terminal stage keeps a contentless accepted state with no call."""
-    preliminary_state, _ = _deterministic_head(cognition_payload)
-    producers = _make_terminal_stage_producer(
-        v3_services, preliminary_state, (), {}
-    )
-
-    outcome = await producers["goal_threat_outcome"](None)
-
-    assert outcome.accepted is True
-    assert outcome.semantic_summary is None
-    assert outcome.local_state == {
-        "selected_evidence_handles": [],
-        "propositions": [],
-        "deltas": [],
-    }
-    assert v3_services.llm.calls == []
-
-
-@pytest.mark.asyncio
 async def test_stage_call_sequence_is_stable_across_two_runs(
     cognition_payload,
 ):
@@ -201,4 +207,164 @@ async def test_stage_call_sequence_is_stable_across_two_runs(
 
     assert tuple(first_invoker.calls) == EXPECTED_STAGE_CALL_SEQUENCE
     assert tuple(second_invoker.calls) == EXPECTED_STAGE_CALL_SEQUENCE
+
+
+@pytest.mark.asyncio
+async def test_cold_serial_chain_preserves_complete_v2_state_emotion_relationship_goal_and_action_output(
+    cognition_payload,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """One cold chain emits the complete V2 state-to-action surface."""
+
+    payload = deepcopy(cognition_payload)
+    evidence_ref = payload["evidence"][0]["evidence_ref"]
+    payload["mutable_state"]["active_events"] = [
+        _active_joy_event(evidence_ref)
+    ]
+    episode_handle = episode_evidence_handle(payload)
+    defaults = default_scripted_responses(episode_handle)
+    appraisal_families = {
+        "A1": (
+            "event_agency",
+            "goal_threat_outcome",
+            "epistemic_comparison_memory",
+        ),
+        "A2": (
+            "relationship_social",
+            "moral_identity",
+            "existential_drive",
+        ),
+    }
+
+    def scripted_response(stage_name: str, attempt_index: int) -> str:
+        families = appraisal_families.get(stage_name)
+        if families is not None:
+            family = families[attempt_index]
+            return json.dumps(
+                {
+                    family: [{
+                        "question_id": family,
+                        "proposition": None,
+                        "delta": None,
+                    }],
+                },
+                ensure_ascii=False,
+            )
+        return defaults[stage_name]
+
+    invoker = ScriptedLLMInvoker(responses=scripted_response)
+    group_counts: list[int] = []
+    original_group_builder = v3_facade.v3_prompt.build_grouped_appraisal_questions
+
+    def capture_group_count(*, planned_questions, group_count, l1_residue=None):
+        group_counts.append(group_count)
+        return original_group_builder(
+            planned_questions=planned_questions,
+            group_count=group_count,
+            l1_residue=l1_residue,
+        )
+
+    monkeypatch.setattr(
+        v3_facade.v3_prompt,
+        "build_grouped_appraisal_questions",
+        capture_group_count,
+    )
+
+    output = await run_cognition(
+        payload,
+        replace(make_v3_services(invoker), appraisal_group_count=6),
+    )
+    validated = validate_cognition_core_output(output)
+    replacement_state = validated["state_update"]["replacement_state"]
+
+    assert tuple(invoker.calls[-2:]) == ("G1a", "P1")
+    assert set(invoker.calls[:-2]) <= {"A1", "A2"}
+    assert replacement_state["state_scope"] == "user"
+    assert replacement_state["active_events"][0]["entity_id"] == "event:joy"
+    assert replacement_state["affect_activations"][0]["emotion_id"] == "joy"
+    assert validated["affect_projection"][0]["emotion"] == "joy"
+    assert validated["relationship_projection"]["axis_summaries"]["care"]
+    assert validated["admitted_bid"]["branch_id"] == "ordinary_response"
+    assert validated["intention"]["selected_branch_id"] == "ordinary_response"
+    assert validated["action_requests"] == []
+    assert validated["resolver_requests"] == []
+    assert validated["goal_resolution"] == "blocked"
+    assert group_counts == [6]
+
+
+@pytest.mark.asyncio
+async def test_sensitive_ordinary_primary_collapse_records_ordered_g1b(
+    cognition_payload,
+):
+    """A sensitive ordinary bid retains the ordered active-bid observation."""
+
+    payload = deepcopy(cognition_payload)
+    evidence_handle = episode_evidence_handle(payload)
+    evidence_ref = payload["evidence"][0]["evidence_ref"]
+    payload["mutable_state"]["goals"] = [{
+        "entity_id": "goal:bond-protection",
+        "description": "Protect a current boundary.",
+        "salience": 70,
+        "role_refs": [],
+        "evidence_refs": [dict(evidence_ref)],
+        "created_at": "2026-07-14T00:00:00Z",
+        "updated_at": "2026-07-14T00:00:00Z",
+        "status": "pursuing",
+        "goal_kind": "bond_protection",
+        "importance": 80,
+        "progress": 10,
+        "obstruction": 0,
+        "expected_success": 50,
+        "controllability": 50,
+        "recoverability": 50,
+        "urgency": 60,
+    }]
+    ordinary_draft = json.loads(ordinary_goal_draft(evidence_handle))
+    ordinary_draft["relational_willingness"] = {
+        "applicability": "relationship_sensitive",
+        "stance": "negotiate",
+        "current_user_relationship_state": "developing_or_uncertain",
+        "reason": "当前关系需要协商边界。",
+        "evidence_handles": [evidence_handle],
+    }
+    active_group = {
+        "bids": [{
+            "branch_id": "bond_protection",
+            "intention": "Protect the active boundary.",
+            "desired_outcome": "The boundary remains clear.",
+            "concrete_detail": "State the current boundary.",
+            "reason": "The persistent boundary goal remains active.",
+            "private_monologue": "Keep the boundary grounded.",
+            "target_role_handles": [],
+            "evidence_handles": [evidence_handle],
+            "expected_consequences": ["The boundary remains visible."],
+            "confidence": "medium",
+        }],
+    }
+    responses = default_scripted_responses(evidence_handle)
+    responses["G1a"] = json.dumps(ordinary_draft, ensure_ascii=False)
+    responses["G1b"] = json.dumps(active_group)
+    invoker = ScriptedLLMInvoker(defaults=responses)
+
+    output = await run_cognition(payload, make_v3_services(invoker))
+
+    assert tuple(invoker.calls) == ("A1", "A2", "G1a", "G1b", "P1")
+    assert output["admitted_bid"]["branch_id"] == "ordinary_response"
+    assert output["relational_willingness"]["stance"] == "negotiate"
+    assert output["diagnostics"]["warnings"].count(
+        "authoritative_relational_willingness"
+    ) == 1
+    branches = output["cognition_observability"]["branches"]
+    assert [branch["goal_kind"] for branch in branches] == [
+        "ordinary_response",
+        "bond_protection",
+    ]
+    assert [branch["status"] for branch in branches] == [
+        "completed",
+        "completed",
+    ]
+    assert [branch["selection"] for branch in branches] == [
+        "primary",
+        "suppressed",
+    ]
 

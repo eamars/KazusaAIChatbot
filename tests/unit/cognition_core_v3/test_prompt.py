@@ -304,3 +304,49 @@ def test_runtime_prompts_exclude_test_fixture_rubric_and_expected_answer_metadat
         scene_marker=legitimate_user_text,
     )
     assert legitimate_user_text in legitimate_message
+
+
+def test_first_message_allows_goal_fields_only_in_registered_question() -> None:
+    """A first goal question retains its fields outside the cold carriers."""
+
+    sections = _first_packet_sections("goal-first-scene")
+    question = prompt.ChainQuestion(
+        contract_name="ordinary_goal_bid.v1",
+        payload={
+            "branch_intent_guidance": "advance the current ordinary goal",
+            "private_continuity_context": "prompt-safe semantic continuity",
+        },
+    )
+    first_message = prompt.build_first_user_message(
+        **sections,
+        question=question,
+    )
+    first_packet = json.loads(first_message)
+
+    assert first_packet[-1]["question"]["payload"] == dict(
+        question.payload
+    )
+
+    carrier_sections = _first_packet_sections("goal-carrier-scene")
+    carrier_sections["episode_and_scene"]["branch_intent_guidance"] = (
+        "misplaced goal-only carrier"
+    )
+    with pytest.raises(prompt.PromptContractError, match="goal-only"):
+        prompt.build_first_user_message(
+            **carrier_sections,
+            question=question,
+        )
+
+    with pytest.raises(prompt.PromptContractError, match="private metadata"):
+        prompt.ChainQuestion(
+            contract_name="ordinary_goal_bid.v1",
+            payload={"run_id": "private-run"},
+        )
+    with pytest.raises(
+        prompt.PromptContractError,
+        match="evaluation metadata",
+    ):
+        prompt.ChainQuestion(
+            contract_name="ordinary_goal_bid.v1",
+            payload={"case_id": "evaluation-case"},
+        )

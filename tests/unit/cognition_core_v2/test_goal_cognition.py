@@ -24,9 +24,9 @@ from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
     ORDINARY_RECURRENCE_SELECTION_GOAL_COGNITION_PROMPT,
     REQUIRED_SELECTION_GOAL_PROMPT,
     SELECTION_GOAL_REPAIR_INSTRUCTIONS,
-    _build_goal_output_contract,
     _conversation_progress_evidence,
     _materialize_recurrence_relational_willingness,
+    build_goal_output_contract,
     run_goal_cognition,
     selection_goal_draft_to_goal_bid,
     validate_goal_bid_draft,
@@ -39,7 +39,7 @@ from kazusa_ai_chatbot.cognition_episode import (
 )
 
 MODULE_PATH = "kazusa_ai_chatbot.cognition_core_v2.goal_cognition"
-EXPECTED_SYMBOLS = ["run_goal_cognition"]
+EXPECTED_SYMBOLS = ["run_goal_cognition", "build_goal_output_contract"]
 _REPLAY_FIXTURE_PATH = (
     Path(__file__).resolve().parents[3]
     / "tests"
@@ -259,7 +259,7 @@ def test_required_selection_prompt_separates_wrapper_and_embedded_action_roles()
         assert "code_owned_fields" in instruction
         assert "相同 wording" in instruction
 
-    selection_contract = _build_goal_output_contract(
+    selection_contract = build_goal_output_contract(
         evidence_handles={"e1"},
         episode_evidence_handles={"e1"},
         required_evidence_handles={"e1"},
@@ -317,7 +317,7 @@ def test_required_selection_prompt_projects_exact_writable_endpoint_fields() -> 
         ),
     )
     for authoritative_operation, writable_fields, known_fields in cases:
-        contract = _build_goal_output_contract(
+        contract = build_goal_output_contract(
             evidence_handles={"e1"},
             episode_evidence_handles={"e1"},
             required_evidence_handles={"e1"},
@@ -523,7 +523,7 @@ def test_goal_prompt_declares_one_primary_current_scene_objective() -> None:
 def test_goal_output_contract_keeps_existing_schema() -> None:
     """Keep the generic goal schema and consequence bounds stable."""
 
-    generic_contract = _build_goal_output_contract(
+    generic_contract = build_goal_output_contract(
         evidence_handles={'e1'},
         episode_evidence_handles={'e1'},
         required_evidence_handles=set(),
@@ -532,7 +532,7 @@ def test_goal_output_contract_keeps_existing_schema() -> None:
         require_relational_willingness=False,
         maximum_evidence_handles=9,
     )
-    selection_contract = _build_goal_output_contract(
+    selection_contract = build_goal_output_contract(
         evidence_handles={'e1'},
         episode_evidence_handles={'e1'},
         required_evidence_handles={'e1'},
@@ -542,7 +542,7 @@ def test_goal_output_contract_keeps_existing_schema() -> None:
         maximum_evidence_handles=9,
         authoritative_operation=_input_operation(),
     )
-    relational_contract = _build_goal_output_contract(
+    relational_contract = build_goal_output_contract(
         evidence_handles={'e1'},
         episode_evidence_handles={'e1'},
         required_evidence_handles=set(),

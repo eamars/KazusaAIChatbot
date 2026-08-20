@@ -11,6 +11,9 @@ Engine selection happens in `cognition_core_selector`. The closed set is
 `v2` / `v3`, selected by the `COGNITION_CORE_ENGINE` setting (default `v2`).
 The persona supervisor connector imports one module-level binding from that
 selector, so its live, idle, and guarded call sites all share the same engine.
+The selected branch constructs only its own core services. The generic
+`COGNITION_LLM` cognition route remains a shared non-core service for callers
+outside the selected core branch.
 
 ## Public surface
 
@@ -18,8 +21,9 @@ The package exports exactly eleven names, pinned by
 `tests/unit/cognition_core_v3/test_public_api.py`:
 
 - `run_cognition(input_payload, services)` — the one public entrypoint; the
-  deterministic orchestrator owns chain selection, stage order, visibility,
-  checkpoints, attempt caps, validation, and failure disposition.
+  deterministic orchestrator owns the serialized chain, stage order,
+  visibility, session continuation, attempt caps, validation, and failure
+  disposition.
 - `StageResult`, `StageFailure` and the bounded failure classes
   `STRUCTURAL_FAILURE_CLASS`, `PROVIDER_FAILURE_CLASS`,
   `EXHAUSTION_FAILURE_CLASS`.
@@ -35,37 +39,42 @@ part of the package export surface.
 
 ## Topology
 
-One invocation runs a parallel first wave of registry-ordered appraisal chains
-in the exact order declared by `registry.APPRAISAL_FIRST_WAVE_CHAINS`:
-`causal_normative`, `relationship`, `epistemic_meaning`. The registry is an
-immutable import-time declaration; `_validate_registry()` fails startup when
-the first-wave order deviates or when the terminal outcome chain joins the
-first wave.
+One invocation owns one serialized primary chain on one primary lane. Its exact
+cold sequence is `A1`, `A2`, `I1`, `G1a`, optional `G1b`, `I2`, conditional
+`W1`, `P1`, off-chain `X1`/`X2`, and `O`. The immutable registry validates that
+order and the configured appraisal grouping maps (`1`, `2`, `3`, or `6`); it
+does not launch parallel waves or use checkpoint joins.
 
-Each preliminary branch kind runs an isolated goal chain (`goal_cognition.py`).
-The accepted appraisal prefix reduces into a provisional state, on which one
-fresh canonical `terminal_outcome` stage (single-stage chain
-`goal_threat_outcome`) runs. Final reduction and exactly one relationship
-maintenance pass follow, then dependency-ready branch kinds reactivate before
-the complete-bid join in `workspace.py`.
+`A1` and `A2` are grouped appraisal steps using the canonical V2 micro-item
+domains. `I1` performs one deterministic state reduction and relationship
+maintenance pass. `G1a` emits the ordinary bid, `G1b` revises the frozen active
+branch roster when present, `I2` applies the existing collapse rules, and `P1`
+assembles the unchanged V2 output products. Accepted primary messages remain
+an append-only transcript; a failed candidate is removed only by the bounded
+tail-rollback repair contract.
 
-Every wave shares one invocation-wide attempt ledger whose per-stage caps
-mirror the V2 model attempt policy (`V2_APPRAISAL_TOTAL_ATTEMPTS` for
-appraisal stages, `V2_MODEL_TOTAL_ATTEMPTS` for goal stages). Producer budgets
-are keyed `chain:stage` so every stage keeps its own full question budget, and
-a shared-budget exhaustion stops the stage at the boundary with a typed
-disposition instead of issuing another call.
+An optional sidecar is one single-stream lane for L1 residue, JSON repair, and
+authorization. It is absent or complete, has a distinct endpoint/model
+identity, and cannot interleave with another sidecar request. Sidecar failure
+is advisory or deny-all according to the existing V2 contract and never
+changes the primary semantic owner.
+
+Resolver recurrence reattaches to the episode session rather than rerunning
+the cold anchor. Its bounded tail is observation, delta appraisal,
+deterministic reduction, bid revision, `I2`, conditional `W1`, fresh `P1`,
+off-chain authorization, and `O`. A terminal recurrence still executes this
+short tail, and one terminal state commit occurs only after the loop.
 
 ## Cache-affine transcripts
 
-Each semantic owner runs a bounded cache-affine transcript under its own static
-system prompt (`transcript.py`). The transcript binds to the validated
-cache-domain identity of the owner's route, measures message sequences in
-deterministic UTF-8 bytes against the owner's prompt budget
-(`fits_prompt_budget`), and restarts on domain or budget mismatch. Attempt
-arithmetic stays deterministic across attempts and cache checkpoints; a
-restarted transcript resumes from its last accepted prefix rather than from raw
-provider history.
+The primary semantic chain runs one bounded cache-affine transcript under the
+static V3 system prompt (`transcript.py`). It binds to the validated
+cache-domain identity of the primary route and preserves the exact accepted
+message prefix across steps, retries, and session reattachment. Tail rollback
+removes the rejected assistant candidate before a repair request; a cold
+rebuild starts from the accepted typed products and never from raw provider
+history. Attempt arithmetic remains the epoch-aware V2 ledger and is not reset
+by a session miss or recurrence.
 
 ## Terminal outcome stage membership
 
@@ -101,13 +110,14 @@ that run.
 
 ## Failure modes and diagnostics
 
-Stage failures fail closed per chain with a typed error code. The closed
-failure contract is enforced by `validate_stage_result`: it rejects unknown
-owner identities and failure classes, requires a failure record exactly when a
-result was not accepted, and accepts only the three-code
-`EXHAUSTION_ERROR_CODES` set for exhaustion-class failures. Required-branch escalation, partial failure
-surfacing, and protected replay capture reuse the V2 behavior verbatim; one
-chain's bounded exhaustion never cancels the other chains of the same wave.
+Stage failures fail closed with a typed error code. The closed failure contract
+is enforced by `validate_stage_result`: it rejects unknown owner identities and
+failure classes, requires a failure record exactly when a result was not
+accepted, and accepts only the three-code `EXHAUSTION_ERROR_CODES` set for
+exhaustion-class failures. Required-branch escalation, partial failure
+surfacing, and protected replay capture reuse the V2 behavior verbatim. The
+engine-neutral resolver guardrail preserves the existing epoch arithmetic and
+does not create a second attempt authority.
 
 Accepted appraisal content bridges into native state through code-owned rows:
 propositions attach to their source evidence row's candidate event root so the
@@ -135,15 +145,31 @@ messages, and provider metadata never appear in these projections.
   bid-and-selection output contract), carrying over the semantic instructions
   of their V2 stage counterparts.
 - Authorizers stay V3-owned on the unchanged V2 authorizer contracts.
-- Role binding (D3): the producer contract carries no role data, so action-row
-  role assignments stay empty in V3 output where V2 materializes them from
-  native state. This is a documented parity limitation of the producer
-  boundary, not an accident of the bridge.
-- Prompt-budget checkpoint: V2 deterministically fits evidence texts to each
-  stage's prompt budget before model calls (`fit_evidence_texts_to_budget` in
-  goal-bid producers and appraisal). V3 enforces budgets at the transcript
-  extension boundary instead — a deterministic UTF-8 byte check plus restart —
-  and has no pre-call text-fitting checkpoint.
+- Role binding (D3): validated required-selection nested role assignments are
+  preserved through canonical V3 materialization and reach the unchanged
+  dialog input.
+- Context budget ownership: V2's semantic helpers remain canonical, while V3
+  reserves each step's completion cap inside a normal 50,000-token total
+  ceiling and may activate one conditional 65,000-token ceiling only when the
+  caller-declared serving window supports it. The context-window declaration
+  stays caller-local and is omitted from provider transport.
+
+## Timing and observability
+
+`COGNITION_V3_APPRAISAL_GROUP_COUNT` is configurable to `1`, `2`, `3`, or `6`
+and defaults to `2`. `COGNITION_V3_TURN_DEADLINE_SECONDS` defaults to `240` and
+is bounded to `30..600`; the deadline is checked between model steps and does
+not bypass deterministic validation, reduction, or the one final commit.
+Runtime telemetry records non-streaming elapsed duration in milliseconds. The
+runtime does not claim or expose time-to-first-token (TTFT).
+
+The chain's `run_id`, `llm_trace_id`, and `cognition_invocation_id` are carried
+with the sanitized `cognition_chain_run.v1` row. Protected transcript capture
+uses `off`, `metadata`, or `full` mode in the protected trace store; the
+bounded `cognition_chain` event family accepts only sanitized aggregate fields
+and best-effort writes. The brain and console read only the exact paired
+correlation and report `not_reported` when it is absent or mismatched; neither
+surface uses a global-latest or stale fallback.
 
 ## Testing
 
@@ -153,8 +179,8 @@ Per-module unit tests live under `tests/unit/cognition_core_v3/`
 `test_registry`, `test_transcript`, `test_workspace`, `test_public_api`). The
 public-API test pins the exact eleven-name export surface and every export's
 owning-module identity. The facade unit suite runs the full engine over the
-canonical fixture with a scripted invoker: wave-completion diagnostics, the
-exact registry-ordered stage-call sequence, per-trace protected record scoping,
+canonical fixture with a scripted invoker: serial-step diagnostics, the exact
+registry-ordered stage-call sequence, per-trace protected record scoping,
 state-carrier and relationship-maintenance application, admitted-bid passthrough
 with goal-resolution fallback, authoritative relational override collapse, the
 evidence-free run's bounded required-branch escalation, and rejected-attempt

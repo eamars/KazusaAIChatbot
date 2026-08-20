@@ -238,7 +238,7 @@ _ACTIVE_REQUIRED_SELECTION_GOAL_PROMPT = '''你负责在选择权属于当前角
 '''
 
 
-def _build_goal_output_contract(
+def build_goal_output_contract(
     *,
     evidence_handles: set[str],
     episode_evidence_handles: set[str],
@@ -545,7 +545,7 @@ def _build_goal_repair_feedback(
         if isinstance(parsed, Mapping)
         else {}
     )
-    goal_output_contract = _build_goal_output_contract(
+    goal_output_contract = build_goal_output_contract(
         evidence_handles=evidence_handles,
         episode_evidence_handles=episode_evidence_handles,
         required_evidence_handles=required_evidence_handles,
@@ -796,7 +796,7 @@ async def _run_goal_cognition(
         "semantic_context": prompt_context,
         "role_handles": sorted(role_bindings),
         "role_summaries": prompt_role_summaries,
-        "goal_output_contract": _build_goal_output_contract(
+        "goal_output_contract": build_goal_output_contract(
             evidence_handles=set(evidence_handles),
             episode_evidence_handles=episode_evidence_handles,
             required_evidence_handles=required_evidence_handles,

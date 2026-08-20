@@ -14,8 +14,8 @@ from typing import Any
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
-    CognitionCoreServicesV2,
+from kazusa_ai_chatbot.cognition_core_v3.contracts import (
+    CognitionChainServicesV3,
 )
 from kazusa_ai_chatbot.llm_interface.contracts import (
     BackendDescriptor,
@@ -58,7 +58,7 @@ DEFAULT_APPRAISAL_CONTENT = json.dumps(
 )
 
 # Dummy route limit; every scripted response is far shorter than this value.
-DUMMY_MAX_COMPLETION_TOKENS = 800
+DUMMY_MAX_COMPLETION_TOKENS = 8192
 
 DEFAULT_ACTION_PLAN_CONTENT = json.dumps({"goal_resolution": "blocked"})
 
@@ -136,22 +136,47 @@ def default_scripted_responses(episode_handle: str) -> dict[str, str]:
     decision. The remaining owners are unreachable in the canonical run and
     default to empty text.
     """
+    def empty_group(families):
+        return {
+            family: [
+                {"question_id": family, "proposition": None, "delta": None}
+            ]
+            for family in families
+        }
+
     responses = {
-        stage_name: DEFAULT_APPRAISAL_CONTENT
-        for stage_name in APPRAISAL_STAGE_NAMES
+        "A1": json.dumps(
+            empty_group(
+                ("event_agency", "goal_threat_outcome", "epistemic_comparison_memory")
+            ),
+            ensure_ascii=False,
+        ),
+        "A2": json.dumps(
+            {
+                "relationship_social": [
+                    {
+                        "question_id": "relationship_social",
+                        "proposition": None,
+                        "delta": {
+                            "target_path": "relationship.r1.care",
+                            "delta": 2,
+                            "evidence_handles": [episode_handle],
+                            "reason": "The greeting keeps the relationship attentive.",
+                        },
+                    }
+                ],
+                "moral_identity": [
+                    {"question_id": "moral_identity", "proposition": None, "delta": None}
+                ],
+                "existential_drive": [
+                    {"question_id": "existential_drive", "proposition": None, "delta": None}
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        "G1a": ordinary_goal_draft(episode_handle),
+        "P1": DEFAULT_ACTION_PLAN_CONTENT,
     }
-    responses["relationship_social"] = relationship_social_care_candidate(
-        episode_handle
-    )
-    responses["goal_ordinary_response"] = ordinary_goal_draft(episode_handle)
-    responses["action_planning"] = DEFAULT_ACTION_PLAN_CONTENT
-    for stage_name in (
-        "goal_active_branch",
-        "workspace_collapse",
-        "action_authorization",
-        "resolver_authorization",
-    ):
-        responses[stage_name] = ""
     return responses
 
 
@@ -194,7 +219,7 @@ class ScriptedLLMInvoker:
     async def ainvoke(self, messages, *, config) -> LLMResponse:
         """Record the routed stage and answer with its scripted content."""
         del messages  # The prompt payload is not inspected by these tests.
-        stage_name = config.stage_name
+        stage_name = config.stage_name.split(".")[0]
         attempt_index = self.stage_attempts.get(stage_name, 0)
         self.stage_attempts[stage_name] = attempt_index + 1
         self.calls.append(stage_name)
@@ -235,42 +260,31 @@ def make_stage_config(stage_name: str) -> LLMCallConfig:
         top_k=None,
         max_completion_tokens=DUMMY_MAX_COMPLETION_TOKENS,
         presence_penalty=None,
+        context_window_tokens=50000,
     )
     return stage_config
 
 
 def make_v3_services(
     invoker: ScriptedLLMInvoker,
-) -> CognitionCoreServicesV2:
-    """Bind the scripted invoker to every engine route config."""
-    services = CognitionCoreServicesV2(
+    *,
+    include_sidecar: bool = False,
+    subconscious_enabled: bool = False,
+) -> CognitionChainServicesV3:
+    """Bind the scripted invoker to the requested V3 primary/sidecar lanes."""
+
+    if subconscious_enabled and not include_sidecar:
+        raise ValueError("subconscious tests require an injected sidecar lane")
+    chain_lane = make_stage_config("cognition_core_v3.chain")
+    services = CognitionChainServicesV3(
         llm=invoker,
-        appraisal_event_agency_config=make_stage_config("event_agency"),
-        appraisal_relationship_social_config=make_stage_config(
-            "relationship_social"
+        chain_lane=chain_lane,
+        sidecar_lane=(
+            make_stage_config("cognition_core_v3.sidecar")
+            if include_sidecar
+            else None
         ),
-        appraisal_moral_identity_config=make_stage_config("moral_identity"),
-        appraisal_goal_threat_outcome_config=make_stage_config(
-            "goal_threat_outcome"
-        ),
-        appraisal_epistemic_comparison_memory_config=make_stage_config(
-            "epistemic_comparison_memory"
-        ),
-        appraisal_existential_drive_config=make_stage_config(
-            "existential_drive"
-        ),
-        goal_ordinary_response_config=make_stage_config(
-            "goal_ordinary_response"
-        ),
-        goal_active_branch_config=make_stage_config("goal_active_branch"),
-        workspace_collapse_config=make_stage_config("workspace_collapse"),
-        action_planning_config=make_stage_config("action_planning"),
-        action_authorization_config=make_stage_config(
-            "action_authorization"
-        ),
-        resolver_authorization_config=make_stage_config(
-            "resolver_authorization"
-        ),
+        subconscious_enabled=subconscious_enabled,
     )
     return services
 

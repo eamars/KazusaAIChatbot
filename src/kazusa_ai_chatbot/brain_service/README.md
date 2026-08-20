@@ -289,6 +289,9 @@ Purpose:
   debug chat in `cognition_graph`.
 - Return the latest bounded self-cognition graph separately in
   `self_cognition_graph`.
+- Return optional `cognition_chain_run` and
+  `self_cognition_chain_run` rows only when each row matches its owning graph's
+  exact `run_id` and `llm_trace_id`.
 - Support the local control-console Overview graph without running cognition.
 - Return either graph field as `null` when that run type has not published
   telemetry since service startup.
@@ -296,6 +299,13 @@ Purpose:
 The endpoint is process-local and read-only. It must not expose prompts,
 embeddings, raw messages, message envelopes, raw source packets, secrets, or
 unbounded memory content.
+
+The chain-run fields are sanitized observability projections. Each graph is
+resolved independently through the exact two-key DB lookup; a missing key,
+cross-run or cross-trace mismatch, read failure, or absent row returns `null`
+for that paired field. The service never substitutes another graph's row or a
+process-global/stale latest row, and a diagnostic write/read failure never
+changes cognition-facing completion.
 
 ### `GET /ops/runtime-status`
 

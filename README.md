@@ -145,6 +145,15 @@ completion-budget, and thinking bundle.
 `COGNITION_LLM_CHARACTER_CARRYOVER` is the dedicated state-only background
 operational carry-over route and has a maximum completion budget of 8,192
 tokens.
+The selected `v3` branch constructs only its own chain and optional sidecar
+services; the generic `COGNITION_LLM` route remains shared non-core plumbing.
+V3 runs one serialized primary chain with a single-stream sidecar, not the
+superseded parallel-wave/checkpoint topology. Its caller-local settings are
+`COGNITION_V3_APPRAISAL_GROUP_COUNT` (`1`, `2`, `3`, or `6`) and
+`COGNITION_V3_TURN_DEADLINE_SECONDS` (`30..600`). The request-window ceiling is
+50,000 tokens normally and conditionally 65,000 when the declared serving
+window supports it. Timing evidence is non-streaming elapsed milliseconds;
+the runtime makes no TTFT claim.
 Typed required-selection goal turns deliberately use
 `COGNITION_LLM_GOAL_ORDINARY_RESPONSE` for every branch, so configure that
 route with the denser goal model. Active persistent-goal turns without a typed
@@ -746,6 +755,25 @@ Or use Uvicorn directly:
 
 ```powershell
 uvicorn kazusa_ai_chatbot.service:app --host 0.0.0.0 --port 8000
+```
+
+### Cognition V3 startup and rollback notes
+
+The documented pre-cutover selector remains `COGNITION_CORE_ENGINE=v2`.
+Operators preparing a V3 run set the complete
+`COGNITION_V3_CHAIN_LLM_*` bundle, optionally set the all-or-nothing
+`COGNITION_V3_SIDECAR_LLM_*` bundle, and choose the appraisal-group and turn-
+deadline settings in `docs/HOWTO.md`. A cutover is an explicit reviewed
+configuration change after its required evidence is available; this document
+does not assert that any gate is sealed. Rollback sets
+`COGNITION_CORE_ENGINE=v2` and restarts the process so the selector binds V2;
+existing V3 diagnostic rows remain available for review.
+
+Useful read-only evidence commands are:
+
+```powershell
+venv\Scripts\python -m pytest -q tests/integration/cognition_core_v3/test_chain_observability.py
+venv\Scripts\python -m scripts.validate_test_impact --base-ref HEAD
 ```
 
 Run the browser debug adapter:

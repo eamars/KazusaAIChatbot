@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 import sys
+from pathlib import Path
 
 from browser_harness import DEFAULT_E2E_OPERATOR_TOKEN
 from fake_brain import (
@@ -258,6 +258,172 @@ def test_overview_cognition_graph_updates_from_latest_brain_run(
                         ),
                         "l2_memory": str(l2_memory_screenshot),
                         "self_reference": str(self_reference_screenshot),
+                    },
+                },
+            )
+
+    assert summary.exists()
+
+
+def test_v3_chain_panels_are_responsive_and_correlated(
+    monkeypatch,
+    tmp_path: Path,
+    unused_tcp_port_factory,
+    e2e_console,
+    e2e_browser_page,
+    e2e_artifact_dir: Path,
+    e2e_summary_writer,
+) -> None:
+    """Verify paired V3 chain cards render bounded values without overflow."""
+
+    original_latest_graph_payload = FakeBrainServer._latest_graph_payload
+
+    def latest_graph_payload_with_chains(owner: FakeBrainServer) -> dict:
+        """Add exact graph-paired chain rows to the existing fake payload."""
+
+        payload = original_latest_graph_payload(owner)
+        for graph_key, chain_key, prefix in (
+            ("cognition_graph", "cognition_chain_run", "live"),
+            ("self_cognition_graph", "self_cognition_chain_run", "self"),
+        ):
+            graph = payload[graph_key]
+            if graph.get("status") == "not_reported":
+                continue
+            payload[chain_key] = {
+                "status": "completed",
+                "chain_run_id": f"{prefix}-chain-{graph['run_id']}",
+                "run_id": graph["run_id"],
+                "llm_trace_id": graph["llm_trace_id"],
+                "cognition_invocation_id": graph[
+                    "cognition_invocation_id"
+                ],
+                "chain_model_name": f"{prefix}-chain-model",
+                "sidecar_model_name": f"{prefix}-sidecar-model",
+                "terminal_disposition": "complete",
+                "started_at": "2026-08-20T00:00:00Z",
+                "completed_at": "2026-08-20T00:00:01Z",
+                "step_count": 8,
+                "warning_codes": ["bounded_warning"],
+            }
+        return payload
+
+    monkeypatch.setattr(
+        FakeBrainServer,
+        "_latest_graph_payload",
+        latest_graph_payload_with_chains,
+    )
+
+    def runtime_payload_with_engine(owner: FakeBrainServer) -> dict:
+        """Return a sanitized selected-engine descriptor for Overview."""
+
+        del owner
+        return {
+            "status": "running",
+            "workers": {},
+            "cognition_engine": {
+                "schema_version": "cognition_engine_descriptor.v1",
+                "engine_id": "v3",
+                "chain_model_name": "chain-model",
+                "sidecar_model_name": "sidecar-model",
+                "sidecar_enabled": True,
+                "subconscious_enabled": False,
+                "appraisal_group_count": 2,
+                "chain_context_window_tokens": 50176,
+                "normal_budget_tokens": 50000,
+                "extended_budget_tokens": 65000,
+                "turn_deadline_seconds": 240,
+            },
+        }
+
+    monkeypatch.setattr(
+        FakeBrainServer,
+        "_runtime_payload",
+        runtime_payload_with_engine,
+    )
+    brain_port = unused_tcp_port_factory()
+    with FakeBrainServer(brain_port) as fake_brain:
+        registry_path = write_conflict_brain_registry(
+            path=tmp_path / "brain_conflict_registry.json",
+            fake_brain_base_url=fake_brain.base_url,
+            python_executable=sys.executable,
+        )
+        fake_brain.set_graph(
+            graph_snapshot(status="completed", run_id="v3-live-run")
+        )
+        fake_brain.set_self_graph(
+            graph_snapshot(status="completed", run_id="v3-self-run")
+        )
+
+        with e2e_console(
+            brain_base_url=fake_brain.base_url,
+            service_registry_path=registry_path,
+            sse_interval_seconds=0.2,
+        ) as console:
+            page = e2e_browser_page(console.base_url)
+            page.set_viewport_size({"width": 390, "height": 844})
+            _login(page)
+
+            live_card = page.locator("#overview-cognition-chain-card")
+            self_card = page.locator("#overview-self-cognition-chain-card")
+            engine_card = page.locator("#overview-cognition-engine-card")
+            assert "completed" in live_card.inner_text()
+            assert "v3-live-run" in live_card.inner_text()
+            assert "llm-trace-v3-live-run" in live_card.inner_text()
+            assert "v3-self-run" not in live_card.inner_text()
+            assert "completed" in self_card.inner_text()
+            assert "v3-self-run" in self_card.inner_text()
+            assert "llm-trace-v3-self-run" in self_card.inner_text()
+            assert "v3-live-run" not in self_card.inner_text()
+            assert "raw_prompt" not in live_card.inner_text()
+            assert "endpoint" not in live_card.inner_text()
+            assert "available" in engine_card.inner_text()
+            assert "v3" in engine_card.inner_text()
+            assert "chain-model" in engine_card.inner_text()
+            assert "sidecar-model" in engine_card.inner_text()
+            assert "50176" in engine_card.inner_text()
+            assert "not reported" not in engine_card.inner_text()
+            assert page.evaluate(
+                "() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1"
+            )
+
+            overview_screenshot = (
+                e2e_artifact_dir / "v3_chain_panels_overview_correlated.png"
+            )
+            page.screenshot(path=str(overview_screenshot), full_page=True)
+
+            page.locator("[data-page-link='debug']").click()
+            debug_card = page.locator("#debug-cognition-chain-card")
+            assert "not reported" in debug_card.inner_text()
+            assert page.evaluate(
+                "() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1"
+            )
+            page.set_viewport_size({"width": 1440, "height": 900})
+            assert page.evaluate(
+                "() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1"
+            )
+
+            debug_screenshot = (
+                e2e_artifact_dir / "v3_chain_panels_debug_absent_safe.png"
+            )
+            page.screenshot(path=str(debug_screenshot), full_page=True)
+            summary = e2e_summary_writer(
+                name="v3_chain_panels_responsive_and_correlated",
+                conclusion="pass",
+                details={
+                    "console_url": console.base_url,
+                    "fake_brain": fake_brain.base_url,
+                    "checked_paths": [
+                        "paired live chain card",
+                        "paired self-cognition chain card",
+                        "selected cognition-engine descriptor card",
+                        "debug absent-safe chain card",
+                        "mobile no-overflow",
+                        "desktop no-overflow",
+                        "approved field and raw-data redaction",
+                    ],
+                    "screenshots": {
+                        "overview_correlated": str(overview_screenshot),
+                        "debug_absent_safe": str(debug_screenshot),
                     },
                 },
             )

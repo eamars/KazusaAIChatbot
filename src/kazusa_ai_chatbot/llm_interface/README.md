@@ -143,6 +143,13 @@ config into backend-compatible request fields.
 request/client kwargs; Cognition V3 uses it to reject oversized requests before
 provider invocation.
 
+For the serialized V3 chain, the caller starts with a 50,000-token total
+request-window ceiling and may activate one conditional 65,000-token ceiling
+only when its declared serving window supports that tier. The declaration is
+caller-local and is never transported as a provider request field. Timing is
+reported as non-streaming elapsed milliseconds; this interface makes no
+time-to-first-token (TTFT) claim.
+
 The relevance stages impose stricter caller-owned budgets while sharing the
 existing `RELEVANCE_AGENT_LLM` route: frontline uses a 256-token completion
 cap and thinking disabled, while settled relevance uses a 512-token cap and

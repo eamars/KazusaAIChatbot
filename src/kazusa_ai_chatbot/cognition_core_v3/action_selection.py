@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from time import perf_counter
 from typing import Any, Literal
 
@@ -30,7 +30,6 @@ from kazusa_ai_chatbot.action_spec.registry import (
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
 )
-from kazusa_ai_chatbot.config import CHARACTER_TIME_ZONE
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     GOAL_RESOLUTION_VALUES,
     CognitionExecutionError,
@@ -53,6 +52,7 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     validate_required_resolver_evidence_dependency,
     validate_resolver_goal_progress,
 )
+from kazusa_ai_chatbot.config import CHARACTER_TIME_ZONE
 from kazusa_ai_chatbot.llm_interface import LLMCallConfig
 from kazusa_ai_chatbot.time_boundary import (
     local_llm_datetime_to_storage_utc_iso,
@@ -102,6 +102,8 @@ GOAL_PROGRESS_CONTENT_FIELDS = (
     "blockers",
     "final_response_requirements",
 )
+
+AuthorizationExecutor = Callable[..., Awaitable[dict[str, bool]]]
 
 
 def project_scene_context_for_action_planning(
@@ -979,6 +981,41 @@ def _validate_action_plan_decision(
             response_contract_status
         )
     return return_value
+
+
+def validate_action_plan_decision(
+    parsed: object,
+    *,
+    bid_handles: Mapping[str, Mapping[str, Any]],
+    action_handles: Mapping[str, Mapping[str, Any]],
+    resolver_handles: Mapping[str, Mapping[str, Any]],
+    current_goal_progress: Mapping[str, Any] | None = None,
+    required_resolver_evidence_dependency: (
+        RequiredResolverEvidenceDependencyV1 | None
+    ) = None,
+    runtime_capability_limits: Sequence[str] = (),
+    self_cognition_response_required: bool = False,
+    evidence: Sequence[Mapping[str, object]] = (),
+    target_handles: Sequence[str] = (),
+    accepted_at_utc: str = "",
+) -> dict[str, Any]:
+    """Validate one serial P1 candidate into the canonical planner contract."""
+
+    return _validate_action_plan_decision(
+        parsed,
+        bid_handles=bid_handles,
+        action_handles=action_handles,
+        resolver_handles=resolver_handles,
+        current_goal_progress=current_goal_progress,
+        required_resolver_evidence_dependency=(
+            required_resolver_evidence_dependency
+        ),
+        runtime_capability_limits=runtime_capability_limits,
+        self_cognition_response_required=self_cognition_response_required,
+        evidence=evidence,
+        target_handles=target_handles,
+        accepted_at_utc=accepted_at_utc,
+    )
 
 def _materialize_action_requests(
     requests: Sequence[Mapping[str, object]],
@@ -2081,6 +2118,7 @@ async def authorize_action_requests(
     action_handles: Mapping[str, Mapping[str, Any]],
     runtime_capability_limits: Sequence[str],
     services: Any,
+    authorization_executor: AuthorizationExecutor | None = None,
 ) -> list[dict[str, str]]:
     """Retain planner proposals whose real effects are semantically grounded."""
 
@@ -2141,16 +2179,26 @@ async def authorize_action_requests(
         SystemMessage(content=ACTION_AUTHORIZATION_PROMPT),
         HumanMessage(content=prompt_text),
     ]
-    decisions = await invoke_semantic_authorizer(
-        services=services,
-        config=services.action_authorization_config,
-        messages=messages,
-        candidate_handles=list(candidate_requests),
-        stage_name="action_authorization",
-        output_state_fields=["authorized_action_requests"],
-        runtime_capability_limits=runtime_capability_limits,
-        prompt_cap=ACTION_AUTHORIZATION_PROMPT_CAP,
-    )
+    if authorization_executor is None:
+        decisions = await invoke_semantic_authorizer(
+            services=services,
+            config=services.action_authorization_config,
+            messages=messages,
+            candidate_handles=list(candidate_requests),
+            stage_name="action_authorization",
+            output_state_fields=["authorized_action_requests"],
+            runtime_capability_limits=runtime_capability_limits,
+            prompt_cap=ACTION_AUTHORIZATION_PROMPT_CAP,
+        )
+    else:
+        decisions = await authorization_executor(
+            messages=messages,
+            candidate_handles=list(candidate_requests),
+            stage_name="action_authorization",
+            output_state_fields=["authorized_action_requests"],
+            runtime_capability_limits=runtime_capability_limits,
+            prompt_cap=ACTION_AUTHORIZATION_PROMPT_CAP,
+        )
     authorized_handles = {
         handle for handle, authorized in decisions.items() if authorized
     }
@@ -2449,6 +2497,7 @@ async def authorize_resolver_requests(
     resolver_handles: Mapping[str, Mapping[str, Any]],
     resolver_context: str,
     services: Any,
+    authorization_executor: AuthorizationExecutor | None = None,
 ) -> list[dict[str, Any]]:
     """Retain proposed resolver work whose evidence need remains useful.
 
@@ -2529,15 +2578,25 @@ async def authorize_resolver_requests(
         SystemMessage(content=RESOLVER_AUTHORIZATION_PROMPT),
         HumanMessage(content=prompt_text),
     ]
-    decisions = await invoke_semantic_authorizer(
-        services=services,
-        config=services.resolver_authorization_config,
-        messages=messages,
-        candidate_handles=list(candidate_requests),
-        stage_name="resolver_authorization",
-        output_state_fields=["authorized_resolver_requests"],
-        prompt_cap=RESOLVER_AUTHORIZATION_PROMPT_CAP,
-    )
+    if authorization_executor is None:
+        decisions = await invoke_semantic_authorizer(
+            services=services,
+            config=services.resolver_authorization_config,
+            messages=messages,
+            candidate_handles=list(candidate_requests),
+            stage_name="resolver_authorization",
+            output_state_fields=["authorized_resolver_requests"],
+            prompt_cap=RESOLVER_AUTHORIZATION_PROMPT_CAP,
+        )
+    else:
+        decisions = await authorization_executor(
+            messages=messages,
+            candidate_handles=list(candidate_requests),
+            stage_name="resolver_authorization",
+            output_state_fields=["authorized_resolver_requests"],
+            runtime_capability_limits=(),
+            prompt_cap=RESOLVER_AUTHORIZATION_PROMPT_CAP,
+        )
     authorized_handles = {
         handle for handle, authorized in decisions.items() if authorized
     }

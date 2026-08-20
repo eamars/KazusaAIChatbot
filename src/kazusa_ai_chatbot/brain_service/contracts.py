@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from typing import Any, Literal, TypedDict
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    StrictInt,
+    model_validator,
+)
 
 from kazusa_ai_chatbot.message_envelope import MentionEntityKind
 
@@ -121,6 +128,8 @@ class ChatResponse(BaseModel):
 class OpsLatestCognitionGraphResponse(BaseModel):
     cognition_graph: dict[str, Any] | None = None
     self_cognition_graph: dict[str, Any] | None = None
+    cognition_chain_run: dict[str, Any] | None = None
+    self_cognition_chain_run: dict[str, Any] | None = None
 
 
 class DeliveryReceiptRequest(BaseModel):
@@ -197,6 +206,87 @@ class OpsWorkerStatusResponse(BaseModel):
     last_status: str = ""
 
 
+class CognitionEngineDescriptorResponse(BaseModel):
+    """Selected cognition-engine configuration safe for operator status."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["cognition_engine_descriptor.v1"]
+    engine_id: Literal["v2", "v3"]
+    chain_model_name: str = Field(min_length=1, max_length=256)
+    sidecar_model_name: str = Field(max_length=256)
+    sidecar_enabled: bool
+    subconscious_enabled: bool
+    appraisal_group_count: StrictInt = Field(ge=0, le=6)
+    chain_context_window_tokens: StrictInt = Field(ge=0, le=1_000_000)
+    normal_budget_tokens: StrictInt = Field(ge=0, le=65_000)
+    extended_budget_tokens: StrictInt = Field(ge=0, le=65_000)
+    turn_deadline_seconds: StrictInt = Field(ge=0, le=600)
+
+    @model_validator(mode="after")
+    def validate_policy(self) -> CognitionEngineDescriptorResponse:
+        """Reject descriptor combinations that cannot describe an engine."""
+
+        if self.appraisal_group_count not in {0, 1, 2, 3, 6}:
+            raise ValueError(
+                "appraisal_group_count must be one of 0, 1, 2, 3, or 6",
+            )
+
+        if self.engine_id == "v2":
+            if self.sidecar_model_name:
+                raise ValueError("V2 descriptor sidecar model must be empty")
+            if self.sidecar_enabled:
+                raise ValueError("V2 descriptor sidecar must be disabled")
+            if self.subconscious_enabled:
+                raise ValueError(
+                    "V2 descriptor subconscious mode must be disabled",
+                )
+            if any(
+                value != 0
+                for value in (
+                    self.appraisal_group_count,
+                    self.chain_context_window_tokens,
+                    self.normal_budget_tokens,
+                    self.extended_budget_tokens,
+                    self.turn_deadline_seconds,
+                )
+            ):
+                raise ValueError(
+                    "V2 descriptor chain-specific numeric fields must be zero",
+                )
+            return self
+
+        if self.appraisal_group_count not in {1, 2, 3, 6}:
+            raise ValueError(
+                "V3 descriptor appraisal_group_count must be one of 1, 2, 3, or 6",
+            )
+        if self.chain_context_window_tokens < 50_000:
+            raise ValueError(
+                "V3 descriptor context window must be at least 50000",
+            )
+        if self.normal_budget_tokens != 50_000:
+            raise ValueError(
+                "V3 descriptor normal budget must equal 50000",
+            )
+        if self.extended_budget_tokens != 65_000:
+            raise ValueError(
+                "V3 descriptor extended budget must equal 65000",
+            )
+        if not 30 <= self.turn_deadline_seconds <= 600:
+            raise ValueError(
+                "V3 descriptor turn deadline must be between 30 and 600",
+            )
+        if self.sidecar_enabled != bool(self.sidecar_model_name):
+            raise ValueError(
+                "V3 descriptor sidecar must match its model name",
+            )
+        if self.subconscious_enabled and not self.sidecar_enabled:
+            raise ValueError(
+                "V3 descriptor subconscious mode requires a sidecar",
+            )
+        return self
+
+
 class OpsRuntimeStatusResponse(BaseModel):
     status: str
     generated_at: str
@@ -207,6 +297,7 @@ class OpsRuntimeStatusResponse(BaseModel):
     )
     workers: dict[str, OpsWorkerStatusResponse] = Field(default_factory=dict)
     semantic_descriptors: dict[str, str] = Field(default_factory=dict)
+    cognition_engine: CognitionEngineDescriptorResponse | None = None
 
 
 class OpsLatestEventRefResponse(BaseModel):

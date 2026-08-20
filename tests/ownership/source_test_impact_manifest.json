@@ -2,6 +2,14 @@
  "schema_version": 1,
  "source_roots": [
   "src/control_console/__init__.py",
+  "src/control_console/contracts.py",
+  "src/control_console/kazusa_client.py",
+  "src/control_console/app.py",
+  "src/control_console/static/index.html",
+  "src/control_console/static/console.js",
+  "src/control_console/static/console.css",
+  "src/control_console/brain_model_routes.py",
+  "src/control_console/service_config.py",
   "src/kazusa_ai_chatbot/cognition_episode.py",
   "src/kazusa_ai_chatbot/cognition_core_v2",
   "src/kazusa_ai_chatbot/cognition_resolver",
@@ -9,6 +17,8 @@
   "src/kazusa_ai_chatbot/config.py",
   "src/kazusa_ai_chatbot/llm_interface/contracts.py",
   "src/kazusa_ai_chatbot/llm_interface/route_report.py",
+  "src/kazusa_ai_chatbot/utils.py",
+  "src/kazusa_ai_chatbot/cognition_core_selector.py",
   "src/kazusa_ai_chatbot/conversation_progress/__init__.py",
   "src/kazusa_ai_chatbot/conversation_progress/history.py",
   "src/kazusa_ai_chatbot/conversation_progress/models.py",
@@ -16,16 +26,21 @@
   "src/kazusa_ai_chatbot/conversation_progress/recorder.py",
   "src/kazusa_ai_chatbot/conversation_progress/runtime.py",
   "src/kazusa_ai_chatbot/db/__init__.py",
+  "src/kazusa_ai_chatbot/db/bootstrap.py",
+  "src/kazusa_ai_chatbot/db/cognition_chain_runs.py",
   "src/kazusa_ai_chatbot/db/users.py",
   "src/kazusa_ai_chatbot/db/script_operations.py",
   "src/kazusa_ai_chatbot/db/accepted_tasks.py",
   "src/kazusa_ai_chatbot/db/internal_monologue_residue.py",
   "src/kazusa_ai_chatbot/db/schemas.py",
   "src/kazusa_ai_chatbot/llm_tracing",
+  "src/kazusa_ai_chatbot/llm_tracing/__init__.py",
   "src/kazusa_ai_chatbot/db/self_cognition.py",
   "src/kazusa_ai_chatbot/event_logging/__init__.py",
   "src/kazusa_ai_chatbot/event_logging/models.py",
   "src/kazusa_ai_chatbot/event_logging/recording.py",
+  "src/kazusa_ai_chatbot/event_logging/sanitization.py",
+  "src/kazusa_ai_chatbot/event_logging/schemas.py",
   "src/kazusa_ai_chatbot/internal_monologue_residue/__init__.py",
   "src/kazusa_ai_chatbot/internal_monologue_residue/loader.py",
   "src/kazusa_ai_chatbot/internal_monologue_residue/models.py",
@@ -43,11 +58,14 @@
   "src/kazusa_ai_chatbot/nodes/dialog_agent.py",
   "src/kazusa_ai_chatbot/nodes/persona_supervisor2_schema.py",
   "src/kazusa_ai_chatbot/brain_service/post_turn.py",
+  "src/kazusa_ai_chatbot/brain_service/contracts.py",
   "src/kazusa_ai_chatbot/local_context_resolver/service.py",
   "src/kazusa_ai_chatbot/local_context_resolver/stages.py",
   "src/kazusa_ai_chatbot/service.py",
   "src/scripts/export_trace_correlation_manifest.py",
   "src/scripts/migrate_cognition_relationship_maintenance.py",
+  "src/scripts/calibrate_cognition_v3_token_estimator.py",
+  "src/scripts/probe_cognition_v3_context_overflow.py",
   "src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition_actions.py",
   "src/kazusa_ai_chatbot/action_spec/models.py",
   "src/kazusa_ai_chatbot/action_spec/execution.py",
@@ -63,7 +81,8 @@
   "src/kazusa_ai_chatbot/self_cognition/sources.py",
   "src/kazusa_ai_chatbot/consolidation/schema.py",
   "scripts/preflight_scheduled_future_speech_contract.py",
-  "src/kazusa_ai_chatbot/cognition_core_v3"
+  "src/kazusa_ai_chatbot/cognition_core_v3",
+  "tests/integration/cognition_core_v3/test_chain_observability.py"
  ],
  "entries": [
   {
@@ -99,6 +118,92 @@
    "supplemental_tests": []
   },
   {
+   "source": "src/control_console/contracts.py",
+   "owner": "control-console contract owner",
+   "contract": "strict bounded optional CognitionChainRunSnapshot",
+   "required_unit_tests": [
+    "tests/test_control_console_contracts.py::test_chain_run_projection_is_strict_bounded_and_optional"
+   ],
+   "supplemental_tests": [
+    "tests/integration/cognition_core_v3/test_chain_observability.py::test_protected_and_sanitized_records_share_exact_service_console_correlation"
+   ]
+  },
+  {
+   "source": "src/control_console/kazusa_client.py",
+   "owner": "control-console client owner",
+   "contract": "paired correlated live/self chain-run projection",
+   "required_unit_tests": [
+    "tests/test_control_console_kazusa_client.py::test_kazusa_client_projects_correlated_live_and_self_chain_runs"
+   ],
+   "supplemental_tests": [
+    "tests/test_control_console_kazusa_client.py::test_kazusa_client_rejects_cross_run_chain_correlation",
+    "tests/integration/cognition_core_v3/test_chain_observability.py::test_protected_and_sanitized_records_share_exact_service_console_correlation"
+   ]
+  },
+  {
+   "source": "src/control_console/app.py",
+   "owner": "control-console paired chain panel owner",
+   "contract": "bootstrap, overview, and debug expose exact paired sanitized chain runs",
+   "required_unit_tests": [
+    "tests/test_control_console_web_surface.py::test_cognition_chain_panels_render_correlated_sanitized_runs",
+    "tests/test_control_console_web_surface.py::test_cognition_engine_projection_fails_closed_for_unknown_or_incomplete_data"
+   ],
+   "supplemental_tests": [
+    "tests/control_console_e2e/test_cognition_graph_e2e.py::test_v3_chain_panels_are_responsive_and_correlated"
+   ]
+  },
+  {
+   "source": "src/control_console/static/index.html",
+   "owner": "control-console paired chain view owner",
+   "contract": "paired live/self/debug cognition-chain panels",
+   "required_unit_tests": [
+    "tests/test_control_console_web_surface.py::test_cognition_chain_panels_render_correlated_sanitized_runs",
+    "tests/test_control_console_web_surface.py::test_cognition_engine_projection_fails_closed_for_unknown_or_incomplete_data"
+   ],
+   "supplemental_tests": [
+    "tests/control_console_e2e/test_cognition_graph_e2e.py::test_v3_chain_panels_are_responsive_and_correlated"
+   ]
+  },
+  {
+   "source": "src/control_console/static/console.js",
+   "owner": "control-console cognition-chain renderer owner",
+   "contract": "strict absent-safe escaped cognition-chain rendering without global fallback",
+   "required_unit_tests": [
+    "tests/test_control_console_web_surface.py::test_cognition_chain_panels_render_correlated_sanitized_runs",
+    "tests/test_control_console_web_surface.py::test_cognition_engine_projection_fails_closed_for_unknown_or_incomplete_data"
+   ],
+   "supplemental_tests": [
+    "tests/control_console_e2e/test_cognition_graph_e2e.py::test_v3_chain_panels_are_responsive_and_correlated"
+   ]
+  },
+  {
+   "source": "src/control_console/static/console.css",
+   "owner": "control-console cognition-chain layout owner",
+   "contract": "responsive bounded cognition-chain panels without horizontal overflow",
+   "required_unit_tests": [
+    "tests/control_console_e2e/test_cognition_graph_e2e.py::test_v3_chain_panels_are_responsive_and_correlated"
+   ],
+   "supplemental_tests": []
+  },
+  {
+   "source": "src/control_console/brain_model_routes.py",
+   "owner": "control-console operator route owner",
+   "contract": "both core families editable, selected core routes active and required, generic cognition shared",
+   "required_unit_tests": [
+    "tests/test_control_console_web_surface.py::test_model_routes_mark_only_selected_core_family_active_and_generic_cognition_shared"
+   ],
+   "supplemental_tests": []
+  },
+  {
+   "source": "src/control_console/service_config.py",
+   "owner": "control-console service configuration owner",
+   "contract": "unconfigured inactive core route models remain visible without becoming required or fabricating model values",
+   "required_unit_tests": [
+    "tests/test_control_console_service_config.py::test_brain_config_allows_unconfigured_inactive_core_routes"
+   ],
+   "supplemental_tests": []
+  },
+  {
    "source": "src/kazusa_ai_chatbot/cognition_episode.py",
    "owner": "cognitive episode contract owner",
    "contract": "selected response-operation role authority",
@@ -123,35 +228,64 @@
    "source": "src/kazusa_ai_chatbot/event_logging/__init__.py",
    "owner": "event logging contract owner",
    "contract": "bounded self-cognition telemetry exports",
-   "required_unit_tests": [
+  "required_unit_tests": [
     "tests/test_self_cognition_group_visible_reply_boundary.py::test_self_cognition_event_contract_rejects_raw_response_content",
-    "tests/test_event_logging_interface.py::test_continuity_boundary_recorder_is_keyword_only_and_exported"
+    "tests/test_event_logging_interface.py::test_continuity_boundary_recorder_is_keyword_only_and_exported",
+    "tests/test_cognition_chain_event_logging.py::test_cognition_chain_event_facade_exports_exact_recorder"
    ],
    "supplemental_tests": [
     "tests/test_event_logging_interface.py::test_public_module_does_not_export_generic_record_event",
-    "tests/test_event_logging_interface.py::test_continuity_boundary_event_documentation_matches_contract"
+    "tests/test_event_logging_interface.py::test_continuity_boundary_event_documentation_matches_contract",
+    "tests/integration/cognition_core_v3/test_chain_observability.py::test_protected_and_sanitized_records_share_exact_service_console_correlation"
    ]
   },
   {
    "source": "src/kazusa_ai_chatbot/event_logging/models.py",
    "owner": "event logging contract owner",
    "contract": "closed self-cognition outcome telemetry values",
-   "required_unit_tests": [
+  "required_unit_tests": [
     "tests/test_self_cognition_group_visible_reply_boundary.py::test_response_outcome_values_are_closed",
-    "tests/test_event_logging_interface.py::test_continuity_boundary_unknown_status_is_not_success"
+    "tests/test_event_logging_interface.py::test_continuity_boundary_unknown_status_is_not_success",
+    "tests/test_cognition_chain_event_logging.py::test_cognition_chain_event_model_rejects_unknown_and_unbounded_fields"
    ],
-   "supplemental_tests": []
+   "supplemental_tests": [
+    "tests/integration/cognition_core_v3/test_chain_observability.py::test_protected_and_sanitized_records_share_exact_service_console_correlation"
+   ]
   },
   {
    "source": "src/kazusa_ai_chatbot/event_logging/recording.py",
    "owner": "event logging recording owner",
    "contract": "sanitized self-cognition event payload",
-   "required_unit_tests": [
+  "required_unit_tests": [
     "tests/test_self_cognition_group_visible_reply_boundary.py::test_self_cognition_event_contract_rejects_raw_response_content",
-    "tests/test_event_logging_interface.py::test_continuity_boundary_payload_is_bounded_and_text_free"
+    "tests/test_event_logging_interface.py::test_continuity_boundary_payload_is_bounded_and_text_free",
+    "tests/test_cognition_chain_event_logging.py::test_cognition_chain_recorder_is_keyword_only_bounded_and_best_effort"
+   ],
+  "supplemental_tests": [
+    "tests/test_self_cognition_event_logging.py::test_self_cognition_event_logger_sanitizes_consolidation_outcome",
+    "tests/integration/cognition_core_v3/test_chain_observability.py::test_protected_and_sanitized_records_share_exact_service_console_correlation"
+   ]
+  },
+  {
+  "source": "src/kazusa_ai_chatbot/event_logging/sanitization.py",
+   "owner": "event logging sanitizer owner",
+   "contract": "closed bounded cognition-chain fields with secret and raw-content exclusion",
+   "required_unit_tests": [
+    "tests/test_cognition_chain_event_logging.py::test_cognition_chain_event_sanitizer_removes_secret_and_raw_content"
    ],
    "supplemental_tests": [
-    "tests/test_self_cognition_event_logging.py::test_self_cognition_event_logger_sanitizes_consolidation_outcome"
+    "tests/integration/cognition_core_v3/test_chain_observability.py::test_protected_and_sanitized_records_share_exact_service_console_correlation"
+   ]
+  },
+  {
+   "source": "src/kazusa_ai_chatbot/event_logging/schemas.py",
+   "owner": "event-logging document schema owner",
+   "contract": "bounded cognition-chain event field projection",
+   "required_unit_tests": [
+    "tests/test_cognition_chain_event_logging.py::test_cognition_chain_event_model_rejects_unknown_and_unbounded_fields"
+   ],
+   "supplemental_tests": [
+    "tests/integration/cognition_core_v3/test_chain_observability.py::test_protected_and_sanitized_records_share_exact_service_console_correlation"
    ]
   },
   {
@@ -365,7 +499,6 @@
     "tests/unit/cognition_core_v2/test_facade.py::test_cognition_applies_relationship_maintenance_once_after_cumulative_trials"
    ],
    "supplemental_tests": [
-    "tests/test_cognition_core_v2_semantic_terminalization.py::test_appraisal_retries_a_reducer_incompatible_candidate",
     "tests/test_cognition_core_v2_semantic_terminalization.py::test_final_reduction_isolates_one_residual_invalid_appraisal",
     "tests/test_cognition_core_v2_semantic_terminalization.py::test_final_reduction_preserves_cross_appraisal_composition",
     "tests/test_cognition_core_v2_trace_failure_mode_matrix.py::test_captured_trace_8d0d4295_stays_within_active_event_cap",
@@ -381,7 +514,7 @@
   {
    "source": "src/kazusa_ai_chatbot/cognition_core_v2/goal_cognition.py",
    "owner": "cognition_core_v2 owner",
-   "contract": "goal_cognition public contract",
+   "contract": "goal cognition and public goal-output-contract helper contract",
    "required_unit_tests": [
     "tests/unit/cognition_core_v2/test_goal_cognition.py::test_public_selection_materializer_preserves_roles_and_evidence",
     "tests/unit/cognition_core_v2/test_goal_cognition.py::test_goal_cognition_exposes_owned_contract",
@@ -680,6 +813,15 @@
    "supplemental_tests": []
   },
   {
+   "source": "src/kazusa_ai_chatbot/utils.py",
+   "owner": "canonical LLM JSON parser and repair owner",
+   "contract": "canonical deterministic parse first with injected sidecar repair pair used only on residual failure",
+   "required_unit_tests": [
+    "tests/test_utils.py::test_parse_llm_json_output_uses_injected_repair_pair_only_after_deterministic_failure"
+   ],
+   "supplemental_tests": []
+  },
+  {
    "source": "src/kazusa_ai_chatbot/config.py",
    "owner": "selected-engine and residue retention configuration owner",
    "contract": "engine-first lazy cognition route loading and bounded canonical residue retention setting",
@@ -687,6 +829,7 @@
     "tests/test_internal_monologue_residue_database.py::test_residue_retention_config_is_bounded_and_documented",
     "tests/test_config.py::test_cognition_core_engine_accepts_only_v2_or_v3",
     "tests/test_config.py::test_cognition_core_engine_default_matches_cutover_state",
+    "tests/test_config.py::test_selected_cognition_route_settings_are_loaded_once",
     "tests/test_config.py::test_v3_service_import_succeeds_with_shared_routes_and_without_twelve_v2_stage_bundles",
     "tests/test_config.py::test_v2_service_import_succeeds_without_v3_routes"
    ],
@@ -768,14 +911,37 @@
   {
    "source": "src/kazusa_ai_chatbot/db/__init__.py",
    "owner": "database public schema facade owner",
-   "contract": "canonical residue schema export",
+   "contract": "canonical residue and chain-run public exports",
    "required_unit_tests": [
     "tests/test_internal_monologue_residue_database.py::test_v2_residue_schema_requires_disposition_operation_and_retention",
-    "tests/unit/db/test_public_facade.py::test_user_cognition_compare_and_replace_is_public"
+    "tests/unit/db/test_public_facade.py::test_user_cognition_compare_and_replace_is_public",
+    "tests/test_db_cognition_chain_runs.py::test_db_exports_exact_chain_run_helpers"
    ],
    "supplemental_tests": [
-    "tests/test_cognition_relationship_maintenance_loop.py::test_relationship_maintenance_round_trips_create_consume_update_persist_reread"
+    "tests/test_cognition_relationship_maintenance_loop.py::test_relationship_maintenance_round_trips_create_consume_update_persist_reread",
+    "tests/integration/cognition_core_v3/test_chain_observability.py::test_protected_and_sanitized_records_share_exact_service_console_correlation"
    ]
+  },
+  {
+   "source": "src/kazusa_ai_chatbot/db/cognition_chain_runs.py",
+   "owner": "Cognition V3 chain-run persistence owner",
+   "contract": "idempotent ID and exact dual correlation without global latest fallback",
+   "required_unit_tests": [
+    "tests/test_db_cognition_chain_runs.py::test_chain_run_upsert_is_idempotent_and_rejects_correlation_conflict",
+    "tests/test_db_cognition_chain_runs.py::test_chain_run_read_requires_exact_run_and_trace_ids"
+   ],
+   "supplemental_tests": [
+    "tests/integration/cognition_core_v3/test_chain_observability.py::test_protected_and_sanitized_records_share_exact_service_console_correlation"
+   ]
+  },
+  {
+   "source": "src/kazusa_ai_chatbot/db/bootstrap.py",
+   "owner": "database bootstrap owner",
+   "contract": "chain-run collection and unique/correlation/invocation/engine/TTL indexes",
+   "required_unit_tests": [
+    "tests/test_db_cognition_chain_runs.py::test_chain_run_indexes_match_retention_and_correlation_contract"
+   ],
+   "supplemental_tests": []
   },
   {
    "source": "src/kazusa_ai_chatbot/db/users.py",
@@ -815,6 +981,24 @@
     "tests/test_cognition_relationship_maintenance_migration.py::test_migration_fails_closed_on_missing_already_valid_row",
     "tests/test_cognition_relationship_maintenance_migration.py::test_migration_uses_named_db_maintenance_boundary"
    ]
+  },
+  {
+   "source": "src/scripts/calibrate_cognition_v3_token_estimator.py",
+   "owner": "Cognition V3 token estimator calibration owner",
+   "contract": "frozen corpus and holdout calculation with zero-underestimate deterministic acceptance",
+   "required_unit_tests": [
+    "tests/test_cognition_core_v3_calibration_scripts.py::test_token_calibration_is_deterministic_and_meets_holdout_contract"
+   ],
+   "supplemental_tests": []
+  },
+  {
+   "source": "src/scripts/probe_cognition_v3_context_overflow.py",
+   "owner": "Cognition V3 serving overflow probe owner",
+   "contract": "effect-free dry run and explicit declared-window validation",
+   "required_unit_tests": [
+    "tests/test_cognition_core_v3_calibration_scripts.py::test_overflow_probe_dry_run_is_effect_free_and_validates_route_contract"
+   ],
+   "supplemental_tests": []
   },
   {
    "source": "src/kazusa_ai_chatbot/db/internal_monologue_residue.py",
@@ -903,7 +1087,7 @@
   {
    "source": "src/kazusa_ai_chatbot/cognition_resolver/guardrail.py",
    "owner": "parent cognition guardrail owner",
-   "contract": "one invocation-wide replay token and bounded parent recovery",
+   "contract": "one invocation-wide replay token, engine-neutral service handoff, and bounded parent recovery",
    "required_unit_tests": [
     "tests/unit/cognition_resolver/test_guardrail.py::test_guardrail_exposes_owned_contract",
     "tests/unit/cognition_resolver/test_guardrail.py::test_coordinator_claim_is_atomic_between_service_and_parent",
@@ -911,7 +1095,8 @@
     "tests/unit/cognition_resolver/test_guardrail.py::test_parent_recovery_allows_only_goal_exhaustion_codes",
     "tests/unit/cognition_resolver/test_guardrail.py::test_parent_recovery_rejects_postcommit_and_unknown_failures",
     "tests/unit/cognition_resolver/test_guardrail.py::test_parent_recovery_isolated_between_concurrent_contexts",
-    "tests/unit/cognition_resolver/test_guardrail.py::test_parent_recovery_cancellation_restores_context"
+    "tests/unit/cognition_resolver/test_guardrail.py::test_parent_recovery_cancellation_restores_context",
+    "tests/unit/cognition_resolver/test_guardrail.py::test_guardrail_passes_engine_neutral_services_and_preserves_v3_attempt_epochs"
    ],
    "supplemental_tests": [
     "tests/integration/cognition_core_v2/test_parent_checkpoint_guardrail.py::test_parent_recovery_failure_preserves_typed_error_and_no_side_effect"
@@ -1021,6 +1206,28 @@
    ]
   },
   {
+   "source": "src/kazusa_ai_chatbot/llm_tracing/chain_transcript.py",
+   "owner": "protected V3 chain-transcript capture owner",
+   "contract": "off/metadata/full protected capture modes without ordinary-path raw exposure",
+   "required_unit_tests": [
+    "tests/test_llm_chain_transcript.py::test_chain_transcript_capture_obeys_off_metadata_full_modes"
+   ],
+   "supplemental_tests": [
+    "tests/integration/cognition_core_v3/test_chain_observability.py::test_protected_and_sanitized_records_share_exact_service_console_correlation"
+   ]
+  },
+  {
+   "source": "src/kazusa_ai_chatbot/llm_tracing/__init__.py",
+   "owner": "protected trace facade owner",
+   "contract": "scoped chain-transcript export only",
+   "required_unit_tests": [
+    "tests/test_llm_chain_transcript.py::test_trace_facade_exposes_only_scoped_chain_capture"
+   ],
+   "supplemental_tests": [
+    "tests/integration/cognition_core_v3/test_chain_observability.py::test_protected_and_sanitized_records_share_exact_service_console_correlation"
+   ]
+  },
+  {
    "source": "src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition.py",
    "owner": "nodes owner",
    "contract": "persona_supervisor2_cognition public contract",
@@ -1038,20 +1245,22 @@
    "supplemental_tests": [
     "tests/test_persona_supervisor2_cognition_prewarm.py::test_parent_retry_does_not_repeat_shared_memory_prewarm",
     "tests/test_persona_supervisor2_cognition_prewarm.py::test_omitted_coordinator_does_not_use_ambient_guardrail",
-    "tests/test_cognition_v2_boundary_propagation.py::test_boundary_rejection_stops_before_action_resolver_delivery"
+    "tests/test_cognition_v2_boundary_propagation.py::test_boundary_rejection_stops_before_action_resolver_delivery",
+    "tests/integration/cognition_core_v3/test_engine_selector.py::test_live_and_idle_connectors_construct_the_same_selected_engine_family"
    ]
   },
   {
    "source": "src/kazusa_ai_chatbot/nodes/persona_supervisor2.py",
    "owner": "persona stage owner",
-   "contract": "live stage coordinator propagation and one final commit",
+   "contract": "live stage coordinator propagation and one terminal final commit after resolver recurrence",
    "required_unit_tests": [
     "tests/test_persona_supervisor2.py::test_persona_stage_uses_canonical_resolver_loop",
     "tests/test_persona_supervisor2.py::test_persona_stage_passes_bound_parent_coordinator",
     "tests/test_persona_supervisor2.py::test_persona_supervisor_passes_current_user_to_group_scene"
    ],
    "supplemental_tests": [
-    "tests/integration/cognition_core_v2/test_parent_checkpoint_guardrail.py::test_parent_retry_does_not_repeat_capability_or_commit"
+    "tests/integration/cognition_core_v2/test_parent_checkpoint_guardrail.py::test_parent_retry_does_not_repeat_capability_or_commit",
+    "tests/integration/cognition_core_v3/test_resolver_recurrence.py::test_live_resolver_loop_commits_one_terminal_replacement_after_recurrence"
    ]
   },
   {
@@ -1108,15 +1317,31 @@
     "tests/test_service_input_queue.py::test_service_graph_retry_reuses_goal_attempt_ledger",
     "tests/test_service_input_queue.py::test_goal_cognition_exhaustion_skips_service_retry",
     "tests/test_service_input_queue.py::test_parent_guardrail_failure_does_not_start_outer_graph_retry",
-    "tests/test_conversation_progress_v2_service.py::test_service_load_passes_group_anchor_mode_and_keeps_user_scope"
+    "tests/test_conversation_progress_v2_service.py::test_service_load_passes_group_anchor_mode_and_keeps_user_scope",
+    "tests/test_service_cognition_graph.py::test_latest_graph_chain_runs_require_exact_run_and_trace_correlation",
+    "tests/test_service_ops_status.py::test_cognition_engine_descriptor_v2_uses_stable_stage_model_set",
+    "tests/test_service_ops_status.py::test_cognition_engine_descriptor_v3_uses_selected_loaded_settings"
    ],
    "supplemental_tests": [
     "tests/integration/cognition_core_v2/test_parent_checkpoint_guardrail.py::test_parent_first_blocks_later_service_retry",
     "tests/integration/cognition_core_v2/test_parent_checkpoint_guardrail.py::test_service_first_blocks_parent_recovery",
-    "tests/integration/cognition_core_v2/test_parent_checkpoint_guardrail.py::test_parent_recovery_success_then_service_failure_has_one_replay"
+    "tests/integration/cognition_core_v2/test_parent_checkpoint_guardrail.py::test_parent_recovery_success_then_service_failure_has_one_replay",
+    "tests/integration/cognition_core_v3/test_chain_observability.py::test_protected_and_sanitized_records_share_exact_service_console_correlation"
+  ]
+ },
+ {
+   "source": "src/kazusa_ai_chatbot/brain_service/contracts.py",
+   "owner": "brain-service response contract owner",
+   "contract": "optional paired live/self chain-run projections",
+   "required_unit_tests": [
+    "tests/test_service_cognition_graph.py::test_response_contract_has_optional_live_and_self_chain_runs",
+    "tests/test_service_ops_status.py::test_cognition_engine_descriptor_contract_is_strict_and_bounded"
+   ],
+   "supplemental_tests": [
+    "tests/integration/cognition_core_v3/test_chain_observability.py::test_protected_and_sanitized_records_share_exact_service_console_correlation"
    ]
-  },
-  {
+ },
+ {
    "source": "src/kazusa_ai_chatbot/nodes/persona_supervisor2_schema.py",
    "owner": "nodes owner",
    "contract": "persona_supervisor2_schema public contract",
@@ -1301,82 +1526,148 @@
   {
    "source": "src/kazusa_ai_chatbot/cognition_core_v3/lane.py",
    "owner": "V3 primary and sidecar lane coordination owner",
-   "contract": "FIFO primary ownership, serialized sidecar streams, bounded logical admissions, and cancellation cleanup",
+   "contract": "FIFO full-primary ownership, serialized L1/repair/X1/X2 sidecar streams, bounded logical admissions, and cancellation cleanup",
    "required_unit_tests": [
     "tests/unit/cognition_core_v3/test_lane.py::test_primary_lane_is_fifo_single_owner_and_sidecar_cannot_interleave",
     "tests/unit/cognition_core_v3/test_lane.py::test_sidecar_stream_serializes_l1_repair_and_authorization_with_fixed_caps",
     "tests/unit/cognition_core_v3/test_lane.py::test_l1_repair_preemption_and_cancellation_release_sidecar_fifo"
    ],
-   "supplemental_tests": []
+   "supplemental_tests": [
+    "tests/integration/cognition_core_v3/test_sidecar_failure.py::test_l1_repair_x1_x2_preemption_order_cancellation_and_failure_are_bounded"
+   ]
   },
   {
    "source": "src/kazusa_ai_chatbot/cognition_core_v3/prompt.py",
    "owner": "V3 dynamic chain question owner",
-   "contract": "volatility-ordered first packet, bounded typed questions, interlude folding, goal-only holdout, and evaluation-integrity boundary",
+   "contract": "volatility-ordered first packet, bounded typed questions, canonical V2 required-selection output contract, advisory L1 packet projection, recurrence delta payloads, post-revision interlude folding, goal-only holdout, and evaluation-integrity boundary",
    "required_unit_tests": [
     "tests/unit/cognition_core_v3/test_prompt.py::test_prompt_questions_are_bounded_contract_oriented_and_dynamic",
     "tests/unit/cognition_core_v3/test_prompt.py::test_runtime_prompts_exclude_test_fixture_rubric_and_expected_answer_metadata"
    ],
+   "supplemental_tests": [
+    "tests/integration/cognition_core_v3/test_resolver_recurrence.py::test_resolver_observation_reattaches_short_tail_and_commits_once",
+    "tests/integration/cognition_core_v3/test_sidecar_failure.py::test_l1_repair_x1_x2_preemption_order_cancellation_and_failure_are_bounded",
+    "tests/integration/cognition_core_v3/test_external_contract_parity.py::test_required_selection_nested_roles_reach_unchanged_dialog_input"
+   ]
+  },
+  {
+  "source": "src/kazusa_ai_chatbot/cognition_core_v3/registry.py",
+   "owner": "V3 fixed serial topology and grouping owner",
+   "contract": "exact serial A1..P1 chain, frozen family order, and 1/2/3/6 grouping maps",
+   "required_unit_tests": [
+    "tests/unit/cognition_core_v3/test_registry.py::test_serial_chain_steps_match_contract",
+    "tests/unit/cognition_core_v3/test_registry.py::test_appraisal_grouping_maps_cover_six_families_exactly",
+    "tests/unit/cognition_core_v3/test_registry.py::test_appraisal_family_order_is_frozen"
+   ],
    "supplemental_tests": []
   },
   {
-   "source": "src/kazusa_ai_chatbot/cognition_core_v3/registry.py",
-   "owner": "V3 fixed topology and visibility owner",
-   "contract": "immutable appraisal-chain, stage-order, goal-topology registry with import-time validation",
+   "source": "src/kazusa_ai_chatbot/cognition_core_v3/budget.py",
+   "owner": "V3 context estimator and budget ledger owner",
+   "contract": "CJK-aware deterministic estimator, 50k/65k total ceilings, one-time extension, re-anchor token, and serving-window overflow",
    "required_unit_tests": [
-    "tests/unit/cognition_core_v3/test_registry.py::test_registry_exposes_exact_appraisal_and_goal_topology"
+    "tests/unit/cognition_core_v3/test_budget.py::test_budget_ledger_calibration_extension_reanchor_and_overflow"
    ],
    "supplemental_tests": []
   },
   {
    "source": "src/kazusa_ai_chatbot/cognition_core_v3/transcript.py",
-   "owner": "V3 cache-affine transcript assembly owner",
-   "contract": "exact-prefix continuation, repair scrubbing, checkpoint restarts, and prompt-budget checks",
+   "owner": "V3 append-only chain transcript owner",
+   "contract": "append, accept, tail rollback, interlude queue, re-anchor, and immutable message projection",
    "required_unit_tests": [
-    "tests/unit/cognition_core_v3/test_transcript.py::test_accepted_same_domain_stage_extends_exact_prefix",
-    "tests/unit/cognition_core_v3/test_transcript.py::test_rejected_candidate_is_scrubbed_before_next_stage",
-    "tests/unit/cognition_core_v3/test_transcript.py::test_cache_domain_change_forces_canonical_checkpoint",
-    "tests/unit/cognition_core_v3/test_transcript.py::test_context_pressure_checkpoints_before_owner_cap"
+    "tests/unit/cognition_core_v3/test_transcript.py::test_tail_rollback_preserves_prefix_and_excludes_rejected_candidate"
    ],
    "supplemental_tests": []
   },
   {
-   "source": "src/kazusa_ai_chatbot/cognition_core_v3/execution.py",
-   "owner": "V3 bounded parallel chain executor owner",
-   "contract": "parallel chains, serial registered stages, global attempt caps, and cancellation without partial effects",
+   "source": "src/kazusa_ai_chatbot/cognition_core_v3/session.py",
+   "owner": "V3 chain-session registry owner",
+   "contract": "process-local bounded recurrence sessions with exact prefix/one resolver-observation reattachment using a nonempty novel evidence handle, prior replacement state, next-admissible cycle index, and single-owner claim disposition",
    "required_unit_tests": [
-    "tests/unit/cognition_core_v3/test_execution.py::test_executor_runs_parallel_chains_and_serial_registered_stages",
-    "tests/unit/cognition_core_v3/test_execution.py::test_executor_preserves_global_attempt_caps",
-    "tests/unit/cognition_core_v3/test_execution.py::test_executor_cancels_owned_tasks_without_partial_effects"
+    "tests/unit/cognition_core_v3/test_session.py::test_session_reattaches_exactly_and_cold_rebuilds_without_attempt_reset",
+    "tests/unit/cognition_core_v3/test_session.py::test_session_digest_classifies_every_input_field_and_rejects_each_unapproved_mutation",
+    "tests/unit/cognition_core_v3/test_session.py::test_session_accepts_prior_replacement_and_rejects_other_mutable_state",
+    "tests/unit/cognition_core_v3/test_session.py::test_session_cycle_index_accepts_zero_one_two_and_rejects_repeated_skipped_or_out_of_order"
+   ],
+   "supplemental_tests": [
+    "tests/integration/cognition_core_v3/test_resolver_recurrence.py::test_resolver_observation_reattaches_short_tail_and_commits_once",
+    "tests/integration/cognition_core_v3/test_resolver_recurrence.py::test_recurrence_zero_one_two_consumes_each_prior_replacement_state",
+    "tests/integration/cognition_core_v3/test_resolver_recurrence.py::test_divergent_or_concurrently_claimed_session_cold_rebuilds_without_mixing_transcript"
+   ]
+  },
+  {
+   "source": "src/kazusa_ai_chatbot/cognition_core_v3/subconscious.py",
+   "owner": "V3 advisory L1 residue owner",
+   "contract": "closed nonblocking L1ResidueV1 with bounded supplied-handle membership and no semantic authority",
+   "required_unit_tests": [
+    "tests/unit/cognition_core_v3/test_subconscious.py::test_l1_is_advisory_nonblocking_and_handle_bounded"
+   ],
+   "supplemental_tests": [
+    "tests/integration/cognition_core_v3/test_sidecar_failure.py::test_l1_repair_x1_x2_preemption_order_cancellation_and_failure_are_bounded"
+   ]
+  },
+  {
+   "source": "src/kazusa_ai_chatbot/cognition_core_v3/facade.py",
+   "owner": "V3 cognition facade owner",
+   "contract": "FIFO-held serial cold chain and resolver-session tail with canonical required-selection materialization, authoritative relationship-sensitive collapse, targetless-group response routing, advisory L1, lane-scoped repair, X1/X2 deny-closed authorization, deterministic recurrence reduction, stable live-roster revision, and cold-rebuild disposition",
+   "required_unit_tests": [
+    "tests/unit/cognition_core_v3/test_facade.py::test_run_cognition_completes_all_stages_without_diagnostics_warnings",
+    "tests/unit/cognition_core_v3/test_facade.py::test_stage_calls_follow_registry_order_with_single_action_planning_call",
+    "tests/unit/cognition_core_v3/test_facade.py::test_state_update_preserves_v2_carriers_and_applies_relationship_maintenance_once",
+    "tests/unit/cognition_core_v3/test_facade.py::test_admitted_bid_carries_ordinary_branch_and_scripted_relational_decision",
+    "tests/unit/cognition_core_v3/test_facade.py::test_authoritative_relational_decision_collapses_without_partition_call",
+    "tests/unit/cognition_core_v3/test_facade.py::test_evidence_free_run_fails_closed_after_bounded_ordinary_attempts",
+    "tests/unit/cognition_core_v3/test_facade.py::test_rejected_goal_draft_attempts_are_captured_before_branch_escalation",
+    "tests/integration/cognition_core_v3/test_resolver_recurrence.py::test_resolver_observation_reattaches_short_tail_and_commits_once",
+    "tests/integration/cognition_core_v3/test_resolver_recurrence.py::test_recurrence_zero_one_two_consumes_each_prior_replacement_state",
+    "tests/integration/cognition_core_v3/test_resolver_recurrence.py::test_divergent_or_concurrently_claimed_session_cold_rebuilds_without_mixing_transcript",
+    "tests/integration/cognition_core_v3/test_resolver_recurrence.py::test_parent_checkpoint_retry_preserves_branch_attempt_arithmetic_and_effect_idempotency",
+    "tests/integration/cognition_core_v3/test_sidecar_failure.py::test_l1_repair_x1_x2_preemption_order_cancellation_and_failure_are_bounded",
+    "tests/integration/cognition_core_v3/test_deterministic_head.py::test_cold_serial_chain_preserves_complete_v2_state_emotion_relationship_goal_and_action_output",
+    "tests/integration/cognition_core_v3/test_deterministic_head.py::test_sensitive_ordinary_primary_collapse_records_ordered_g1b",
+    "tests/integration/cognition_core_v3/test_external_contract_parity.py::test_required_selection_nested_roles_reach_unchanged_dialog_input",
+    "tests/integration/cognition_core_v3/test_external_contract_parity.py::test_targetless_group_can_silence_or_emit_grounded_reply_proposal"
    ],
    "supplemental_tests": []
+  },
+  {
+  "source": "src/kazusa_ai_chatbot/cognition_core_v3/execution.py",
+   "owner": "V3 serial primary-chain executor owner",
+   "contract": "one serial primary chain, lane-scoped canonical JSON repair, exact accepted typed-product retention, V2 epoch-aware attempt reservations, and non-authoritative session-ledger projection",
+   "required_unit_tests": [
+    "tests/unit/cognition_core_v3/test_execution.py::test_executor_runs_one_serial_primary_chain_and_preserves_attempt_epochs",
+    "tests/unit/cognition_core_v3/test_execution.py::test_serial_chain_rejects_unknown_step"
+   ],
+   "supplemental_tests": [
+    "tests/integration/cognition_core_v3/test_resolver_recurrence.py::test_resolver_observation_reattaches_short_tail_and_commits_once",
+    "tests/integration/cognition_core_v3/test_resolver_recurrence.py::test_parent_checkpoint_retry_preserves_branch_attempt_arithmetic_and_effect_idempotency",
+    "tests/integration/cognition_core_v3/test_sidecar_failure.py::test_l1_repair_x1_x2_preemption_order_cancellation_and_failure_are_bounded"
+   ]
   },
   {
    "source": "src/kazusa_ai_chatbot/cognition_core_v3/appraisal.py",
    "owner": "V3 cache-affine appraisal semantics owner",
    "contract": "six-family domains, shared static prompt, candidate admission classification, and provisional reduction",
    "required_unit_tests": [
-    "tests/unit/cognition_core_v3/test_appraisal.py::test_v3_appraisal_preserves_six_family_domains",
-    "tests/unit/cognition_core_v3/test_appraisal.py::test_all_appraisal_chains_use_one_byte_identical_static_system_prompt",
-    "tests/unit/cognition_core_v3/test_appraisal.py::test_causal_and_epistemic_chains_expose_only_accepted_predecessor_context",
-    "tests/unit/cognition_core_v3/test_appraisal.py::test_terminal_outcome_runs_from_provisional_accepted_state",
-    "tests/unit/cognition_core_v3/test_appraisal.py::test_optional_stage_exhaustion_preserves_accepted_prefix"
+    "tests/unit/cognition_core_v3/test_appraisal.py::test_grouped_appraisal_validator_uses_exact_micro_item_contract",
+    "tests/unit/cognition_core_v3/test_appraisal.py::test_grouped_appraisal_reducer_maps_to_v2_validated_row"
    ],
    "supplemental_tests": []
   },
   {
    "source": "src/kazusa_ai_chatbot/cognition_core_v3/goal_cognition.py",
    "owner": "V3 cache-affine goal cognition owner",
-   "contract": "shared static goal prompt, ordinary-only relational-willingness ownership, isolated sibling transcripts, required-selection fixed-role binding and progress evidence projection, fail-closed exhaustion disposition",
+   "contract": "shared static goal prompt, ordinary-only relational-willingness ownership including cold required-selection complete bids and recurrence-carried stance, isolated sibling transcripts, canonical required-selection fixed-role binding and progress evidence projection, fail-closed exhaustion disposition",
    "required_unit_tests": [
-    "tests/unit/cognition_core_v3/test_goal_cognition.py::test_all_goal_chains_use_one_byte_identical_static_system_prompt",
     "tests/unit/cognition_core_v3/test_goal_cognition.py::test_ordinary_goal_remains_relational_willingness_owner",
-    "tests/unit/cognition_core_v3/test_goal_cognition.py::test_sibling_goal_transcripts_are_isolated",
-    "tests/unit/cognition_core_v3/test_goal_cognition.py::test_required_selection_preserves_fixed_roles_and_progress_evidence",
-    "tests/unit/cognition_core_v3/test_goal_cognition.py::test_required_goal_exhaustion_preserves_existing_fail_closed_contract"
+    "tests/unit/cognition_core_v3/test_goal_cognition.py::test_active_goal_group_output_enforces_frozen_roster_order",
+    "tests/unit/cognition_core_v3/test_goal_cognition.py::test_required_selection_preserves_code_owned_fields"
    ],
    "supplemental_tests": [
-    "tests/unit/cognition_core_v3/test_goal_cognition.py::test_isolated_goal_chain_registry_identity"
+    "tests/unit/cognition_core_v3/test_goal_cognition.py::test_isolated_goal_chain_registry_identity",
+    "tests/integration/cognition_core_v3/test_resolver_recurrence.py::test_resolver_observation_reattaches_short_tail_and_commits_once",
+    "tests/integration/cognition_core_v3/test_resolver_recurrence.py::test_recurrence_zero_one_two_consumes_each_prior_replacement_state",
+    "tests/integration/cognition_core_v3/test_external_contract_parity.py::test_required_selection_nested_roles_reach_unchanged_dialog_input"
    ]
   },
   {
@@ -1392,14 +1683,17 @@
   {
    "source": "src/kazusa_ai_chatbot/cognition_core_v3/action_selection.py",
    "owner": "V3 action planning and isolated authorization owner",
-   "contract": "fresh authorizer context projection, stance effect suppression, future-speak authority validation, selected-intention and goal-progress preservation",
+   "contract": "fresh authorizer context projection, injected V3 X1/X2 execution, stance effect suppression, future-speak authority validation, selected-intention and goal-progress preservation",
    "required_unit_tests": [
     "tests/unit/cognition_core_v3/test_action_selection.py::test_non_accepting_stance_suppresses_effects",
     "tests/unit/cognition_core_v3/test_action_selection.py::test_action_and_resolver_authorizers_receive_fresh_minimal_context",
     "tests/unit/cognition_core_v3/test_action_selection.py::test_invalid_authority_proposal_denies_all_effects",
     "tests/unit/cognition_core_v3/test_action_selection.py::test_selected_operation_and_goal_progress_are_preserved"
    ],
-   "supplemental_tests": []
+   "supplemental_tests": [
+    "tests/integration/cognition_core_v3/test_sidecar_failure.py::test_l1_repair_x1_x2_preemption_order_cancellation_and_failure_are_bounded",
+    "tests/integration/cognition_core_v3/test_resolver_recurrence.py::test_parent_checkpoint_retry_preserves_branch_attempt_arithmetic_and_effect_idempotency"
+   ]
   },
   {
    "source": "src/kazusa_ai_chatbot/cognition_core_v3/diagnostics.py",
@@ -1408,6 +1702,15 @@
    "required_unit_tests": [
     "tests/unit/cognition_core_v3/test_diagnostics.py::test_v3_public_diagnostics_match_v2_contract",
     "tests/unit/cognition_core_v3/test_diagnostics.py::test_protected_chain_metadata_excludes_secrets_and_rejected_content"
+   ],
+   "supplemental_tests": []
+  },
+  {
+   "source": "tests/integration/cognition_core_v3/test_chain_observability.py",
+   "owner": "V3 protected-to-sanitized observability integration-test owner",
+   "contract": "exact protected transcript, sanitized event, DB, service, and console correlation path",
+   "required_unit_tests": [
+    "tests/integration/cognition_core_v3/test_chain_observability.py::test_protected_and_sanitized_records_share_exact_service_console_correlation"
    ],
    "supplemental_tests": []
   }

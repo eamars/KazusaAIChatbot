@@ -9,21 +9,11 @@ They are V3-internal; the public entrypoint still speaks
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping
+from typing import Literal
 
-from kazusa_ai_chatbot.cognition_core_v3.registry import (
-    ALL_CHAINS,
-    ChainSpec,
-)
 from kazusa_ai_chatbot.llm_interface import LLMCallConfig, LLMInvoker
-from kazusa_ai_chatbot.llm_interface.detection import (
-    normalize_base_url,
-    normalize_model_name,
-)
-
-_MINIMUM_CHAIN_CONTEXT_WINDOW_TOKENS = 50_000
-_MINIMUM_LANE_COMPLETION_TOKENS = 8_192
 
 BOUNDARY_REJECTED_ERROR_CODE = "cognition_boundary_rejected"
 APPRASAL_CONTRACT_EXHAUSTED_ERROR_CODE = "semantic_appraisal_contract_exhausted"
@@ -55,99 +45,6 @@ EXHAUSTION_FAILURE_CLASS = "contract_exhausted"
 FAILURE_CLASSES: frozenset[str] = frozenset(
     {STRUCTURAL_FAILURE_CLASS, PROVIDER_FAILURE_CLASS, EXHAUSTION_FAILURE_CLASS}
 ) | TERMINAL_BOUNDARY_CLASSES
-
-
-@dataclass(frozen=True)
-class CognitionChainServicesV3:
-    """Injected primary and optional sidecar bindings for Cognition V3."""
-
-    llm: LLMInvoker
-    chain_lane: LLMCallConfig
-    sidecar_lane: LLMCallConfig | None
-    subconscious_enabled: bool = False
-
-    def __post_init__(self) -> None:
-        """Fail construction when a lane cannot satisfy the V3 contract."""
-
-        if self.llm is None:
-            raise TypeError("V3 services require an LLM invoker")
-        if not isinstance(self.subconscious_enabled, bool):
-            raise TypeError("subconscious_enabled must be a bool")
-
-        _validate_lane_config(
-            self.chain_lane,
-            lane_label="chain",
-            require_context_window=True,
-        )
-        if self.sidecar_lane is None:
-            if self.subconscious_enabled:
-                raise ValueError(
-                    "V3 subconscious execution requires a sidecar lane"
-                )
-            return
-
-        _validate_lane_config(
-            self.sidecar_lane,
-            lane_label="sidecar",
-            require_context_window=False,
-        )
-        chain_identity = (
-            normalize_base_url(self.chain_lane.base_url),
-            normalize_model_name(self.chain_lane.model),
-        )
-        sidecar_identity = (
-            normalize_base_url(self.sidecar_lane.base_url),
-            normalize_model_name(self.sidecar_lane.model),
-        )
-        if sidecar_identity == chain_identity:
-            raise ValueError(
-                "V3 chain and sidecar lanes must have distinct endpoint/model identities"
-            )
-
-
-def _validate_lane_config(
-    config: LLMCallConfig,
-    *,
-    lane_label: str,
-    require_context_window: bool,
-) -> None:
-    """Validate one complete non-thinking lane binding and its capacity."""
-
-    if not isinstance(config, LLMCallConfig):
-        raise TypeError(f"V3 {lane_label} lane must be an LLMCallConfig")
-    for field_name in ("route_name", "base_url", "api_key", "model"):
-        value = getattr(config, field_name)
-        if not isinstance(value, str) or not value.strip():
-            raise ValueError(
-                f"V3 {lane_label} route {field_name} must be non-empty"
-            )
-    if config.thinking.enabled:
-        raise ValueError(f"V3 {lane_label} lane thinking must be disabled")
-
-    completion_cap = config.max_completion_tokens
-    if (
-        not isinstance(completion_cap, int)
-        or isinstance(completion_cap, bool)
-        or completion_cap < _MINIMUM_LANE_COMPLETION_TOKENS
-    ):
-        raise ValueError(
-            f"V3 {lane_label} lane completion cap must be at least "
-            f"{_MINIMUM_LANE_COMPLETION_TOKENS}"
-        )
-
-    if not require_context_window:
-        return
-
-    context_window = config.context_window_tokens
-    if (
-        not isinstance(context_window, int)
-        or isinstance(context_window, bool)
-        or context_window < _MINIMUM_CHAIN_CONTEXT_WINDOW_TOKENS
-    ):
-        raise ValueError(
-            "V3 chain context window must be at least "
-            f"{_MINIMUM_CHAIN_CONTEXT_WINDOW_TOKENS}"
-        )
 
 
 @dataclass(frozen=True)
@@ -219,15 +116,13 @@ class CacheDomainIdentity:
             The SHA-256 hex digest over all six normalized components joined by
             an ASCII unit-separator byte, so no component boundary can collide.
         """
-        payload = "\x1f".join(
-            (
-                self.normalized_backend_url,
-                self.credential_identity_hash,
-                self.backend_kind,
-                self.model,
-                self.template_strategy,
-                self.static_system_prompt_hash,
-            )
+        payload = (
+            f"{self.normalized_backend_url}\x1f"
+            f"{self.credential_identity_hash}\x1f"
+            f"{self.backend_kind}\x1f"
+            f"{self.model}\x1f"
+            f"{self.template_strategy}\x1f"
+            f"{self.static_system_prompt_hash}"
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
@@ -257,31 +152,6 @@ def hash_static_prompt(prompt_text: str) -> str:
     return hashlib.sha256(prompt_text.encode("utf-8")).hexdigest()
 
 
-def _validate_chain_identity(chain_name: str, stage_name: str | None = None) -> ChainSpec:
-    """Validate a chain name and optional stage against the registry.
-
-    Args:
-        chain_name: The registered chain being referenced.
-        stage_name: Optional stage that must be ordered under ``chain_name``.
-
-    Returns:
-        The matching registry chain specification.
-
-    Raises:
-        ValueError: Unknown chains or stages outside their registered chain fail
-            fast before any semantic work runs.
-    """
-    for chain in ALL_CHAINS:
-        if chain.name == chain_name:
-            if stage_name is not None and stage_name not in chain.stages:
-                raise ValueError(
-                    f"Stage {stage_name!r} is not registered under chain {chain_name!r}"
-                )
-            return chain
-
-    raise ValueError(f"Unknown registered chain {chain_name!r}")
-
-
 def validate_stage_result(result: StageResult) -> StageResult:
     """Validate one stage result against the closed failure contract.
 
@@ -296,8 +166,6 @@ def validate_stage_result(result: StageResult) -> StageResult:
             an unknown failure class, or a boundary-class violation of the
             terminal-no-repair invariants fail fast.
     """
-    _validate_chain_identity(result.chain_name, result.stage_name)
-
     if bool(result.accepted) == (result.failure is not None):
         raise ValueError(
             "A stage outcome carries a failure record exactly when it was not accepted"
@@ -359,8 +227,6 @@ def validate_chain_checkpoint(checkpoint: ChainCheckpoint) -> ChainCheckpoint:
         ValueError or TypeError: Unknown chain identity, non-mapping state slots,
             or non-string summaries fail fast before transcript assembly.
     """
-    _validate_chain_identity(checkpoint.chain_name)
-
     if not isinstance(checkpoint.accepted_local_state, Mapping):
         raise TypeError("Checkpoint local state must be a mapping of accepted typed values")
     if not isinstance(checkpoint.next_owner_projection, Mapping):
@@ -413,3 +279,67 @@ def _validate_sha256_hex(value: str, label: str) -> None:
         int(value, 16)
     except ValueError as exc:
         raise ValueError(f"Cache-domain {label} must be a SHA-256 hex digest") from exc
+
+_MINIMUM_CHAIN_CONTEXT_WINDOW_TOKENS = 50_000
+_MINIMUM_LANE_COMPLETION_TOKENS = 8_192
+
+
+def _validate_v3_lane_config(config, *, lane_label: str, require_context_window: bool) -> None:
+    if not isinstance(config, LLMCallConfig):
+        raise TypeError(f"V3 {lane_label} lane must be an LLMCallConfig")
+    for field_name in ("route_name", "base_url", "api_key", "model"):
+        value = getattr(config, field_name)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"V3 {lane_label} route {field_name} must be non-empty")
+    if config.thinking.enabled:
+        raise ValueError(f"V3 {lane_label} lane thinking must be disabled")
+    completion_cap = config.max_completion_tokens
+    if not isinstance(completion_cap, int) or isinstance(completion_cap, bool) or completion_cap < _MINIMUM_LANE_COMPLETION_TOKENS:
+        raise ValueError(f"V3 {lane_label} lane completion cap must be at least {_MINIMUM_LANE_COMPLETION_TOKENS}")
+    if not require_context_window:
+        return
+    context_window = config.context_window_tokens
+    if not isinstance(context_window, int) or isinstance(context_window, bool) or context_window < _MINIMUM_CHAIN_CONTEXT_WINDOW_TOKENS:
+        raise ValueError("V3 chain context window must be at least 50000")
+
+
+@dataclass(frozen=True)
+class CognitionChainServicesV3:
+    """Injected primary and optional sidecar bindings for Cognition V3."""
+
+    llm: LLMInvoker
+    chain_lane: LLMCallConfig
+    sidecar_lane: LLMCallConfig | None
+    subconscious_enabled: bool = False
+    appraisal_group_count: Literal[1, 2, 3, 6] = 2
+    turn_deadline_seconds: int = 240
+
+    def __post_init__(self) -> None:
+        if self.llm is None:
+            raise TypeError("V3 services require an LLM invoker")
+        if not isinstance(self.subconscious_enabled, bool):
+            raise TypeError("subconscious_enabled must be a bool")
+        if not isinstance(self.appraisal_group_count, int) or isinstance(
+            self.appraisal_group_count,
+            bool,
+        ):
+            raise TypeError("appraisal_group_count must be an integer")
+        if self.appraisal_group_count not in {1, 2, 3, 6}:
+            raise ValueError("appraisal_group_count must be one of 1, 2, 3, or 6")
+        if not isinstance(self.turn_deadline_seconds, int) or isinstance(
+            self.turn_deadline_seconds,
+            bool,
+        ):
+            raise TypeError("turn_deadline_seconds must be an integer")
+        if not 30 <= self.turn_deadline_seconds <= 600:
+            raise ValueError("turn_deadline_seconds must be between 30 and 600")
+        _validate_v3_lane_config(self.chain_lane, lane_label="chain", require_context_window=True)
+        if self.sidecar_lane is None:
+            if self.subconscious_enabled:
+                raise ValueError("V3 subconscious execution requires a sidecar lane")
+            return
+        _validate_v3_lane_config(self.sidecar_lane, lane_label="sidecar", require_context_window=False)
+        chain_identity = (self.chain_lane.base_url.strip().rstrip('/').lower(), self.chain_lane.model.strip().lower())
+        sidecar_identity = (self.sidecar_lane.base_url.strip().rstrip('/').lower(), self.sidecar_lane.model.strip().lower())
+        if sidecar_identity == chain_identity:
+            raise ValueError("V3 chain and sidecar lanes must have distinct endpoint/model identities")

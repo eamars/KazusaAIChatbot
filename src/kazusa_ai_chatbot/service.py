@@ -7,7 +7,6 @@ Start with:
 from __future__ import annotations
 
 import asyncio
-from copy import deepcopy
 import hashlib
 import hmac
 import json
@@ -16,44 +15,100 @@ import os
 import socket
 import time
 import traceback
-from uuid import uuid4
 from collections.abc import Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
+from copy import deepcopy
 from typing import Any, Literal
+from uuid import uuid4
 
 from fastapi import BackgroundTasks, FastAPI, Request
 
+from kazusa_ai_chatbot import event_logging, llm_tracing
 from kazusa_ai_chatbot.action_spec.execution import execute_action_specs_for_trace
 from kazusa_ai_chatbot.action_spec.results import (
     has_consolidatable_output,
     project_episode_trace_for_consolidation,
 )
-from kazusa_ai_chatbot.config import (
-    CALENDAR_SCHEDULER_CLAIM_LIMIT,
-    CALENDAR_SCHEDULER_ENABLED,
-    CALENDAR_SCHEDULER_LEASE_SECONDS,
-    CALENDAR_SCHEDULER_MAX_ATTEMPTS,
-    CALENDAR_SCHEDULER_POLL_INTERVAL_SECONDS,
-    BACKGROUND_WORK_INPUT_CHAR_LIMIT,
-    BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
-    BACKGROUND_WORK_WORKER_CLAIM_LIMIT,
-    BACKGROUND_WORK_WORKER_ENABLED,
-    BACKGROUND_WORK_WORKER_INTERVAL_SECONDS,
-    BACKGROUND_WORK_WORKER_LEASE_SECONDS,
-    BACKGROUND_WORK_WORKER_MAX_ATTEMPTS,
-    CHARACTER_GLOBAL_USER_ID,
-    CHAT_HISTORY_RECENT_LIMIT,
-    CONVERSATION_HISTORY_LIMIT,
-    COGNITION_VISUAL_DIRECTIVES_ENABLED,
-    KAZUSA_CONTROL_BRAIN_SHARED_SECRET,
-    MEDIA_DESCRIPTOR_CACHE_MAX_HYDRATION_ENTRIES,
-    REFLECTION_CYCLE_ENABLED,
-    REFLECTION_PHASE_MAX_SLOTS_PER_PERIOD,
-    REFLECTION_PHASE_MIN_SLOT_SPACING_SECONDS,
-    REFLECTION_WORKER_INTERVAL_SECONDS,
-    SELF_COGNITION_ENABLED,
-    SELF_COGNITION_MAX_CASES_PER_TICK,
-    SELF_COGNITION_WORKER_INTERVAL_SECONDS,
+from kazusa_ai_chatbot.background_work import (
+    BackgroundWorkRuntimeHandle,
+    start_background_work_runtime,
+    stop_background_work_runtime,
+)
+from kazusa_ai_chatbot.brain_service import (
+    cache_startup as brain_cache_startup,
+)
+from kazusa_ai_chatbot.brain_service import (
+    graph as brain_graph,
+)
+from kazusa_ai_chatbot.brain_service import (
+    health as brain_health,
+)
+from kazusa_ai_chatbot.brain_service import (
+    intake as brain_intake,
+)
+from kazusa_ai_chatbot.brain_service import (
+    post_turn as brain_post_turn,
+)
+from kazusa_ai_chatbot.brain_service import (
+    runtime_adapters as brain_runtime_registry,
+)
+from kazusa_ai_chatbot.brain_service.character_state_ordering import (
+    _registered_predecessor_receipt,
+    await_predecessors,
+    capture_predecessor_watermark,
+    complete_predecessor,
+    register_predecessor,
+)
+from kazusa_ai_chatbot.brain_service.contracts import (
+    AttachmentIn as AttachmentIn,
+)
+from kazusa_ai_chatbot.brain_service.contracts import (
+    AttachmentOut as AttachmentOut,
+)
+from kazusa_ai_chatbot.brain_service.contracts import (
+    AttachmentRefIn as AttachmentRefIn,
+)
+from kazusa_ai_chatbot.brain_service.contracts import (
+    Cache2AgentStatsResponse as Cache2AgentStatsResponse,
+)
+from kazusa_ai_chatbot.brain_service.contracts import (
+    Cache2HealthResponse as Cache2HealthResponse,
+)
+from kazusa_ai_chatbot.brain_service.contracts import (
+    ChatRequest,
+    ChatRequestReceiptMetadata,
+    ChatResponse,
+    DeliveryReceiptRequest,
+    DeliveryReceiptResponse,
+    EventRequest,
+    HealthResponse,
+    OperationalErrorOut,
+    OpsLatestCognitionGraphResponse,
+    OpsRuntimeStatusResponse,
+    OpsSelfCognitionStatsResponse,
+    OpsStatsResponse,
+    RuntimeAdapterRegistrationRequest,
+    RuntimeAdapterRegistrationResponse,
+)
+from kazusa_ai_chatbot.brain_service.contracts import (
+    DebugModesIn as DebugModesIn,
+)
+from kazusa_ai_chatbot.brain_service.contracts import (
+    MentionIn as MentionIn,
+)
+from kazusa_ai_chatbot.brain_service.contracts import (
+    MessageEnvelopeIn as MessageEnvelopeIn,
+)
+from kazusa_ai_chatbot.brain_service.contracts import (
+    ReplyTargetIn as ReplyTargetIn,
+)
+from kazusa_ai_chatbot.brain_service.delivery_mentions import (
+    build_inline_delivery_mentions,
+)
+from kazusa_ai_chatbot.brain_service.turn_settlement import (
+    AssessmentLease,
+    PersistedChatFragment,
+    TurnSettlementCoordinator,
 )
 from kazusa_ai_chatbot.calendar_scheduler import models as calendar_models
 from kazusa_ai_chatbot.calendar_scheduler import repository as calendar_repository
@@ -68,159 +123,17 @@ from kazusa_ai_chatbot.calendar_scheduler.worker import (
     start_calendar_scheduler_worker,
     stop_calendar_scheduler_worker,
 )
-from kazusa_ai_chatbot.cognition_episode import (
-    CURRENT_CHARACTER_ROLE,
-    CURRENT_USER_ROLE,
-    CognitiveEpisodeV1,
-    EvidenceRefV1,
-    PerceptV1,
-    TargetScopeV1,
-    build_reply_media_description_rows,
-    build_text_chat_media_description_rows,
-    build_user_message_episode,
-)
-from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
-    project_character_operational_state,
-    project_operational_relationship_context,
-    project_relationship_context,
-    select_character_operational_context,
-)
-from kazusa_ai_chatbot.conversation_progress import (
-    ConversationProgressScope,
-    ConversationProgressSourceRefV2,
-    assemble_logical_turns,
-    load_progress_context,
-    logical_turns_as_history_rows,
-    record_turn_progress,
-    select_recent_logical_turns,
-    select_recordable_turn_outcome,
+from kazusa_ai_chatbot.character_identity_growth.runner import (
+    reconcile_identity_growth_post_commit,
 )
 from kazusa_ai_chatbot.character_identity_growth.runtime import (
     load_latest_identity_for_episode,
     snapshot_state_update,
 )
-from kazusa_ai_chatbot.character_identity_growth.runner import (
-    reconcile_identity_growth_post_commit,
-)
-from kazusa_ai_chatbot.internal_monologue_residue import (
-    load_residue_context,
-    record_completed_episode_residue,
-)
-from kazusa_ai_chatbot.past_dialog_cognition import (
-    build_past_dialog_cognition_context,
-    candidate_from_conversation_row,
-)
-from kazusa_ai_chatbot.llm_interface.route_report import render_llm_route_table
-from kazusa_ai_chatbot import llm_tracing
-from kazusa_ai_chatbot.llm_tracing import (
-    failure_capsule,
-    guardrail_capsule,
-)
-from kazusa_ai_chatbot.reflection_cycle.phase_scheduler import (
-    REFLECTION_PHASE_GROUPS_PER_SLOT,
-)
-from kazusa_ai_chatbot.runtime_coordination import (
-    PipelineCoordinator,
-    PipelineScope,
-)
-from kazusa_ai_chatbot.db import (
-    DatabaseBackendError,
-    backfill_character_conversation_identity,
-    check_database_connection,
-    close_db,
-    db_bootstrap,
-    ensure_operational_character_state,
-    issue_internal_action_latch,
-    ensure_character_identity,
-    apply_assistant_delivery_receipt,
-    build_interaction_style_context,
-    get_current_identity,
-    get_character_profile,
-    get_character_runtime_state,
-    get_ambient_conversation_history,
-    get_conversation_by_platform_message_id,
-    get_conversation_history,
-    get_user_profile,
-    get_user_message_by_platform_message_id,
-    get_user_message_by_row_id,
-    has_inbound_after,
-    load_media_descriptor_entries,
-    complete_character_operational_receipt,
-    query_active_commitment_memory_units_for_user,
-    resolve_global_user_id,
-    save_conversation,
-    save_conversation_receipt,
-    set_conversation_source_episode_id,
-    update_conversation_row_llm_trace_id,
-    upsert_post_turn_lifecycle_record,
-    IdentityLedgerNotFoundError,
-)
-from kazusa_ai_chatbot.mcp_client import mcp_manager
-from kazusa_ai_chatbot.state import IMProcessState, MultiMediaDoc, DebugModes, ReplyContext
-from kazusa_ai_chatbot.time_boundary import (
-    parse_storage_utc_datetime,
-    storage_utc_now,
-    storage_utc_now_iso,
-)
 from kazusa_ai_chatbot.chat_input_queue import ChatInputQueue, QueuedChatItem
-from kazusa_ai_chatbot.message_envelope import (
-    MessageEnvelope,
-    project_prompt_message_context,
-    project_reply_attachment_summaries,
-)
-from kazusa_ai_chatbot.media_inspection.session_cache import (
-    begin_session_turn,
-    put_session_media,
-)
-from kazusa_ai_chatbot.utils import log_list_preview, log_preview, trim_history_dict
-from kazusa_ai_chatbot import event_logging
-from kazusa_ai_chatbot.dispatcher import (
-    AdapterRegistry,
-    DispatchContext,
-    RemoteHttpAdapter,
-    handle_send_message,
-)
-
-from kazusa_ai_chatbot.brain_service import (
-    cache_startup as brain_cache_startup,
-    graph as brain_graph,
-    health as brain_health,
-    intake as brain_intake,
-    post_turn as brain_post_turn,
-    runtime_adapters as brain_runtime_registry,
-)
-from kazusa_ai_chatbot.brain_service.turn_settlement import (
-    AssessmentLease,
-    PersistedChatFragment,
-    TurnSettlementCoordinator,
-)
-from kazusa_ai_chatbot.brain_service.delivery_mentions import (
-    build_inline_delivery_mentions,
-)
-from kazusa_ai_chatbot.brain_service.contracts import (
-    AttachmentIn as AttachmentIn,
-    AttachmentOut as AttachmentOut,
-    AttachmentRefIn as AttachmentRefIn,
-    Cache2AgentStatsResponse as Cache2AgentStatsResponse,
-    Cache2HealthResponse as Cache2HealthResponse,
-    ChatRequest,
-    ChatRequestReceiptMetadata,
-    ChatResponse,
-    DebugModesIn as DebugModesIn,
-    DeliveryReceiptRequest,
-    DeliveryReceiptResponse,
-    EventRequest,
-    HealthResponse,
-    MentionIn as MentionIn,
-    MessageEnvelopeIn as MessageEnvelopeIn,
-    OpsLatestCognitionGraphResponse,
-    OpsRuntimeStatusResponse,
-    OpsSelfCognitionStatsResponse,
-    OpsStatsResponse,
-    OperationalErrorOut,
-    ReplyTargetIn as ReplyTargetIn,
-    RuntimeAdapterRegistrationRequest,
-    RuntimeAdapterRegistrationResponse,
+from kazusa_ai_chatbot.cognition_core_v2.character_carryover import (
+    CharacterCarryoverServicesV1,
+    build_character_carryover_services,
 )
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionContextLimitError,
@@ -234,20 +147,131 @@ from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
     reset_v2_attempt_ledger,
     snapshot_v2_guarded_attempt_ledger,
 )
+from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+    project_character_operational_state,
+    project_operational_relationship_context,
+    project_relationship_context,
+    select_character_operational_context,
+)
+from kazusa_ai_chatbot.cognition_episode import (
+    CURRENT_CHARACTER_ROLE,
+    CURRENT_USER_ROLE,
+    CognitiveEpisodeV1,
+    EvidenceRefV1,
+    PerceptV1,
+    TargetScopeV1,
+    build_reply_media_description_rows,
+    build_text_chat_media_description_rows,
+    build_user_message_episode,
+)
 from kazusa_ai_chatbot.cognition_resolver.guardrail import (
     bind_cognition_retry_coordinator,
     create_cognition_retry_coordinator,
     reset_cognition_retry_coordinator,
 )
-from kazusa_ai_chatbot.relevance import (
-    SettledRelevanceContractError,
-    build_group_attention_context,
-    frontline_relevance_agent,
-    relevance_agent,
+from kazusa_ai_chatbot.config import (
+    BACKGROUND_WORK_INPUT_CHAR_LIMIT,
+    BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
+    BACKGROUND_WORK_WORKER_CLAIM_LIMIT,
+    BACKGROUND_WORK_WORKER_ENABLED,
+    BACKGROUND_WORK_WORKER_INTERVAL_SECONDS,
+    BACKGROUND_WORK_WORKER_LEASE_SECONDS,
+    BACKGROUND_WORK_WORKER_MAX_ATTEMPTS,
+    CALENDAR_SCHEDULER_CLAIM_LIMIT,
+    CALENDAR_SCHEDULER_ENABLED,
+    CALENDAR_SCHEDULER_LEASE_SECONDS,
+    CALENDAR_SCHEDULER_MAX_ATTEMPTS,
+    CALENDAR_SCHEDULER_POLL_INTERVAL_SECONDS,
+    CHARACTER_GLOBAL_USER_ID,
+    CHAT_HISTORY_RECENT_LIMIT,
+    COGNITION_CORE_ENGINE,
+    COGNITION_VISUAL_DIRECTIVES_ENABLED,
+    CONVERSATION_HISTORY_LIMIT,
+    KAZUSA_CONTROL_BRAIN_SHARED_SECRET,
+    MEDIA_DESCRIPTOR_CACHE_MAX_HYDRATION_ENTRIES,
+    REFLECTION_CYCLE_ENABLED,
+    REFLECTION_PHASE_MAX_SLOTS_PER_PERIOD,
+    REFLECTION_PHASE_MIN_SLOT_SPACING_SECONDS,
+    REFLECTION_WORKER_INTERVAL_SECONDS,
+    SELF_COGNITION_ENABLED,
+    SELF_COGNITION_MAX_CASES_PER_TICK,
+    SELF_COGNITION_WORKER_INTERVAL_SECONDS,
+    CognitionV3RouteSettingsV1,
+    get_selected_cognition_route_settings,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer import (
-    multimedia_descriptor_agent,
-    select_media_for_turn,
+from kazusa_ai_chatbot.consolidation.character_operational_state import (
+    CharacterOperationalExecutionContext,
+    prepare_character_operational_target,
+    run_character_operational_target,
+)
+from kazusa_ai_chatbot.consolidation.core import call_consolidation_subgraph
+from kazusa_ai_chatbot.conversation_progress import (
+    ConversationProgressScope,
+    ConversationProgressSourceRefV2,
+    assemble_logical_turns,
+    load_progress_context,
+    logical_turns_as_history_rows,
+    record_turn_progress,
+    select_recent_logical_turns,
+    select_recordable_turn_outcome,
+)
+from kazusa_ai_chatbot.db import (
+    DatabaseBackendError,
+    IdentityLedgerNotFoundError,
+    apply_assistant_delivery_receipt,
+    backfill_character_conversation_identity,
+    build_interaction_style_context,
+    check_database_connection,
+    close_db,
+    complete_character_operational_receipt,
+    db_bootstrap,
+    ensure_character_identity,
+    ensure_operational_character_state,
+    get_ambient_conversation_history,
+    get_character_profile,
+    get_character_runtime_state,
+    get_cognition_chain_run,
+    get_conversation_by_platform_message_id,
+    get_conversation_history,
+    get_current_identity,
+    get_user_message_by_platform_message_id,
+    get_user_message_by_row_id,
+    get_user_profile,
+    has_inbound_after,
+    issue_internal_action_latch,
+    load_media_descriptor_entries,
+    query_active_commitment_memory_units_for_user,
+    resolve_global_user_id,
+    save_conversation,
+    save_conversation_receipt,
+    set_conversation_source_episode_id,
+    update_conversation_row_llm_trace_id,
+    upsert_post_turn_lifecycle_record,
+)
+from kazusa_ai_chatbot.dispatcher import (
+    AdapterRegistry,
+    DispatchContext,
+    RemoteHttpAdapter,
+    handle_send_message,
+)
+from kazusa_ai_chatbot.internal_monologue_residue import (
+    load_residue_context,
+    record_completed_episode_residue,
+)
+from kazusa_ai_chatbot.llm_interface.route_report import render_llm_route_table
+from kazusa_ai_chatbot.llm_tracing import (
+    failure_capsule,
+    guardrail_capsule,
+)
+from kazusa_ai_chatbot.mcp_client import mcp_manager
+from kazusa_ai_chatbot.media_inspection.session_cache import (
+    begin_session_turn,
+    put_session_media,
+)
+from kazusa_ai_chatbot.message_envelope import (
+    MessageEnvelope,
+    project_prompt_message_context,
+    project_reply_attachment_summaries,
 )
 from kazusa_ai_chatbot.nodes.dialog_agent import (
     DialogGenerationContractError,
@@ -256,22 +280,13 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2 import persona_supervisor2
 from kazusa_ai_chatbot.nodes.persona_supervisor2_memory_lifecycle import (
     call_post_surface_memory_lifecycle_review,
 )
-from kazusa_ai_chatbot.consolidation.core import call_consolidation_subgraph
-from kazusa_ai_chatbot.consolidation.character_operational_state import (
-    CharacterOperationalExecutionContext,
-    prepare_character_operational_target,
-    run_character_operational_target,
+from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer import (
+    multimedia_descriptor_agent,
+    select_media_for_turn,
 )
-from kazusa_ai_chatbot.cognition_core_v2.character_carryover import (
-    CharacterCarryoverServicesV1,
-    build_character_carryover_services,
-)
-from kazusa_ai_chatbot.brain_service.character_state_ordering import (
-    _registered_predecessor_receipt,
-    await_predecessors,
-    capture_predecessor_watermark,
-    complete_predecessor,
-    register_predecessor,
+from kazusa_ai_chatbot.past_dialog_cognition import (
+    build_past_dialog_cognition_context,
+    candidate_from_conversation_row,
 )
 from kazusa_ai_chatbot.rag.cache2_policy import (
     MEDIA_DESCRIPTOR_CACHE_NAME,
@@ -284,17 +299,37 @@ from kazusa_ai_chatbot.reflection_cycle import (
     start_reflection_cycle_worker,
     stop_reflection_cycle_worker,
 )
+from kazusa_ai_chatbot.reflection_cycle.phase_scheduler import (
+    REFLECTION_PHASE_GROUPS_PER_SLOT,
+)
+from kazusa_ai_chatbot.relevance import (
+    SettledRelevanceContractError,
+    build_group_attention_context,
+    frontline_relevance_agent,
+    relevance_agent,
+)
+from kazusa_ai_chatbot.runtime_coordination import (
+    PipelineCoordinator,
+    PipelineScope,
+)
 from kazusa_ai_chatbot.self_cognition import (
     SelfCognitionWorkerHandle,
     start_self_cognition_worker,
     stop_self_cognition_worker,
 )
 from kazusa_ai_chatbot.self_cognition import models as self_cognition_models
-from kazusa_ai_chatbot.background_work import (
-    BackgroundWorkRuntimeHandle,
-    start_background_work_runtime,
-    stop_background_work_runtime,
+from kazusa_ai_chatbot.state import (
+    DebugModes,
+    IMProcessState,
+    MultiMediaDoc,
+    ReplyContext,
 )
+from kazusa_ai_chatbot.time_boundary import (
+    parse_storage_utc_datetime,
+    storage_utc_now,
+    storage_utc_now_iso,
+)
+from kazusa_ai_chatbot.utils import log_list_preview, log_preview, trim_history_dict
 
 logger = logging.getLogger(__name__)
 
@@ -2291,12 +2326,41 @@ def _record_latest_self_cognition_graph(
     _latest_self_cognition_graph = deepcopy(cognition_graph)
 
 
-def _latest_cognition_graph_response() -> OpsLatestCognitionGraphResponse:
+async def _resolve_chain_run_for_graph(
+    graph: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Resolve one graph's paired chain-run row by exact correlation."""
+
+    if not isinstance(graph, Mapping):
+        return None
+    run_id = graph.get("run_id")
+    llm_trace_id = graph.get("llm_trace_id")
+    if not isinstance(run_id, str) or not isinstance(
+        llm_trace_id,
+        str,
+    ):
+        return None
+    if not run_id.strip() or not llm_trace_id.strip():
+        return None
+    chain_run = await get_cognition_chain_run(
+        run_id=run_id,
+        llm_trace_id=llm_trace_id,
+    )
+    return chain_run
+
+
+async def _latest_cognition_graph_response() -> OpsLatestCognitionGraphResponse:
     """Build the read-only latest cognition graph API response."""
 
     response = OpsLatestCognitionGraphResponse(
         cognition_graph=deepcopy(_latest_cognition_graph),
         self_cognition_graph=deepcopy(_latest_self_cognition_graph),
+        cognition_chain_run=await _resolve_chain_run_for_graph(
+            _latest_cognition_graph
+        ),
+        self_cognition_chain_run=await _resolve_chain_run_for_graph(
+            _latest_self_cognition_graph
+        ),
     )
     return response
 
@@ -2336,6 +2400,56 @@ async def _handle_calendar_reflection_phase_run(
         pipeline_coordinator=_pipeline_coordinator,
     )
     return result
+
+
+def _cognition_engine_descriptor() -> dict[str, object]:
+    """Build the safe selected-engine descriptor from loaded config."""
+
+    selected_settings = get_selected_cognition_route_settings()
+    if COGNITION_CORE_ENGINE == "v3":
+        if not isinstance(selected_settings, CognitionV3RouteSettingsV1):
+            raise RuntimeError("selected V3 cognition settings are unavailable")
+        context_window_tokens = selected_settings.chain.context_window_tokens
+        if context_window_tokens is None:
+            raise RuntimeError("selected V3 chain context window is unavailable")
+        sidecar = selected_settings.sidecar
+        descriptor = {
+            "schema_version": "cognition_engine_descriptor.v1",
+            "engine_id": "v3",
+            "chain_model_name": selected_settings.chain.model,
+            "sidecar_model_name": sidecar.model if sidecar else "",
+            "sidecar_enabled": sidecar is not None,
+            "subconscious_enabled": selected_settings.subconscious_enabled,
+            "appraisal_group_count": selected_settings.appraisal_group_count,
+            "chain_context_window_tokens": context_window_tokens,
+            "normal_budget_tokens": 50_000,
+            "extended_budget_tokens": 65_000,
+            "turn_deadline_seconds": selected_settings.turn_deadline_seconds,
+        }
+        return descriptor
+
+    if COGNITION_CORE_ENGINE != "v2" or not isinstance(
+        selected_settings,
+        Mapping,
+    ):
+        raise RuntimeError("selected cognition engine settings are unavailable")
+    stage_models = sorted({setting.model for setting in selected_settings.values()})
+    if not stage_models:
+        raise RuntimeError("selected V2 cognition stage models are unavailable")
+    descriptor = {
+        "schema_version": "cognition_engine_descriptor.v1",
+        "engine_id": "v2",
+        "chain_model_name": ", ".join(stage_models),
+        "sidecar_model_name": "",
+        "sidecar_enabled": False,
+        "subconscious_enabled": False,
+        "appraisal_group_count": 0,
+        "chain_context_window_tokens": 0,
+        "normal_budget_tokens": 0,
+        "extended_budget_tokens": 0,
+        "turn_deadline_seconds": 0,
+    }
+    return descriptor
 
 
 def _ops_runtime_status_payload(
@@ -2421,6 +2535,7 @@ def _ops_runtime_status_payload(
         "semantic_descriptors": dict(
             base_status.get("semantic_descriptors", {}),
         ),
+        "cognition_engine": _cognition_engine_descriptor(),
     }
     return payload
 
@@ -8135,7 +8250,7 @@ async def ops_runtime_status(
 async def ops_latest_cognition_graph() -> OpsLatestCognitionGraphResponse:
     """Return the latest bounded cognition graph snapshot for operators."""
 
-    response = _latest_cognition_graph_response()
+    response = await _latest_cognition_graph_response()
     return response
 
 

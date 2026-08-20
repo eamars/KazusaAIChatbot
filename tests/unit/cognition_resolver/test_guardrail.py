@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import cast
+from typing import cast, get_type_hints
 
 import pytest
 
@@ -19,6 +19,9 @@ from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
     reset_v2_attempt_ledger,
     snapshot_v2_attempt_ledger,
     snapshot_v2_guarded_attempt_ledger,
+)
+from kazusa_ai_chatbot.cognition_core_v3.contracts import (
+    CognitionChainServicesV3,
 )
 from kazusa_ai_chatbot.cognition_resolver import guardrail
 
@@ -135,6 +138,48 @@ async def test_parent_epoch_persists_after_recovery() -> None:
     finally:
         guardrail.reset_cognition_retry_coordinator(coordinator_token)
         reset_v2_attempt_ledger(ledger_token)
+
+
+@pytest.mark.asyncio
+async def test_guardrail_passes_engine_neutral_services_and_preserves_v3_attempt_epochs() -> None:
+    """The parent checkpoint preserves one V3 service object across epochs."""
+
+    annotations = get_type_hints(guardrail.run_guarded_cognition)
+    assert annotations["services"] is guardrail.ServicesT
+
+    ledger = create_v2_attempt_ledger("v3-engine-neutral")
+    ledger_token = bind_v2_attempt_ledger(ledger, graph_attempt=1)
+    coordinator = guardrail.create_cognition_retry_coordinator(
+        "v3-engine-neutral",
+    )
+    coordinator_token = guardrail.bind_cognition_retry_coordinator(coordinator)
+    v3_services = cast(CognitionChainServicesV3, object())
+    observed_services: list[CognitionChainServicesV3] = []
+    observed_epochs: list[int] = []
+
+    async def run_child(
+        _payload: CognitionCoreInputV2,
+        services: CognitionChainServicesV3,
+    ) -> CognitionCoreOutputV2:
+        observed_services.append(services)
+        observed_epochs.append(coordinator.epoch)
+        if len(observed_services) == 1:
+            raise _goal_exhaustion()
+        return _output()
+
+    try:
+        output = await guardrail.run_guarded_cognition(
+            _input_payload(),
+            v3_services,
+            run_child=run_child,
+        )
+    finally:
+        guardrail.reset_cognition_retry_coordinator(coordinator_token)
+        reset_v2_attempt_ledger(ledger_token)
+
+    assert output == _output()
+    assert observed_services == [v3_services, v3_services]
+    assert observed_epochs == [0, 1]
 
 
 def test_parent_recovery_allows_only_goal_exhaustion_codes() -> None:

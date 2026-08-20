@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+import time
+import uuid
 from collections.abc import Mapping
 from datetime import datetime, timezone
-import time
+from itertools import pairwise
 from typing import Any, Literal
-import uuid
 
 import httpx
 from pydantic import ValidationError
 
 from control_console.contracts import (
+    CognitionChainRunSnapshot,
     CognitionContextConsumption,
     CognitionRunGraphEdge,
     CognitionRunGraphNode,
@@ -263,7 +265,6 @@ COGNITION_GRAPH_NESTED_DETAIL_KEYS = frozenset(
         "trend",
         "cause_summary",
         "route",
-        "visibility",
         "emotional_tone",
         "directness",
     }
@@ -368,6 +369,40 @@ class KazusaClient:
         )
         return graph
 
+    async def get_latest_cognition_graph_with_chain_runs(
+        self,
+    ) -> tuple[
+        CognitionRunGraphSnapshot,
+        CognitionChainRunSnapshot,
+        CognitionRunGraphSnapshot,
+        CognitionChainRunSnapshot,
+    ]:
+        """Read paired live/self graph and chain-run projections."""
+
+        async with self._client() as client:
+            response = await client.get("/ops/latest-cognition-graph")
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            payload = {}
+        live_graph = project_cognition_graph_snapshot(
+            source="overview_latest",
+            payload=payload,
+        )
+        self_graph = project_cognition_graph_snapshot(
+            source="self_latest",
+            payload=payload,
+        )
+        live_chain = _project_paired_cognition_chain_run_snapshot(
+            payload.get("cognition_chain_run"),
+            graph=live_graph,
+        )
+        self_chain = _project_paired_cognition_chain_run_snapshot(
+            payload.get("self_cognition_chain_run"),
+            graph=self_graph,
+        )
+        return live_graph, live_chain, self_graph, self_chain
+
     async def send_debug_chat(
         self,
         request: ConsoleDebugChatRequest,
@@ -382,6 +417,17 @@ class KazusaClient:
         response.raise_for_status()
         response_payload = response.json()
         elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+        debug_graph = project_cognition_graph_snapshot(
+            source="debug_latest",
+            payload=response_payload,
+            run_id=_safe_optional_text(
+                response_payload.get("delivery_tracking_id"),
+            ),
+        )
+        debug_chain = _project_paired_cognition_chain_run_snapshot(
+            response_payload.get("cognition_chain_run"),
+            graph=debug_graph,
+        )
         result = {
             "request_id": f"cc-req-{uuid.uuid4().hex[:12]}",
             "brain_available": True,
@@ -398,13 +444,8 @@ class KazusaClient:
             "latency_ms": elapsed_ms,
             "sent_at": datetime.now(timezone.utc).isoformat(),
             "error": None,
-            "cognition_graph": project_cognition_graph_snapshot(
-                source="debug_latest",
-                payload=response_payload,
-                run_id=_safe_optional_text(
-                    response_payload.get("delivery_tracking_id"),
-                ),
-            ).model_dump(mode="json"),
+            "cognition_graph": debug_graph.model_dump(mode="json"),
+            "cognition_chain_run": debug_chain.model_dump(mode="json"),
         }
         return result
 
@@ -587,6 +628,80 @@ def project_cognition_graph_snapshot(
             reason="brain cognition graph telemetry failed console validation",
         )
     return snapshot
+
+
+def not_reported_cognition_chain_run() -> CognitionChainRunSnapshot:
+    """Return an explicit absent-safe chain-run snapshot."""
+
+    snapshot = CognitionChainRunSnapshot(status="not_reported")
+    return snapshot
+
+
+def project_cognition_chain_run_snapshot(
+    value: object,
+) -> CognitionChainRunSnapshot:
+    """Project one sanitized chain-run record into a strict console snapshot."""
+
+    if not isinstance(value, dict):
+        snapshot = not_reported_cognition_chain_run()
+        return snapshot
+    normalized = {
+        "status": _safe_optional_text(value.get("status")) or "completed",
+        "chain_run_id": _safe_optional_text(value.get("chain_run_id")),
+        "run_id": _safe_optional_text(value.get("run_id")),
+        "llm_trace_id": _safe_optional_text(value.get("llm_trace_id")),
+        "cognition_invocation_id": _safe_optional_text(
+            value.get("cognition_invocation_id")
+        ),
+        "chain_model_name": _safe_optional_text(
+            value.get("chain_model_name")
+        ) or "",
+        "sidecar_model_name": _safe_optional_text(
+            value.get("sidecar_model_name")
+        ) or "",
+        "terminal_disposition": _safe_optional_text(
+            value.get("terminal_disposition")
+        ) or "",
+        "started_at": _safe_optional_text(value.get("started_at")) or "",
+        "completed_at": _safe_optional_text(value.get("completed_at")) or "",
+        "step_count": (
+            value.get("step_count")
+            if isinstance(value.get("step_count"), int)
+            else 0
+        ),
+        "warning_codes": (
+            list(value["warning_codes"])
+            if isinstance(value.get("warning_codes"), list)
+            else []
+        ),
+    }
+    try:
+        snapshot = CognitionChainRunSnapshot.model_validate(normalized)
+    except ValidationError:
+        snapshot = not_reported_cognition_chain_run()
+    return snapshot
+
+
+def _project_paired_cognition_chain_run_snapshot(
+    value: object,
+    *,
+    graph: CognitionRunGraphSnapshot,
+) -> CognitionChainRunSnapshot:
+    """Keep a chain row only when its graph correlation is exact."""
+
+    chain = project_cognition_chain_run_snapshot(value)
+    if chain.status == "not_reported":
+        return chain
+    if not graph.run_id or not graph.llm_trace_id:
+        absent_chain = not_reported_cognition_chain_run()
+        return absent_chain
+    if (
+        chain.run_id != graph.run_id
+        or chain.llm_trace_id != graph.llm_trace_id
+    ):
+        absent_chain = not_reported_cognition_chain_run()
+        return absent_chain
+    return chain
 
 
 def _first_graph_payload(
@@ -894,7 +1009,7 @@ def _project_known_cognition_fields(
                 "messages": _project_cognition_graph_message_fragments(payload),
             },
         })
-    for source_node, target_node in zip(nodes, nodes[1:]):
+    for source_node, target_node in pairwise(nodes):
         edges.append({
             "source": source_node["id"],
             "target": target_node["id"],

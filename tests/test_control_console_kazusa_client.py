@@ -101,6 +101,7 @@ async def test_kazusa_client_reads_health_and_posts_debug_chat() -> None:
     assert chat["response"]["content_type"] == "text"
     assert chat["response"]["attachment_count"] == 1
     assert chat["response"]["delivery_mention_count"] == 1
+    assert chat["cognition_chain_run"]["status"] == "not_reported"
     assert "delivery_mentions" not in chat["response"]
     assert "global-user-secret" not in repr(chat)
     assert "platform-user-secret" not in repr(chat)
@@ -111,3 +112,114 @@ async def test_kazusa_client_reads_health_and_posts_debug_chat() -> None:
         ("GET", "/ops/latest-cognition-graph"),
         ("POST", "/chat"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_kazusa_client_projects_correlated_live_and_self_chain_runs() -> None:
+    """The client projects each graph's exact paired chain-run separately."""
+
+    from control_console.kazusa_client import KazusaClient
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/ops/latest-cognition-graph":
+            return httpx.Response(
+                200,
+                json={
+                    "cognition_graph": {
+                        "run_id": "live-run",
+                        "llm_trace_id": "live-trace",
+                        "status": "completed",
+                        "nodes": [],
+                        "edges": [],
+                    },
+                    "self_cognition_graph": {
+                        "run_id": "self-run",
+                        "llm_trace_id": "self-trace",
+                        "status": "completed",
+                        "nodes": [],
+                        "edges": [],
+                    },
+                    "cognition_chain_run": {
+                        "chain_run_id": "cogchain-live",
+                        "run_id": "live-run",
+                        "llm_trace_id": "live-trace",
+                        "terminal_disposition": "complete",
+                    },
+                    "self_cognition_chain_run": {
+                        "chain_run_id": "cogchain-self",
+                        "run_id": "self-run",
+                        "llm_trace_id": "self-trace",
+                        "terminal_disposition": "complete",
+                    },
+                },
+            )
+        return httpx.Response(404)
+
+    client = KazusaClient(
+        base_url="http://brain.local",
+        timeout_seconds=1.0,
+        transport=httpx.MockTransport(handler),
+    )
+    live_graph, live_chain, self_graph, self_chain = (
+        await client.get_latest_cognition_graph_with_chain_runs()
+    )
+
+    assert live_graph.run_id == "live-run"
+    assert self_graph.run_id == "self-run"
+    assert live_chain.run_id == "live-run"
+    assert live_chain.chain_run_id == "cogchain-live"
+    assert self_chain.run_id == "self-run"
+    assert self_chain.chain_run_id == "cogchain-self"
+
+
+@pytest.mark.asyncio
+async def test_kazusa_client_rejects_cross_run_chain_correlation() -> None:
+    """Mismatched chain rows remain explicitly absent instead of stale."""
+
+    from control_console.kazusa_client import KazusaClient
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/ops/latest-cognition-graph"
+        return httpx.Response(
+            200,
+            json={
+                "cognition_graph": {
+                    "run_id": "live-run",
+                    "llm_trace_id": "live-trace",
+                    "status": "completed",
+                    "nodes": [],
+                    "edges": [],
+                },
+                "self_cognition_graph": {
+                    "run_id": "self-run",
+                    "llm_trace_id": "self-trace",
+                    "status": "completed",
+                    "nodes": [],
+                    "edges": [],
+                },
+                "cognition_chain_run": {
+                    "chain_run_id": "wrong-chain",
+                    "run_id": "other-run",
+                    "llm_trace_id": "other-trace",
+                    "terminal_disposition": "complete",
+                },
+                "self_cognition_chain_run": {
+                    "chain_run_id": "wrong-self-chain",
+                    "run_id": "self-run",
+                    "llm_trace_id": "other-trace",
+                    "terminal_disposition": "complete",
+                },
+            },
+        )
+
+    client = KazusaClient(
+        base_url="http://brain.local",
+        timeout_seconds=1.0,
+        transport=httpx.MockTransport(handler),
+    )
+    _, live_chain, _, self_chain = (
+        await client.get_latest_cognition_graph_with_chain_runs()
+    )
+
+    assert live_chain.status == "not_reported"
+    assert self_chain.status == "not_reported"

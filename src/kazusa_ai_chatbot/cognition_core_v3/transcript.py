@@ -12,8 +12,8 @@ they appear only inside ephemeral repair requests sent to the provider.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Sequence
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
@@ -28,6 +28,181 @@ TranscriptMessage = tuple[str, str]
 
 class TranscriptContractError(RuntimeError):
     """Fail-closed transcript contract violation."""
+
+
+@dataclass(frozen=True)
+class ChainMessageV1:
+    """One immutable primary-chain message row."""
+
+    role: str
+    content: str
+
+
+@dataclass(frozen=True)
+class ChainTranscriptV1:
+    """Append-only invocation transcript with tail rollback and re-anchor."""
+
+    messages: tuple[ChainMessageV1, ...] = ()
+    accepted_products: tuple[Mapping[str, object], ...] = ()
+    attempt_ledger: Mapping[str, int] | None = None
+    token_ledger: Mapping[str, int] | None = None
+    deadline_monotonic: float | None = None
+    reanchor_used: bool = False
+    pending_interludes: tuple[Mapping[str, object], ...] = ()
+
+    def append_question(self, content: str) -> ChainTranscriptV1:
+        """Append one human question, including any pending interludes."""
+
+        if not isinstance(content, str) or not content.strip():
+            raise TranscriptContractError(
+                "Chain questions must be non-empty strings"
+            )
+        if self.messages and self.messages[-1].role != ROLE_ASSISTANT:
+            raise TranscriptContractError(
+                "A new question must follow an accepted assistant answer"
+            )
+        question = self._prepend_interludes(content)
+        return self._with_messages(self.messages + (
+            ChainMessageV1(role=ROLE_HUMAN, content=question),
+        ))
+
+    def accept_answer(
+        self,
+        content: str,
+        product: Mapping[str, object] | None = None,
+    ) -> ChainTranscriptV1:
+        """Append one accepted assistant answer and typed product."""
+
+        if not isinstance(content, str) or not content.strip():
+            raise TranscriptContractError(
+                "Accepted assistant answers must be non-empty strings"
+            )
+        if not self.messages or self.messages[-1].role != ROLE_HUMAN:
+            raise TranscriptContractError(
+                "An assistant answer must follow a human question"
+            )
+        products = self.accepted_products + (product,)
+        return self._with_messages(
+            self.messages + (
+                ChainMessageV1(role=ROLE_ASSISTANT, content=content),
+            ),
+            products,
+        )
+
+    def rollback_tail_answer(self) -> tuple[ChainTranscriptV1, str]:
+        """Remove only the current assistant tail and return its question."""
+
+        if len(self.messages) < 2:
+            raise TranscriptContractError(
+                "A rollback requires an assistant answer after a question"
+            )
+        if self.messages[-1].role != ROLE_ASSISTANT:
+            raise TranscriptContractError(
+                "Only the current assistant tail may be rolled back"
+            )
+        question = self.messages[-2]
+        if question.role != ROLE_HUMAN:
+            raise TranscriptContractError(
+                "The question preceding a rolled-back answer is invalid"
+            )
+        products = (
+            self.accepted_products[:-1]
+            if self.accepted_products
+            else self.accepted_products
+        )
+        return (
+            self._with_messages(self.messages[:-1], products),
+            question.content,
+        )
+
+    def append_interlude_to_next_question(
+        self,
+        interlude: Mapping[str, object],
+    ) -> ChainTranscriptV1:
+        """Queue one deterministic notice for the next human question."""
+
+        if not isinstance(interlude, Mapping):
+            raise TranscriptContractError(
+                "Deterministic interludes must be mappings"
+            )
+        return self._with_pending_interludes(
+            self.pending_interludes + (interlude,)
+        )
+
+    def reanchor(self, new_system_digest: str) -> ChainTranscriptV1:
+        """Replace the message tail with a compact deterministic digest."""
+
+        if self.reanchor_used:
+            raise TranscriptContractError("Re-anchor token already consumed")
+        if not isinstance(new_system_digest, str) or not new_system_digest.strip():
+            raise TranscriptContractError(
+                "Re-anchor digests must be non-empty strings"
+            )
+        return ChainTranscriptV1(
+            messages=(),
+            accepted_products=self.accepted_products,
+            attempt_ledger=self.attempt_ledger,
+            token_ledger=self.token_ledger,
+            deadline_monotonic=self.deadline_monotonic,
+            reanchor_used=True,
+            pending_interludes=(),
+        ).append_question(new_system_digest)
+
+    def to_messages(self) -> tuple[tuple[str, str], ...]:
+        """Expose an immutable role/content projection for callers."""
+
+        return tuple(
+            (message.role, message.content)
+            for message in self.messages
+        )
+
+    def _prepend_interludes(self, content: str) -> str:
+        """Prefix queued deterministic notices without a standalone user row."""
+
+        if not self.pending_interludes:
+            return content
+        interlude_json = ", ".join(
+            repr(dict(interlude))
+            for interlude in self.pending_interludes
+        )
+        return f"[interludes: {interlude_json}] {content}"
+
+    def _with_messages(
+        self,
+        messages: tuple[ChainMessageV1, ...],
+        products: tuple[Mapping[str, object], ...] | None = None,
+    ) -> ChainTranscriptV1:
+        """Build a replacement transcript with queued interludes cleared."""
+
+        return ChainTranscriptV1(
+            messages=messages,
+            accepted_products=(
+                self.accepted_products
+                if products is None
+                else products
+            ),
+            attempt_ledger=self.attempt_ledger,
+            token_ledger=self.token_ledger,
+            deadline_monotonic=self.deadline_monotonic,
+            reanchor_used=self.reanchor_used,
+            pending_interludes=(),
+        )
+
+    def _with_pending_interludes(
+        self,
+        pending_interludes: tuple[Mapping[str, object], ...],
+    ) -> ChainTranscriptV1:
+        """Build a replacement transcript with a new interlude queue."""
+
+        return ChainTranscriptV1(
+            messages=self.messages,
+            accepted_products=self.accepted_products,
+            attempt_ledger=self.attempt_ledger,
+            token_ledger=self.token_ledger,
+            deadline_monotonic=self.deadline_monotonic,
+            reanchor_used=self.reanchor_used,
+            pending_interludes=pending_interludes,
+        )
 
 
 @dataclass(frozen=True)
@@ -290,6 +465,8 @@ def to_invoker_messages(
 __all__ = [
     "ROLE_ASSISTANT",
     "ROLE_HUMAN",
+    "ChainMessageV1",
+    "ChainTranscriptV1",
     "TranscriptContractError",
     "TranscriptMessage",
     "TranscriptState",

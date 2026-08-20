@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-
 COGNITION_CORE_V2_ROUTES = (
     "COGNITION_LLM_CHARACTER_CARRYOVER",
     "COGNITION_LLM_APPRAISAL_EVENT_AGENCY",
@@ -19,6 +18,10 @@ COGNITION_CORE_V2_ROUTES = (
     "COGNITION_LLM_ACTION_PLANNING",
     "COGNITION_LLM_ACTION_AUTHORIZATION",
     "COGNITION_LLM_RESOLVER_AUTHORIZATION",
+)
+COGNITION_CORE_V3_ROUTES = (
+    "COGNITION_V3_CHAIN_LLM",
+    "COGNITION_V3_SIDECAR_LLM",
 )
 EXPECTED_ROUTE_PREFIXES = (
     "RELEVANCE_AGENT_LLM",
@@ -35,6 +38,7 @@ EXPECTED_ROUTE_PREFIXES = (
     "BACKGROUND_WORK_LLM",
     "CODING_AGENT_PM_LLM",
     "CODING_AGENT_PROGRAMMER_LLM",
+    *COGNITION_CORE_V3_ROUTES,
 )
 
 
@@ -66,6 +70,13 @@ def test_route_catalog_matches_configured_chat_routes() -> None:
     ]
     assert len(core_routes) == 13
     assert all(route.group == "Cognition Core V2" for route in core_routes)
+    v3_routes = [
+        route
+        for route in route_descriptors()
+        if route.env_prefix in COGNITION_CORE_V3_ROUTES
+    ]
+    assert len(v3_routes) == 2
+    assert all(route.group == "Cognition Core V3" for route in v3_routes)
     assert all(route.editable_fields == (
         "model",
         "max_completion_tokens",
@@ -92,10 +103,10 @@ def test_brain_descriptor_projects_routes_and_environment_overlay() -> None:
         environment=environment,
         overrides=overrides,
     )
-    assert len(snapshot.fields) == 83
+    assert len(snapshot.fields) == 89
 
     routes = project_brain_model_routes(snapshot=snapshot, environment=environment)
-    assert len(routes) == 26
+    assert len(routes) == 28
     cognition = next(route for route in routes if route["route_key"] == "cognition_llm")
     assert cognition["effective"]["model"] == "cognition_llm-qwen3"
     assert cognition["effective"]["max_completion_tokens"] == 8192

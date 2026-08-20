@@ -750,6 +750,20 @@ if COGNITION_CORE_ENGINE == "v2":
 else:
     _COGNITION_V3_ROUTE_SETTINGS = load_cognition_v3_route_settings()
 
+
+def get_selected_cognition_route_settings() -> (
+    dict[str, CognitionRouteSettingV1] | CognitionV3RouteSettingsV1
+):
+    """Return the selected cognition route settings loaded at import time."""
+
+    if COGNITION_CORE_ENGINE == "v2":
+        selected_settings = dict(_COGNITION_V2_ROUTE_SETTINGS)
+        return selected_settings
+
+    selected_settings = _COGNITION_V3_ROUTE_SETTINGS
+    return selected_settings
+
+
 DIALOG_GENERATOR_LLM_BASE_URL = os.environ["DIALOG_GENERATOR_LLM_BASE_URL"]
 DIALOG_GENERATOR_LLM_API_KEY = os.environ["DIALOG_GENERATOR_LLM_API_KEY"]
 DIALOG_GENERATOR_LLM_MODEL = os.environ["DIALOG_GENERATOR_LLM_MODEL"]

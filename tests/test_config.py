@@ -1483,6 +1483,31 @@ def test_cognition_core_engine_default_matches_cutover_state(tmp_path):
     assert result.returncode == 0, result.stderr
 
 
+def test_selected_cognition_route_settings_are_loaded_once(monkeypatch) -> None:
+    """The selected route accessor does not reread environment settings."""
+
+    import kazusa_ai_chatbot.config as config
+
+    selected_settings = config.get_selected_cognition_route_settings()
+
+    def fail_reload(*args, **kwargs):
+        """Fail if the accessor attempts to reload route settings."""
+
+        raise AssertionError("selected route settings were reloaded")
+
+    monkeypatch.setattr(config, "load_cognition_v2_route_settings", fail_reload)
+    monkeypatch.setattr(config, "load_cognition_v3_route_settings", fail_reload)
+    loaded_again = config.get_selected_cognition_route_settings()
+
+    if config.COGNITION_CORE_ENGINE == "v2":
+        assert loaded_again is not selected_settings
+        assert loaded_again == selected_settings
+        selected_settings.clear()
+        assert loaded_again
+    else:
+        assert loaded_again is selected_settings
+
+
 def test_v3_service_import_succeeds_with_shared_routes_and_without_twelve_v2_stage_bundles(
     tmp_path,
 ) -> None:

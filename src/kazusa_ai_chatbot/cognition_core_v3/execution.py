@@ -1,61 +1,180 @@
-"""Bounded parallel chain execution with global attempt caps and cancellation.
-
-A wave runs every registered chain concurrently as an owned task; stages inside
-one chain run serially in exact registry order. Each stage owner has a total
-attempt limit tracked by one invocation-wide ledger, boundary-class failures are
-terminal rejections with zero repair calls, exhaustion records the
-owner-specific error code (goal owners split provider versus structure on the
-final attempt class while appraisal and terminal owners keep the contract-
-exhausted code), each stage mirrors its attempts into the shared V2 invocation
-ledger when one is active so producer budgets stay 1:1 with V3's local caps,
-and each stage is optional so independently valid later stages still run after
-an earlier-stage failure. Cancelling owned tasks materializes no partial
-effects: a cancelled or failed chain contributes nothing to the result set while
-its completed attempt reservations remain diagnostic.
-"""
+"""Bounded serial primary-chain execution helpers for Cognition V3."""
 
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
-from typing import Awaitable, Callable, Mapping, Sequence
+import json
+import time
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from copy import deepcopy
+from dataclasses import dataclass, field, replace
+from functools import partial
+
+import httpx
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from openai import OpenAIError
 
 from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
     V2AttemptBudgetExhausted,
     current_v2_attempt_ledger,
     record_v2_attempt_disposition,
-    record_v2_branch_disposition,
     reserve_v2_model_attempt,
 )
-from kazusa_ai_chatbot.cognition_core_v2.state_models import GOAL_KINDS
+from kazusa_ai_chatbot.cognition_core_v3 import prompt as v3_prompt
 from kazusa_ai_chatbot.cognition_core_v3.contracts import (
     APPRASAL_CONTRACT_EXHAUSTED_ERROR_CODE,
-    BOUNDARY_REJECTED_ERROR_CODE,
     EXHAUSTION_FAILURE_CLASS,
-    GOAL_BID_PROVIDER_EXHAUSTED_ERROR_CODE,
-    GOAL_BID_STRUCTURE_EXHAUSTED_ERROR_CODE,
-    PROVIDER_FAILURE_CLASS,
-    TERMINAL_BOUNDARY_CLASSES,
+    STRUCTURAL_FAILURE_CLASS,
     StageFailure,
     StageResult,
 )
-from kazusa_ai_chatbot.cognition_core_v3.registry import ALL_CHAINS
+from kazusa_ai_chatbot.cognition_core_v3.lane import (
+    LaneDeadlineError,
+    SidecarAdmissionError,
+    SidecarAdmissionLedger,
+    SidecarCoordinator,
+    SidecarInvocationState,
+)
+from kazusa_ai_chatbot.cognition_core_v3.registry import SERIAL_CHAIN_STEPS
+from kazusa_ai_chatbot.cognition_core_v3.transcript import ChainTranscriptV1
+from kazusa_ai_chatbot.llm_interface import LLMCallConfig, LLMInvoker
+from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 
 class ExecutorContractError(RuntimeError):
     """Fail-closed executor topology or attempt-cap violation."""
 
 
+class TurnDeadlineExceeded(TimeoutError):
+    """The current invocation cannot start another model request."""
+
+
+def check_turn_deadline(deadline_monotonic: float | None) -> float | None:
+    """Return remaining seconds, or raise before a new model request."""
+
+    if deadline_monotonic is None:
+        return None
+    remaining_seconds = deadline_monotonic - time.monotonic()
+    if remaining_seconds <= 0:
+        raise TurnDeadlineExceeded("cognition turn deadline expired")
+    return remaining_seconds
+
+
+def config_for_turn_deadline(
+    config: LLMCallConfig,
+    deadline_monotonic: float | None,
+) -> LLMCallConfig:
+    """Bound one model configuration to the invocation's remaining time."""
+
+    remaining_seconds = check_turn_deadline(deadline_monotonic)
+    if remaining_seconds is None:
+        return config
+    configured_timeout = config.timeout_seconds
+    timeout_seconds = (
+        remaining_seconds
+        if configured_timeout is None
+        else min(float(configured_timeout), remaining_seconds)
+    )
+    if timeout_seconds <= 0:
+        raise TurnDeadlineExceeded("cognition turn deadline expired")
+    return replace(config, timeout_seconds=timeout_seconds)
+
+
+class _DeadlineBoundSyncInvoker:
+    """Guard a synchronous repair worker at its provider boundary."""
+
+    def __init__(
+        self,
+        llm: LLMInvoker,
+        deadline_monotonic: float | None,
+    ) -> None:
+        self._llm = llm
+        self._deadline_monotonic = deadline_monotonic
+
+    def invoke(self, messages, *, config):
+        check_turn_deadline(self._deadline_monotonic)
+        return self._llm.invoke(messages, config=config)
+
+
+JsonRepairCallback = Callable[
+    [str, str, Mapping[str, object]],
+    Awaitable[dict[str, object] | None],
+]
+
+
+def _accepted_product(
+    question: v3_prompt.ChainQuestion,
+    product: object,
+) -> dict[str, object]:
+    """Project one exact validated product beside its accepted answer."""
+
+    return {
+        "question": question.contract_name,
+        "typed_product": deepcopy(product),
+    }
+
+
+@dataclass(frozen=True)
+class SerialChainStep:
+    """One immutable serial chain step and its bounded producer."""
+
+    step_id: str
+    stage_kind: str
+    producer: StageProducer
+
+
+@dataclass(frozen=True)
+class SerialChainResult:
+    """Materialized result for one cleanly completed serial chain."""
+
+    step_results: tuple[StageResult, ...]
+
+    @property
+    def accepted_steps(self) -> tuple[StageResult, ...]:
+        """Return only accepted stage results in serial order."""
+
+        return tuple(result for result in self.step_results if result.accepted)
+
+
+@dataclass
+class SerialChainHarness:
+    """Owned append-only transcript, attempt ledger, and context budget."""
+
+    transcript: ChainTranscriptV1
+    ledger: AttemptLedger
+    budget: object
+
+    def append_question(self, content: str) -> None:
+        """Append the next primary question to the owned transcript."""
+
+        self.transcript = self.transcript.append_question(content)
+
+    def accept_answer(
+        self,
+        content: str,
+        product: Mapping[str, object] | None = None,
+    ) -> None:
+        """Append one accepted assistant answer to the owned transcript."""
+
+        self.transcript = self.transcript.accept_answer(content, product)
+
+    def rollback_tail(self) -> str:
+        """Roll back the current assistant tail and return its question."""
+
+        self.transcript, question = self.transcript.rollback_tail_answer()
+        return question
+
+    def queue_interlude(self, interlude: Mapping[str, object]) -> None:
+        """Queue one deterministic notice for the next question."""
+
+        self.transcript = self.transcript.append_interlude_to_next_question(
+            interlude
+        )
+
+
 @dataclass(frozen=True)
 class StageAttemptOutcome:
-    """Raw producer outcome for one bounded attempt before disposition.
-
-    ``failure_class`` uses the closed contract failure vocabulary; it is None
-    when the attempt was accepted, so no parallel failure vocabulary exists.
-    ``detail`` carries the owner validator's exact structural violation or
-    boundary context for non-accepted outcomes so a local repair request can
-    restate the precise error without inventing a new failure class.
-    """
+    """Raw producer outcome for one bounded attempt before disposition."""
 
     accepted: bool
     local_state: dict[str, object] | None
@@ -77,415 +196,534 @@ class ExecutorContext:
 StageProducer = Callable[[ExecutorContext], Awaitable[StageAttemptOutcome]]
 
 
-@dataclass(frozen=True)
-class ChainTaskSpec:
-    """One registered chain to run in a wave with its ordered stage producers.
-
-    ``stages`` must equal the exact registry stage order for ``chain_name``;
-    model-created stages, reordered stages, and missing producer bindings are
-    rejected before any task starts.
-    """
-
-    chain_name: str
-    stages: tuple[str, ...]
-    producers: Mapping[str, StageProducer]
-
-
-@dataclass(frozen=True)
-class ChainOutcome:
-    """Materialized results for one cleanly completed chain."""
-
-    chain_name: str
-    results: tuple[StageResult, ...]
-
-
-@dataclass(frozen=True)
-class WaveResult:
-    """Wave materialization separating clean outcomes from isolated failures.
-
-    ``outcomes`` holds only chains whose every stage reached a recorded typed
-    disposition; cancelled or failed chains appear in their own fields so no
-    partial effect leaks into the result set.
-    """
-
-    outcomes: Mapping[str, ChainOutcome]
-    cancelled_chains: tuple[str, ...]
-    failed_chains: dict[str, str]
-
-
 @dataclass
 class AttemptLedger:
-    """Global bounded attempt arithmetic for one cognition invocation.
-
-    Reservations are per-owner and never exceed the configured total limit;
-    exhaustion is a recorded typed outcome rather than an exception path.
-    """
+    """Global bounded attempt arithmetic for one cognition invocation."""
 
     limits: Mapping[str, int]
     _counts: dict[str, int] = field(default_factory=dict)
 
     def attempts_used(self, owner_name: str) -> int:
         """Return completed attempt reservations for one owner so far."""
+
         return self._counts.get(owner_name, 0)
 
     def can_reserve(self, owner_name: str) -> bool:
-        """Check whether the next reservation stays inside the owner's cap.
+        """Check whether the next reservation stays inside the owner's cap."""
 
-        Raises:
-            ExecutorContractError: Unknown owners or non-positive configured
-                limits fail fast at configuration time.
-        """
         if owner_name not in self.limits:
             raise ExecutorContractError(f"Unknown attempt-cap owner {owner_name!r}")
         limit = self.limits[owner_name]
         if limit <= 0:
-            raise ExecutorContractError(f"Owner {owner_name!r} has a non-positive attempt limit")
+            raise ExecutorContractError(
+                f"Owner {owner_name!r} has a non-positive attempt limit"
+            )
         return self.attempts_used(owner_name) < limit
 
     def reserve(self, owner_name: str) -> int:
-        """Reserve the next attempt number for one owner.
+        """Reserve the next attempt number for one owner."""
 
-        Returns:
-            The 1-based attempt number just reserved.
-
-        Raises:
-            ExecutorContractError: Reservations beyond the configured cap are a
-                programming error and fail fast instead of silently overrunning
-                the global arithmetic.
-        """
         if not self.can_reserve(owner_name):
-            raise ExecutorContractError(f"Owner {owner_name!r} attempt cap already exhausted")
+            raise ExecutorContractError(
+                f"Owner {owner_name!r} attempt cap already exhausted"
+            )
+        next_number = self.attempts_used(owner_name) + 1
+        self._counts[owner_name] = next_number
+        return next_number
+
+    def record_attempt(self, owner_name: str) -> int:
+        """Project one already-authorized model attempt into chain metadata."""
+
+        if not isinstance(owner_name, str) or not owner_name.strip():
+            raise ExecutorContractError("attempt projection owner is required")
         next_number = self.attempts_used(owner_name) + 1
         self._counts[owner_name] = next_number
         return next_number
 
 
-def validate_chain_spec(spec: ChainTaskSpec) -> None:
-    """Validate one chain task spec against the immutable registry.
-
-    Args:
-        spec: The chain, its stage sequence, and producer bindings to check.
-
-    Raises:
-        ExecutorContractError: Unknown chains, stage sequences that deviate from
-            the exact registry order, or missing producer bindings fail fast
-            before any model call starts; model-created stages are rejected at
-            this boundary.
-    """
-    chain = next((candidate for candidate in ALL_CHAINS if candidate.name == spec.chain_name), None)
-    if chain is None:
-        raise ExecutorContractError(f"Unknown registered chain {spec.chain_name!r}")
-    if spec.stages != chain.stages:
-        raise ExecutorContractError(
-            f"Chain {spec.chain_name!r} stages must match the exact registry order {chain.stages}"
-        )
-    for stage in chain.stages:
-        if stage not in spec.producers:
-            raise ExecutorContractError(f"Chain {spec.chain_name!r} has no producer bound for stage {stage!r}")
-
-
-@dataclass
-class WaveHandle:
-    """Owned parallel-wave task set supporting bounded cancellation."""
-
-    _tasks: dict[str, asyncio.Task] = field(default_factory=dict)
-
-    def cancel(self) -> None:
-        """Cancel every owned wave task.
-
-        Cancelling stops in-flight stage attempts; no partial chain result is
-        materialized by ``complete`` for a cancelled chain.
-        """
-        for task in self._tasks.values():
-            if not task.done():
-                task.cancel()
-
-    async def complete(self) -> WaveResult:
-        """Materialize clean chain outcomes and isolate every failure route.
-
-        Returns:
-            A wave result whose ``outcomes`` contain only chains whose stages
-            all reached recorded typed dispositions; cancelled chains list in
-            ``cancelled_chains`` and producer-exception chains in
-            ``failed_chains`` keyed by exception class name, so sibling chains
-            keep their materialized results.
-        """
-        outcomes: dict[str, ChainOutcome] = {}
-        cancelled_chains: list[str] = []
-        failed_chains: dict[str, str] = {}
-
-        for chain_name in sorted(self._tasks):
-            task = self._tasks[chain_name]
-            try:
-                outcome = await task
-            except asyncio.CancelledError:
-                cancelled_chains.append(chain_name)
-            except Exception as exc:  # noqa: BLE001 - producer isolation is the contract here
-                failed_chains[chain_name] = type(exc).__name__
-            else:
-                outcomes[chain_name] = outcome
-
-        return WaveResult(
-            outcomes=outcomes,
-            cancelled_chains=tuple(cancelled_chains),
-            failed_chains=failed_chains,
-        )
-
-
-def start_wave(specs: Sequence[ChainTaskSpec], *, ledger: AttemptLedger) -> WaveHandle:
-    """Start one parallel wave of registered chains as owned tasks.
-
-    Args:
-        specs: Chain task specs for the wave; every chain runs concurrently and
-            stages inside each chain run serially in registry order.
-        ledger: The invocation-wide attempt-cap arithmetic shared by all owners.
-
-    Returns:
-        The handle owning every started wave task.
-
-    Raises:
-        ExecutorContractError: Topology validation fails fast before any task
-            starts, so an invalid spec never leaves a half-started wave behind.
-    """
-    for spec in specs:
-        validate_chain_spec(spec)
-    if len({spec.chain_name for spec in specs}) != len(specs):
-        raise ExecutorContractError("One wave cannot run the same registered chain twice")
-
-    handle = WaveHandle()
-    for spec in specs:
-        handle._tasks[spec.chain_name] = asyncio.create_task(_run_chain(spec, ledger))
-    return handle
-
-
-def _v2_mirror_coordinates(
-    chain_name: str,
-    stage_name: str,
-) -> tuple[str, str]:
-    """Map one V3 stage to its shared V2 ledger owner and branch key.
-
-    Goal-kind stages mirror under the goal-bid producer keyed by their kind so
-    each goal chain keeps the exact V2 per-branch budget; appraisal and
-    terminal stages mirror under the semantic-appraisal producer keyed by
-    ``chain:stage`` so every stage keeps its own full question budget, matching
-    V2's one-question-one-budget parity without starving later stages of a
-    multi-stage chain. The mapped caps are built from the same constants as
-    V3's local ledger, keeping both counts 1:1 per stage.
-    """
-    if stage_name in GOAL_KINDS:
-        return "goal_bid_structure", stage_name
-    return "semantic_appraisal", f"{chain_name}:{stage_name}"
-
-
-def _exhaustion_error_code(
-    stage_name: str,
-    last_failure_class: str | None,
-) -> str:
-    """Select the owner-specific exhaustion error code for one stage.
-
-    Goal-kind stages split on the final attempt's failure class exactly as the
-    V2 goal loop does (provider failures exhaust under the provider code,
-    everything else under the structure code); appraisal and terminal stages
-    keep the semantic-appraisal contract-exhausted code unchanged.
-    """
-    if stage_name not in GOAL_KINDS:
-        return APPRASAL_CONTRACT_EXHAUSTED_ERROR_CODE
-    if last_failure_class == PROVIDER_FAILURE_CLASS:
-        return GOAL_BID_PROVIDER_EXHAUSTED_ERROR_CODE
-    return GOAL_BID_STRUCTURE_EXHAUSTED_ERROR_CODE
-
-
-def _reserve_v2_mirror_attempt(
-    stage: str,
-    branch_id: str,
-    local_attempt: int,
-) -> Mapping[str, object] | None:
-    """Reserve one mirrored attempt in the shared V2 invocation ledger.
-
-    Args:
-        stage: The mapped V2 producer owner for this V3 stage.
-        branch_id: The mapped V2 branch key for this chain or goal kind.
-        local_attempt: The 1-based attempt number from the local ledger.
-
-    Returns:
-        The reserved coordinates for later disposition recording, or None when
-        no invocation ledger is bound so standalone executor runs keep working
-        without a context-bound ledger.
-
-    Raises:
-        V2AttemptBudgetExhausted: When the shared producer budget is exhausted
-            before this model call; the calling stage fails closed at its
-            shared-budget boundary instead of issuing another call.
-    """
-    if current_v2_attempt_ledger() is None:
-        return None
-    return reserve_v2_model_attempt(
-        stage=stage, branch_id=branch_id, local_attempt=local_attempt
-    )
-
-
-def _record_v2_mirror_disposition(
-    v2_coordinates: Mapping[str, object] | None,
-    disposition: str,
-) -> None:
-    """Record one mirrored attempt disposition in the shared V2 ledger.
-
-    Standalone execution without a bound invocation ledger skips silently so
-    executor unit tests keep running outside a cognition graph.
-    """
-    if v2_coordinates is None or current_v2_attempt_ledger() is None:
-        return
-    record_v2_attempt_disposition(v2_coordinates, disposition=disposition)
-
-
-async def _run_chain(
-    spec: ChainTaskSpec,
-    ledger: AttemptLedger,
-) -> ChainOutcome:
-    """Run one chain's registered stages serially under the shared ledger.
-
-    Each stage consumes bounded attempts until acceptance or a terminal boundary
-    rejection; exhaustion records the owner-specific error code and goal-kind
-    stages additionally record their shared-branch exhausted disposition. When
-    an active V2 invocation ledger exists, every attempt mirrors into its
-    shared producer budget with V2 disposition semantics (accepted/recovered on
-    acceptance, regenerate for non-final failures, exhausted for final ones,
-    denied for terminal boundary rejections); a shared-budget exhaustion stops
-    the stage without another model call. Every stage is optional, so an
-    earlier-stage failure does not remove later independently valid stages from
-    the registry order.
-    """
-    accepted_prefix: list[StageResult] = []
-    results: list[StageResult] = []
-
-    for stage_name in spec.stages:
-        producer = spec.producers[stage_name]
-        result: StageResult | None = None
-        mirror_stage, mirror_branch = _v2_mirror_coordinates(
-            spec.chain_name, stage_name
-        )
-        last_failure_class: str | None = None
-
-        while ledger.can_reserve(stage_name):
-            attempt_number = ledger.reserve(stage_name)
-            try:
-                v2_coordinates = _reserve_v2_mirror_attempt(
-                    mirror_stage, mirror_branch, attempt_number
-                )
-            except V2AttemptBudgetExhausted:
-                # The shared producer budget is exhausted before this model
-                # call; fail the stage closed and let the trailing exhaustion
-                # block record its owner-specific outcome.
-                break
-
-            outcome = await producer(
-                ExecutorContext(
-                    chain_name=spec.chain_name,
-                    stage_name=stage_name,
-                    attempt_number=attempt_number,
-                    accepted_prefix=tuple(accepted_prefix),
-                )
-            )
-
-            if outcome.accepted:
-                _record_v2_mirror_disposition(
-                    v2_coordinates,
-                    "accepted" if attempt_number == 1 else "recovered",
-                )
-                result = StageResult(
-                    chain_name=spec.chain_name,
-                    stage_name=stage_name,
-                    accepted=True,
-                    local_state=outcome.local_state,
-                    semantic_summary=outcome.semantic_summary,
-                )
-                break
-
-            last_failure_class = outcome.failure_class
-
-            if outcome.failure_class in TERMINAL_BOUNDARY_CLASSES:
-                _record_v2_mirror_disposition(v2_coordinates, "denied")
-                result = _boundary_rejection_result(
-                    spec.chain_name, stage_name, outcome.failure_class
-                )
-                break
-
-            shared_budget_exhausted = (
-                v2_coordinates is not None
-                and v2_coordinates["cumulative_producer_attempt"]
-                >= v2_coordinates["configured_limit"]
-            )
-            if shared_budget_exhausted or not ledger.can_reserve(stage_name):
-                _record_v2_mirror_disposition(v2_coordinates, "exhausted")
-            else:
-                _record_v2_mirror_disposition(v2_coordinates, "regenerate")
-
-        if result is None:
-            attempts_used = ledger.attempts_used(stage_name)
-            error_code = _exhaustion_error_code(
-                stage_name, last_failure_class
-            )
-            if (
-                stage_name in GOAL_KINDS
-                and current_v2_attempt_ledger() is not None
-            ):
-                record_v2_branch_disposition(
-                    branch_id=mirror_branch,
-                    disposition="exhausted",
-                    error_code=error_code,
-                )
-            result = StageResult(
-                chain_name=spec.chain_name,
-                stage_name=stage_name,
-                accepted=False,
-                local_state=None,
-                semantic_summary=None,
-                failure=StageFailure(
-                    chain_name=spec.chain_name,
-                    stage_name=stage_name,
-                    failure_class=EXHAUSTION_FAILURE_CLASS,
-                    error_code=error_code,
-                    repair_attempted=attempts_used >= 2,
-                ),
-            )
-
-        if result.accepted:
-            accepted_prefix.append(result)
-        results.append(result)
-
-    return ChainOutcome(chain_name=spec.chain_name, results=tuple(results))
-
-
-def _boundary_rejection_result(
-    chain_name: str,
-    stage_name: str,
-    boundary_class: str,
+async def run_serial_harness_step(
+    *,
+    harness: SerialChainHarness,
+    step_id: str,
+    stage_kind: str,
+    producer: StageProducer,
 ) -> StageResult:
-    """Record a terminal boundary rejection with zero repair calls.
+    """Run one harness-owned serial step with shared attempt arithmetic."""
 
-    Args:
-        chain_name: The registered chain owning the rejected stage.
-        stage_name: The stage whose candidate failed a boundary-class check.
-        boundary_class: The exact producer-reported terminal boundary class;
-            the record keeps that closed-set value rather than inventing a new
-            vocabulary.
-
-    Returns:
-        A non-accepted stage result carrying the exact boundary-rejected error
-        code and ``repair_attempted=False``; the rejection is terminal for this
-        stage while independently valid later stages keep running.
-    """
+    if step_id not in SERIAL_CHAIN_STEPS:
+        raise ExecutorContractError(f"Unknown serial chain step {step_id!r}")
+    attempt_number = harness.ledger.reserve(stage_kind)
+    context = ExecutorContext(
+        chain_name="serial",
+        stage_name=stage_kind,
+        attempt_number=attempt_number,
+        accepted_prefix=(),
+    )
+    raw = await producer(context)
+    if raw.accepted:
+        if raw.local_state is None or raw.semantic_summary is None:
+            raise ExecutorContractError(
+                "Accepted serial steps require typed local state and summary"
+            )
+        result = StageResult(
+            chain_name="serial",
+            stage_name=stage_kind,
+            accepted=True,
+            local_state=raw.local_state,
+            semantic_summary=raw.semantic_summary,
+        )
+        harness.accept_answer(
+            raw.semantic_summary,
+            {"step_id": step_id, **raw.local_state},
+        )
+        return result
+    failure_class = raw.failure_class or STRUCTURAL_FAILURE_CLASS
     return StageResult(
-        chain_name=chain_name,
-        stage_name=stage_name,
+        chain_name="serial",
+        stage_name=stage_kind,
         accepted=False,
         local_state=None,
         semantic_summary=None,
         failure=StageFailure(
-            chain_name=chain_name,
-            stage_name=stage_name,
-            failure_class=boundary_class,
-            error_code=BOUNDARY_REJECTED_ERROR_CODE,
-            repair_attempted=False,
+            chain_name="serial",
+            stage_name=stage_kind,
+            failure_class=failure_class,
+            error_code=raw.detail or APPRASAL_CONTRACT_EXHAUSTED_ERROR_CODE,
+            repair_attempted=attempt_number > 1,
         ),
     )
+
+
+async def invoke_serial_model_step(
+    *,
+    harness: SerialChainHarness,
+    system_content: str,
+    llm: LLMInvoker,
+    config: LLMCallConfig,
+    deterministic_only: bool = False,
+    deadline_monotonic: float | None = None,
+) -> dict[str, object]:
+    """Invoke one serial model step from the append-only transcript."""
+
+    if not system_content:
+        raise ExecutorContractError(
+            "Serial model steps require a non-empty system head"
+        )
+    messages: list[BaseMessage] = [SystemMessage(content=system_content)]
+    for role, content in harness.transcript.to_messages():
+        if role == "human":
+            messages.append(HumanMessage(content=content))
+        elif role == "assistant":
+            messages.append(AIMessage(content=content))
+        else:
+            raise ExecutorContractError(f"Unknown transcript role {role!r}")
+    effective_deadline = (
+        deadline_monotonic
+        if deadline_monotonic is not None
+        else harness.transcript.deadline_monotonic
+    )
+    effective_config = config_for_turn_deadline(config, effective_deadline)
+    response = await llm.ainvoke(messages, config=effective_config)
+    raw_output = getattr(response, "content", "")
+    return parse_llm_json_output(
+        raw_output,
+        deterministic_only=deterministic_only,
+    )
+
+
+async def invoke_lane_scoped_json_repair(
+    *,
+    raw_output: str,
+    candidate_id: str,
+    attempt_coordinates: Mapping[str, object],
+    llm: LLMInvoker,
+    config: LLMCallConfig,
+    coordinator: SidecarCoordinator,
+    admissions: SidecarAdmissionLedger,
+    invocation_state: SidecarInvocationState,
+    deadline_monotonic: float | None = None,
+) -> dict[str, object] | None:
+    """Repair one malformed primary candidate through the owned sidecar lane.
+
+    The canonical parser still performs its deterministic pass before this
+    helper is called.  This helper admits one injected repair model call while
+    the producing V2 attempt remains live, preempts unfinished L1 work, and
+    drains a synchronous repair worker before releasing the sidecar claim on
+    cancellation.
+
+    Args:
+        raw_output: The malformed assistant candidate retained by the caller.
+        candidate_id: Stable non-content identity for this producer attempt.
+        attempt_coordinates: The producing V2 model-attempt reservation.
+        llm: The injected V3 model invoker.
+        config: The V3 sidecar route configuration for this repair call.
+        coordinator: The process-local serialized sidecar owner.
+        admissions: The invocation-local sidecar admission authority.
+        invocation_state: The invocation-local task and diagnostics owner.
+
+    Returns:
+        The canonically repaired object, or ``None`` when repair admission is
+        unavailable or the injected parser cannot recover an object.
+    """
+
+    try:
+        check_turn_deadline(deadline_monotonic)
+    except TurnDeadlineExceeded:
+        return None
+
+    try:
+        admissions.reserve_json_repair(
+            candidate_id=candidate_id,
+            attempt_coordinates=attempt_coordinates,
+        )
+    except SidecarAdmissionError:
+        return None
+
+    try:
+        await invocation_state.preempt_l1_for_repair()
+        async with coordinator.claim(
+            stream_kind="json_repair",
+            invocation_state=invocation_state,
+            deadline_monotonic=deadline_monotonic,
+        ):
+            effective_config = config_for_turn_deadline(
+                config,
+                deadline_monotonic,
+            )
+            repair_task = asyncio.create_task(
+                asyncio.to_thread(
+                    partial(
+                        parse_llm_json_output,
+                        raw_output,
+                        deterministic_only=False,
+                        repair_llm=_DeadlineBoundSyncInvoker(
+                            llm,
+                            deadline_monotonic,
+                        ),
+                        repair_config=effective_config,
+                    )
+                )
+            )
+            try:
+                repaired_output = await asyncio.shield(repair_task)
+            except asyncio.CancelledError:
+                await asyncio.shield(repair_task)
+                raise
+    except (LaneDeadlineError, TurnDeadlineExceeded):
+        return None
+    if not isinstance(repaired_output, dict):
+        return None
+    repaired_object = dict(repaired_output)
+    return repaired_object
+
+
+async def invoke_serial_question_sequence(
+    *,
+    harness: SerialChainHarness,
+    system_content: str,
+    llm: LLMInvoker,
+    config: LLMCallConfig,
+    questions: Sequence[v3_prompt.ChainQuestion],
+    deadline_monotonic: float | None = None,
+) -> list[dict[str, object]]:
+    """Invoke registered serial questions and return parsed raw outputs."""
+
+    parsed_results: list[dict[str, object]] = []
+    stage_kinds = {
+        "semantic_appraisal_group.v1": "appraisal",
+        "ordinary_goal_bid.v1": "goal_ordinary",
+        "active_goal_bid_group.v1": "goal_active",
+        "workspace_partition.v1": "workspace",
+        "action_plan.v1": "action_planning",
+    }
+    for question in questions:
+        stage_kind = stage_kinds.get(question.contract_name)
+        if stage_kind is None:
+            raise ExecutorContractError(
+                f"Unknown serial question contract {question.contract_name!r}"
+            )
+        harness.ledger.reserve(stage_kind)
+        question_text = v3_prompt.build_question_message(question)
+        harness.append_question(question_text)
+        parsed = await invoke_serial_model_step(
+            harness=harness,
+            system_content=system_content,
+            llm=llm,
+            config=config,
+            deadline_monotonic=deadline_monotonic,
+        )
+        harness.accept_answer(
+            json.dumps(parsed, ensure_ascii=False),
+            _accepted_product(question, parsed),
+        )
+        parsed_results.append(parsed)
+    return parsed_results
+
+
+async def invoke_serial_question_with_repair(
+    *,
+    harness: SerialChainHarness,
+    system_content: str,
+    llm: LLMInvoker,
+    config: LLMCallConfig,
+    question: v3_prompt.ChainQuestion,
+    validator: Callable[[dict[str, object]], object],
+    attempt_limit: int,
+    first_packet_sections: Sequence[Mapping[str, object]] | None = None,
+    interludes: Sequence[Mapping[str, object]] = (),
+    attempt_owner: str | None = None,
+    v2_stage: str | None = None,
+    v2_branch_id: str | None = None,
+    deterministic_only: bool = False,
+    json_repair_callback: JsonRepairCallback | None = None,
+    deadline_monotonic: float | None = None,
+) -> tuple[object | None, str | None]:
+    """Invoke one serial question with bounded tail-safe repair attempts.
+
+    ``first_packet_sections`` supplies the cold-turn carriers. They are
+    rendered only while the accepted transcript is empty, so each rejected
+    attempt retains the complete packet and every accepted later row keeps the
+    compact question format.
+    """
+
+    if attempt_limit <= 0:
+        raise ExecutorContractError("Serial repair attempt_limit must be positive")
+    if not isinstance(question, v3_prompt.ChainQuestion):
+        raise ExecutorContractError("Serial repair requires a registered question")
+    if (v2_stage is None) != (v2_branch_id is None):
+        raise ExecutorContractError(
+            "V2 attempt stage and branch must be supplied together"
+        )
+
+    transcript_messages = harness.transcript.to_messages()
+    base_messages: list[BaseMessage] = [SystemMessage(content=system_content)]
+    for role, content in transcript_messages:
+        if role == "human":
+            base_messages.append(HumanMessage(content=content))
+        elif role == "assistant":
+            base_messages.append(AIMessage(content=content))
+        else:
+            raise ExecutorContractError(f"Unknown transcript role {role!r}")
+
+    if first_packet_sections is not None and not transcript_messages:
+        (
+            constraints_and_operational_state,
+            relationship_and_mutable_state,
+            episode_and_scene,
+            evidence_and_affordances,
+        ) = first_packet_sections
+        question_text = v3_prompt.build_first_user_message(
+            constraints_and_operational_state=(
+                constraints_and_operational_state
+            ),
+            relationship_and_mutable_state=(
+                relationship_and_mutable_state
+            ),
+            episode_and_scene=episode_and_scene,
+            evidence_and_affordances=evidence_and_affordances,
+            question=question,
+        )
+    else:
+        question_text = v3_prompt.build_question_message(
+            question,
+            interludes=interludes,
+        )
+    effective_deadline = (
+        deadline_monotonic
+        if deadline_monotonic is not None
+        else harness.transcript.deadline_monotonic
+    )
+    last_error: str | None = None
+    raw_output: str | None = None
+
+    for attempt_number in range(1, attempt_limit + 1):
+        try:
+            check_turn_deadline(effective_deadline)
+        except TurnDeadlineExceeded:
+            return None, raw_output
+        coordinates: Mapping[str, object] | None = None
+        if v2_stage is not None and current_v2_attempt_ledger() is not None:
+            try:
+                coordinates = reserve_v2_model_attempt(
+                    stage=v2_stage,
+                    branch_id=v2_branch_id,
+                    local_attempt=attempt_number,
+                )
+            except V2AttemptBudgetExhausted:
+                return None, raw_output
+        if attempt_owner is not None:
+            harness.ledger.record_attempt(attempt_owner)
+        payload_text = question_text
+        if attempt_number > 1 and last_error is not None:
+            payload_text = f"{question_text}\n[contract_repair]\n{last_error}"
+        attempt_config = replace(
+            config,
+            stage_name=f"{config.stage_name}.repair{attempt_number}",
+        )
+        messages = [*base_messages, HumanMessage(content=payload_text)]
+        repaired_output = False
+        try:
+            attempt_config = config_for_turn_deadline(
+                attempt_config,
+                effective_deadline,
+            )
+            response = await llm.ainvoke(messages, config=attempt_config)
+            raw_output = getattr(response, "content", "")
+            parsed = parse_llm_json_output(
+                raw_output,
+                deterministic_only=(
+                    deterministic_only
+                    or json_repair_callback is not None
+                ),
+            )
+            if (
+                not parsed
+                and json_repair_callback is not None
+                and coordinates is not None
+            ):
+                check_turn_deadline(effective_deadline)
+                repaired = await json_repair_callback(
+                    str(raw_output),
+                    f"{config.stage_name}:attempt:{attempt_number}",
+                    coordinates,
+                )
+                if repaired is not None:
+                    parsed = repaired
+                    repaired_output = True
+            if not isinstance(parsed, Mapping):
+                raise TypeError("serial answer must be a JSON object")
+            validated = validator(dict(parsed))
+        except TurnDeadlineExceeded:
+            if coordinates is not None:
+                record_v2_attempt_disposition(
+                    coordinates,
+                    disposition="exhausted",
+                )
+            return None, raw_output
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            last_error = str(exc)
+            if coordinates is not None:
+                record_v2_attempt_disposition(
+                    coordinates,
+                    disposition=(
+                        "exhausted"
+                        if attempt_number == attempt_limit
+                        else "regenerate"
+                    ),
+                )
+            continue
+        except (OpenAIError, httpx.HTTPError, ConnectionError, OSError) as exc:
+            last_error = str(exc)
+            if coordinates is not None:
+                record_v2_attempt_disposition(
+                    coordinates,
+                    disposition=(
+                        "exhausted"
+                        if attempt_number == attempt_limit
+                        else "regenerate"
+                    ),
+                )
+            continue
+
+        harness.append_question(payload_text)
+        accepted_answer = (
+            json.dumps(parsed, ensure_ascii=False, sort_keys=True)
+            if repaired_output
+            else raw_output or ""
+        )
+        harness.accept_answer(
+            accepted_answer,
+            _accepted_product(question, validated),
+        )
+        if coordinates is not None:
+            record_v2_attempt_disposition(
+                coordinates,
+                disposition=(
+                    "accepted"
+                    if attempt_number == 1
+                    else "recovered"
+                ),
+            )
+        return validated, raw_output
+
+    return None, raw_output
+
+
+async def run_serial_chain(
+    steps: Sequence[SerialChainStep],
+    *,
+    ledger: AttemptLedger,
+) -> SerialChainResult:
+    """Run one serial chain step-by-step under shared attempt arithmetic."""
+
+    if not steps:
+        raise ExecutorContractError("A serial chain requires at least one step")
+    if len({step.step_id for step in steps}) != len(steps):
+        raise ExecutorContractError("One serial chain cannot run the same step twice")
+    registered_steps = set(SERIAL_CHAIN_STEPS)
+    for step in steps:
+        if step.step_id not in registered_steps:
+            raise ExecutorContractError(f"Unknown serial chain step {step.step_id!r}")
+
+    results: list[StageResult] = []
+    for step in steps:
+        attempts = ledger.attempts_used(step.stage_kind)
+        try:
+            attempt_number = ledger.reserve(step.stage_kind)
+        except ExecutorContractError:
+            failure = StageFailure(
+                chain_name="serial",
+                stage_name=step.stage_kind,
+                failure_class=EXHAUSTION_FAILURE_CLASS,
+                error_code=APPRASAL_CONTRACT_EXHAUSTED_ERROR_CODE,
+                repair_attempted=attempts > 0,
+            )
+            results.append(
+                StageResult(
+                    chain_name="serial",
+                    stage_name=step.stage_kind,
+                    accepted=False,
+                    local_state=None,
+                    semantic_summary=None,
+                    failure=failure,
+                )
+            )
+            continue
+        context = ExecutorContext(
+            chain_name="serial",
+            stage_name=step.stage_kind,
+            attempt_number=attempt_number,
+            accepted_prefix=tuple(result for result in results if result.accepted),
+        )
+        raw = await step.producer(context)
+        if raw.accepted:
+            if raw.local_state is None or raw.semantic_summary is None:
+                raise ExecutorContractError(
+                    "Accepted serial steps require typed local state and summary"
+                )
+            result = StageResult(
+                chain_name="serial",
+                stage_name=step.stage_kind,
+                accepted=True,
+                local_state=raw.local_state,
+                semantic_summary=raw.semantic_summary,
+            )
+        else:
+            failure_class = raw.failure_class or STRUCTURAL_FAILURE_CLASS
+            result = StageResult(
+                chain_name="serial",
+                stage_name=step.stage_kind,
+                accepted=False,
+                local_state=None,
+                semantic_summary=None,
+                failure=StageFailure(
+                    chain_name="serial",
+                    stage_name=step.stage_kind,
+                    failure_class=failure_class,
+                    error_code=raw.detail or APPRASAL_CONTRACT_EXHAUSTED_ERROR_CODE,
+                    repair_attempted=attempt_number > 1,
+                ),
+            )
+        results.append(result)
+
+    return SerialChainResult(tuple(results))

@@ -6,8 +6,24 @@ import pytest
 
 from kazusa_ai_chatbot.cognition_core_v3 import contracts, transcript
 
-
 STATIC_PROMPT = "STATIC CHAIN CONTRACT"
+
+
+def test_tail_rollback_preserves_prefix_and_excludes_rejected_candidate() -> None:
+    """Rejected answers are removed while the question prefix stays exact."""
+
+    chain = transcript.ChainTranscriptV1()
+    chain = chain.append_question("first stage question")
+    prefix = chain.to_messages()
+    rejected = chain.accept_answer("rejected candidate", {"step": "A1"})
+
+    repaired, question = rejected.rollback_tail_answer()
+
+    assert question == "first stage question"
+    assert repaired.to_messages() == prefix
+    joined = "".join(content for _, content in repaired.to_messages())
+    assert "rejected candidate" not in joined
+    assert repaired.accepted_products == ()
 
 
 def _identity(url: str = "https://backend.test/v1", credential: str = "cred-a") -> contracts.CacheDomainIdentity:

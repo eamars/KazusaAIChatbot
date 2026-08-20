@@ -18,18 +18,18 @@ from openai import OpenAIError
 from kazusa_ai_chatbot.config import (
     JSON_REPAIR_LLM_API_KEY,
     JSON_REPAIR_LLM_BASE_URL,
-    JSON_REPAIR_LLM_MODEL,
     JSON_REPAIR_LLM_MAX_COMPLETION_TOKENS,
+    JSON_REPAIR_LLM_MODEL,
     JSON_REPAIR_LLM_THINKING_ENABLED,
 )
-from kazusa_ai_chatbot.message_envelope import (
-    MAX_PROMPT_ATTACHMENT_DESCRIPTION_CHARS,
-)
-
 from kazusa_ai_chatbot.llm_interface import (
     LLInterface,
     LLMCallConfig,
+    LLMInvoker,
     LLMThinkingConfig,
+)
+from kazusa_ai_chatbot.message_envelope import (
+    MAX_PROMPT_ATTACHMENT_DESCRIPTION_CHARS,
 )
 
 logger = logging.getLogger(__name__)
@@ -471,6 +471,8 @@ def parse_json_with_llm(
     *,
     expected_output_format: str | None = None,
     repair_trace_hook: JsonRepairTraceHook | None = None,
+    repair_llm: LLMInvoker | None = None,
+    repair_config: LLMCallConfig | None = None,
 ) -> dict:
     """Repair malformed JSON text by asking the configured JSON-repair LLM.
 
@@ -480,6 +482,11 @@ def parse_json_with_llm(
             original LLM.
         repair_trace_hook: Optional protected trace callback for the repair
             model attempt.
+        repair_llm: Optional injected sidecar invoker. Must be paired with
+            ``repair_config``; when omitted the global JSON-repair route is
+            used.
+        repair_config: Optional injected sidecar call configuration paired with
+            ``repair_llm``.
 
     Returns:
         Parsed JSON object from the repaired response, or ``{}`` if repair does
@@ -487,6 +494,14 @@ def parse_json_with_llm(
     """
 
     _validate_expected_output_format(expected_output_format)
+    if (repair_llm is None) != (repair_config is None):
+        raise ValueError("repair_llm and repair_config must be supplied together")
+    selected_llm = repair_llm if repair_llm is not None else _parse_json_with_llm
+    selected_config = (
+        repair_config
+        if repair_config is not None
+        else _parse_json_with_llm_config
+    )
 
     system_prompt = SystemMessage(
         content=_build_json_repair_prompt(expected_output_format)
@@ -502,9 +517,9 @@ def parse_json_with_llm(
     request_messages = [system_prompt, human_message]
     started_at = perf_counter()
     try:
-        response = _parse_json_with_llm.invoke(
+        response = selected_llm.invoke(
             request_messages,
-            config=_parse_json_with_llm_config,
+            config=selected_config,
         )
     except (
         OpenAIError,
@@ -521,7 +536,7 @@ def parse_json_with_llm(
                 parsed_output={},
                 parse_status="provider_error",
                 status="failed",
-                config=_parse_json_with_llm_config,
+                config=selected_config,
                 validation_error=str(exc),
                 started_at=started_at,
             )
@@ -555,7 +570,7 @@ def parse_json_with_llm(
             parsed_output=decoded_json_dict,
             parse_status=parse_status,
             status=status,
-            config=_parse_json_with_llm_config,
+            config=selected_config,
             validation_error=validation_error,
             started_at=started_at,
         )
@@ -570,6 +585,8 @@ def parse_llm_json_output(
     expected_output_format: str | None = None,
     deterministic_only: bool = False,
     repair_trace_hook: JsonRepairTraceHook | None = None,
+    repair_llm: LLMInvoker | None = None,
+    repair_config: LLMCallConfig | None = None,
 ) -> dict:
     """Parse LLM JSON output, handling markdown fences and malformed JSON.
     
@@ -581,6 +598,11 @@ def parse_llm_json_output(
             calling the JSON-repair LLM.
         repair_trace_hook: Optional protected trace callback for a repair-model
             attempt.
+        repair_llm: Optional injected sidecar invoker. Must be paired with
+            ``repair_config``; when omitted the global JSON-repair route is
+            used.
+        repair_config: Optional injected sidecar call configuration paired with
+            ``repair_llm``.
         
     Returns:
         Parsed JSON object as dict, or empty dict if parsing fails
@@ -625,16 +647,24 @@ def parse_llm_json_output(
             return return_value
 
         try:
+            if (repair_llm is None) != (repair_config is None):
+                raise ValueError(
+                    "repair_llm and repair_config must be supplied together"
+                )
             if repair_trace_hook is None:
                 decoded_json_dict = parse_json_with_llm(
                     raw_output,
                     expected_output_format=expected_output_format,
+                    repair_llm=repair_llm,
+                    repair_config=repair_config,
                 )
             else:
                 decoded_json_dict = parse_json_with_llm(
                     raw_output,
                     expected_output_format=expected_output_format,
                     repair_trace_hook=repair_trace_hook,
+                    repair_llm=repair_llm,
+                    repair_config=repair_config,
                 )
         except Exception as exc:
             logger.exception(f"LLM JSON repair failed: {exc}")

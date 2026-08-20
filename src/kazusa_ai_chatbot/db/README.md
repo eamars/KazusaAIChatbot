@@ -554,6 +554,24 @@ Stores persistent initializer cache entries for RAG Cache2. The collection is
 owned by cache helpers that build version keys, load entries, record hits, and
 prune stale data.
 
+### `cognition_chain_runs`
+
+Stores one sanitized `cognition_chain_run.v1` document for each V3
+invocation. The row carries `chain_run_id`, exact `run_id`, `llm_trace_id`,
+and `cognition_invocation_id` correlation, source/model names, bounded step
+records, ledger and sidecar counters, terminal disposition, warning codes, and
+`expires_at`. It contains no prompt, answer, private metadata, evidence text,
+credential, or endpoint.
+
+The owner creates a unique `chain_run_id` index, an exact
+`(run_id, llm_trace_id, completed_at)` lookup index, an invocation and engine
+index, and a TTL index on `expires_at` using the configured audit retention.
+`save_cognition_chain_run(...)` validates and idempotently upserts the complete
+document. `get_cognition_chain_run(run_id=..., llm_trace_id=...)` reads only
+the exact two-key intersection; missing or mismatched keys, read failures, and
+global-latest requests return no row. Best-effort persistence failure remains
+outside cognition-facing completion.
+
 ### `event_log_events`
 
 Append-only canonical observability stream. Runtime callers do not write this

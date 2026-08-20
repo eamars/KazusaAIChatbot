@@ -4,23 +4,28 @@
 
 - Owning package: `kazusa_ai_chatbot.cognition_resolver`
 - Source of truth: resolver contracts, loop, capability executor, and tests
-- Document status: current V2 resolver recurrence contract
+- Document status: current V2/V3 resolver recurrence boundary
 
 ## Purpose
 
-The cognition resolver owns bounded recurrence around Cognition Core V2 and
-projects source-owned observations into later cognition cycles.
+The cognition resolver owns bounded recurrence around the selected Cognition
+Core engine and projects source-owned observations into later cognition cycles.
+The external request and evidence contracts remain the V2 public shapes; V3
+adds a session continuation tail behind that same boundary.
 
 ## Boundary
 
-The cognition resolver owns bounded recurrence around Cognition Core V2. Its
+The cognition resolver owns bounded recurrence around the selected Core. Its
 live owner is `nodes.persona_supervisor2.stage_1_goal_resolver`; the idle owner
-is `self_cognition.runner._default_cognition_client`.
+is `self_cognition.runner._default_cognition_client`. The resolver guardrail
+is engine-neutral: it passes the caller's services object through unchanged,
+preserves the existing epoch arithmetic, and never chooses a core engine.
 
 The resolver executes a cognition-selected capability and returns typed
 observations. It has no authority to mutate user or character cognition state,
 select final wording, deliver adapter output, or reinterpret a capability
-result. Cognition Core V2 remains the semantic decision owner. The connector
+result. The selected Cognition Core engine remains the semantic decision owner.
+The connector
 commits the single final replacement state before L3, action execution, dialog,
 or worker delivery can proceed.
 
@@ -51,7 +56,19 @@ CognitionCoreInputV2
 The loop carries the latest in-memory V2 output forward. It does not reload or
 write cognition state between cycles. The caller commits only the final output.
 
-### Persona parent-checkpoint guardrail
+### V3 session continuation
+
+V3 performs one cold serialized chain before entering resolver recurrence. A
+reattached cycle appends the bounded tail
+`observation -> delta appraisal -> deterministic reduction -> bid revision ->
+I2 -> conditional W1 -> fresh P1 -> off-chain authorization -> O`. The tail
+uses only the new resolver observation plus the handles permitted by the V2
+contract; it does not rerun the cold A1/A2 anchor. A terminal cycle still runs
+this short tail, and the connector performs one terminal state commit after
+the loop. Session misses and cold rebuilds retain the same epoch-aware attempt
+ledger rather than resetting it.
+
+### Shared parent-checkpoint guardrail
 
 The live persona stage may bind one context-local
 `CognitionRetryCoordinator` around its queued service graph. The canonical

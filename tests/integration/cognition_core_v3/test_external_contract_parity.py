@@ -7,6 +7,8 @@ result through the unchanged V2 contract entry points.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
@@ -15,6 +17,24 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     validate_relational_willingness,
 )
 from kazusa_ai_chatbot.cognition_core_v3 import run_cognition
+from kazusa_ai_chatbot.cognition_episode import (
+    CURRENT_CHARACTER_ROLE,
+    CURRENT_USER_ROLE,
+    attach_dialog_semantic_projection,
+)
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
+    build_cognition_input_from_global_state,
+)
+from kazusa_ai_chatbot.nodes.persona_supervisor2_l3_surface import (
+    build_text_surface_input_from_global_state,
+)
+from tests.integration.cognition_core_v3.conftest import (
+    ScriptedLLMInvoker,
+    default_scripted_responses,
+    episode_evidence_handle,
+    make_v3_services,
+)
+from tests.test_cognition_chain_connector_mapping import _global_state
 
 REQUIRED_OUTPUT_KEYS = frozenset(
     {
@@ -129,3 +149,151 @@ async def test_state_update_and_diagnostics_carry_v2_shapes(
     assert tuple(stage_status[name] for name in ENGINE_STAGE_NAMES) == (
         "completed",
     ) * len(ENGINE_STAGE_NAMES)
+
+
+@pytest.mark.asyncio
+async def test_required_selection_nested_roles_reach_unchanged_dialog_input():
+    """Cold G1a preserves its full selection draft and fixed role bindings."""
+
+    state = _global_state()
+    input_operation = {
+        "operation": "The user chooses a respectful response boundary.",
+        "response_owner_role": CURRENT_CHARACTER_ROLE,
+        "selection_owner_role": CURRENT_CHARACTER_ROLE,
+        "selection_required": True,
+        "embedded_actor_role": CURRENT_USER_ROLE,
+        "embedded_target_role": CURRENT_CHARACTER_ROLE,
+    }
+    state["cognitive_episode"] = attach_dialog_semantic_projection(
+        state["cognitive_episode"],
+        "The current user asks the current character to choose a response boundary.",
+        input_operation,
+    )
+    payload = build_cognition_input_from_global_state(state)
+    episode_handle = episode_evidence_handle(payload)
+
+    selected_operation = {
+        **input_operation,
+        "operation": "The current user offers the current character a pause.",
+    }
+    selection_draft = {
+        "selection": "Choose the grounded pause boundary.",
+        "selected_response_operation": {
+            "operation": selected_operation["operation"],
+        },
+        "reason": "The explicit episode operation requires one choice.",
+        "private_monologue": "Keep the selected role boundary exact.",
+        "target_role_handles": [],
+        "evidence_handles": [episode_handle],
+        "expected_consequences": [
+            "The surface receives the validated selected operation."
+        ],
+        "confidence": "medium",
+        "relational_willingness": {
+            "applicability": "not_relationship_sensitive",
+            "stance": "not_applicable",
+            "current_user_relationship_state": "not_applicable",
+            "reason": "当前选择不涉及关系敏感性。",
+            "evidence_handles": [episode_handle],
+        },
+    }
+    responses = default_scripted_responses(episode_handle)
+    responses["G1a"] = json.dumps(selection_draft)
+    output = await run_cognition(
+        payload,
+        make_v3_services(ScriptedLLMInvoker(defaults=responses)),
+    )
+
+    state["cognition_core_output"] = output
+    surface_input = build_text_surface_input_from_global_state(
+        state,
+        interaction_style_context="brief and direct",
+    )
+
+    assert output["intention"]["selected_response_operation"] == selected_operation
+    assert surface_input["intention"]["selected_response_operation"] == (
+        selected_operation
+    )
+    assert surface_input["selected_response_operation"] == selected_operation
+    assert output["relational_willingness"]["applicability"] == (
+        "not_relationship_sensitive"
+    )
+
+
+@pytest.mark.asyncio
+async def test_targetless_group_can_silence_or_emit_grounded_reply_proposal():
+    """Targetless group P1 retains either canonical semantic response route."""
+
+    def targetless_payload():
+        state = _global_state()
+        state["channel_type"] = "group"
+        state["global_user_id"] = ""
+        state["platform_user_id"] = ""
+        state["platform_message_id"] = ""
+        episode = state["cognitive_episode"]
+        assert isinstance(episode, dict)
+        episode["trigger_source"] = "self_cognition"
+        target_scope = episode["target_scope"]
+        assert isinstance(target_scope, dict)
+        target_scope["channel_type"] = "group"
+        target_scope["current_global_user_id"] = None
+        target_scope["current_platform_user_id"] = None
+        character_state = state["character_cognition_state"]
+        assert isinstance(character_state, dict)
+        return build_cognition_input_from_global_state(
+            state,
+            mutable_state=character_state,
+            character_state=character_state,
+        )
+
+    silent_payload = targetless_payload()
+    silent_handle = episode_evidence_handle(silent_payload)
+    silent_responses = default_scripted_responses(silent_handle)
+    silent_responses["P1"] = json.dumps({
+        "goal_resolution": "blocked",
+        "self_cognition_response": {
+            "decision": "stay_silent",
+            "evidence_handles": [],
+            "semantic_target_handle": "",
+            "participation_basis": "",
+            "response_goal": "",
+            "reason": "The current scene has no grounded reason to enter.",
+        },
+    })
+    silent_output = await run_cognition(
+        silent_payload,
+        make_v3_services(ScriptedLLMInvoker(defaults=silent_responses)),
+    )
+
+    visible_payload = targetless_payload()
+    visible_handle = episode_evidence_handle(visible_payload)
+    visible_responses = default_scripted_responses(visible_handle)
+    visible_responses["P1"] = json.dumps({
+        "goal_resolution": "blocked",
+        "self_cognition_response": {
+            "decision": "propose_visible_reply",
+            "evidence_handles": [visible_handle],
+            "semantic_target_handle": "current_group_scene",
+            "participation_basis": "grounded_scene_intervention",
+            "response_goal": "Offer a grounded reply to the current group scene.",
+            "reason": "The current episode supplies direct group-scene evidence.",
+        },
+    })
+    visible_output = await run_cognition(
+        visible_payload,
+        make_v3_services(ScriptedLLMInvoker(defaults=visible_responses)),
+    )
+
+    assert silent_output["self_cognition_response_contract_status"] == "valid"
+    assert silent_output["self_cognition_response"]["decision"] == "stay_silent"
+    assert silent_output["intention"]["route"] == "silence"
+    assert visible_output["self_cognition_response_contract_status"] == "valid"
+    assert visible_output["self_cognition_response"] == {
+        "decision": "propose_visible_reply",
+        "evidence_handles": [visible_handle],
+        "semantic_target_handle": "current_group_scene",
+        "participation_basis": "grounded_scene_intervention",
+        "response_goal": "Offer a grounded reply to the current group scene.",
+        "reason": "The current episode supplies direct group-scene evidence.",
+    }
+    assert visible_output["intention"]["route"] == "speech"

@@ -18,8 +18,8 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
 )
 from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
     MAX_GOAL_BID_EVIDENCE_HANDLES,
-    _build_goal_output_contract,
     _required_selection_operations,
+    build_goal_output_contract,
     run_goal_cognition,
     validate_selection_goal_draft,
 )
@@ -602,7 +602,7 @@ def test_live_harness_contract_inspection_is_exact() -> None:
         },
         'semantic_text': semantic_text,
     }]
-    contract = _build_goal_output_contract(
+    contract = build_goal_output_contract(
         evidence_handles={'e1'},
         episode_evidence_handles={'e1'},
         required_evidence_handles={'e1'},

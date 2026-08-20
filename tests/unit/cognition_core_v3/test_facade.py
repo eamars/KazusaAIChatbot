@@ -25,10 +25,7 @@ from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
     FAMILIARITY_DATE_INCREMENT,
 )
 from kazusa_ai_chatbot.cognition_core_v3 import (
-    bind_protected_chain_records,
-    reset_protected_chain_records,
     run_cognition,
-    snapshot_protected_chain_records,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     build_cognition_input_from_global_state,
@@ -57,14 +54,10 @@ EXPECTED_PROTECTED_STAGE_SEQUENCE = (
 # single accepted action-planning call. The scripted invoker introduces no
 # internal await points, so these waves complete without interleaving.
 EXPECTED_STAGE_CALL_SEQUENCE = (
-    "event_agency",
-    "moral_identity",
-    "relationship_social",
-    "epistemic_comparison_memory",
-    "existential_drive",
-    "goal_ordinary_response",
-    "goal_threat_outcome",
-    "action_planning",
+    "A1",
+    "A2",
+    "G1a",
+    "P1",
 )
 
 
@@ -129,25 +122,93 @@ async def test_stage_calls_follow_registry_order_with_single_action_planning_cal
 
 
 @pytest.mark.asyncio
-async def test_protected_chain_records_capture_one_accepted_attempt_per_stage(
-    facade_payload, facade_bundle
+async def test_cold_first_packet_reaches_llm_and_enters_accepted_transcript(
+    facade_payload,
 ):
-    """Protected records capture one accepted attempt per semantic owner."""
-    _, services = facade_bundle
-    token = bind_protected_chain_records()
+    """The first cold request carries all sections into the accepted prefix."""
 
+    invoker, services = make_facade_bundle(facade_payload)
+    captured_calls: list[tuple[str, tuple[object, ...]]] = []
+    scripted_ainvoke = invoker.ainvoke
+
+    async def recording_ainvoke(messages, *, config):
+        """Retain exact messages before delegating to the scripted invoker."""
+
+        stage_name = config.stage_name.split(".")[0]
+        captured_calls.append((stage_name, tuple(messages)))
+        response = await scripted_ainvoke(messages, config=config)
+        return response
+
+    invoker.ainvoke = recording_ainvoke
     await run_cognition(facade_payload, services)
 
-    records = snapshot_protected_chain_records()
-    reset_protected_chain_records(token)
+    first_stage, first_messages = captured_calls[0]
+    assert first_stage == "A1"
+    first_payload = first_messages[-1].content
+    first_packet = json.loads(first_payload)
+    assert [next(iter(section)) for section in first_packet] == [
+        "constraints_and_operational_state",
+        "relationship_and_mutable_state",
+        "episode_and_scene",
+        "evidence_and_affordances",
+        "question",
+    ]
+    assert first_packet[2]["episode_and_scene"]["episode"][
+        "visible_percepts"
+    ]
+    assert first_packet[3]["evidence_and_affordances"]["evidence"]
 
-    observed_sequence = [record["stage_id"] for record in records]
-    assert observed_sequence == list(EXPECTED_PROTECTED_STAGE_SEQUENCE)
+    second_stage, second_messages = captured_calls[1]
+    assert second_stage == "A2"
+    assert second_messages[1].content == first_payload
+    assert second_messages[2].content == default_scripted_responses(
+        episode_evidence_handle(facade_payload)
+    )["A1"]
+    later_packet = json.loads(second_messages[-1].content)
+    assert [next(iter(section)) for section in later_packet] == ["question"]
 
-    for record in records:
-        assert record["parse_status"] == "accepted"
-        assert record["attempt_number"] == 1
-        assert record["error"] is None
+
+@pytest.mark.asyncio
+async def test_next_cold_question_keeps_first_packet_after_appraisal_exhaustion(
+    facade_payload,
+):
+    """The first accepted owner gets all cold carriers after early failures."""
+
+    invoker, services = make_facade_bundle(
+        facade_payload,
+        responses={"A1": "{invalid", "A2": "{invalid"},
+    )
+    captured_calls: list[tuple[str, tuple[object, ...]]] = []
+    scripted_ainvoke = invoker.ainvoke
+
+    async def recording_ainvoke(messages, *, config):
+        """Retain exact messages before delegating to the scripted invoker."""
+
+        stage_name = config.stage_name.split(".")[0]
+        captured_calls.append((stage_name, tuple(messages)))
+        response = await scripted_ainvoke(messages, config=config)
+        return response
+
+    invoker.ainvoke = recording_ainvoke
+    await run_cognition(facade_payload, services)
+
+    g1a_messages = next(
+        messages
+        for stage_name, messages in captured_calls
+        if stage_name == "G1a"
+    )
+    assert len(g1a_messages) == 2
+    g1a_packet = json.loads(g1a_messages[-1].content)
+    assert [next(iter(section)) for section in g1a_packet] == [
+        "constraints_and_operational_state",
+        "relationship_and_mutable_state",
+        "episode_and_scene",
+        "evidence_and_affordances",
+        "question",
+    ]
+    assert g1a_packet[-1]["question"]["contract_name"] == (
+        "ordinary_goal_bid.v1"
+    )
 
 
 @pytest.mark.asyncio
@@ -281,7 +342,7 @@ async def test_authoritative_relational_decision_collapses_without_partition_cal
 
     override_bundle = make_facade_bundle(
         facade_payload,
-        responses={"goal_ordinary_response": json.dumps(sensitive_draft)},
+        responses={"G1a": json.dumps(sensitive_draft)},
     )
     override_invoker, override_services = override_bundle
     output = await run_cognition(facade_payload, override_services)
@@ -336,10 +397,10 @@ async def test_evidence_free_run_fails_closed_after_bounded_ordinary_attempts(
 
     invoker = ScriptedLLMInvoker(
         responses={
-            "goal_ordinary_response": json.dumps(
+            "G1a": json.dumps(
                 ZERO_EVIDENCE_ORDINARY_DRAFT
             ),
-            "action_planning": json.dumps({"goal_resolution": "blocked"}),
+            "P1": json.dumps({"goal_resolution": "blocked"}),
         }
     )
     services = make_v3_services(invoker)
@@ -347,7 +408,7 @@ async def test_evidence_free_run_fails_closed_after_bounded_ordinary_attempts(
     with pytest.raises(CognitionExecutionError, match="ordinary_response"):
         await run_cognition(variant, services)
 
-    assert tuple(invoker.calls) == ("goal_ordinary_response",) * 3
+    assert tuple(invoker.calls) == ("G1a",) * 3
 
 
 @pytest.mark.asyncio
@@ -363,31 +424,14 @@ async def test_rejected_goal_draft_attempts_are_captured_before_branch_escalatio
     """
     invoker, services = make_facade_bundle(
         facade_payload,
-        responses={"goal_ordinary_response": "{invalid json"},
+        responses={"G1a": "{invalid json"},
     )
-
-    token = bind_protected_chain_records()
-    try:
-        with pytest.raises(CognitionExecutionError):
-            await run_cognition(facade_payload, services)
-    finally:
-        records = snapshot_protected_chain_records()
-        reset_protected_chain_records(token)
+    with pytest.raises(CognitionExecutionError):
+        await run_cognition(facade_payload, services)
 
     expected_calls = (
-        "event_agency",
-        "moral_identity",
-        "relationship_social",
-        "epistemic_comparison_memory",
-        "existential_drive",
-    ) + ("goal_ordinary_response",) * 3
+        "A1",
+        "A2",
+    ) + ("G1a",) * 3
     assert tuple(invoker.calls) == expected_calls
-
-    rejected = [
-        record
-        for record in records
-        if record["stage_id"] == "ordinary_response:ordinary_response"
-    ]
-    assert [record["attempt_number"] for record in rejected] == [1, 2, 3]
-    assert all(record["parse_status"] == "rejected" for record in rejected)
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 COGNITION_CORE_V2_ROUTES = (
     "COGNITION_LLM_CHARACTER_CARRYOVER",
     "COGNITION_LLM_APPRAISAL_EVENT_AGENCY",
@@ -227,13 +226,19 @@ def test_brain_model_route_api_applies_and_resets_selected_route(
     snapshot = snapshot_response.json()
     assert snapshot["service_id"] == "brain"
     assert snapshot["service_state"]["actual_state"] == "running"
-    assert len(snapshot["routes"]) == 26
+    assert len(snapshot["routes"]) == 28
     core_routes = [
         route
         for route in snapshot["routes"]
         if route["group"] == "Cognition Core V2"
     ]
     assert len(core_routes) == 13
+    v3_routes = [
+        route
+        for route in snapshot["routes"]
+        if route["group"] == "Cognition Core V3"
+    ]
+    assert len(v3_routes) == 2
     assert "test-key" not in snapshot_response.text
 
     missing_csrf = client.put(

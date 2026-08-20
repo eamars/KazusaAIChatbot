@@ -18,11 +18,6 @@ from kazusa_ai_chatbot.action_spec.registry import (
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
 )
-from kazusa_ai_chatbot.cognition_episode import (
-    GoalContinuationRefV1,
-    build_goal_continuation_ref,
-    validate_goal_continuation_ref,
-)
 from kazusa_ai_chatbot.cognition_core_v2.action_authorization import (
     authorize_action_requests,
     derive_action_route,
@@ -41,14 +36,19 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     SemanticActionRequestV2,
     is_targetless_group_self_cognition_episode,
     project_evidence_provenance_role,
-    validate_self_cognition_response_decision,
     validate_scheduled_authority_proposal,
+    validate_self_cognition_response_decision,
 )
 from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
     V2_MODEL_TOTAL_ATTEMPTS,
 )
 from kazusa_ai_chatbot.cognition_core_v2.resolver_authorization import (
     authorize_resolver_requests,
+)
+from kazusa_ai_chatbot.cognition_episode import (
+    GoalContinuationRefV1,
+    build_goal_continuation_ref,
+    validate_goal_continuation_ref,
 )
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     ALLOWED_PENDING_DECISIONS,
@@ -59,8 +59,8 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
 )
 from kazusa_ai_chatbot.config import CHARACTER_TIME_ZONE
 from kazusa_ai_chatbot.time_boundary import (
-    local_time_context_from_storage_utc,
     local_llm_datetime_to_storage_utc_iso,
+    local_time_context_from_storage_utc,
     normalize_storage_utc_iso,
     parse_storage_utc_datetime,
 )

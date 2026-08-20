@@ -1,60 +1,43 @@
-"""Deterministic tests for the V3 fixed appraisal and goal topology."""
+"""Deterministic tests for the serialized Cognition V3 registry."""
 
 from __future__ import annotations
 
-import dataclasses
-
-import pytest
-
-from kazusa_ai_chatbot.cognition_core_v2.state_models import GOAL_KINDS
 from kazusa_ai_chatbot.cognition_core_v3 import registry
 
 
-def test_registry_exposes_exact_appraisal_and_goal_topology():
-    first_wave = {chain.name: chain.stages for chain in registry.APPRAISAL_FIRST_WAVE_CHAINS}
-    assert first_wave == {
-        "causal_normative": ("event_agency", "moral_identity"),
-        "relationship": ("relationship_social",),
-        "epistemic_meaning": ("epistemic_comparison_memory", "existential_drive"),
-    }
-
-    assert registry.TERMINAL_OUTCOME_CHAIN == registry.ChainSpec(
-        name="terminal_outcome",
-        stages=("goal_threat_outcome",),
+def test_serial_chain_steps_match_contract() -> None:
+    assert registry.SERIAL_CHAIN_STEPS == (
+        "A1",
+        "A2",
+        "I1",
+        "G1a",
+        "G1b",
+        "I2",
+        "W1",
+        "P1",
     )
 
-    goal_chains = {chain.name: chain.stages for chain in registry.GOAL_CHAINS}
-    assert tuple(goal_chains) == GOAL_KINDS
-    assert all(stages == (name,) for name, stages in goal_chains.items())
 
-    seen_stages: list[str] = []
-    for chain in registry.ALL_CHAINS:
-        for stage in chain.stages:
-            assert stage not in seen_stages, f"Stage {stage!r} is registered twice"
-            seen_stages.append(stage)
+def test_appraisal_grouping_maps_cover_six_families_exactly() -> None:
+    assert registry.VALID_APPRAISAL_GROUP_COUNTS == (1, 2, 3, 6)
 
-    first_wave_names = {chain.name for chain in registry.APPRAISAL_FIRST_WAVE_CHAINS}
-    assert "terminal_outcome" not in first_wave_names
-    assert registry.WAVE_A_CHAIN_NAMES == (
-        "causal_normative",
-        "relationship",
-        "epistemic_meaning",
-        *GOAL_KINDS,
+    for group_count, groups in registry.APPRAISAL_GROUPING_MAPS.items():
+        families: list[str] = []
+        for step_id, grouped_families in groups:
+            assert step_id in {"A1", "A2"}
+            families.extend(grouped_families)
+        assert tuple(sorted(set(families))) == tuple(
+            sorted(registry.APPRAISAL_FAMILY_ORDER)
+        )
+
+
+def test_appraisal_family_order_is_frozen() -> None:
+    assert registry.APPRAISAL_FAMILY_ORDER == (
+        "event_agency",
+        "goal_threat_outcome",
+        "epistemic_comparison_memory",
+        "relationship_social",
+        "moral_identity",
+        "existential_drive",
     )
-    assert registry.ALL_CHAIN_NAMES[-1] == "terminal_outcome"
-
-    visibility = dict(registry.CHAIN_VISIBILITY)
-    assert visibility["causal_normative"] == registry.VISIBILITY_ACCEPTED_PROJECTION
-    assert visibility["relationship"] == registry.VISIBILITY_SAME_OWNER_ONLY
-    assert visibility["epistemic_meaning"] == registry.VISIBILITY_ACCEPTED_PROJECTION
-    assert visibility["terminal_outcome"] == registry.VISIBILITY_FRESH_CANONICAL_PROJECTION
-    assert all(visibility[name] == registry.VISIBILITY_ISOLATED_BRANCH for name in GOAL_KINDS)
-
-    spec = registry.ChainSpec(name="probe", stages=("stage_a",))
-    with pytest.raises(dataclasses.FrozenInstanceError):
-        spec.name = "mutated"  # type: ignore[misc]
-    with pytest.raises(TypeError):
-        registry.APPRAISAL_FIRST_WAVE_CHAINS[0] = spec
-
-    assert registry.PRELIMINARY_GOAL_WAVE == 1
-    assert registry.REACTIVATION_GOAL_WAVE == 2
+    assert registry.APPRAISAL_WORLD_FAMILIES == registry.APPRAISAL_FAMILY_ORDER

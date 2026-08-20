@@ -10,6 +10,10 @@ from unittest.mock import AsyncMock
 import pytest
 
 from kazusa_ai_chatbot import service as service_module
+from kazusa_ai_chatbot.config import (
+    CognitionRouteSettingV1,
+    CognitionV3RouteSettingsV1,
+)
 from scripts import export_event_log as export_module
 
 
@@ -269,6 +273,197 @@ async def test_ops_runtime_status_merges_config_and_worker_liveness(
     assert payload["workers"]["background_work"]["enabled"] is True
     assert "private" not in json.dumps(payload, sort_keys=True)
     build_runtime_status.assert_awaited_once_with(window_hours=6)
+
+
+def test_cognition_engine_descriptor_v2_uses_stable_stage_model_set(
+    monkeypatch,
+) -> None:
+    """V2 status exposes only stable configured stage model names."""
+
+    route = CognitionRouteSettingV1(
+        base_url="https://private.example/v1",
+        api_key="private-key",
+        model="model-b",
+        max_completion_tokens=1024,
+        thinking_enabled=False,
+        context_window_tokens=None,
+    )
+    duplicate_route = CognitionRouteSettingV1(
+        base_url="https://private.example/v1",
+        api_key="private-key-2",
+        model="model-a",
+        max_completion_tokens=1024,
+        thinking_enabled=False,
+        context_window_tokens=None,
+    )
+    monkeypatch.setattr(service_module, "COGNITION_CORE_ENGINE", "v2")
+    monkeypatch.setattr(
+        service_module,
+        "get_selected_cognition_route_settings",
+        lambda: {"one": route, "two": duplicate_route, "three": route},
+    )
+
+    descriptor = service_module._ops_runtime_status_payload({})[
+        "cognition_engine"
+    ]
+
+    assert descriptor == {
+        "schema_version": "cognition_engine_descriptor.v1",
+        "engine_id": "v2",
+        "chain_model_name": "model-a, model-b",
+        "sidecar_model_name": "",
+        "sidecar_enabled": False,
+        "subconscious_enabled": False,
+        "appraisal_group_count": 0,
+        "chain_context_window_tokens": 0,
+        "normal_budget_tokens": 0,
+        "extended_budget_tokens": 0,
+        "turn_deadline_seconds": 0,
+    }
+    assert "private-key" not in str(descriptor)
+    assert "private.example" not in str(descriptor)
+
+
+def test_cognition_engine_descriptor_v3_uses_selected_loaded_settings(
+    monkeypatch,
+) -> None:
+    """V3 status exposes configured chain, sidecar, and policy values."""
+
+    chain = CognitionRouteSettingV1(
+        base_url="https://chain.private.example/v1",
+        api_key="chain-private-key",
+        model="chain-model",
+        max_completion_tokens=8192,
+        thinking_enabled=False,
+        context_window_tokens=50176,
+    )
+    sidecar = CognitionRouteSettingV1(
+        base_url="https://sidecar.private.example/v1",
+        api_key="sidecar-private-key",
+        model="sidecar-model",
+        max_completion_tokens=8192,
+        thinking_enabled=False,
+        context_window_tokens=None,
+    )
+    settings = CognitionV3RouteSettingsV1(
+        chain=chain,
+        sidecar=sidecar,
+        subconscious_enabled=True,
+        appraisal_group_count=6,
+        turn_deadline_seconds=333,
+    )
+    monkeypatch.setattr(service_module, "COGNITION_CORE_ENGINE", "v3")
+    monkeypatch.setattr(
+        service_module,
+        "get_selected_cognition_route_settings",
+        lambda: settings,
+    )
+
+    descriptor = service_module._ops_runtime_status_payload({})[
+        "cognition_engine"
+    ]
+
+    assert descriptor == {
+        "schema_version": "cognition_engine_descriptor.v1",
+        "engine_id": "v3",
+        "chain_model_name": "chain-model",
+        "sidecar_model_name": "sidecar-model",
+        "sidecar_enabled": True,
+        "subconscious_enabled": True,
+        "appraisal_group_count": 6,
+        "chain_context_window_tokens": 50176,
+        "normal_budget_tokens": 50000,
+        "extended_budget_tokens": 65000,
+        "turn_deadline_seconds": 333,
+    }
+    assert "private-key" not in str(descriptor)
+    assert "private.example" not in str(descriptor)
+
+
+def test_cognition_engine_descriptor_contract_is_strict_and_bounded() -> None:
+    """Runtime status rejects unknown fields and impossible combinations."""
+
+    from kazusa_ai_chatbot.brain_service.contracts import (
+        CognitionEngineDescriptorResponse,
+    )
+
+    descriptor = {
+        "schema_version": "cognition_engine_descriptor.v1",
+        "engine_id": "v3",
+        "chain_model_name": "chain-model",
+        "sidecar_model_name": "",
+        "sidecar_enabled": False,
+        "subconscious_enabled": False,
+        "appraisal_group_count": 2,
+        "chain_context_window_tokens": 50176,
+        "normal_budget_tokens": 50000,
+        "extended_budget_tokens": 65000,
+        "turn_deadline_seconds": 240,
+    }
+    validated = CognitionEngineDescriptorResponse.model_validate(descriptor)
+    assert validated.model_dump() == descriptor
+    assert CognitionEngineDescriptorResponse.model_validate({
+        **descriptor,
+        "sidecar_model_name": "sidecar-model",
+        "sidecar_enabled": True,
+        "subconscious_enabled": True,
+    }).model_dump() == {
+        **descriptor,
+        "sidecar_model_name": "sidecar-model",
+        "sidecar_enabled": True,
+        "subconscious_enabled": True,
+    }
+    assert CognitionEngineDescriptorResponse.model_validate({
+        **descriptor,
+        "engine_id": "v2",
+        "sidecar_model_name": "",
+        "sidecar_enabled": False,
+        "subconscious_enabled": False,
+        "appraisal_group_count": 0,
+        "chain_context_window_tokens": 0,
+        "normal_budget_tokens": 0,
+        "extended_budget_tokens": 0,
+        "turn_deadline_seconds": 0,
+    }).engine_id == "v2"
+    with pytest.raises(ValueError):
+        CognitionEngineDescriptorResponse.model_validate({
+            **descriptor,
+            "endpoint": "https://private.example",
+        })
+
+    invalid_descriptors = (
+        {"engine_id": "v1"},
+        {"chain_model_name": ""},
+        {"appraisal_group_count": 4},
+        {"appraisal_group_count": True},
+        {"engine_id": "v2", "sidecar_model_name": "sidecar-model"},
+        {"engine_id": "v2", "sidecar_enabled": True},
+        {"engine_id": "v2", "subconscious_enabled": True},
+        {"engine_id": "v2", "appraisal_group_count": 2},
+        {"engine_id": "v2", "chain_context_window_tokens": 1},
+        {"engine_id": "v2", "normal_budget_tokens": 1},
+        {"engine_id": "v2", "extended_budget_tokens": 1},
+        {"engine_id": "v2", "turn_deadline_seconds": 1},
+        {"appraisal_group_count": 0},
+        {"chain_context_window_tokens": 49_999},
+        {"chain_context_window_tokens": True},
+        {"normal_budget_tokens": 49_999},
+        {"normal_budget_tokens": True},
+        {"extended_budget_tokens": 64_999},
+        {"extended_budget_tokens": True},
+        {"turn_deadline_seconds": 29},
+        {"turn_deadline_seconds": 601},
+        {"turn_deadline_seconds": True},
+        {"sidecar_model_name": "", "sidecar_enabled": True},
+        {"sidecar_model_name": "sidecar-model", "sidecar_enabled": False},
+        {"sidecar_enabled": False, "subconscious_enabled": True},
+    )
+    for overrides in invalid_descriptors:
+        with pytest.raises(ValueError):
+            CognitionEngineDescriptorResponse.model_validate({
+                **descriptor,
+                **overrides,
+            })
 
 
 @pytest.mark.asyncio

@@ -57,6 +57,11 @@ their owning modules: `canonicalize_semantic_appraisal_item`,
 They are the same implementations used by V2 itself. Consumers import them
 directly from their owning modules; there is no copied validator or alternate
 contract vocabulary.
+V3 reuses this same public V2 substrate, including
+`build_goal_output_contract` and the existing appraisal, workspace, action,
+and authorization helpers. V3 owns only its serialized-chain orchestration and
+lane/session accounting; it does not create a second semantic helper
+vocabulary.
 
 ## Required-Selection Role Operation
 

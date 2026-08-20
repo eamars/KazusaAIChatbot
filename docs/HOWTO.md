@@ -356,6 +356,34 @@ ten logical turns. Its history projection keeps the newest whole turns under an
 exact 6,000-character compact-JSON sub-budget before the unchanged
 16,000-character settled-input cap is applied.
 
+## Cognition V3 operator runbook
+
+Keep `COGNITION_CORE_ENGINE=v2` for the documented pre-cutover default. A V3
+startup requires the complete `COGNITION_V3_CHAIN_LLM_*` bundle and uses only
+the optional all-or-nothing `COGNITION_V3_SIDECAR_LLM_*` bundle when configured.
+`COGNITION_V3_APPRAISAL_GROUP_COUNT` accepts `1`, `2`, `3`, or `6` (default `2`)
+and `COGNITION_V3_TURN_DEADLINE_SECONDS` accepts `30..600` (default `240`).
+The primary caller declares a 50,000-token normal total ceiling; the
+conditional 65,000-token ceiling is available only when
+`COGNITION_V3_CHAIN_LLM_CONTEXT_WINDOW_TOKENS` is at least `65000`. The
+context-window declaration remains caller-local and is not sent to the
+provider. Runtime timing evidence is non-streaming elapsed milliseconds, with
+no TTFT claim.
+
+Before a reviewed cutover, collect deterministic evidence with the exact
+commands below; passing local tests does not by itself claim a sealed gate:
+
+```powershell
+venv\Scripts\python -m pytest -q tests/integration/cognition_core_v3/test_chain_observability.py::test_protected_and_sanitized_records_share_exact_service_console_correlation
+venv\Scripts\python -m scripts.validate_test_impact --base-ref HEAD
+```
+
+For rollback, set `COGNITION_CORE_ENGINE=v2` and restart the brain process so
+the closed selector binds V2. Retain V3 diagnostic rows for review and do not
+rewrite or globally substitute correlation records. The brain endpoint and
+control console pair each graph with its exact chain run; missing or mismatched
+`run_id`/`llm_trace_id` is shown as `not_reported`.
+
 ## Relevance Turn Settlement
 
 Active chat intake commits one canonical `conversation_history` user receipt

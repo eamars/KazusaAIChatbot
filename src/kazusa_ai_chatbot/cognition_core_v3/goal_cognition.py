@@ -26,6 +26,12 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     project_evidence_provenance_role,
     validate_relational_willingness,
 )
+from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
+    selection_goal_draft_to_goal_bid as materialize_v2_selection_goal_draft,
+)
+from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
+    validate_selection_goal_draft as validate_v2_selection_goal_draft,
+)
 from kazusa_ai_chatbot.cognition_core_v2.state_models import GOAL_KINDS
 from kazusa_ai_chatbot.cognition_episode import (
     NO_ROLE,
@@ -108,8 +114,8 @@ STATIC_GOAL_SYSTEM_PROMPT = '''你是一个独立的目标认知分支。请为�
 5. 当本分支拥有 relational_willingness 时先完成完整的关系立场：applicability 只能是 relationship_sensitive 或 not_relationship_sensitive；stance 只能是 reject、deflect、negotiate、conditional_accept、accept 或 not_applicable；current_user_relationship_state 只能是 unestablished、developing_or_uncertain、established 或 not_applicable。not_relationship_sensitive 时 stance 和 current_user_relationship_state 都必须是 not_applicable；relationship_sensitive 时两者都不能是 not_applicable。只有不涉及关系敏感性的请求使用 not_relationship_sensitive/not_applicable，其余请求由当前角色结合全部有依据的事实自主选择立场。
 
 # 输出与最后检查
-goal bid 只返回一个 JSON 对象，字段恰好是 intention、desired_outcome、concrete_detail、reason、private_monologue、target_role_handles、evidence_handles、expected_consequences 和 confidence；当本分支拥有 relational_willingness 时还含该字段。relational_willingness 的字段恰好是 applicability、stance、current_user_relationship_state、reason 和 evidence_handles，schema_version 由代码绑定。
-selection draft 只返回一个严格 JSON 对象，字段恰好是 selection、selected_response_operation、reason、private_monologue、target_role_handles、evidence_handles、expected_consequences 和 confidence；按输入绑定的 writable_fields 输出 selected_response_operation，方向字段保持代码绑定；selection 直接写出当前角色的具体选择。
+goal bid 只返回一个 JSON 对象，字段恰好是 intention、desired_outcome、concrete_detail、reason、private_monologue、target_role_handles、evidence_handles、expected_consequences 和 confidence；当本分支拥有 relational_willingness 时还含该字段。若 payload 含 carried_relational_willingness，它是已验证、由代码保留的本轮关系立场：不得重判或输出 relational_willingness。relational_willingness 的字段恰好是 applicability、stance、current_user_relationship_state、reason 和 evidence_handles，schema_version 由代码绑定。
+selection draft 只返回一个严格 JSON 对象，字段恰好是 selection、selected_response_operation、reason、private_monologue、target_role_handles、evidence_handles、expected_consequences 和 confidence；当 payload 的 goal_output_contract 要求 relational_willingness 时还必须输出完整该字段，否则不得输出。按输入绑定的 writable_fields 输出 selected_response_operation，方向字段保持代码绑定；selection 直接写出当前角色的具体选择。
 叙述字段使用简体中文；用户引文、专有名词、代码、URL、schema 或 enum token 保持原样。内部句柄、结构术语和运行元数据只允许出现在各自的类型化 handle 字段，所有自由文本必须使用语义角色描述或自然指代。target_role_handles 和 evidence_handles 是字符串数组，expected_consequences 是非空字符串数组。每个 handle 逐个等于输入值，只返回 JSON。
 '''
 
@@ -315,58 +321,104 @@ def validate_goal_bid_draft(
     return normalized
 
 
+def validate_recurrence_ordinary_goal_bid_draft(
+    candidate: object,
+    *,
+    carried_relational_willingness: Mapping[str, object],
+    evidence_handles: set[str],
+    role_handles: set[str],
+) -> dict[str, Any]:
+    """Validate a revised ordinary bid while preserving its prior stance.
+
+    The resolver tail may revise the ordinary goal from the newly admitted
+    observation, but the original ordinary semantic owner retains its
+    already-validated relational decision for the whole resolver turn. The
+    model therefore supplies the standard bid fields only; this boundary adds
+    the carried decision before the canonical ordinary validator revalidates
+    its existing evidence references.
+    """
+
+    if not isinstance(candidate, Mapping):
+        raise TypeError("recurrence ordinary goal bid must be an object")
+    if set(candidate) != set(GOAL_BID_FIELDS):
+        raise ValueError("recurrence ordinary goal bid fields are not exact")
+    if not isinstance(carried_relational_willingness, Mapping):
+        raise TypeError("carried relational willingness must be an object")
+    carried_candidate = dict(carried_relational_willingness)
+    schema_version = carried_candidate.pop("schema_version", None)
+    if schema_version != RELATIONAL_WILLINGNESS_SCHEMA_VERSION:
+        raise ValueError("carried relational willingness schema is invalid")
+    candidate_with_carrier = dict(candidate)
+    candidate_with_carrier["relational_willingness"] = carried_candidate
+    return validate_goal_bid_draft(
+        candidate_with_carrier,
+        goal_kind=ORDINARY_GOAL_KIND,
+        evidence_handles=evidence_handles,
+        role_handles=role_handles,
+    )
+
+
 def validate_selection_goal_draft(
     candidate: object,
     *,
     evidence_handles: set[str],
     role_handles: set[str],
+    required_evidence_handles: set[str],
+    required_operations: Sequence[Mapping[str, Any]],
+    episode_handles: set[str] | None,
+    require_relational_willingness: bool,
+    maximum_evidence_handles: int,
 ) -> dict[str, Any]:
-    """Validate one model-owned required-selection draft.
+    """Validate one selection draft through the canonical V2 owner.
 
     Args:
         candidate: Parsed model output for a selection-mode goal chain.
         evidence_handles: Complete authorized evidence handle set.
         role_handles: Complete authorized role handle set.
+        required_evidence_handles: Required-selection evidence handles that
+            must appear in the accepted draft.
+        required_operations: Canonical typed selection-operation facts.
+        episode_handles: Current-episode evidence handles for the ordinary
+            relational-willingness validator.
+        require_relational_willingness: Whether this ordinary G1a producer
+            owns a new relational decision rather than carrying one forward.
+        maximum_evidence_handles: The current V2 selection-contract cap.
 
     Returns:
-        The normalized draft with validated handle lists and an operation
-        mapping ready for ``bind_selected_response_operation``.
+        The V2-normalized selection draft, including the bound response
+        operation and, when owned by this cold ordinary G1a, the validated
+        relational decision.
 
     Raises:
-        ValueError: on any field-set, type, bound, or domain violation.
+        ValueError: On any canonical V2 field, role, evidence, operation, or
+            relational-willingness contract violation.
     """
-    if not isinstance(candidate, Mapping):
-        raise ValueError("selection goal draft must be an object")
-    if set(candidate) != set(SELECTION_GOAL_DRAFT_FIELDS):
-        raise ValueError("selection goal draft fields are not exact")
+    validated_selection_draft = validate_v2_selection_goal_draft(
+        candidate,
+        evidence_handles=evidence_handles,
+        role_handles=role_handles,
+        required_evidence_handles=required_evidence_handles,
+        required_operations=required_operations,
+        episode_handles=episode_handles,
+        require_relational_willingness=require_relational_willingness,
+        maximum_evidence_handles=maximum_evidence_handles,
+    )
+    return validated_selection_draft
 
-    for field_name in ("selection", "reason", "private_monologue"):
-        _bounded_text(
-            candidate[field_name],
-            f"goal bid {field_name}",
-            GOAL_BID_TEXT_CHAR_LIMIT,
-        )
-    _bounded_text(candidate["confidence"], "confidence", GOAL_CONFIDENCE_CHAR_LIMIT)
 
-    normalized = dict(candidate)
-    if not isinstance(normalized["selected_response_operation"], Mapping):
-        raise ValueError("selected response operation must be an object")
-    normalized["target_role_handles"] = validate_handle_list(
-        candidate["target_role_handles"],
-        role_handles,
-        "role",
-        GOAL_BID_ROLE_HANDLE_LIMIT,
+def materialize_selection_goal_draft(
+    selection_draft: Mapping[str, Any],
+    *,
+    include_relational_willingness: bool,
+) -> dict[str, Any]:
+    """Materialize one validated selection draft through the V2 owner."""
+
+    materialized_selection_draft = materialize_v2_selection_goal_draft(
+        selection_draft,
+        branch_id=ORDINARY_GOAL_KIND,
+        include_relational_willingness=include_relational_willingness,
     )
-    normalized["evidence_handles"] = validate_handle_list(
-        candidate["evidence_handles"],
-        evidence_handles,
-        "evidence",
-        GOAL_BID_EVIDENCE_HANDLE_LIMIT,
-    )
-    normalized["expected_consequences"] = _validate_expected_consequences(
-        candidate["expected_consequences"]
-    )
-    return normalized
+    return materialized_selection_draft
 
 
 def bind_selected_response_operation(
@@ -630,9 +682,9 @@ def build_goal_question_tail(
     fixed order with structured values as single-line JSON so the tail stays
     deterministic across attempts and cache checkpoints. Selection mode is an
     episode-driven input fact (the authoritative operation requires a
-    selection), not a kind fact: in that shape the draft omits
-    ``relational_willingness`` because the stance was already determined
-    earlier and travels by deterministic code.
+    selection), not a kind fact: a cold ordinary G1a selection draft owns and
+    emits ``relational_willingness``; a recurrence carries its already accepted
+    stance by deterministic code and omits that model-owned field.
 
     Args:
         goal_kind: Goal kind label from the closed V2 ``GOAL_KINDS`` set.
@@ -872,3 +924,43 @@ def resolve_goal_disposition(
             f"goal chain {goal_kind!r} has no typed failure record"
         )
     return GoalBidDisposition(goal_kind, False, error_code=failure.error_code)
+
+def validate_active_goal_group_output(
+    raw: object,
+    *,
+    branch_roster: Sequence[Mapping[str, object]],
+    evidence_handles: set[str],
+    role_handles: set[str],
+) -> list[dict[str, Any]]:
+    """Validate an ordered active-branch group bid output."""
+
+    if not isinstance(raw, Mapping) or set(raw) != {"bids"}:
+        raise ValueError("active goal group output fields are not exact")
+    bids = raw["bids"]
+    if not isinstance(bids, list):
+        raise ValueError("active goal group bids must be a list")
+    if len(bids) != len(branch_roster):
+        raise ValueError("active goal group bid count must equal the roster")
+
+    validated_bids: list[dict[str, Any]] = []
+    for roster_row, bid_row in zip(branch_roster, bids):
+        if not isinstance(roster_row, Mapping):
+            raise ValueError("active goal roster rows must be mappings")
+        branch_id = roster_row.get("branch_id")
+        if not isinstance(branch_id, str) or branch_id not in GOAL_KINDS:
+            raise ValueError("active goal roster branch_id is invalid")
+        if not isinstance(bid_row, Mapping):
+            raise ValueError("active goal group rows must be mappings")
+        if bid_row.get("branch_id") != branch_id:
+            raise ValueError("active goal group bid order must equal the roster")
+        candidate = dict(bid_row)
+        candidate.pop("branch_id", None)
+        validated = validate_goal_bid_draft(
+            candidate,
+            goal_kind=branch_id,
+            evidence_handles=evidence_handles,
+            role_handles=role_handles,
+        )
+        validated["branch_id"] = branch_id
+        validated_bids.append(validated)
+    return validated_bids

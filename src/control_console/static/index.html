@@ -96,6 +96,26 @@
             </div>
           </div>
         </article>
+        <div class="content-grid three cognition-chain-grid">
+          <article class="card cognition-chain-card" id="overview-cognition-chain-card" data-component="Card">
+            <div class="card-header"><h3>V3 live cognition chain</h3><span class="badge" id="overview-cognition-chain-status">not reported</span></div>
+            <div class="card-content cognition-chain-panel" id="overview-cognition-chain" data-cognition-chain="overview_latest">
+              <p class="panel-empty">V3 chain-run telemetry is not reported.</p>
+            </div>
+          </article>
+          <article class="card cognition-chain-card" id="overview-self-cognition-chain-card" data-component="Card">
+            <div class="card-header"><h3>V3 self-cognition chain</h3><span class="badge" id="overview-self-cognition-chain-status">not reported</span></div>
+            <div class="card-content cognition-chain-panel" id="overview-self-cognition-chain" data-cognition-chain="self_latest">
+              <p class="panel-empty">V3 self-cognition chain-run telemetry is not reported.</p>
+            </div>
+          </article>
+          <article class="card cognition-chain-card cognition-engine-card" id="overview-cognition-engine-card" data-component="Card">
+            <div class="card-header"><h3>Cognition engine configuration</h3><span class="badge" id="overview-cognition-engine-status">not reported</span></div>
+            <div class="card-content cognition-chain-panel cognition-engine-panel" id="overview-cognition-engine" data-component="ScrollArea">
+              <p class="panel-empty">Selected cognition-engine configuration is not reported.</p>
+            </div>
+          </article>
+        </div>
       </section>
 
       <section class="page" data-page="services">
@@ -176,14 +196,22 @@
             </div>
           </form>
         </div>
-        <article class="card cognition-card" data-component="Card">
-          <div class="card-header"><h3>Debug cognition run</h3><span class="badge" id="debug-cognition-status">not reported</span></div>
-          <div class="card-content">
-            <div class="cognition-graph" id="debug-cognition-graph" data-cognition-graph="debug_latest">
-              <p class="graph-empty">Send a debug message to inspect reported cognition telemetry.</p>
+        <div class="content-grid two cognition-debug-panels">
+          <article class="card cognition-card" data-component="Card">
+            <div class="card-header"><h3>Debug cognition run</h3><span class="badge" id="debug-cognition-status">not reported</span></div>
+            <div class="card-content">
+              <div class="cognition-graph" id="debug-cognition-graph" data-cognition-graph="debug_latest">
+                <p class="graph-empty">Send a debug message to inspect reported cognition telemetry.</p>
+              </div>
             </div>
-          </div>
-        </article>
+          </article>
+          <article class="card cognition-chain-card" id="debug-cognition-chain-card" data-component="Card">
+            <div class="card-header"><h3>Debug V3 cognition chain</h3><span class="badge" id="debug-cognition-chain-status">not reported</span></div>
+            <div class="card-content cognition-chain-panel" id="debug-cognition-chain" data-cognition-chain="debug_latest">
+              <p class="panel-empty">Debug V3 chain-run telemetry is not reported.</p>
+            </div>
+          </article>
+        </div>
       </section>
 
       <section class="page" data-page="events">

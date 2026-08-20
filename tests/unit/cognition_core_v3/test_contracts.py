@@ -57,7 +57,36 @@ def test_v3_contracts_reject_unknown_fields_types_and_enums() -> None:
         "chain_lane",
         "sidecar_lane",
         "subconscious_enabled",
+        "appraisal_group_count",
+        "turn_deadline_seconds",
     ]
+    assert services.appraisal_group_count == 2
+    assert services.turn_deadline_seconds == 240
+    for invalid_group in (True, 0, 4):
+        with pytest.raises((TypeError, ValueError)):
+            contracts.CognitionChainServicesV3(
+                llm=LLInterface(),
+                chain_lane=chain_lane,
+                sidecar_lane=None,
+                appraisal_group_count=invalid_group,
+            )
+    for invalid_deadline in (False, 29, 601):
+        with pytest.raises((TypeError, ValueError)):
+            contracts.CognitionChainServicesV3(
+                llm=LLInterface(),
+                chain_lane=chain_lane,
+                sidecar_lane=None,
+                turn_deadline_seconds=invalid_deadline,
+            )
+    bounded_services = contracts.CognitionChainServicesV3(
+        llm=LLInterface(),
+        chain_lane=chain_lane,
+        sidecar_lane=None,
+        appraisal_group_count=6,
+        turn_deadline_seconds=600,
+    )
+    assert bounded_services.appraisal_group_count == 6
+    assert bounded_services.turn_deadline_seconds == 600
     with pytest.raises(TypeError):
         contracts.CognitionChainServicesV3(
             llm=LLInterface(),
@@ -159,17 +188,6 @@ def test_chain_contracts_reject_unknown_fields_and_values():
     accepted = _accepted_result()
     assert contracts.validate_stage_result(accepted) is accepted
 
-    with pytest.raises(ValueError, match="Unknown registered chain"):
-        contracts.validate_stage_result(dataclasses.replace(accepted, chain_name="invented_chain"))
-
-    with pytest.raises(ValueError, match="not registered under chain"):
-        cross = dataclasses.replace(
-            _rejected_result(_boundary_failure()),
-            stage_name="event_agency",
-        )
-        # Stage event_agency is not ordered under the relationship chain.
-        contracts.validate_stage_result(cross)
-
     paired_accepted = dataclasses.replace(accepted, failure=_boundary_failure())
     with pytest.raises(ValueError, match="failure record"):
         contracts.validate_stage_result(paired_accepted)
@@ -212,9 +230,6 @@ def test_chain_contracts_reject_unknown_fields_and_values():
         next_owner_projection={"state_slice": {}},
     )
     assert contracts.validate_chain_checkpoint(checkpoint) is checkpoint
-
-    with pytest.raises(ValueError, match="Unknown registered chain"):
-        contracts.validate_chain_checkpoint(dataclasses.replace(checkpoint, chain_name="invented_chain"))
 
     with pytest.raises(TypeError, match="mapping of accepted typed values"):
         bad_state = dataclasses.replace(checkpoint, accepted_local_state=("not", "a", "mapping"))  # type: ignore[arg-type]

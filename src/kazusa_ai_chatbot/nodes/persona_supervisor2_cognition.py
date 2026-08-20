@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Any, cast
 
 from kazusa_ai_chatbot import llm_tracing
+from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
 from kazusa_ai_chatbot.action_spec.models import (
     ActionAvailabilityContextV1,
     RuntimeCapabilitySnapshotV1,
@@ -25,50 +26,32 @@ from kazusa_ai_chatbot.action_spec.registry import (
     build_runtime_capability_snapshot,
     project_prompt_affordances,
 )
-from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
 from kazusa_ai_chatbot.action_spec.results import project_trace_action_result_v2
 from kazusa_ai_chatbot.background_work.result_source import (
     ToolResultCognitionSourceV1,
     validate_tool_result_cognition_source,
 )
-from kazusa_ai_chatbot.config import (
-    AFFECT_SETTLING_WAKE_PREP_MINUTES,
-    BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
-    BACKGROUND_WORK_WORKER_ENABLED,
-    CALENDAR_SCHEDULER_ENABLED,
-    CHARACTER_SLEEP_LOCAL_PERIOD,
-    CHARACTER_TIME_ZONE,
-    COGNITION_CORE_ENGINE,
-    COGNITION_LLM_API_KEY,
-    COGNITION_LLM_BASE_URL,
-    COGNITION_LLM_MAX_COMPLETION_TOKENS,
-    COGNITION_LLM_MODEL,
-    COGNITION_LLM_THINKING_ENABLED,
-    COGNITION_STAGE_TIMEOUT_SECONDS,
-    CODING_AGENT_WORKSPACE_ROOT,
-    CognitionRouteSettingV1,
-    load_cognition_v2_route_settings,
-    load_cognition_v3_route_settings,
+from kazusa_ai_chatbot.character_identity_growth.models import (
+    TOP_LEVEL_IDENTITY_KEYS,
 )
-from kazusa_ai_chatbot.cognition_episode import (
-    CognitiveEpisodeValidationError,
-    GoalContinuationRefV1,
-    project_dialog_response_operation,
-    project_dialog_role_explicit_content,
-    validate_cognitive_episode_v1,
-    validate_goal_continuation_ref,
+from kazusa_ai_chatbot.character_identity_growth.projection import (
+    project_identity_for_cognition,
+)
+from kazusa_ai_chatbot.character_identity_growth.runtime import (
+    load_latest_identity_for_episode,
+    snapshot_state_update,
 )
 from kazusa_ai_chatbot.cognition_core_selector import run_cognition
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    EVIDENCE_SOURCE_QUESTION_IDS,
+    PAST_DIALOG_COGNITION_CONTEXT_MAX_CHARS,
     ActionAffordanceV2,
     CognitionContractError,
     CognitionCoreInputV2,
     CognitionCoreOutputV2,
     CognitionCoreServicesV2,
     CognitionExecutionError,
-    EVIDENCE_SOURCE_QUESTION_IDS,
     GroupEngagementActionContextV2,
-    PAST_DIALOG_COGNITION_CONTEXT_MAX_CHARS,
     ResolverAffordanceV2,
     SceneContextV2,
     _validate_scene_context,
@@ -81,8 +64,8 @@ from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     validate_cognition_state,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
-    project_character_sleep_phase,
     project_character_operational_state,
+    project_character_sleep_phase,
     project_duration,
     project_relationship_context,
     select_character_operational_context,
@@ -90,31 +73,19 @@ from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
 from kazusa_ai_chatbot.cognition_core_v3.contracts import (
     CognitionChainServicesV3,
 )
+from kazusa_ai_chatbot.cognition_episode import (
+    CognitiveEpisodeValidationError,
+    GoalContinuationRefV1,
+    project_dialog_response_operation,
+    project_dialog_role_explicit_content,
+    validate_cognitive_episode_v1,
+    validate_goal_continuation_ref,
+)
 from kazusa_ai_chatbot.cognition_resolver.capabilities import (
     merge_shared_memory_prewarm_result,
     project_resolver_observation_for_cognition,
     run_first_cycle_shared_memory_prewarm,
     validate_task_resolution_execution_readiness,
-)
-from kazusa_ai_chatbot.cognition_resolver.guardrail import (
-    CognitionRetryCoordinator,
-    bind_cognition_retry_coordinator,
-    reset_cognition_retry_coordinator,
-    run_guarded_cognition,
-)
-from kazusa_ai_chatbot.character_identity_growth.models import (
-    TOP_LEVEL_IDENTITY_KEYS,
-)
-from kazusa_ai_chatbot.character_identity_growth.projection import (
-    project_identity_for_cognition,
-)
-from kazusa_ai_chatbot.character_identity_growth.runtime import (
-    load_latest_identity_for_episode,
-    snapshot_state_update,
-)
-from kazusa_ai_chatbot.conversation_progress import (
-    project_conversation_progress_evidence,
-    project_conversation_progress_scene,
 )
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     ALLOWED_RESOLVER_CAPABILITIES,
@@ -124,21 +95,50 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     ResolverValidationError,
     validate_current_turn_relational_willingness,
 )
+from kazusa_ai_chatbot.cognition_resolver.guardrail import (
+    CognitionRetryCoordinator,
+    bind_cognition_retry_coordinator,
+    reset_cognition_retry_coordinator,
+    run_guarded_cognition,
+)
 from kazusa_ai_chatbot.cognition_resolver.state import validate_resolver_state
+from kazusa_ai_chatbot.config import (
+    AFFECT_SETTLING_WAKE_PREP_MINUTES,
+    BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
+    BACKGROUND_WORK_WORKER_ENABLED,
+    CALENDAR_SCHEDULER_ENABLED,
+    CHARACTER_SLEEP_LOCAL_PERIOD,
+    CHARACTER_TIME_ZONE,
+    CODING_AGENT_WORKSPACE_ROOT,
+    COGNITION_CORE_ENGINE,
+    COGNITION_LLM_API_KEY,
+    COGNITION_LLM_BASE_URL,
+    COGNITION_LLM_MAX_COMPLETION_TOKENS,
+    COGNITION_LLM_MODEL,
+    COGNITION_LLM_THINKING_ENABLED,
+    COGNITION_STAGE_TIMEOUT_SECONDS,
+    CognitionRouteSettingV1,
+    load_cognition_v2_route_settings,
+    load_cognition_v3_route_settings,
+)
+from kazusa_ai_chatbot.conversation_progress import (
+    project_conversation_progress_evidence,
+    project_conversation_progress_scene,
+)
 from kazusa_ai_chatbot.db import (
-    compare_and_replace_user_cognition_state,
     compare_and_replace_character_cognition_state,
+    compare_and_replace_user_cognition_state,
     get_character_cognition_state,
     get_user_cognition_state,
+)
+from kazusa_ai_chatbot.event_logging import (
+    record_cognition_v2_event,
+    record_continuity_boundary_event,
 )
 from kazusa_ai_chatbot.llm_interface import (
     LLInterface,
     LLMCallConfig,
     LLMThinkingConfig,
-)
-from kazusa_ai_chatbot.event_logging import (
-    record_cognition_v2_event,
-    record_continuity_boundary_event,
 )
 from kazusa_ai_chatbot.media_inspection.session_cache import (
     list_session_media_refs,
@@ -302,6 +302,8 @@ def build_cognition_core_services(
         chain_lane=chain_lane,
         sidecar_lane=sidecar_lane,
         subconscious_enabled=route_settings_v3.subconscious_enabled,
+        appraisal_group_count=route_settings_v3.appraisal_group_count,
+        turn_deadline_seconds=route_settings_v3.turn_deadline_seconds,
     )
     return services
 

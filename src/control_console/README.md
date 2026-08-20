@@ -505,6 +505,16 @@ the most recent debug turn; a future historical-run inspector must reuse the
 same graph contract and renderer instead of adding a second diagram widget.
 Nodes expose bounded reasoning detail through hover and keyboard focus.
 
+Overview and Debug chat pair each graph with a read-only V3 chain-run card.
+Live and self-cognition cards consume only their matching
+`cognition_chain_run` or `self_cognition_chain_run` snapshot. The bounded
+fields are status, chain/run/trace/invocation references, chain and sidecar
+model names, terminal disposition, start/completion times, step count, and
+warning codes. Missing or mismatched exact correlation is projected as
+`status=not_reported`; the console never chooses a global or stale row. The
+cards escape every displayed value and never expose prompts, raw answers,
+endpoint data, credentials, or unapproved ids.
+
 No Node.js, npm, pnpm, yarn, React, Vue, Vite, Webpack, Tailwind build tooling, frontend dev server, frontend package manager workflow, or frontend build/runtime stack is required.
 
 ## Forbidden Behavior

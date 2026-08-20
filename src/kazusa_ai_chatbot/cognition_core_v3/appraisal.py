@@ -16,6 +16,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
+from kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal import (
+    canonicalize_semantic_appraisal_item,
+    merge_semantic_appraisal_item,
+    validate_semantic_appraisal_result,
+)
 from kazusa_ai_chatbot.cognition_core_v3.contracts import (
     CANDIDATE_ORIGIN_MISSING,
     PRODUCER_HANDLE_DOMAIN_INVALID,
@@ -23,7 +28,9 @@ from kazusa_ai_chatbot.cognition_core_v3.contracts import (
     StageResult,
 )
 from kazusa_ai_chatbot.cognition_core_v3.execution import (
-    ChainOutcome,
+    SerialChainResult as ChainOutcome,
+)
+from kazusa_ai_chatbot.cognition_core_v3.execution import (
     StageAttemptOutcome,
 )
 
@@ -717,3 +724,113 @@ def classify_appaisal_candidate(
         semantic_summary=explanation,
         failure_class=None,
     )
+
+def validate_grouped_appraisal_output(
+    raw: Mapping[str, object],
+    *,
+    planned_families: Sequence[str],
+) -> dict[str, object]:
+    """Validate one grouped appraisal output against the closed family contract."""
+
+    if set(raw) != set(planned_families):
+        raise ValueError(
+            "grouped appraisal output must contain exactly the planned families"
+        )
+    validated: dict[str, object] = {}
+    for family_name in planned_families:
+        rows = raw[family_name]
+        if not isinstance(rows, list) or len(rows) > 8:
+            raise ValueError(
+                f"appraisal family {family_name} must be a list of at most eight"
+            )
+        cleaned_rows = []
+        for row in rows:
+            if not isinstance(row, Mapping):
+                raise TypeError(
+                    f"appraisal family {family_name} rows must be mappings"
+                )
+            if set(row) != {"question_id", "proposition", "delta"}:
+                raise ValueError(
+                    f"appraisal family {family_name} row has invalid fields"
+                )
+            if row.get("question_id") != family_name:
+                raise ValueError(
+                    "appraisal question_id must equal its family name"
+                )
+            for field_name in ("proposition", "delta"):
+                if row[field_name] is not None and not isinstance(
+                    row[field_name],
+                    Mapping,
+                ):
+                    raise ValueError(
+                        f"appraisal {field_name} must be an object or null"
+                    )
+            cleaned_rows.append(dict(row))
+        validated[family_name] = cleaned_rows
+    return validated
+
+
+def reduce_grouped_appraisal_output(
+    raw: Mapping[str, object],
+    *,
+    planned_families: Sequence[str],
+    questions_by_family: Mapping[str, Mapping[str, object]],
+    evidence_handles: Sequence[str],
+    handle_to_ref: Mapping[str, Mapping[str, str]],
+) -> list[dict[str, object]]:
+    """Reduce grouped micro-appraisals into validated V2 appraisal rows."""
+
+    validate_grouped_appraisal_output(
+        raw,
+        planned_families=planned_families,
+    )
+    evidence_domain = set(evidence_handles)
+    reduced_rows: list[dict[str, object]] = []
+
+    for family_name in planned_families:
+        question = questions_by_family.get(family_name)
+        if not isinstance(question, Mapping):
+            raise ValueError(
+                f"appraisal family {family_name} has no planned question"
+            )
+        accepted_result: dict[str, object] | None = None
+        for item in raw[family_name]:
+            if not isinstance(item, Mapping):
+                raise TypeError(
+                    f"appraisal family {family_name} rows must be mappings"
+                )
+            singular = canonicalize_semantic_appraisal_item(item)
+            if not isinstance(singular, Mapping):
+                raise TypeError("canonical appraisal item must be a mapping")
+            singular = dict(singular)
+            singular["question_id"] = question["question_id"]
+            if accepted_result is None:
+                accepted_result = singular
+            else:
+                accepted_result = merge_semantic_appraisal_item(
+                    accepted_result,
+                    singular,
+                )
+
+        if accepted_result is None:
+            accepted_result = {
+                "question_id": question["question_id"],
+                "selected_evidence_handles": [],
+                "selected_role_handles": [],
+                "propositions": [],
+                "deltas": [],
+                "explanation": "No additional supported semantic item.",
+            }
+
+        validated_row = validate_semantic_appraisal_result(
+            accepted_result,
+            question,
+            evidence_domain,
+            handle_to_ref,
+            maximum_propositions=8,
+            maximum_deltas=8,
+            maximum_explanation_chars=1000,
+        )
+        reduced_rows.append(validated_row)
+
+    return reduced_rows

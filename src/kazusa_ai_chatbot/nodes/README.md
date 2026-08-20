@@ -1,9 +1,10 @@
 # Cognition Nodes
 
 `kazusa_ai_chatbot.nodes` owns the adapter-neutral connector between the brain
-service and Cognition Core V2. It prepares the current episode, runs bounded
-cognition and resolver recurrence, commits the final replacement state, routes
-selected action and surface work, and hands a semantic text plan to dialog.
+service and the selected Cognition Core engine. It prepares the current
+episode, runs bounded cognition and resolver recurrence, commits the final
+replacement state, routes selected action and surface work, and hands a
+semantic text plan to dialog.
 
 The package is part of the character-brain path:
 
@@ -13,7 +14,7 @@ adapter or debug client
   -> relevance, media description, and conversation context
   -> persona_supervisor2
        decontextualization
-       V2 cognition and bounded resolver recurrence
+       selected Cognition Core and bounded resolver recurrence
        one final cognition-state commit
        selected action handling
        optional V2 text-surface planning
@@ -22,8 +23,9 @@ adapter or debug client
   -> scheduler and reflection outside live chat
 ```
 
-RAG and resolver capabilities return evidence. Cognition Core V2 owns semantic
-appraisal, causal state changes, present character judgment, bid collapse,
+RAG and resolver capabilities return evidence. The selected Cognition Core
+owns semantic appraisal, causal state changes, present character judgment, and
+bid collapse,
 route selection, and response goals. Prior conversation and private residue
 inform that judgment without commanding one repeated posture. Deterministic
 connectors own validation, persistence, action materialization, permissions,
@@ -243,6 +245,20 @@ of at least 50,000 tokens, both lanes require an 8,192-token completion
 capacity, and thinking stays disabled. Only the selected core family is read.
 The generic `COGNITION_LLM` route remains a required shared non-core binding
 for carry-over and memory-lifecycle consumers under either engine.
+
+For the V3 branch, the connector hands one invocation to the serialized
+primary chain in the exact cold order `A1 -> A2 -> I1 -> G1a -> optional G1b
+-> I2 -> conditional W1 -> P1 -> off-chain X1/X2 -> O`. The optional sidecar
+is a single-stream lane for advisory L1, repair, and authorization. Resolver
+recurrence reattaches the same episode session and runs only its bounded
+observation -> delta-appraisal -> bid-revision -> fresh-P1 tail before the
+single terminal replacement-state commit. This connector does not launch
+parallel V3 waves or add a second checkpoint/commit authority.
+The caller configures `COGNITION_V3_APPRAISAL_GROUP_COUNT` (`1`, `2`, `3`, or
+`6`, default `2`) and `COGNITION_V3_TURN_DEADLINE_SECONDS` (`30..600`, default
+`240`). V3 starts with the 50,000-token total ceiling and can use the
+conditional 65,000-token tier only when the caller-local serving window
+declaration supports it.
 
 Persistent identifiers and raw numeric state remain behind deterministic
 handle bindings. Model-facing projections use semantic roles and qualitative

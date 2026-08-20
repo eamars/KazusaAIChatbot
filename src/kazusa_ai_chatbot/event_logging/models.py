@@ -290,6 +290,42 @@ class CognitionV2EventFields(TypedDict):
     stage_status: Literal["started", "completed", "failed", "skipped"]
 
 
+class CognitionChainEventFields(TypedDict):
+    """Bounded Cognition V3 chain-run diagnostics without raw evidence."""
+
+    run_id: str
+    cognition_invocation_id: str
+    terminal_disposition: str
+    chain_model_name: str
+    sidecar_model_name: str
+    step_count: int
+    repair_count: int
+    cold_start_count: int
+    prompt_chars_total: int
+    new_suffix_chars_total: int
+    prefix_share_ratio: float
+    max_estimated_prompt_tokens: int
+    max_reserved_completion_tokens: int
+    max_estimated_total_context_tokens: int
+    active_total_ceiling_tokens: int
+    extension_available: bool
+    extension_used: bool
+    reanchor_used: bool
+    session_disposition: str
+    duration_ms: int
+    deadline_ms: int
+    deadline_consumption_ratio: float
+    l1_stream_count: int
+    json_repair_call_count: int
+    action_auth_attempt_count: int
+    resolver_auth_attempt_count: int
+    sidecar_queue_wait_ms_total: int
+    sidecar_max_in_flight: int
+    l1_preempted_by_repair: bool
+    sidecar_cancellation_count: int
+    warning_codes: list[str]
+
+
 class CognitionV2SnapshotSummary(TypedDict):
     """Bounded aggregate consumed by later diagnostics."""
 

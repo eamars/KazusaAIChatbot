@@ -29,128 +29,17 @@ from kazusa_ai_chatbot.db._client import (
     get_text_embedding,
     get_text_embeddings_batch,
 )
-from kazusa_ai_chatbot.db.errors import (
-    DatabaseBackendError,
-    DatabaseOperationError,
+from kazusa_ai_chatbot.db.background_work_jobs import (
+    claim_background_work_job,
+    complete_background_work_job,
+    ensure_background_work_job_indexes,
+    fail_background_work_job,
+    find_deliverable_background_work_jobs,
+    insert_background_work_job,
+    mark_background_work_delivered,
+    mark_background_work_delivery_failed,
+    mark_background_work_delivery_in_progress,
 )
-from kazusa_ai_chatbot.db.health import check_database_connection
-
-# ── Schemas ────────────────────────────────────────────────────────
-from kazusa_ai_chatbot.db.schemas import (
-    AttachmentDoc,
-    CalendarRunDoc,
-    CalendarScheduleDoc,
-    CharacterOperationalClaimV1,
-    CharacterOperationalReceiptV1,
-    CharacterProfileDoc,
-    CharacterReflectionRunDoc,
-    ConversationEpisodeBlockDoc,
-    ConversationEpisodeStateDoc,
-    ConversationProgressEventDoc,
-    ConversationProgressSourceRefDoc,
-    ConversationMessageDoc,
-    InternalMonologueResidueSourceRefDoc,
-    InternalMonologueResidueV2Doc,
-    InternalActionLatchClaimV1,
-    InternalActionLatchV1,
-    InteractionStyleImageDoc,
-    InteractionStyleOverlayDoc,
-    InteractionStyleScopeType,
-    InteractionStyleStatus,
-    MemoryDoc,
-    MentionDoc,
-    PlatformAccountDoc,
-    RAGCache2PersistentEntryDoc,
-    ReflectionMessageRefDoc,
-    ReflectionScopeDoc,
-    ScheduledEventDoc,
-    SelfCognitionActionAttemptDoc,
-    SelfCognitionGroupReviewWindowDoc,
-    PostTurnLifecycleRecordV1,
-    PostTurnLifecycleRecordV2,
-    UserMemoryContextDoc,
-    UserMemoryContextEntry,
-    UserMemoryUnitDoc,
-    UserMemoryUnitMergeHistoryEntry,
-    UserMemoryUnitSourceRef,
-    UserMemoryUnitStatus,
-    UserMemoryUnitType,
-    UserProfileDoc,
-    build_memory_doc,
-)
-
-# ── Conversation history ──────────────────────────────────────────
-from kazusa_ai_chatbot.db.conversation import (
-    aggregate_conversation_by_user,
-    apply_assistant_delivery_receipt,
-    get_ambient_conversation_history,
-    get_conversation_by_platform_message_id,
-    get_conversation_history,
-    get_latest_private_channel_for_user,
-    get_participant_conversation_history,
-    get_user_message_by_platform_message_id,
-    get_user_message_by_row_id,
-    has_inbound_after,
-    list_conversation_rows_by_row_ids,
-    list_recent_group_summaries,
-    save_conversation,
-    save_conversation_receipt,
-    search_conversation_history,
-    set_conversation_source_episode_id,
-    update_conversation_row_llm_trace_id,
-    update_conversation_attachment_descriptions,
-)
-from kazusa_ai_chatbot.db.llm_tracing import (
-    list_llm_trace_steps_for_trace_ids,
-)
-from kazusa_ai_chatbot.db.conversation_reflection import (
-    explain_monitored_channel_query,
-    list_recent_character_message_channels,
-    list_reflection_scope_messages,
-    resolve_single_private_scope_user_id,
-)
-from kazusa_ai_chatbot.db.reflection_cycle import (
-    ensure_reflection_run_indexes,
-    find_reflection_run_by_id,
-    list_daily_channel_runs,
-    list_existing_run_ids,
-    list_hourly_runs_for_channel_day,
-    list_reflection_runs_for_kind_date,
-    upsert_reflection_run,
-)
-from kazusa_ai_chatbot.db.interaction_style_images import (
-    build_group_engagement_action_context,
-    build_interaction_style_context,
-    build_user_engagement_relevance_context,
-    empty_interaction_style_overlay,
-    ensure_interaction_style_image_indexes,
-    get_group_channel_style_image,
-    get_user_style_image,
-    upsert_group_channel_style_image,
-    upsert_user_style_image,
-    validate_interaction_style_overlay,
-)
-from kazusa_ai_chatbot.db.internal_monologue_residue import (
-    INTERNAL_MONOLOGUE_RESIDUE_COLLECTION,
-    ensure_internal_monologue_residue_indexes,
-    insert_internal_monologue_residue_row,
-    list_internal_monologue_residue_rows,
-)
-
-from kazusa_ai_chatbot.db.user_memory_units import (
-    build_user_memory_unit_doc,
-    get_user_memory_unit_by_unit_id,
-    insert_user_memory_units,
-    query_active_commitment_memory_units,
-    query_active_commitment_memory_units_for_user,
-    query_user_memory_units,
-    search_user_memory_units_by_keyword,
-    search_user_memory_units_by_vector,
-    update_user_memory_unit_semantics,
-    update_user_memory_unit_window,
-    validate_user_memory_unit_semantics,
-)
-
 from kazusa_ai_chatbot.db.character_identity_growth import (
     CANDIDATES_COLLECTION,
     GROWTH_COLLECTION_NAMES,
@@ -180,6 +69,56 @@ from kazusa_ai_chatbot.db.character_identity_growth import (
     reject_growth_candidates,
     update_growth_candidate,
 )
+from kazusa_ai_chatbot.db.cognition_chain_runs import (
+    ensure_cognition_chain_run_indexes,
+    get_cognition_chain_run,
+    save_cognition_chain_run,
+)
+
+# ── Conversation history ──────────────────────────────────────────
+from kazusa_ai_chatbot.db.conversation import (
+    aggregate_conversation_by_user,
+    apply_assistant_delivery_receipt,
+    get_ambient_conversation_history,
+    get_conversation_by_platform_message_id,
+    get_conversation_history,
+    get_latest_private_channel_for_user,
+    get_participant_conversation_history,
+    get_user_message_by_platform_message_id,
+    get_user_message_by_row_id,
+    has_inbound_after,
+    list_conversation_rows_by_row_ids,
+    list_recent_group_summaries,
+    save_conversation,
+    save_conversation_receipt,
+    search_conversation_history,
+    set_conversation_source_episode_id,
+    update_conversation_attachment_descriptions,
+    update_conversation_row_llm_trace_id,
+)
+from kazusa_ai_chatbot.db.conversation_reflection import (
+    explain_monitored_channel_query,
+    list_recent_character_message_channels,
+    list_reflection_scope_messages,
+    resolve_single_private_scope_user_id,
+)
+from kazusa_ai_chatbot.db.errors import (
+    DatabaseBackendError,
+    DatabaseOperationError,
+)
+from kazusa_ai_chatbot.db.health import check_database_connection
+from kazusa_ai_chatbot.db.interaction_style_images import (
+    build_group_engagement_action_context,
+    build_interaction_style_context,
+    build_user_engagement_relevance_context,
+    empty_interaction_style_overlay,
+    ensure_interaction_style_image_indexes,
+    get_group_channel_style_image,
+    get_user_style_image,
+    upsert_group_channel_style_image,
+    upsert_user_style_image,
+    validate_interaction_style_overlay,
+)
 from kazusa_ai_chatbot.db.internal_action_latches import (
     claim_due_internal_action_latch,
     consume_internal_action_latch,
@@ -188,6 +127,15 @@ from kazusa_ai_chatbot.db.internal_action_latches import (
     fail_internal_action_latch,
     issue_internal_action_latch,
     release_internal_action_latch,
+)
+from kazusa_ai_chatbot.db.internal_monologue_residue import (
+    INTERNAL_MONOLOGUE_RESIDUE_COLLECTION,
+    ensure_internal_monologue_residue_indexes,
+    insert_internal_monologue_residue_row,
+    list_internal_monologue_residue_rows,
+)
+from kazusa_ai_chatbot.db.llm_tracing import (
+    list_llm_trace_steps_for_trace_ids,
 )
 from kazusa_ai_chatbot.db.post_turn_lifecycle import (
     build_character_operational_lifecycle_record,
@@ -199,26 +147,6 @@ from kazusa_ai_chatbot.db.post_turn_lifecycle import (
     get_character_operational_receipt,
     upsert_post_turn_lifecycle_record,
 )
-
-from kazusa_ai_chatbot.db.self_cognition import (
-    find_self_cognition_group_review_window,
-    list_group_review_windows,
-    list_self_cognition_action_attempts,
-    upsert_self_cognition_group_review_window,
-    upsert_self_cognition_action_attempt,
-)
-from kazusa_ai_chatbot.db.background_work_jobs import (
-    claim_background_work_job,
-    complete_background_work_job,
-    ensure_background_work_job_indexes,
-    fail_background_work_job,
-    find_deliverable_background_work_jobs,
-    insert_background_work_job,
-    mark_background_work_delivered,
-    mark_background_work_delivery_failed,
-    mark_background_work_delivery_in_progress,
-)
-
 from kazusa_ai_chatbot.db.rag_cache2_persistent import (
     build_initializer_version_key,
     build_media_descriptor_version_key,
@@ -232,6 +160,79 @@ from kazusa_ai_chatbot.db.rag_cache2_persistent import (
     record_media_descriptor_hit,
     upsert_initializer_entry,
     upsert_media_descriptor_entry,
+)
+from kazusa_ai_chatbot.db.reflection_cycle import (
+    ensure_reflection_run_indexes,
+    find_reflection_run_by_id,
+    list_daily_channel_runs,
+    list_existing_run_ids,
+    list_hourly_runs_for_channel_day,
+    list_reflection_runs_for_kind_date,
+    upsert_reflection_run,
+)
+
+# ── Schemas ────────────────────────────────────────────────────────
+from kazusa_ai_chatbot.db.schemas import (
+    AttachmentDoc,
+    CalendarRunDoc,
+    CalendarScheduleDoc,
+    CharacterOperationalClaimV1,
+    CharacterOperationalReceiptV1,
+    CharacterProfileDoc,
+    CharacterReflectionRunDoc,
+    ConversationEpisodeBlockDoc,
+    ConversationEpisodeStateDoc,
+    ConversationMessageDoc,
+    ConversationProgressEventDoc,
+    ConversationProgressSourceRefDoc,
+    InteractionStyleImageDoc,
+    InteractionStyleOverlayDoc,
+    InteractionStyleScopeType,
+    InteractionStyleStatus,
+    InternalActionLatchClaimV1,
+    InternalActionLatchV1,
+    InternalMonologueResidueSourceRefDoc,
+    InternalMonologueResidueV2Doc,
+    MemoryDoc,
+    MentionDoc,
+    PlatformAccountDoc,
+    PostTurnLifecycleRecordV1,
+    PostTurnLifecycleRecordV2,
+    RAGCache2PersistentEntryDoc,
+    ReflectionMessageRefDoc,
+    ReflectionScopeDoc,
+    ScheduledEventDoc,
+    SelfCognitionActionAttemptDoc,
+    SelfCognitionGroupReviewWindowDoc,
+    UserMemoryContextDoc,
+    UserMemoryContextEntry,
+    UserMemoryUnitDoc,
+    UserMemoryUnitMergeHistoryEntry,
+    UserMemoryUnitSourceRef,
+    UserMemoryUnitStatus,
+    UserMemoryUnitType,
+    UserProfileDoc,
+    build_memory_doc,
+)
+from kazusa_ai_chatbot.db.self_cognition import (
+    find_self_cognition_group_review_window,
+    list_group_review_windows,
+    list_self_cognition_action_attempts,
+    upsert_self_cognition_action_attempt,
+    upsert_self_cognition_group_review_window,
+)
+from kazusa_ai_chatbot.db.user_memory_units import (
+    build_user_memory_unit_doc,
+    get_user_memory_unit_by_unit_id,
+    insert_user_memory_units,
+    query_active_commitment_memory_units,
+    query_active_commitment_memory_units_for_user,
+    query_user_memory_units,
+    search_user_memory_units_by_keyword,
+    search_user_memory_units_by_vector,
+    update_user_memory_unit_semantics,
+    update_user_memory_unit_window,
+    validate_user_memory_unit_semantics,
 )
 
 _LAZY_MEMORY_EXPORTS = {
@@ -378,6 +379,9 @@ __all__ = [
     "update_conversation_row_llm_trace_id",
     "update_conversation_attachment_descriptions",
     "list_llm_trace_steps_for_trace_ids",
+    "ensure_cognition_chain_run_indexes",
+    "get_cognition_chain_run",
+    "save_cognition_chain_run",
     "explain_monitored_channel_query",
     "list_recent_character_message_channels",
     "list_reflection_scope_messages",

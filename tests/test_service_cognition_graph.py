@@ -2,9 +2,65 @@
 
 from __future__ import annotations
 
+import pytest
+
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionExecutionError,
 )
+
+
+def test_response_contract_has_optional_live_and_self_chain_runs() -> None:
+    """The latest-graph response owns paired optional chain-run projections."""
+
+    from kazusa_ai_chatbot.brain_service.contracts import (
+        OpsLatestCognitionGraphResponse,
+    )
+
+    response = OpsLatestCognitionGraphResponse()
+    assert response.cognition_chain_run is None
+    assert response.self_cognition_chain_run is None
+
+
+@pytest.mark.asyncio
+async def test_latest_graph_chain_runs_require_exact_run_and_trace_correlation(
+    monkeypatch,
+) -> None:
+    """Chain-run reads use each graph's exact ids and never a global latest."""
+
+    from unittest.mock import AsyncMock
+
+    from kazusa_ai_chatbot import service
+
+    monkeypatch.setattr(service, "_latest_cognition_graph", {
+        "run_id": "run-live",
+        "llm_trace_id": "trace-live",
+    })
+    monkeypatch.setattr(service, "_latest_self_cognition_graph", {
+        "run_id": "run-self",
+        "llm_trace_id": "trace-self",
+    })
+    monkeypatch.setattr(
+        service,
+        "get_cognition_chain_run",
+        AsyncMock(
+            side_effect=lambda *, run_id, llm_trace_id: {
+                "run_id": run_id,
+                "llm_trace_id": llm_trace_id,
+            }
+        ),
+    )
+
+    response = await service._latest_cognition_graph_response()
+
+    assert response.cognition_chain_run == {
+        "run_id": "run-live",
+        "llm_trace_id": "trace-live",
+    }
+    assert response.self_cognition_chain_run == {
+        "run_id": "run-self",
+        "llm_trace_id": "trace-self",
+    }
+    assert service.get_cognition_chain_run.await_count == 2
 
 
 def _response_state(*, visual_directives: dict[str, object]) -> dict[str, object]:

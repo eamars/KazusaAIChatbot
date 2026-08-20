@@ -376,6 +376,84 @@ def test_brain_config_exposes_identity_growth_pace_and_renders_overrides() -> No
     }
 
 
+def test_brain_config_allows_unconfigured_inactive_core_routes(monkeypatch) -> None:
+    """Only selected core routes require a model for Brain config reads."""
+
+    from control_console import brain_model_routes
+    from control_console.service_config import (
+        ServiceConfigOverrideStore,
+        ServiceConfigValidationError,
+        build_default_service_config_registry,
+    )
+
+    monkeypatch.setattr(brain_model_routes, "COGNITION_CORE_ENGINE", "v2")
+    environment = _brain_service_environment()
+    environment.pop("COGNITION_V3_CHAIN_LLM_MODEL")
+    environment.pop("COGNITION_V3_SIDECAR_LLM_MODEL")
+
+    registry = build_default_service_config_registry()
+    snapshot = registry.snapshot_for_service(
+        service_id="brain",
+        environment=environment,
+        overrides=ServiceConfigOverrideStore(),
+    )
+    fields = {field.key: field for field in snapshot.fields}
+
+    assert fields["cognition_llm_model"].effective_value == "test-model"
+    for field_key in (
+        "cognition_v3_chain_llm_model",
+        "cognition_v3_sidecar_llm_model",
+    ):
+        assert fields[field_key].default_value == ""
+        assert fields[field_key].override_value is None
+        assert fields[field_key].effective_value == ""
+
+    missing_selected_model = dict(environment)
+    missing_selected_model.pop("COGNITION_LLM_APPRAISAL_EVENT_AGENCY_MODEL")
+    with pytest.raises(
+        ServiceConfigValidationError,
+        match="cognition_llm_appraisal_event_agency_model",
+    ):
+        registry.snapshot_for_service(
+            service_id="brain",
+            environment=missing_selected_model,
+            overrides=ServiceConfigOverrideStore(),
+        )
+
+    monkeypatch.setattr(brain_model_routes, "COGNITION_CORE_ENGINE", "v3")
+    v3_environment = _brain_service_environment()
+    for route in brain_model_routes.route_descriptors():
+        if route.required_engine == "v2":
+            v3_environment.pop(brain_model_routes.route_env_name(route, "model"))
+
+    v3_registry = build_default_service_config_registry()
+    v3_snapshot = v3_registry.snapshot_for_service(
+        service_id="brain",
+        environment=v3_environment,
+        overrides=ServiceConfigOverrideStore(),
+    )
+    v3_fields = {field.key: field for field in v3_snapshot.fields}
+
+    assert v3_fields["cognition_v3_chain_llm_model"].effective_value == (
+        "test-model"
+    )
+    assert v3_fields["cognition_llm_appraisal_event_agency_model"].effective_value == (
+        ""
+    )
+
+    missing_v3_chain_model = dict(v3_environment)
+    missing_v3_chain_model.pop("COGNITION_V3_CHAIN_LLM_MODEL")
+    with pytest.raises(
+        ServiceConfigValidationError,
+        match="cognition_v3_chain_llm_model",
+    ):
+        v3_registry.snapshot_for_service(
+            service_id="brain",
+            environment=missing_v3_chain_model,
+            overrides=ServiceConfigOverrideStore(),
+        )
+
+
 def test_brain_identity_growth_pace_rejects_bounds_and_cross_field_values() -> None:
     """Pace settings should fail before an invalid Brain restart."""
 

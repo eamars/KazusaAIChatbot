@@ -6,6 +6,17 @@ import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
+from typing import Any
+
+from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
+    build_goal_output_contract,
+)
+from kazusa_ai_chatbot.cognition_core_v3.goal_cognition import (
+    GOAL_BID_EVIDENCE_HANDLE_LIMIT,
+    ORDINARY_GOAL_KIND,
+)
+from kazusa_ai_chatbot.cognition_core_v3.registry import APPRAISAL_GROUPING_MAPS
+from kazusa_ai_chatbot.cognition_episode import project_model_visible_percepts
 
 APPRAISAL_QUESTION_GUIDANCE = '''按 `semantic_appraisal_group.v1` 检查 payload 中依次列出的语义问题；逐项使用各自允许的证据、角色和状态路径，返回同键同序的微评估列表。'''
 
@@ -163,6 +174,8 @@ _SCENE_CONTEXT_FIELDS = frozenset(
     }
 )
 _CURRENT_EPISODE_REF = "current_cognitive_episode"
+_L1_AFFECT_BAND_CAP = 4
+_L1_BOUNDARY_FIELD_CAP = 8
 
 
 class PromptContractError(ValueError):
@@ -203,6 +216,35 @@ def _reject_fields(
                 forbidden_fields=forbidden_fields,
                 error_label=error_label,
             )
+
+
+def _sanitize_prompt_value(value: object) -> object:
+    """Remove evaluation and private runtime metadata recursively."""
+
+    forbidden = {
+        "action_latch_ref", "active_turn_conversation_row_ids",
+        "active_turn_platform_message_ids", "api_key", "base_url",
+        "calendar_event_id", "claim_id", "cognition_invocation_id",
+        "context_window_tokens", "correlation_id", "current_global_user_id",
+        "current_platform_user_id", "delivery_permission_ref", "entity_id",
+        "episode_id", "evidence_id", "global_user_id", "invocation_id",
+        "model", "origin_metadata", "owner_user_id", "permission_ref",
+        "platform", "platform_channel_id", "platform_message_id",
+        "platform_user_id", "prior_episode_id", "relationship_id",
+        "result_ref", "route_name", "run_id", "source_case_ref",
+        "source_id", "source_message_id", "stage_name",
+        "target_addressed_user_ids", "target_scope", "target_scope_ref",
+        "task_id", "trace_id", "user_id",
+    }
+    if isinstance(value, Mapping):
+        return {
+            field_name: _sanitize_prompt_value(nested_value)
+            for field_name, nested_value in value.items()
+            if field_name not in forbidden
+        }
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [_sanitize_prompt_value(nested_value) for nested_value in value]
+    return value
 
 
 def _require_exact_fields(
@@ -434,11 +476,6 @@ def build_first_user_message(
             error_label="private metadata",
         )
 
-    _reject_fields(
-        question.payload,
-        forbidden_fields=_GOAL_ONLY_FIELDS,
-        error_label="goal-only",
-    )
     _validate_first_packet_carriers(named_sections)
     message_sections = [
         {section_name: dict(section_value)}
@@ -526,3 +563,285 @@ __all__ = [
     "build_first_user_message",
     "build_question_message",
 ]
+
+def build_first_packet_sections(
+    *,
+    projection_payload: Mapping[str, Any],
+    scene_context: Mapping[str, Any],
+    episode: Mapping[str, Any],
+    direct_facts: Sequence[Mapping[str, object]],
+    available_actions: Sequence[Mapping[str, object]],
+    available_resolver_capabilities: Sequence[Mapping[str, object]],
+    resolver_context: str,
+) -> tuple[Mapping[str, object], ...]:
+    if not isinstance(projection_payload, Mapping):
+        raise PromptContractError("projection payload must be a mapping")
+    if not isinstance(scene_context, Mapping):
+        raise PromptContractError("scene context must be a mapping")
+    if not isinstance(episode, Mapping):
+        raise PromptContractError("episode must be a mapping")
+    mutable_state = {
+        field_name: list(projection_payload.get(field_name, []))
+        for field_name in (
+            "goals", "threats", "events", "knowledge_gaps", "affect", "causal_candidates",
+        )
+    }
+    relationship = projection_payload.get("relationship")
+    if not isinstance(relationship, Mapping):
+        relationship = {
+            "handle": "r1",
+            "axes": {},
+            "causal_context": [],
+            "affect": [],
+            "relationship_freshness": "",
+            "evidence_freshness": "",
+        }
+    visible_percepts = project_model_visible_percepts(episode)
+    scene_section = {
+        field_name: scene_context.get(field_name, "")
+        for field_name in (
+            "channel_scope", "character_role", "current_user_role", "semantic_scene",
+            "public_group_scene", "conversation_continuity", "semantic_temporal_context",
+        )
+    }
+    scene_section["participant_bindings"] = []
+    evidence_rows = list(projection_payload.get("evidence", []))
+    normalized_evidence = [
+        {
+            "handle": row.get("handle", ""),
+            "source_kind": row.get("source_kind", "unknown"),
+            "semantic_summary": row.get("semantic_summary", ""),
+        }
+        for row in evidence_rows
+        if isinstance(row, Mapping)
+    ]
+    sections = (
+        {
+            "character_constraints": dict(projection_payload.get("character_constraints", {})),
+            "character_operational_context": dict(projection_payload.get("character_operational_context", {})),
+        },
+        {
+            "relationship": dict(relationship),
+            "mutable_state": mutable_state,
+        },
+        {
+            "episode": {
+                "episode_ref": "current_cognitive_episode",
+                "trigger_source": str(episode.get("trigger_source", "user_message")),
+                "visible_percepts": list(visible_percepts),
+            },
+            "scene_context": scene_section,
+        },
+        {
+            "evidence": normalized_evidence,
+            "direct_facts": list(direct_facts),
+            "available_actions": list(available_actions),
+            "available_resolver_capabilities": list(available_resolver_capabilities),
+            "resolver_context": resolver_context,
+        },
+    )
+    return tuple(_sanitize_prompt_value(section) for section in sections)
+
+
+def build_l1_subconscious_packet(
+    *,
+    episode: Mapping[str, object],
+    affect_bands: Sequence[Mapping[str, object]],
+    boundary_summary: Mapping[str, object],
+    supplied_evidence_handles: Sequence[str],
+) -> str:
+    """Render the bounded fresh packet consumed by the advisory L1 stage.
+
+    The packet intentionally excludes chain history, semantic evidence text,
+    goals, and relationship state. It preserves only the current model-visible
+    percept wording, qualitative affect descriptors, compact boundary language,
+    and the handles L1 may cite as advisory salience.
+
+    Args:
+        episode: Canonical episode projected without deterministic identifiers.
+        affect_bands: Prompt-safe qualitative affect projections.
+        boundary_summary: Prompt-safe boundary descriptors for the active
+            cognition identity.
+        supplied_evidence_handles: Exact evidence handles available this turn.
+
+    Returns:
+        One compact JSON object for the independent L1 sidecar boundary.
+    """
+
+    visible_percepts = project_model_visible_percepts(episode)
+    current_percept_text = ""
+    for percept in visible_percepts:
+        content = percept.get("content")
+        if not isinstance(content, Mapping):
+            continue
+        semantic_text = content.get("semantic_text")
+        if not isinstance(semantic_text, str):
+            semantic_text = content.get("text")
+        if isinstance(semantic_text, str) and semantic_text:
+            current_percept_text = semantic_text
+            break
+
+    qualitative_affect_bands = [
+        {
+            field_name: band[field_name]
+            for field_name in ("emotion", "phase", "intensity", "trend")
+            if field_name in band
+        }
+        for band in affect_bands[:_L1_AFFECT_BAND_CAP]
+    ]
+    bounded_boundary_summary = {
+        field_name: boundary_summary[field_name]
+        for field_name in sorted(boundary_summary)[:_L1_BOUNDARY_FIELD_CAP]
+    }
+    packet = {
+        "current_percept_text": current_percept_text,
+        "qualitative_affect_bands": qualitative_affect_bands,
+        "boundary_summary": bounded_boundary_summary,
+        "supplied_evidence_handles": list(supplied_evidence_handles),
+    }
+    rendered_packet = json.dumps(
+        packet,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return rendered_packet
+
+
+def build_appraisal_question_payload(*, questions, l1_residue=None):
+    rows = []
+    for question in questions:
+        if not isinstance(question, Mapping):
+            raise PromptContractError("appraisal questions must be mappings")
+        rows.append({
+            "family": question.get("question_kind", ""),
+            "evidence_handles": list(question.get("evidence_handles", [])),
+            "permitted_delta_paths": list(question.get("permitted_delta_paths", [])),
+            "semantic_question": question.get("semantic_question", ""),
+        })
+    if not rows:
+        raise PromptContractError("grouped appraisal requires at least one planned question")
+    return {"questions": rows, "l1_residue": dict(l1_residue or {})}
+
+
+def build_grouped_appraisal_questions(*, planned_questions, group_count, l1_residue=None):
+    groups = APPRAISAL_GROUPING_MAPS.get(group_count)
+    if groups is None:
+        raise PromptContractError("appraisal group_count must be one of 1, 2, 3, or 6")
+    by_family = {
+        str(question.get("question_kind")): question
+        for question in planned_questions
+        if isinstance(question, Mapping) and isinstance(question.get("question_kind"), str)
+    }
+    result = []
+    for step_id, family_names in groups:
+        grouped = [by_family[family_name] for family_name in family_names if family_name in by_family]
+        if not grouped:
+            continue
+        payload = build_appraisal_question_payload(questions=grouped, l1_residue=l1_residue)
+        result.append(ChainQuestion(contract_name="semantic_appraisal_group.v1", payload=payload))
+    return result
+
+
+def build_goal_question_payload(*, goal_kind, goal_projection, evidence_handles, action_tendencies,
+                                branch_intent_guidance, role_bindings, role_summaries, semantic_context,
+                                appraisal_summaries, evidence_rows, selection_operations, progress_evidence,
+                                carried_relational_willingness=None, l1_residue=None):
+    selection_required = bool(selection_operations)
+    required_evidence_handles = {
+        operation["evidence_handle"]
+        for operation in selection_operations
+    }
+    require_relational_willingness = (
+        goal_kind == ORDINARY_GOAL_KIND
+        and carried_relational_willingness is None
+    )
+    payload = {
+        "goal_kind": goal_kind,
+        "goal_projection": dict(goal_projection),
+        "evidence_handles": list(evidence_handles),
+        "action_tendencies": list(action_tendencies),
+        "branch_intent_guidance": branch_intent_guidance,
+        "role_bindings": dict(role_bindings),
+        "role_summaries": dict(role_summaries),
+        "semantic_context": dict(semantic_context),
+        "appraisal_summaries": list(appraisal_summaries),
+        "evidence_rows": [dict(row) for row in evidence_rows],
+        "selection_operations": [dict(row) for row in selection_operations],
+        "progress_evidence": [dict(row) for row in progress_evidence],
+        "goal_output_contract": build_goal_output_contract(
+            evidence_handles=set(evidence_handles),
+            episode_evidence_handles=required_evidence_handles,
+            required_evidence_handles=required_evidence_handles,
+            role_bindings=role_bindings,
+            selection_required=selection_required,
+            require_relational_willingness=require_relational_willingness,
+            maximum_evidence_handles=max(
+                GOAL_BID_EVIDENCE_HANDLE_LIMIT,
+                len(required_evidence_handles),
+            ),
+            authoritative_operation=(
+                selection_operations[0]["response_operation"]
+                if selection_required
+                else None
+            ),
+            recurrence_relational_willingness=(
+                carried_relational_willingness is not None
+            ),
+        ),
+    }
+    if carried_relational_willingness is not None:
+        payload["carried_relational_willingness"] = dict(
+            carried_relational_willingness
+        )
+    if l1_residue is not None:
+        payload["l1_residue"] = dict(l1_residue)
+    return payload
+
+
+def build_active_goal_group_question_payload(*, roster, evidence_handles, semantic_context):
+    return {
+        "branch_roster": [dict(row) for row in roster],
+        "evidence_handles": list(evidence_handles),
+        "semantic_context": dict(semantic_context),
+    }
+
+
+def build_workspace_question_payload(*, bids, current_event, goal_contexts):
+    return {
+        "bids": [dict(row) for row in bids],
+        "current_event": dict(current_event) if isinstance(current_event, Mapping) else {},
+        "goal_contexts": dict(goal_contexts),
+    }
+
+
+def build_action_plan_question_payload(*, primary_bid, supporting_bids, available_actions,
+                                       available_resolvers, resolver_context, runtime_capability_limits,
+                                       current_goal_progress, required_resolver_evidence_dependency):
+    payload = {
+        "primary_bid": dict(primary_bid) if primary_bid is not None else None,
+        "supporting_bids": [dict(row) for row in supporting_bids],
+        "available_actions": [dict(row) for row in available_actions],
+        "available_resolvers": [dict(row) for row in available_resolvers],
+        "resolver_context": resolver_context,
+        "runtime_capability_limits": list(runtime_capability_limits),
+        "current_goal_progress": dict(current_goal_progress) if current_goal_progress is not None else None,
+        "required_resolver_evidence_dependency": dict(required_resolver_evidence_dependency) if required_resolver_evidence_dependency is not None else None,
+    }
+    return _sanitize_prompt_value(payload)
+
+
+def build_serial_question_sequence(*, planned_questions, group_count, ordinary_goal_payload,
+                                   active_branch_roster, workspace_payload, action_plan_payload):
+    sequence = []
+    appraisal_questions = build_grouped_appraisal_questions(planned_questions=planned_questions, group_count=group_count)
+    appraisal_step_ids = [step_id for step_id, _families in APPRAISAL_GROUPING_MAPS[group_count]]
+    for step_id, appraisal_question in zip(appraisal_step_ids, appraisal_questions):
+        sequence.append((step_id, appraisal_question))
+    sequence.append(("G1a", ChainQuestion(contract_name="ordinary_goal_bid.v1", payload=dict(ordinary_goal_payload))))
+    if active_branch_roster:
+        sequence.append(("G1b", ChainQuestion(contract_name="active_goal_bid_group.v1", payload={"branch_roster": [dict(row) for row in active_branch_roster]})))
+    if workspace_payload:
+        sequence.append(("W1", ChainQuestion(contract_name="workspace_partition.v1", payload=dict(workspace_payload))))
+    sequence.append(("P1", ChainQuestion(contract_name="action_plan.v1", payload=dict(action_plan_payload))))
+    return sequence

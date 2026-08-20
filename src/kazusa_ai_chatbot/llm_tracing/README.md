@@ -72,6 +72,21 @@ intentionally store empty parsed output for this purpose, so a past dialog with
 only metadata trace rows contributes no residual context and is treated as
 forgotten.
 
+### V3 protected chain transcript
+
+The scoped `record_cognition_chain_transcript(...)` API writes one protected
+`cognition_chain_transcript.v1` row for a V3 invocation when capture is
+enabled. `off` writes no row; `metadata` keeps hashes, lengths, step metadata,
+and dispositions; `full` may keep the exact system/user/assistant messages and
+accepted step records. The row carries the V3 `run_id` and `llm_trace_id` but
+stays behind the protected trace-store boundary. It is never copied into
+sanitized event, service, or console payloads.
+
+The protected chain writer is best effort and uses the existing debug-trace
+retention and write timeout. A capture failure returns a bounded failed/skipped
+result and does not change cognition-facing completion. Runtime timing remains
+non-streaming elapsed duration; no TTFT field is part of this trace contract.
+
 ## Storage Contract
 
 Retention is governed by shared logging retention settings:
