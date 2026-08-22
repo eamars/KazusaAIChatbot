@@ -1,317 +1,356 @@
 # Unified LLM Native Structured Output Default Plan
 
-## Plan Status
-
-- **Status:** `draft`
-- **Decision date:** 2026-08-19
-- **Plan type:** Decision record and pre-impact implementation contract
-- **Execution authorization:** None. This draft records the policy decision; it does not authorize production-code, prompt, schema, or test changes.
-- **Parallel boundary:** `development_plans/active/short_term/cognition_v3_cache_affine_semantic_chain_bigbang_plan.md`
-- **Cutover strategy:** Native structured output becomes the default while the existing fallback, validation, and JSON-repair behavior remains available and bounded.
-
 ## Summary
 
-This plan records the decision to move structured-output stages from prompt-level
-soft fences to provider-native structured output through the unified LLM
-interface. The decision applies across models and providers rather than only to
-the model that motivated this investigation.
+- **Goal:** Make provider-native JSON-object output the default for Kazusa LLM
+  stages while preserving the existing parsers, evaluators, repair path, and
+  the small set of intentionally free-form stages.
+- **Status:** `approved`
+- **Owner approval date:** 2026-08-22
+- **Plan type:** Lightweight executable implementation contract
+- **Execution authorization:** The owner approved this plan as executable.
+  Production implementation starts on a separate explicit execution command.
+- **Scope boundary:** One shared output-mode field, one provider mapping, three
+  explicit free-form configurations, mechanical prompt cleanup, and small
+  final verification.
+- **Change direction:** Surgical compatible cutover. Native JSON-object mode is
+  the default; recognized unsupported-feature responses receive one bounded
+  retry through the existing text path.
+- **Acceptance state:** The shared transport works, free-form stages remain
+  free-form, existing parsing and repair still work, and the final spot checks
+  pass.
 
-The plan intentionally stops before source mapping and impact-radius analysis.
-Those artifacts are mandatory before this plan can become an executable
-implementation plan, but they are not authored in this decision-record phase.
+## Confirmed Owner Decisions
 
-## Binding Decisions
+1. Keep this fix lightweight and surgical.
+2. Preserve existing runtime behavior and semantic ownership.
+3. Use provider-native JSON-object output as the shared default instead of
+   introducing per-stage schema classes or a new structured-output framework.
+4. Keep existing parsers, validators, normalization, JSON repair, retries, and
+   fail-closed behavior authoritative.
+5. Limit prompt changes to serialization-only wording. Preserve field meaning,
+   decision rules, grounding, refusal, silence, and character semantics.
+6. Use final spot checks instead of baseline capture or exhaustive testing.
+7. Keep unit coverage at the stable transport boundary. Prompt snapshots,
+   per-prompt fixtures, and tests that freeze incidental wording are excluded.
+8. Run only the exact small verification set listed in this plan.
+9. Use one persistent `gpt-5.6-luna` coding subagent with `max` reasoning on
+   the standard-speed runtime lane for this plan only.
+10. Perform all documentation work as the final execution step. Complete code,
+    verification, parent review, and remediation first. Then update the
+    subsystem README, plan evidence and lifecycle, registry, and archive state
+    in one documentation closeout pass.
 
-The following decisions are made and recorded as the policy for the later
-implementation phase.
+## Mandatory Execution Order
 
-### 1. Native structured output is the default for all models
+Execute this plan in this order:
 
-- Every call that has a structured-output contract uses the unified LLM
-  interface's native structured-output request by default.
-- The default is model- and provider-independent. A model does not remain on a
-  prompt-only soft fence merely because it is weaker, newer, or configured by a
-  different route.
-- A call that intentionally has a free-form contract remains free-form. “All
-  models” means that every model capable of serving a structured-output stage
-  receives the same native-default policy; it does not force an artificial JSON
-  schema onto final prose or other intentionally free-form surfaces.
-- Native transport shape is owned by the structured-output contract supplied to
-  the interface. Semantic judgment, grounding, and character/business meaning
-  remain owned by the producing LLM stage and its semantic instructions.
+1. Implement production code, prompt changes, and the two transport checks.
+2. Run the bounded verification and live spot checks.
+3. Complete parent code review and all Luna remediation.
+4. Freeze the accepted code diff.
+5. Perform the final documentation closeout:
+   - update `src/kazusa_ai_chatbot/llm_interface/README.md`;
+   - record plan checklist and execution evidence;
+   - mark the plan completed;
+   - update the registry; and
+   - archive the completed plan.
 
-### 2. Prompts stop duplicating the wire-format contract
+The plan, registry, subsystem README, and other documentation remain unchanged
+during coding, verification, review, and remediation. A later code correction
+returns execution to step 1, followed by a fresh final documentation closeout.
 
-- Structured prompts remove hard-coded JSON object examples and other
-  schema-shaped examples whose purpose is to teach serialization.
-- Prompts retain the semantic explanations needed for the stage to make the
-  correct decision: field meaning where useful, decision criteria, grounding
-  requirements, boundaries, refusal or silence meaning, and other domain
-  semantics.
-- Prompts no longer require global boilerplate such as “no markdown fence”,
-  “return only JSON”, or a field-by-field reproduction of the exact wire
-  format merely to enforce serialization. The native contract owns that
-  responsibility.
-- The implementation agent has explicit case-by-case judgment over the
-  remaining prompt wording. It may express semantic concepts in the form that
-  best serves each stage, while preserving the native contract and the
-  semantic behavior under test.
-
-### 3. Every structured prompt receives a real-LLM regression test
-
-- Each structured-output prompt must be exercised through a real LLM test using
-  the actual unified interface and a real configured model route.
-- Mocked or patched model tests may verify deterministic plumbing, but they do
-  not satisfy the prompt-behavior requirement.
-- The live test must compare the post-change behavior with a captured baseline
-  for the same prompt case and model route. The comparison is semantic and
-  contract-oriented rather than byte-for-byte wording equality.
-- The later test inventory must cover representative normal, boundary, and
-  failure-sensitive cases for each prompt. A prompt is not considered migrated
-  because only one unrelated prompt has passed.
-- Live cases are run one at a time, inspected, and recorded as durable review
-  artifacts with enough context to determine whether the behavior drifted.
-
-### 4. Structured output is a first-class unified-interface capability
-
-- The unified LLM interface exposes a provider-neutral way for a caller to
-  supply a structured-output contract.
-- The interface owns translation of that contract to the selected provider's
-  native request mechanism. Callers do not create provider-specific structured
-  output clients or prompt-format shims.
-- The interface preserves the response information required by the existing
-  parser, checks, repair path, diagnostics, and stage evaluator.
-- The exact signature, schema representation, provider feature matrix, and
-  source ownership are implementation details for the deferred impact-mapping
-  phase. The provider-neutral capability and native-default policy are binding
-  now.
-
-### 5. Existing fallback, checks, and JSON repair are preserved
-
-- The current fallback behavior remains available after native structured output
-  becomes the default.
-- Existing structural parsing, deterministic cleanup, contract checks,
-  semantic validation, normalization, error classification, bounded retry or
-  regeneration behavior, and JSON repair remain part of the response path.
-- Native output is still subject to the existing checks. Native transport
-  success is not treated as semantic validation success.
-- Existing fallback triggers, attempt caps, repair ownership, failure
-  dispositions, and fail-closed behavior are preserved unless a separately
-  approved plan explicitly changes them.
-- JSON repair remains structural recovery. It may repair permitted syntax or
-  object-shape defects according to the existing routine, but it does not invent
-  semantic values, change a domain decision, or bypass later validation.
-- The implementation must retain evidence of whether a result used the native
-  path, the preserved fallback, or repair, so regressions in recovery behavior
-  remain diagnosable.
-
-## Decision Rationale
-
-Prompt-level JSON examples and soft fences communicate an intention but do not
-reliably constrain the model's transport output. They also duplicate the shape
-contract, consume prompt space, and create drift between prompt examples and
-the actual evaluator.
-
-Native structured output gives the interface/provider boundary ownership of
-serialization and substantially reduces markdown-fence and malformed-shape
-failures. It does not replace semantic instructions or domain validation, so
-the plan keeps semantic explanations and the existing deterministic recovery
-path. Real-LLM baseline tests are required because native shape compliance does
-not prove that prompt meaning, grounding, silence, refusal, or other semantic
-decisions remain stable.
-
-## Scope For This Draft
-
-### In scope now
-
-- Recording the five binding decisions above.
-- Defining the intended ownership boundary between semantic prompts, native
-  structured transport, and existing validation/recovery.
-- Defining the evidence and approval gates required before implementation.
-- Registering this plan as a separate draft alongside the parallel Cognition V3
-  plan.
-
-### Explicitly deferred now
-
-- Source-file, symbol, call-site, route, schema, and prompt inventory.
-- Impact-radius analysis and ownership assignment to exact files.
-- Exact pytest node IDs and the source-to-test traceability matrix.
-- Provider capability mapping, unsupported-feature behavior details, and the
-  concrete unified-interface signature.
-- Prompt edits, production-code edits, schema implementation, test additions,
-  and rollout execution.
-- Any modification, supersession, or status change to the parallel Cognition V3
-  plan.
-
-The deferred items are execution gates, not policy questions. The five policy
-decisions are closed by this document; implementation mechanics remain open
-until the required mapping is performed.
-
-## Parallel-Work Coexistence Rule
-
-This plan is independent of the Cognition V3 cache-affine semantic-chain plan
-and does not authorize edits to its files or contracts. While that work is in
-progress, an implementation agent must first refresh the source and impact
-map against the actual shared workspace state. Any overlap with Cognition V3
-must be resolved through an explicit sequencing decision or plan amendment
-before production changes are made.
-
-The native structured-output policy is the cross-cutting target state for the
-later implementation, but this draft does not assume which Cognition V3
-contracts, prompts, or interface surfaces will exist after its work lands.
-
-## Target State Contract
-
-The later implementation must produce this boundary:
+## Target State
 
 ```text
-semantic stage instructions + native structured contract
-        -> unified LLM interface
-        -> provider-native structured request (default)
-        -> existing parser/check/repair and stage evaluation
-        -> typed stage result or bounded failure
+structured stage with default LLMCallConfig
+    -> OpenAI-compatible provider requests {"type": "json_object"}
+    -> existing LLMResponse.content
+    -> existing parse_llm_json_output or local parser
+    -> existing stage validator / normalization / repair / bounded failure
+
+intentional free-form stage with output_mode="text"
+    -> existing text request and response behavior
 ```
 
-The contract has four distinct responsibilities:
+The native request guarantees an object-shaped JSON transport where the
+configured endpoint supports it. Existing stage code continues to own field
+shape, semantic validation, normalization, repair, and regeneration. This plan
+does not introduce strict per-stage JSON Schema transport.
 
-| Responsibility | Owner | Required behavior |
-|---|---|---|
-| Semantic meaning and decision criteria | Producing LLM stage | Explain what the result means and how to decide it; keep grounding and domain semantics. |
-| Wire shape and serialization | Native structured contract plus unified interface | Request the declared shape natively for every structured-output model call. |
-| Structural and domain acceptance | Existing deterministic checks and owning evaluator | Continue to validate, normalize, reject, regenerate, or fail closed under current rules. |
-| Recovery and diagnostics | Existing fallback/repair boundary | Preserve current fallback and JSON-repair behavior and make the disposition observable. |
+## Implementation Contract
 
-## Mandatory Skills And Rules For Later Execution
+### 1. Shared output mode
 
-- Apply `development-plan` for promotion, ownership, gates, and execution
-  evidence.
-- Apply `local-llm-architecture` to preserve the boundary between native shape,
-  semantic prompting, deterministic validation, and bounded recovery.
-- Apply `debug-llm` to create human-readable live-LLM comparison artifacts and
-  inspect semantic drift.
-- Apply `test-style-and-execution` for all test changes and execution. Run live
-  LLM cases one at a time and inspect each result.
-- Apply `py-style` before writing or reviewing Python implementation or test
-  code.
-- Keep the native request model-agnostic and provider-neutral at the unified
-  interface boundary.
-- Keep semantic ownership with the producing LLM stage and deterministic
-  ownership with validation, limits, persistence, and recovery code.
-- Preserve the existing fallback, checks, JSON repair, attempt caps, and
-  fail-closed outcomes.
-- Do not authorize production changes from this draft alone. Promotion to
-  `approved` or `in_progress` requires the deferred impact map and an explicit
-  implementation authorization.
+Add one immutable field to `LLMCallConfig`:
 
-## Later Execution Roles And Handoffs
+```python
+output_mode: Literal["json_object", "text"] = "json_object"
+```
 
-Exact file ownership is intentionally deferred. The later executable plan must
-assign these boundary owners to exact repository files and symbols before any
-production edit:
+`json_object` is the default because nearly every current Kazusa LLM stage
+returns an object and already routes the result through an existing parser or
+evaluator. `text` is the explicit mode for intentionally free-form stages.
 
-| Role | Boundary responsibility | Required handoff evidence |
-|---|---|---|
-| Unified-interface owner | Add the provider-neutral native structured-output capability and preserve response/recovery compatibility. | Interface contract, provider-routing evidence, native/fallback disposition evidence, and focused tests. |
-| Prompt-contract owner | Remove serialization examples and fence boilerplate while retaining semantic explanations, using case-by-case wording. | Prompt diff, semantic intent review, baseline comparison, and live test artifacts for every structured prompt. |
-| Validation/recovery owner | Confirm existing checks, fallback, normalization, JSON repair, caps, and fail-closed outcomes remain unchanged in behavior. | Recovery-path regression evidence, including native success, native failure/unsupported, malformed output, and repair cases. |
-| Live-LLM verification owner | Run and inspect real model cases and compare them with the pre-change baseline. | One-at-a-time run log, durable raw/normalized artifacts, semantic drift disposition, and review summary. |
-| Independent reviewer | Review cross-cutting ownership, parallel-plan overlap, contract compatibility, and acceptance evidence. | Written approval or a bounded list of required corrections. |
+Keep the `LLInterface.ainvoke(...)` and `LLInterface.invoke(...)` signatures
+unchanged. Keep call sites unchanged unless they own a free-form config or
+serialization-only prompt wording.
 
-No role may expand the scope into Cognition V3 or alter fallback semantics
-without an explicit plan amendment and owner decision.
+### 2. Provider mapping and fallback
+
+The OpenAI-compatible provider maps `output_mode="json_object"` to the native
+request format:
+
+```json
+{"response_format": {"type": "json_object"}}
+```
+
+The provider omits `response_format` for `output_mode="text"`.
+
+When an endpoint returns a recognized unsupported-parameter or
+unsupported-feature error naming `response_format` or JSON-object mode, the
+provider retries that call once in text mode and logs the bounded fallback.
+Schema, authentication, timeout, rate-limit, server, and unrelated request
+errors retain their existing error behavior. LM Studio reload handling remains
+unchanged.
+
+Include `output_mode` in diagnostic and provider cache identity so a text model
+instance and JSON-object model instance cannot share incompatible request
+configuration.
+
+### 3. Free-form exceptions
+
+Set `output_mode="text"` only on these current free-form configurations:
+
+- `src/kazusa_ai_chatbot/coding_agent/code_writing/programmer.py`
+  - `_writing_programmer_llm_config`
+- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_evaluator.py`
+  - `_evaluator_summarizer_llm_config`
+  - `_finalizer_llm_config`
+
+The structured continuation assessor in the RAG evaluator keeps the default
+`json_object` mode.
+
+### 4. Prompt cleanup
+
+For the prompt files listed under `Change Surface`, remove only generic
+serialization enforcement such as:
+
+- requests for JSON outside markdown fences;
+- repeated `return only JSON` boilerplate;
+- prose whose sole purpose is preventing surrounding explanations; and
+- schema-shaped examples that merely demonstrate braces and quoting.
+
+Keep semantic field names and concise field descriptions when the model needs
+them to make the correct decision. Keep enum meanings, cardinality meaning,
+grounding rules, evidence rules, and downstream semantic contracts. Keep
+special repair and regeneration prompts intact because they own recovery.
+
+## Fixed Execution Roles
+
+### Parent architecture and control owner
+
+- **Responsibility:** Maintain scope, resolve hard issues, approve prompt
+  semantics, review the diff, and decide acceptance.
+- **Owned surface:** This plan, registry lifecycle, architectural decisions,
+  handoff records, review findings, and final sign-off.
+- **Authority:** Read-only source inspection, plan amendments, scope decisions,
+  and acceptance decisions.
+- **Independence:** The parent performs review and sign-off while the coding
+  executor performs implementation and remediation.
+- **Acceptance output:** Reviewed diff, verification disposition, and final
+  plan lifecycle record.
+
+### Fixed coding executor
+
+- **Executor:** One persistent project-native subagent.
+- **Model:** `gpt-5.6-luna`.
+- **Reasoning effort:** `max`.
+- **Speed:** Standard-speed runtime lane.
+- **Resolution mode:** Plan-scoped fixed execution constraint.
+- **Responsibility:** Implement the complete bounded change, update the two
+  transport tests, run the listed checks and spot checks, remediate parent
+  review findings, and perform documentation closeout only after the parent
+  accepts the code diff.
+- **Authority:** Modify only the files in `Change Surface` and produce the
+  listed evidence.
+- **Required skills:** `py-style`, `test-style-and-execution`,
+  `local-llm-architecture`, `debug-llm`, and `development-plan`.
+- **Acceptance output:** Scoped diff, exact check results, live spot-check
+  observations, and a concise handoff.
+
+The same subagent identity is reused for implementation and remediation.
+Availability or capability failure pauses execution for owner direction.
+Additional coding and review subagents are outside this plan.
+
+## Change Surface
+
+### Core transport files
+
+- `src/kazusa_ai_chatbot/llm_interface/contracts.py`
+  - Add `output_mode` to `LLMCallConfig` with the JSON-object default.
+- `src/kazusa_ai_chatbot/llm_interface/session.py`
+  - Include `output_mode` in diagnostic identity.
+- `src/kazusa_ai_chatbot/llm_interface/providers/openai_compatible.py`
+  - Map JSON-object and text modes, include mode in provider cache identity,
+    and perform the one bounded unsupported-feature fallback.
+- `src/kazusa_ai_chatbot/llm_interface/README.md`
+  - In the final documentation closeout, document the default, text
+    exceptions, and fallback boundary.
+
+### Free-form configuration files
+
+- `src/kazusa_ai_chatbot/coding_agent/code_writing/programmer.py`
+- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_evaluator.py`
+
+### Structured prompt-only files
+
+Only serialization wording may change in these files:
+
+- `src/kazusa_ai_chatbot/character_identity_growth/llm.py`
+- `src/kazusa_ai_chatbot/coding_agent/code_action_loop/prompts.py`
+- `src/kazusa_ai_chatbot/coding_agent/code_modifying/product_manager.py`
+- `src/kazusa_ai_chatbot/coding_agent/code_writing/product_manager.py`
+- `src/kazusa_ai_chatbot/cognition_core_v3/anchor.py`
+- `src/kazusa_ai_chatbot/cognition_core_v3/authorization.py`
+- `src/kazusa_ai_chatbot/cognition_core_v3/facade.py`
+- `src/kazusa_ai_chatbot/cognition_core_v3/goal_cognition.py`
+- `src/kazusa_ai_chatbot/cognition_shared/character_carryover.py`
+- `src/kazusa_ai_chatbot/cognition_shared/surface_stages.py`
+- `src/kazusa_ai_chatbot/complex_task_resolver/stages.py`
+- `src/kazusa_ai_chatbot/consolidation/lane_router.py`
+- `src/kazusa_ai_chatbot/consolidation/memory_units.py`
+- `src/kazusa_ai_chatbot/conversation_progress/recorder.py`
+- `src/kazusa_ai_chatbot/local_context_resolver/stages.py`
+- `src/kazusa_ai_chatbot/media_inspection/service.py`
+- `src/kazusa_ai_chatbot/nodes/dialog_agent.py`
+- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_memory_lifecycle.py`
+- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_msg_decontextualizer.py`
+- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_dispatch.py`
+- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_evaluator.py`
+- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_initializer.py`
+- `src/kazusa_ai_chatbot/rag/conversation_evidence/selector.py`
+- `src/kazusa_ai_chatbot/rag/conversation_evidence/workers/aggregate.py`
+- `src/kazusa_ai_chatbot/rag/conversation_evidence/workers/filter.py`
+- `src/kazusa_ai_chatbot/rag/conversation_evidence/workers/keyword.py`
+- `src/kazusa_ai_chatbot/rag/conversation_evidence/workers/search.py`
+- `src/kazusa_ai_chatbot/rag/live_context/selector.py`
+- `src/kazusa_ai_chatbot/rag/memory_evidence/selector.py`
+- `src/kazusa_ai_chatbot/rag/memory_evidence/workers/persistent_keyword.py`
+- `src/kazusa_ai_chatbot/rag/memory_evidence/workers/persistent_search.py`
+- `src/kazusa_ai_chatbot/rag/memory_evidence/workers/user_memory.py`
+- `src/kazusa_ai_chatbot/rag/person_context/selector.py`
+- `src/kazusa_ai_chatbot/rag/person_context/workers/list.py`
+- `src/kazusa_ai_chatbot/rag/person_context/workers/lookup.py`
+- `src/kazusa_ai_chatbot/rag/person_context/workers/relationship.py`
+- `src/kazusa_ai_chatbot/rag/recall/review.py`
+- `src/kazusa_ai_chatbot/rag/web_agent3/subagent/web_search.py`
+- `src/kazusa_ai_chatbot/reflection_cycle/group_scene_digest.py`
+- `src/kazusa_ai_chatbot/reflection_cycle/promotion.py`
+- `src/kazusa_ai_chatbot/relevance/frontline_relevance_agent.py`
+- `src/kazusa_ai_chatbot/relevance/persona_relevance_agent.py`
+- `src/kazusa_ai_chatbot/task_resolution/orchestrator.py`
+- `src/kazusa_ai_chatbot/task_resolution/specialists/text_computation.py`
+
+### Tests
+
+- `tests/test_llm_interface_contracts.py`
+- `tests/test_llm_interface_openai_provider.py`
+
+### Keep unchanged
+
+- `src/kazusa_ai_chatbot/llm_interface/interface.py`
+- `src/kazusa_ai_chatbot/llm_interface/reload.py`
+- `src/kazusa_ai_chatbot/utils.py`
+- All stage parsers, evaluators, normalization, JSON repair, retry caps, and
+  fail-closed dispositions.
+- Route environment variables, model selection, persistence, adapters,
+  scheduler, and delivery behavior.
 
 ## Test Impact And Traceability
 
-The exact source-to-test matrix is intentionally omitted from this draft at the
-owner's direction. Adding guessed paths, symbols, or pytest node IDs would
-violate the deferred-impact boundary.
+This plan uses an owner-approved lightweight verification exception. Unit
+coverage is limited to the durable transport boundary; prompt wording is
+verified by final live spot checks rather than snapshots or per-prompt tests.
 
-Before this plan can be promoted to an executable implementation contract, the
-implementation owner must add one row for every affected source or governed
-artifact. Each row must name:
+| Source or governed surface | Contract | Owner | Exact verification | Mode | Regression prevented |
+|---|---|---|---|---|---|
+| `src/kazusa_ai_chatbot/llm_interface/contracts.py` | JSON-object default and explicit text mode | Unified interface | `tests/test_llm_interface_contracts.py::test_call_config_defaults_to_json_object_output` | regular | Default or free-form mode drifts silently. |
+| `src/kazusa_ai_chatbot/llm_interface/session.py`; `src/kazusa_ai_chatbot/llm_interface/providers/openai_compatible.py` | Provider mapping, cache separation, bounded unsupported fallback | OpenAI-compatible provider | `tests/test_llm_interface_openai_provider.py::test_provider_maps_json_object_text_and_unsupported_fallback` | regular | Native mode leaks into text calls or unsupported endpoints stop working. |
+| Structured prompt-only files | Serialization wording changes while semantic decisions remain intact | Owning stage prompts | `tests/test_relevance_turn_settlement_live_llm.py::test_live_frontline_discards_clear_third_party_message`; `tests/test_dialog_agent_direct_live_llm.py::test_dialog_agent_direct_live_technical_numeric_comparison` | live-LLM spot check | Representative structured stages stop parsing or lose semantic behavior. |
+| Free-form configurations | Explicit text mode preserves prose and artifact output | RAG finalizer and coding writer | `tests/test_persona_supervisor2_rag_supervisor2_live.py::test_rag_finalizer_live_preserves_visible_conversation_speaker` plus manual inspection of one writing-programmer artifact when that route is configured | live-LLM spot check | JSON mode wraps or suppresses intentionally free-form output. |
 
-1. the exact repository-relative source or prompt artifact;
-2. the exact symbol or contract;
-3. the semantic owner;
-4. the exact pytest node ID or live-test case identifier;
-5. the test mode (`regular`, `live-LLM`, or `live-DB` where applicable); and
-6. the regression prevented or behavior proven.
+## Verification
 
-The matrix must include every structured prompt, the unified-interface native
-request path, the preserved fallback path, existing checks, and JSON repair.
-The real-LLM requirement in Decision 3 applies to each prompt row; a mocked
-test alone cannot close that row.
+Run only this bounded set after implementation:
 
-## Promotion And Execution Gates
+1. `venv\Scripts\python -m pytest tests/test_llm_interface_contracts.py::test_call_config_defaults_to_json_object_output tests/test_llm_interface_openai_provider.py::test_provider_maps_json_object_text_and_unsupported_fallback -q`
+2. Run these live cases one at a time and inspect their visible output:
+   - `venv\Scripts\python -m pytest tests/test_relevance_turn_settlement_live_llm.py::test_live_frontline_discards_clear_third_party_message -q -s`
+   - `venv\Scripts\python -m pytest tests/test_dialog_agent_direct_live_llm.py::test_dialog_agent_direct_live_technical_numeric_comparison -q -s`
+   - `venv\Scripts\python -m pytest tests/test_persona_supervisor2_rag_supervisor2_live.py::test_rag_finalizer_live_preserves_visible_conversation_speaker -q -s`
+3. When the coding-writer route is configured, run one ordinary writing request
+   and inspect that it still returns one markdown-fenced artifact.
+4. Run `git diff --check` on the owned files.
 
-### Gate 0 — Decision record
+Baseline capture, full-suite execution, every-prompt replay, prompt snapshots,
+and fixture-driven semantic redesign are excluded from this plan.
 
-- This document is registered as `draft`.
-- All five binding decisions are explicit.
-- The parallel Cognition V3 boundary is named.
-- No source map, impact-radius claim, or production change is made.
+## Executor Autonomy Boundaries
 
-### Gate 1 — Pre-implementation impact mapping
+The coding executor may choose local naming and small helper placement inside
+the listed files while preserving the target contract. The change remains one
+output-mode field, one provider mapping, three text exceptions, and mechanical
+prompt cleanup.
 
-- The parallel-plan workspace state is inspected before assigning ownership.
-- The exact source/prompt/schema/interface inventory is complete.
-- The exact test-impact and traceability matrix is complete.
-- Shared-surface sequencing with Cognition V3 is resolved.
-- A later status change to `approved` or `in_progress` is explicitly authorized.
+Architecture changes, per-stage schema systems, feature flags, parallel APIs,
+new provider abstractions, new retry loops, broad exception swallowing,
+semantic prompt rewrites, and unrelated cleanup require a plan amendment.
 
-### Gate 2 — Implementation contract
+If inspection finds another intentionally free-form production stage, the
+executor reports its exact config and prompt to the parent. The parent may add
+that exact config to the text-mode list when the existing prompt clearly owns
+free-form output; broader ambiguity returns to the owner.
 
-- The unified interface exposes the provider-neutral native structured-output
-  request.
-- Native structured output is the default for every structured-output model
-  call across all models/providers.
-- Prompt serialization examples and fence boilerplate are removed while
-  semantic explanations remain.
-- Existing fallback/check/repair behavior has a locked baseline and an
-  explicit compatibility test set.
+## Acceptance Criteria
 
-### Gate 3 — Behavioral verification
+1. `LLMCallConfig` defaults to native JSON-object mode.
+2. The OpenAI-compatible provider sends the native JSON-object request for the
+   default mode and omits it for explicit text mode.
+3. A recognized unsupported native-output response receives one bounded text
+   retry while unrelated errors retain existing behavior.
+4. The coding writer, RAG evaluator summarizer, and RAG finalizer remain
+   free-form.
+5. Existing parsers, validators, JSON repair, retries, and failure dispositions
+   remain functionally unchanged.
+6. Prompt edits remove serialization-only wording while preserving semantic
+   instructions.
+7. The two transport checks pass.
+8. The three live spot checks are run individually and their outputs remain
+   usable and semantically appropriate.
+9. The parent reviews the complete diff and records approval or sends bounded
+   remediation to the fixed coding executor.
 
-- Every structured prompt has a real-LLM test through the unified interface.
-- Each live case is run individually, inspected, and recorded.
-- Post-change behavior remains within the approved semantic baseline, including
-  grounding, refusal/silence, literal fidelity, and contract interpretation.
-- Native, fallback, check-failure, and JSON-repair dispositions are observable
-  and match the preserved behavior contract.
+## Execution Checklist
 
-### Gate 4 — Independent review and handoff
-
-- The exact source/test matrix is reviewed.
-- No prompt has regained a JSON example or fence instruction solely as a hidden
-  replacement for native shape enforcement.
-- No fallback, check, repair, cap, or fail-closed rule was weakened.
-- The plan records implementation commit(s), test commands, live artifacts,
-  reviewer disposition, and final status before archival or continued work.
-
-## Acceptance Criteria For The Later Implementation
-
-The implementation is acceptable only when all of the following are true:
-
-1. Structured-output stages use native structured output by default through the
-   unified LLM interface for every model/provider route in scope.
-2. The prompt set no longer relies on hard-coded JSON examples or mandatory
-   markdown-fence instructions for serialization, while its semantic
-   explanations remain effective and reviewed case by case.
-3. Every structured prompt has inspected real-LLM evidence showing no
-   unacceptable semantic drift from its captured baseline.
-4. The unified interface carries the structured contract without
-   provider-specific call sites or stage-local transport shims.
-5. Existing fallback, checks, normalization, bounded retry/regeneration,
-   JSON-repair, diagnostics, and fail-closed behavior remain preserved.
-6. The exact source/test traceability matrix and implementation evidence are
-   complete before the plan is considered executable or complete.
+- [ ] Capture the worktree baseline and exact owned files.
+- [ ] Record the fixed Luna handoff.
+- [ ] Implement the shared output mode and provider fallback.
+- [ ] Mark the three free-form configurations as text.
+- [ ] Apply mechanical serialization-only prompt cleanup.
+- [ ] Add the two transport-boundary checks.
+- [ ] Run the bounded verification set.
+- [ ] Complete parent review and any Luna remediation.
+- [ ] Freeze the accepted code diff.
+- [ ] As the final step, update the subsystem README, record execution
+      evidence, mark the plan completed, update the registry, and archive the
+      plan.
 
 ## Current Handoff State
 
-- **Decision:** recorded and closed.
-- **Plan registration:** complete in `development_plans/README.md`.
-- **Source and impact mapping:** deliberately deferred.
-- **Production implementation:** not started and not authorized by this draft.
-- **Next authorized planning action:** after the parallel Cognition V3 work is
-  sufficiently stable, perform the exact impact mapping and propose the
-  executable-plan promotion for approval.
+- **Plan status:** approved and executable.
+- **Implementation:** ready for a separate explicit execution command.
+- **Fixed executor:** one persistent `gpt-5.6-luna` subagent, `max` reasoning,
+  standard-speed runtime lane.
+- **Parent role:** architecture, hard-issue resolution, lifecycle, review, and
+  acceptance.

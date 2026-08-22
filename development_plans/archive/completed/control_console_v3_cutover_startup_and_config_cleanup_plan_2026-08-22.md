@@ -2,7 +2,7 @@
 
 ## Document control
 
-- **Status:** in progress; explicitly authorized by the owner on 2026-08-22.
+- **Status:** completed on 2026-08-22.
 - **Class:** production startup incident and incomplete V3 cutover cleanup.
 - **Owner:** root parent; the reusable gpt-5.6-luna worker owns the surgical
   implementation and verification handoff.
@@ -43,3 +43,24 @@ route bundles and has no canonical V3 chain/sidecar bundle.
 - One debug-chat request completes through Brain cognition, dialog, response,
   trace, and persistence inspection, or an exact external dependency blocker
   is reported with all in-process boundaries proven.
+
+## Closure evidence
+
+- Brain `/health` and both console roots returned HTTP 200 after the final
+  restart.
+- The actual control-console entrypoint, authenticated twelve-page browser
+  signoff, protected trace handoff, and one no-memory debug-chat path completed.
+- Browser console errors, page errors, and HTTP failures were all zero.
+- The live cognition chain reported `completed` with a nonzero step count and
+  returned a coherent visible acknowledgement.
+- `.env` contains the complete chain bundle and shared control-plane trace
+  secret, with zero engine-selector or removed per-stage cognition route keys.
+- The active Services route catalog contains sixteen routes and exposes only
+  the chain and sidecar cognition routes.
+- Current operator surfaces use canonical agentic-cognition labels; V2-only
+  route, graph, replay, documentation, and plan tests were deleted instead of
+  migrated.
+
+The observed `partial` graph / `accepted-degraded` appraisal result is outside
+this startup-and-cutover recovery scope. It is retained as the initiating
+evidence for a separate cognition first-pass quality investigation.

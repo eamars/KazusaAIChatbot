@@ -45,6 +45,8 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
+| [cognition_v3_handleless_model_contract_bigbang_plan_2026-08-22.md](active/short_term/cognition_v3_handleless_model_contract_bigbang_plan_2026-08-22.md) | Handleless cognition model-contract big-bang proposal | draft |
+| [unified_llm_native_structured_output_default_plan.md](active/short_term/unified_llm_native_structured_output_default_plan.md) | Lightweight native JSON-object default and prompt cleanup | approved |
 
 ### Superseded Plans
 
@@ -60,17 +62,18 @@ recorded evidence.
 | [cognition_v3_hybrid_agentic_loop_reconciliation_plan_handover_2026-08-21.md](archive/completed/cognition_v3_hybrid_agentic_loop_reconciliation_plan_handover_2026-08-21.md) | Gate 7/8 execution and closure handover | completed |
 | [cognition_v2_runtime_decommission_after_v3_cutover_plan_2026-08-22.md](archive/completed/cognition_v2_runtime_decommission_after_v3_cutover_plan_2026-08-22.md) | V2 cognition-engine removal and V3-only cutover closure | completed |
 | [cognition_v2_stale_axes_and_validator_policy_plan.md](archive/completed/cognition_v2_stale_axes_and_validator_policy_plan.md) | Stale relationship-axis maintenance and semantic/structural cognition admission policy | completed |
+| [control_console_v3_cutover_startup_and_config_cleanup_plan_2026-08-22.md](archive/completed/control_console_v3_cutover_startup_and_config_cleanup_plan_2026-08-22.md) | Control-console startup repair, production verification, and V3-only environment cleanup | completed |
 
 ### Active Bugfix Plans
 
 | Document | Type | Status |
 |---|---|---|
-| [control_console_v3_cutover_startup_and_config_cleanup_plan_2026-08-22.md](active/bugfix/control_console_v3_cutover_startup_and_config_cleanup_plan_2026-08-22.md) | Control-console startup repair and V3-only environment cleanup | in_progress |
 
 ### Completed Bugfix Plans
 
 | Document | Type | Status |
 |---|---|---|
+| [cognition_v3_first_pass_appraisal_structural_exhaustion_diagnosis_2026-08-22.md](archive/completed/cognition_v3_first_pass_appraisal_structural_exhaustion_diagnosis_2026-08-22.md) | First-pass cognition appraisal structural-exhaustion diagnosis | completed |
 | [cognition_v2_semantic_admission_original_contract_restoration_plan.md](archive/completed/cognition_v2_semantic_admission_original_contract_restoration_plan.md) | Cognition V2 semantic-admission original-contract restoration | completed |
 | [dialog_final_generator_evaluator_decommission_plan.md](archive/completed/dialog_final_generator_evaluator_decommission_plan.md) | Final dialog evaluator/verifier and scheduled semantic-evaluator decommission | completed |
 | [selected_operation_nested_role_scope_bugfix_plan.md](archive/completed/selected_operation_nested_role_scope_bugfix_plan.md) | Selected-operation nested role scope and dialog evaluator false-positive fix | completed |
