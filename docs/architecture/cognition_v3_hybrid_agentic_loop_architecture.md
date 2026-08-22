@@ -284,6 +284,26 @@ stages, so V3 adopts an explicit, reviewed relaxation:
    (§7). Any carrier for which transcript visibility is itself harmful must
    be routed off-chain or dropped — none is currently known.
 
+The model-facing carrier is therefore a dependency projection, not a dump of
+the complete cognition input. The first consumer of each information class is
+fixed:
+
+| Information | First consumer | Rule |
+|---|---|---|
+| Evidence text, authority, source kind, conversation-role bindings, candidate/entity index | A1, or the first non-skipped cognition stage | Present each semantic observation once; later stages cite handles from transcript history. |
+| World-facing family domains | A1 | Include only the three planned A1 families, their exact proposition kinds/semantics, handle domains, and writable paths. |
+| Character constraints, operational context, relationship state, and relation-facing domains | A2 | Do not expose these to A1; A2 owns character-relative judgment. |
+| Deterministically reduced qualitative state, active goals, required-selection carriers, and goal-only continuity | G1a/G1b | I1 supplies the authoritative state notice; goal carriers appear only with the goal question that owns them. |
+| Complete bid handles and partition candidates | W1 | Earlier accepted bids remain in the transcript; W1 receives a compact index rather than re-serialized bid bodies. |
+| Action/resolver capabilities, availability, permission inputs, and planning-only scene constraints | P1 | Capabilities do not appear in appraisal or goal prompts. |
+| New resolver observation and changed evidence/candidate handles | R | Append the observation once and project only affected family/branch domains. |
+
+Every stage question carries its exact local objective, writable authority,
+closed output schema, and relevant domains adjacent to the requested answer.
+The system anchor retains only character identity and rules shared by every
+stage. Contract details used by only one stage do not live in the global
+manual.
+
 ## 5. The cognition chain
 
 ### 5.1 Canonical stage sequence
@@ -295,7 +315,7 @@ OpenAI-compatible chat templates re-serialize those deterministically.
 
 | Step | Kind | Semantic question | Output contract | LLM |
 |---|---|---|---|---|
-| A1 | chain | Appraisal, world-facing group: event/agency, goal/threat/outcome, epistemic/comparison/memory | Per-family micro-appraisal batches, same item contract as V2 (≤8 items/family, ≤1 proposition + ≤1 delta per item, same handle/delta-path domains) | yes |
+| A1 | chain | Appraisal, world-facing group: event/agency, goal/threat/outcome, epistemic/comparison/memory | Exact family map; each family has independent `propositions` and `deltas` arrays, ≤8 rows in each, using the unchanged V2 semantic domains | yes |
 | A2 | chain | Appraisal, relation-facing group: relationship/social, moral/identity, existential/drive | same | yes |
 | I1 | interlude | — | Deterministic per-family replay-validation, reduction, relationship maintenance, 21-formula emotion derivation; append bounded state-transition notice (≤600 chars, qualitative bands + accepted/rejected counts) | no |
 | G1a | chain | Ordinary-response goal bid only; carries `relational_willingness.v2`; typed required-selection turns use the specialized selection form | The complete ordinary bid, contract identical to V2 | yes |
@@ -313,30 +333,37 @@ sensitive turns ⇒ deterministic authoritative collapse with the ordinary bid
 primary and effect denial downstream; `goal_resolution == answerable_now` ⇒
 optional resolver requests suppressed before authorization.
 
-### 5.2 Appraisal grouping
+### 5.2 Appraisal products and fixed stages
 
-The six families collapse into two grouped chain steps by default, with the
-family→step map held in a registry (1, 2, 3, or 6 steps are tunable without
-contract change). Grouping rationale:
+The six appraisal families remain complete and independently replay-validated,
+but the model no longer emulates V2's short-call micro-item loop. A1 always
+owns the three world-facing families and A2 always owns the three
+relation-facing families; there is no runtime 1/2/3/6 topology setting.
 
-- The deterministic question planner is unchanged: it still plans per-family
-  questions, permitted handles, and delta-path domains; a grouped step's
-  question simply carries several families' planned questions.
-- Output contracts remain per-family batches, so the reducer's per-family
-  replay validation, accepted-prefix isolation, and rejection semantics are
-  untouched.
-- Two steps bound the per-step completion size (grouped batches must fit the
-  step's completion cap; the validator terminates a family batch that
-  overruns exactly as V2 bounds serial items) while cutting up to 48 calls
-  to 2.
+Each planned family is an exact object with two arrays:
 
-Sequential grouping trades V2's nominal family independence for coherence
-and cache affinity. This is sanctioned by ECT §12.2 (families are
-independent only where inputs/outputs are independent — the outputs remain
-independent contracts) and mitigated by ordering the world-facing group
-before the relation-facing group, so factual interpretation is least
-contaminated. The reducer never trusted family independence anyway: it
-replays and validates every family against the same original state.
+```json
+{
+  "propositions": [],
+  "deltas": []
+}
+```
+
+The enclosing object has exactly the planned family keys in frozen order.
+Each array retains the V2 maximum of eight entries and uses the existing V2
+fields, proposition-kind vocabulary, role/evidence handle domains, delta
+paths, and numeric bounds. Empty arrays explicitly mean that the family found
+no additional supported product. This preserves every proposition and state
+delta that V2 can represent while removing `question_id` echoes, nullable
+product pairs, null-null terminators, exact-repeat termination instructions,
+and the fiction that one long response is a sequence of independent model
+calls. Deterministic code projects the two arrays into the canonical V2
+aggregate and runs the unchanged V2 validators/reducers; I1 and all 21 emotion
+formulas remain unchanged.
+
+The fixed A1→A2 sequence makes the loop legible and keeps factual
+interpretation ahead of character-relative judgment. Grouping is a semantic
+stage boundary, not a performance knob.
 
 ### 5.3 Goal bidding: two ordered steps, deterministic bid order
 
@@ -628,8 +655,8 @@ transcript's prefix discipline (§11.3).
   remain byte-identical.
 ### 9.2 Attempt budgets and exhaustion
 
-- **Attempt caps** mirror V2's per-owner policies (appraisal 2 total per
-  family step; goal 3 per branch across the invocation with the shared
+- **Attempt caps** preserve V2's per-owner limits (appraisal 2 total per
+  family; goal 3 per branch across the invocation with the shared
   ledger; collapse/planning/authorization 3), and the exhaustion
   dispositions are identical: family omitted with diagnostics,
   required-branch recovery by valid sibling, degraded first-bid collapse,
@@ -641,24 +668,21 @@ transcript's prefix discipline (§11.3).
 - **JSON boundary unchanged:** canonical deterministic parse first; the
   repair model remains sidecar-lane; required-selection stays
   deterministic-only.
-### 9.3 Grouped-step failure isolation
+### 9.3 Appraisal failure isolation
 
-V2 isolated failures per appraisal family; a grouped chain step widens the
-blast radius of one provider failure or truncated completion to every family
-in the group. The disposition ladder restores per-family isolation at
-bounded cost:
+One A1 or A2 request consumes the first attempt for every family listed in
+that request. If the answer is structurally invalid, length-truncated, or
+provider-failed, tail rollback removes it and the engine asks each affected
+family once as an explicit singleton recovery step. This directly consumes
+that family's second and final attempt. There is no identical grouped retry
+and no 2→3→6 topology ladder.
 
-1. A step-level provider failure, a length-truncated completion
-   (`finish_reason == length`), or an unparseable trailing fragment consumes
-   one attempt and retries the same grouped question once.
-2. A second failure splits the group along the §5.2 registry fallback
-   (2 → 3 → 6 steps) and retries only the unanswered families as separate
-   smaller steps, each under the remaining family-level attempt budget.
-3. Families that still fail are omitted with typed diagnostics — V2's
-   per-family disposition — and the chain continues.
-
-Split retries preserve the prefix: the failed grouped answer rolls back
-under §9.1, and the split questions extend from the same cached prefix.
+Singleton recovery uses the same family object (`propositions` plus `deltas`)
+and the same local domain. A successful sibling is never regenerated. A
+family that exhausts is omitted with the unchanged typed diagnostic, while
+the other families continue. The recovery step ids identify their owning
+stage and family, so provider calls, semantic attempt reservations, and
+observability describe the same unit.
 
 ### 9.4 Provider and serving-layer failures
 
@@ -1016,13 +1040,14 @@ HTTP surface, callback, or console import. The console couples only to
 **persisted, schema-versioned, read-only projections**, consumed through
 the existing brain-service/console query paths:
 
-- **`cognition_chain_run.v1`** — one record per invocation, the primary new
+- **`cognition_chain_run.v2`** — one record per invocation, the primary new
   console artifact: engine version; lane bindings as **model names only**
   (never endpoints or credentials); ordered step rows (step id, stage kind,
   status, attempt count, duration, prompt chars, new-suffix chars, cache
   class); ledger summary (budget, spent, 65 k extension used); session
-  events (reattached / rebuilt / re-anchored / cold); degradation markers
-  and warning codes; terminal disposition.
+  events (reattached / rebuilt / re-anchored / cold); fixed appraisal-stage
+  layout `fixed_a1_a2`; degradation markers and warning codes; terminal
+  disposition.
 - **Existing trace rows keep their shape.** Every chain step, sidecar call,
   and repair attempt is also emitted as an ordinary `llm_trace_steps` row
   (stage name, route, model, prompt/output sizes, parse status, duration),
@@ -1039,10 +1064,12 @@ the existing brain-service/console query paths:
   through the existing console status routes and sourced from configuration
   at the service boundary — not queried from the engine at runtime.
 
-Coupling rules: the console never imports cognition modules; all payloads
-carry `schema_version` and evolve additively; there is no console-side
-mutation surface into cognition (no live prompt editing, pause/step, or
-injection) — configuration travels through deployment environment only.
+Coupling rules: the console never imports cognition modules; all payloads carry
+`schema_version`. Additive changes remain within a version; incompatible
+changes use an explicit schema-version bump with an atomic producer/consumer
+migration. There is no console-side mutation surface into cognition (no live
+prompt editing, pause/step, or injection) — configuration travels through
+deployment environment only.
 
 ## 15. Open validation questions
 
@@ -1052,10 +1079,10 @@ injection) — configuration travels through deployment environment only.
    whether surface/dialog must move to the sidecar lane to protect it.
 2. **Token estimator calibration** against server-reported counts for the
    CJK-heavy payload mix.
-3. **Grouped-appraisal quality:** contract-level A/B against V2 on the
-   replay corpus (family batch acceptance rates, delta distributions,
-   rejection reasons) to confirm 2-step grouping does not degrade appraisal
-   admissibility; fall back to 3 or 6 steps via the registry if it does.
+3. **Fixed-stage appraisal quality:** contract-level A/B against V2 on the
+   replay corpus (family product acceptance rates, delta distributions,
+   rejection reasons) to confirm the fixed A1/A2 contract preserves semantic
+   admissibility and family-level recovery.
 4. **Bid cross-contamination:** whether sibling-visible bids reduce branch
    diversity in practice (measured by collapse outcomes vs. V2 baseline).
 5. **Long-context behavior** of the primary local model at 30–50 k tokens

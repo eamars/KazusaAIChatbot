@@ -250,7 +250,11 @@ async def test_targetless_group_can_silence_or_emit_grounded_reply_proposal():
     silent_handle = episode_evidence_handle(silent_payload)
     silent_responses = default_scripted_responses(silent_handle)
     silent_responses["P1"] = json.dumps({
+        "action_requests": [],
+        "resolver_requests": [],
         "goal_resolution": "blocked",
+        "resolver_pending_resolution": None,
+        "resolver_goal_progress": None,
         "self_cognition_response": {
             "decision": "stay_silent",
             "evidence_handles": [],
@@ -269,7 +273,11 @@ async def test_targetless_group_can_silence_or_emit_grounded_reply_proposal():
     visible_handle = episode_evidence_handle(visible_payload)
     visible_responses = default_scripted_responses(visible_handle)
     visible_responses["P1"] = json.dumps({
+        "action_requests": [],
+        "resolver_requests": [],
         "goal_resolution": "blocked",
+        "resolver_pending_resolution": None,
+        "resolver_goal_progress": None,
         "self_cognition_response": {
             "decision": "propose_visible_reply",
             "evidence_handles": [visible_handle],

@@ -11,7 +11,8 @@
   provenance amendment is also parent-reviewed. The 2026-08-20 owner
   execution amendment permits delegation and fixes one reusable subagent as
   the sole production-code implementation executor.
-  This document is a closed approved implementation contract. The owner
+  This document is an approved implementation contract, amended on 2026-08-21
+  by the owner's Gate 7 input-flow direction. The owner
   authorized implementation on 2026-08-19, the exact closure goal is active,
   Gate 0 passed on 2026-08-19T12:18:06Z, Gate 1 passed on
   2026-08-19T15:29:12Z, and Gate 2 is in progress.
@@ -103,8 +104,8 @@ topology would retain the architectural defect.
 | Area | Current implementation | Required ideal state | Required disposition |
 |---|---|---|---|
 | Primary topology | `execution.start_wave(...)` launches multiple appraisal and goal tasks. | One serialized A1→A2→I1→G1a→G1b→I2→W1→P1 chain on one lane. | Replace executor and registry; remove parallel-wave behavior and tests. |
-| Prompt geometry | One static prompt and transcript per semantic chain. | One byte-stable system head containing only the engine manual and character identity, followed by one volatility-ordered dynamic turn packet plus A1 in the first user message and one append-only transcript for the invocation. | Replace prompt/transcript ownership. |
-| Appraisal | Three parallel first-wave chains plus a later terminal-outcome call; custom aggregate arrays. | Default two grouped steps, exact per-family V2 micro-item contracts, deterministic replay reduction, registered 1/2/3/6 grouping. | Replace V3 appraisal contract and bridge. |
+| Prompt geometry | One static prompt and transcript per semantic chain. | One byte-stable system head containing only stage-independent rules and character identity; each dynamic carrier appears once with its first consuming stage in one append-only invocation transcript. | Replace prompt/transcript ownership. |
+| Appraisal | Three parallel first-wave chains plus a later terminal-outcome call; custom aggregate arrays. | Fixed A1/A2 stages, exact per-family proposition/delta arrays, deterministic V2 replay reduction, direct singleton recovery. | Replace V3 appraisal contract and bridge. |
 | State reduction | Provisional reductions occur between current parallel chains. | One I1 interlude after grouped appraisals, using V2 reducers/maintenance/emotion derivation verbatim. | Centralize in I1; remove topology-specific provisional bridges. |
 | Goal generation | Preliminary goals run beside appraisal and sibling goal transcripts are isolated. | Ordinary G1a after I1, then registry-ordered G1b whose branches see the accepted ordinary bid and earlier sibling content. | Replace goal ordering and visibility. |
 | Required selection | Partial contract reuse exists. | The exact V2 specialized required-selection validator, fixed role binding, evidence coverage, and deterministic-only parsing. | Reuse the canonical V2 pure validator/materializer. |
@@ -424,54 +425,54 @@ V2 service-bound `invoke_semantic_authorizer(...)` loop.
    messages. There are no tool-role messages and no assistant prefill.
 8. The system head uses one compact canonical JSON encoding
    (`ensure_ascii=False`, `sort_keys=True`, separators `(',', ':')`) and
-   contains only `engine_manual` followed by `character_identity`. The first
-   user message contains the volatility-ordered dynamic turn packet followed
-   by the A1 question. No timestamp, invocation id, trace id, random id, route
+   contains only the stage-independent `engine_manual` followed by
+   `character_identity`. The first non-skipped cognition question carries the
+   observation packet exactly once. Each later carrier first appears with its
+   owning stage. No timestamp, invocation id, trace id, random id, route
    name, retry counter, or stage-specific repair text appears in the system
    head. Dynamic state, scene, evidence, affordances, and episode fields never
    enter the system message.
-9. Private continuity, past-dialog cognition context, character sleep phase,
-   group-engagement action context, required-selection operation registry, and
-   branch intent guidance are held out of the anchor. They first appear in the
-   G1a/G1b question that owns them and remain visible downstream through the
-   append-only transcript.
+9. Evidence and the typed conversation frame first appear at A1; character
+   constraints, relationship state, and relation-facing domains first appear
+   at A2; deterministic state plus goal-only continuity first appear at G1;
+   bid indexes first appear at W1; and action/resolver capabilities first
+   appear at P1. Private continuity, past-dialog cognition context, character
+   sleep phase, group-engagement context, required-selection operations, and
+   branch guidance remain goal-scoped. All carriers stay visible downstream
+   through the append-only transcript after their first consumer.
 10. The primary model's accepted raw assistant text is retained byte-for-byte
     in the session transcript after canonical parsing and semantic validation.
     Rebuild uses those exact accepted bytes. Deterministic interlude products
     are rendered canonically in the next user question.
 
-### Appraisal grouping
+### Appraisal stages and products
 
 11. The frozen family order is:
     `event_agency`, `goal_threat_outcome`,
     `epistemic_comparison_memory`, `relationship_social`,
     `moral_identity`, `existential_drive`.
-12. The registered groupings are exact:
-
-    | Count | Ordered groups |
-    |---:|---|
-    | 1 | all six families in frozen order |
-    | 2 | `[event_agency, goal_threat_outcome, epistemic_comparison_memory]`; `[relationship_social, moral_identity, existential_drive]` |
-    | 3 | `[event_agency, goal_threat_outcome]`; `[epistemic_comparison_memory, relationship_social]`; `[moral_identity, existential_drive]` |
-    | 6 | six singleton groups in frozen order |
-
-13. Runtime default is two groups. `COGNITION_V3_APPRAISAL_GROUP_COUNT` is a
-    closed integer setting accepting `1`, `2`, `3`, or `6`, default `2`.
-    Production cutover may use only the smallest count whose matched live
-    appraisal gate passes. The mechanical selection rule is `2`, then `3`,
-    then `6`; count `1` is experimental evidence only and cannot be the
-    initial production value under this plan.
-14. Each family retains up to eight micro-items. Each item has exactly one
-    nullable proposition and one nullable delta, with the same V2 domains.
-    Empty or exact-repeat item semantics terminate that family. Group output
-    is an exact mapping from listed family id to its ordered item list.
-15. A grouped structural failure retries the same question once after tail
-    rollback. A second failure intersects the affected unanswered families
-    with the next finer registry partition and asks only strict-subset groups;
-    an unchanged intersection advances immediately to the following topology.
-    After topology `6` exhausts, optional affected families are omitted with
-    typed warnings. Accepted families are never regenerated.
-16. Valid but reducer-rejected appraisal items remain visible in the accepted
+12. A1 is the fixed world-facing stage and A2 is the fixed relation-facing
+    stage. The runtime grouping setting and 1/2/3/6 registry are removed; the
+    stage boundary is semantic rather than tunable.
+13. Each planned family returns exactly `propositions` and `deltas`. Each
+    array retains the V2 maximum of eight rows and the same V2 fields, kinds,
+    handles, paths, and numeric domains. Empty arrays mean no additional
+    supported product. Model-facing `question_id` echoes, nullable product
+    pairs, null-null terminators, and exact-repeat loop instructions are
+    omitted. Canonical V2 aggregate validation/reduction and every downstream
+    emotion, relationship, goal, planning, authorization, and resolver owner
+    remain unchanged.
+14. One A1/A2 request consumes attempt one for every listed family. Structural
+    failure rolls back that answer and directly asks each affected family once
+    through an explicit owning-stage singleton recovery. That request consumes
+    the family's second and final attempt. There is no same-group retry or
+    topology ladder. Accepted sibling families are never regenerated; an
+    exhausted optional family is omitted with its existing typed warning.
+15. The model-facing system anchor contains only stage-independent rules.
+    Every stage question carries its local objective, exact output schema,
+    relevant state subset, candidate index, allowed handles, proposition-kind
+    meanings, evidence domain, and writable paths adjacent to the answer.
+16. Valid but reducer-rejected appraisal products remain visible in the accepted
     assistant answer. I1 lists only qualitative accepted/rejected counts and
     state bands; the rejected item never mutates state.
 
@@ -829,7 +830,6 @@ class CognitionChainServicesV3:
     chain_lane: LLMCallConfig
     sidecar_lane: LLMCallConfig | None
     subconscious_enabled: bool = False
-    appraisal_group_count: Literal[1, 2, 3, 6] = 2
     turn_deadline_seconds: int = 240
 ```
 
@@ -837,9 +837,9 @@ Construction validates exact dataclass fields, a non-empty chain route, chain
 thinking disabled, `context_window_tokens >= 50000`, each step completion cap,
 normal total-ceiling admission, conditional extended-tier availability only
 when `context_window_tokens >= 65000`, sidecar completeness, sidecar thinking
-disabled, sidecar/chain identity inequality, required lane caps, the closed
-appraisal-group domain, and the `30..600` turn-deadline range. The selected
-connector injects both runtime values from `CognitionV3RouteSettingsV1`; the
+disabled, sidecar/chain identity inequality, required lane caps, and the
+`30..600` turn-deadline range. The selected connector injects the turn
+deadline from `CognitionV3RouteSettingsV1`; the
 facade never rereads route environment. API keys remain excluded from repr,
 diagnostics, persistence, and cache identity.
 
@@ -857,7 +857,6 @@ Configuration is engine-conditional and exact:
 | `COGNITION_V3_SIDECAR_LLM_MAX_COMPLETION_TOKENS` | default `8192`, minimum `8192` when sidecar exists |
 | `COGNITION_V3_SIDECAR_LLM_THINKING_ENABLED` | default `false`; `true` rejected |
 | `COGNITION_V3_SUBCONSCIOUS_ENABLED` | default `false`; requires sidecar when `true` |
-| `COGNITION_V3_APPRAISAL_GROUP_COUNT` | default `2`; closed to `1`, `2`, `3`, `6` |
 | `COGNITION_V3_TURN_DEADLINE_SECONDS` | default `240`; range `30..600` |
 
 The loaders return these closed immutable settings shapes before any
@@ -878,7 +877,6 @@ class CognitionV3RouteSettingsV1:
     chain: CognitionRouteSettingV1
     sidecar: CognitionRouteSettingV1 | None
     subconscious_enabled: bool
-    appraisal_group_count: Literal[1, 2, 3, 6]
     turn_deadline_seconds: int
 ```
 
@@ -2314,7 +2312,8 @@ production source change.
    execute Decision 46 completely. Run no further full real-LLM E2E attempt
    for that failure until the stage node and patched handoffs pass. Apply
    Decisions 45 and 47 to every correction.
-5. Evaluate grouping counts by the fixed 2→3→6 rule.
+5. Evaluate the fixed A1/A2 product contract and direct singleton recovery;
+   there is no appraisal topology selection pass.
 6. Calculate the fixed `semantic_successes / 72` rate, verify at least `69`
    successes, verify every residual against the presealed inherited-defect
    registry, and create the deferred residual register for up to three
@@ -2486,7 +2485,8 @@ permits the fixed matched-pair rerun described by the protocol.
 - [x] Gate 4 sidecar and recurrence accepted.
 - [x] Gate 5 observability and console accepted.
 - [x] Gate 6 deterministic/impact verification accepted.
-- [ ] Gate 7 live quality/serving/performance accepted.
+- [x] Gate 7 live quality/serving/performance accepted under the owner's
+  2026-08-22 critical-only semantic and retained-evidence amendment.
 - [ ] Gate 8 cutover/observation/final parent audit accepted.
 - [ ] Plan archived as completed.
 - [ ] Plan-closure goal marked complete after archive closure.
@@ -4349,3 +4349,146 @@ and must close before Gate 7 acceptance. The interrupted dynamic appraisal-
 domain prompt correction was removed before the batch began, leaving the last
 reviewed first-packet remediation as the candidate baseline. Documentation
 prose remains audited by the parent and has no documentation unit test.
+
+### Gate 7 input-flow architecture amendment — 2026-08-21
+
+The owner directed Gate 7 to preserve every function-level cognition feature
+while reconsidering the V2 model-call shape before further prompt iteration.
+This amendment supersedes the earlier appraisal Decisions 12–15 and the Gate 7
+2→3→6 selection step. It retains the A1, A2, I1, G1a, G1b, I2, W1, P1, X1,
+X2, R, and O owners; all six appraisal families; every V2 proposition and
+delta domain; per-family capacity; the 21-emotion derivation; all 11
+relationship axes; goals, bids, required selection, workspace collapse,
+planning, authorization, resolver recurrence, state validation, and external
+V2 input/output contracts.
+
+The retained live evidence establishes the boundary:
+
+- The sealed legacy-shaped A1 reproduction `exact.json` used two provider
+  calls, 6,373 then 6,464 provider prompt tokens, and about 36 seconds. Both
+  responses assigned the reporting `current_user` as actor of a reported
+  third-party event and used an out-of-family epistemic proposition kind;
+  bounded repair repeated the ownership error and exhausted structurally.
+- The answer-leakage-audited architecture probe used the same frozen case,
+  route, and model with one evidence occurrence, typed conversation roles,
+  candidate handles, local family domains, and no character/relationship,
+  capability, resolver, or duplicate-scene carrier. It used one provider call,
+  1,255 provider prompt tokens, and 5,298 ms. Its semantic direction improved:
+  both propositions used candidate event `ce1`, with no invented
+  `current_user` actor assignment.
+- The probe still failed structurally because the inherited nullable pair led
+  the model to emit scalar `delta: 1` beside a proposition. The sealed probe
+  artifact is
+  `test_artifacts/cognition_core_v3/cogv3-g1-047bed95-331653f8/local_semantic_resets/v3_appraisal_first_packet_carrier/architecture_probe.json`;
+  file SHA-256
+  `b2a0dd80f62315dd4896bc22fcc06d466f670e428ad6b94baaf8ccc8573ad159`.
+  Its deterministic harness module passed 21/21 tests before the live call.
+
+The resulting contract decision is architectural rather than case-specific
+prompt tuning:
+
+1. A1 and A2 are fixed semantic stages. The runtime grouping control and
+   1/2/3/6 topology registry leave the canonical runtime.
+2. Each planned family returns exact independent `propositions` and `deltas`
+   arrays, each retaining the V2 eight-row maximum and V2 field vocabulary.
+   This removes only the model-facing micro-loop ceremony: repeated
+   `question_id`, nullable proposition/delta pairs, null-null sentinels, and
+   exact-repeat termination.
+3. One grouped attempt consumes attempt one for its listed families. A
+   structural failure rolls back and routes directly to one singleton recovery
+   attempt per affected family. This preserves family isolation and the V2
+   two-attempt cap without a same-group repair or topology ladder.
+4. The system anchor retains character identity and universal semantic/JSON
+   rules. Exact stage contracts and local domains sit adjacent to the current
+   question.
+5. Dynamic input follows first-consumer ownership: observation evidence and
+   typed conversation frame at A1; character/relationship context at A2;
+   reduced qualitative state and goal carriers at G1; bid index at W1;
+   capabilities and resolver availability at P1; new observation deltas at R.
+   Each semantic evidence text appears once in the transcript.
+6. Deterministic code remains the only owner of parsing, validation, attempt
+   accounting, state reduction, emotions, relationship mutation, permissions,
+   execution, persistence, and delivery. It maps accepted family arrays into
+   the canonical V2 aggregate and invokes the existing V2 validators/reducers.
+
+Implementation proceeds in bounded checkpoints through the same reusable
+gpt-5.6-luna maximum-reasoning production worker: first appraisal product
+geometry and recovery; then first-consumer carrier projection and compact
+stage-independent anchor; then obsolete topology/configuration and dead-layer
+excision. Each checkpoint requires its exact unit/integration nodes, focused
+Ruff, compilation, diff check, and parent code audit. A smallest-component
+live verification follows deterministic acceptance; the full Gate 7 rerun
+remains governed by the sealed rerun and blinding rules.
+
+### Gate 7 critical-only acceptance and retained-evidence amendment — 2026-08-22
+
+The owner replaced the semantic pass rule and the post-remediation execution
+requirement after reviewing the complete failure census. A semantic trial now
+fails Gate 7 only for role reversal, material internal self-conflict, or a
+boundary/safety conflict. Other rubric weaknesses remain visible diagnostic
+warnings. Structural schema, provenance, privacy, permission, authorization,
+effect, persistence, and delivery failures retain zero tolerance.
+
+The owner also directed the parent to retain prior passing tests and accept a
+remediated failure owner from its narrow post-fix verification without
+repeating the full passing inventory. This is an explicit evidence-policy
+override, not a mutation of the sealed Gate 1 rubric or prior blinded reviews.
+The original detailed scores, raw artifacts, mappings, and arithmetic audit
+remain immutable and diagnostic.
+
+The sealed relaxed batch result before the final role fix was `65/72` V3
+critical passes. Its seven failures were four role reversals and the three
+`future_speak_authority` self-conflicts. The final structural correction places
+the typed five-field dialogue-role binding beside its matching current-event
+evidence, carries the same binding into goal stages, excludes memory/tool
+evidence from inheritance, removes private source identity from the prompt,
+and fails unknown/private carrier fields closed. It does not parse pronouns or
+rewrite model semantics deterministically.
+
+The two owner-selected narrow live checks passed after that source change:
+
+- `existential_drive:1` accepted `self` as subject and experiencer and
+  persisted an empty event `role_refs`; artifact SHA-256
+  `7b68815bd3a5dfae07ff6870a7c24293c9453660653c9b0816af6c9526cc4e40`.
+- `event_agency_and_moral_chain:3` invented no self/current-user event role and
+  persisted an empty event `role_refs`; artifact SHA-256
+  `b638b925faeeabd02ad8a49d8d8d6f1a14cb28c459686fa1013f6279789636bd`.
+
+Both trials were eligible, input/output-validator clean, input-unchanged, and
+prefix-exact. Deterministic V3 unit/integration verification passed `181`
+tests. The correction therefore substitutes passes for the four trials in the
+single role-reversal owner group. The effective accepted result is `69/72`
+(`95.833%`). The three `future_speak_authority` trials remain explicitly
+reported `self_conflict` failures and consume the full allowed residual count;
+they are not relabeled as passes.
+
+The input-flow optimization preserved all cognition stages, six appraisal
+families, emotion/relationship axes, goals, selection, planning,
+authorization, resolver, and persistence features. The 21-emotion reducer
+still persists `emotion_id`, `primary_root`, `root_refs`, and `cause_status`
+for active affect and exposes `cause_summary`; emotion-plus-cause is therefore
+preserved in V3.
+
+For retained performance evidence, the pre-compaction cold run already passed
+eligibility, full median/p95 ratios, primary median reduction, prefix
+exactness, single-primary ownership, and foreign-interleave checks. Its sole
+failure was the first-primary ratio (`1.9936519198167852`). The compact
+first-consumer design reduced the observed first request from `16,294`
+characters/`6,151` provider prompt tokens to `10,253` characters/`3,295`
+provider prompt tokens while retaining exact prefixes. Previously passing
+warm, changed-tail, resolver, concurrency, sidecar, long-context, and serving
+evidence is retained. The corrected serving probe directly produced provider
+context rejection; artifact SHA-256
+`20a8b1838b8b201b3ba5f58e45336b33e6da43a984513e11a0f230ad0284fc57`.
+Under the owner's retained-evidence instruction, these repaired owner groups
+are accepted without full performance-node repetition.
+
+The attempted new full baseline
+`cogv3-g7-evidence-role-official-20260822` was stopped before its first call
+and produced no artifact. The older `cogv3-g7-role-binding-final-20260822`
+batch predates the evidence-local source change and is retained only as stale
+diagnostic evidence. The authoritative acceptance record is
+`test_artifacts/cognition_core_v3/cogv3-g7-rerun-20260822/gate7_owner_accepted_disposition.json`.
+
+Gate 7 is accepted. Gate 8 cutover, observation, final parent audit, sign-off,
+and archive closure remain pending.

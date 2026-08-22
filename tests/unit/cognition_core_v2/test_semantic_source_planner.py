@@ -20,7 +20,6 @@ from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
 )
 from tests.cognition_core_v2_test_helpers import canonical_identity_context
 
-
 NOW = "2026-07-14T00:00:00Z"
 
 
@@ -205,20 +204,33 @@ def _lifecycle_state() -> dict[str, Any]:
 
 
 def _goal_threat_evidence() -> list[dict[str, Any]]:
-    """Build evidence that authorizes only the terminal-outcome family."""
+    """Build source-linked evidence for every eligible outcome entity."""
 
-    return [{
-        "evidence_handle": "e1",
-        "evidence_ref": {
-            "source_kind": "episode",
-            "source_id": "episode-planner-terminal",
-            "occurred_at": NOW,
-            "semantic_summary": "A current outcome observation is available.",
-        },
-        "semantic_text": "A current outcome observation is available.",
-        "visible_to": ["q:goal_threat_outcome"],
-        "authority": "current_event",
-    }]
+    source_rows = (
+        ("goal", 1),
+        ("goal", 2),
+        ("threat", 1),
+        ("event", 1),
+        ("knowledge-gap", 1),
+        ("knowledge-gap", 2),
+    )
+    evidence = []
+    for index, (kind, entity_index) in enumerate(source_rows, start=1):
+        evidence.append({
+            "evidence_handle": f"e{index}",
+            "evidence_ref": {
+                "source_kind": "episode",
+                "source_id": f"planner-{kind}-{entity_index}",
+                "occurred_at": NOW,
+                "semantic_summary": (
+                    "A current outcome observation is available."
+                ),
+            },
+            "semantic_text": "A current outcome observation is available.",
+            "visible_to": ["q:goal_threat_outcome"],
+            "authority": "current_event",
+        })
+    return evidence
 
 
 def _goal_outcome_question() -> dict[str, Any]:
@@ -287,6 +299,54 @@ def test_goal_outcome_keeps_eligible_handles_and_candidates() -> None:
     )
 
 
+def test_current_source_prunes_unrelated_native_event_handles() -> None:
+    """Expose only source-linked stored events beside the current candidate."""
+
+    evidence, state, _ = _projection()
+    state["active_events"] = [_event(1, "active")]
+    state["active_events"][0]["entity_id"] = "event:stored-abuse"
+    state["active_events"][0]["evidence_refs"] = [{
+        "source_kind": "episode",
+        "source_id": "stored-abuse",
+        "occurred_at": NOW,
+        "semantic_summary": "Stored abuse source.",
+    }]
+    evidence = [{
+        "evidence_handle": "e1",
+        "evidence_ref": {
+            "source_kind": "episode",
+            "source_id": "transit-current",
+            "occurred_at": NOW,
+            "semantic_summary": "Transit source.",
+        },
+        "semantic_text": "Transit source.",
+        "visible_to": ["q:event_agency"],
+        "authority": "current_event",
+    }]
+    projection = project_state_for_prompt(
+        state,
+        character_constraints=_constraints(),
+        character_identity_context=canonical_identity_context(),
+        evidence=evidence,
+    )
+    question = next(
+        question
+        for question in plan_semantic_questions(
+            evidence,
+            state,
+            projection.handle_to_ref,
+        )
+        if question["question_kind"] == "event_agency"
+    )
+
+    handles = set(question["permitted_role_handles"])
+    paths = set(question["permitted_delta_paths"])
+    assert "ev1" not in handles
+    assert "ce1" in handles
+    assert not any(path.startswith("active_events.ev1.") for path in paths)
+    assert any(path.startswith("active_events.ce1.") for path in paths)
+
+
 def test_moral_identity_questions_exclude_standard_handles() -> None:
     """Keep repository standards out of model-facing role-handle domains."""
 
@@ -321,6 +381,7 @@ def test_group_questions_separate_causal_and_role_assignment_handles() -> None:
 
     evidence, state, projection = _projection()
     state["goals"] = [_goal(1, "pursuing")]
+    state["goals"][0]["evidence_refs"] = [evidence[0]["evidence_ref"]]
     projection = project_state_for_prompt(
         state,
         character_constraints=_constraints(),

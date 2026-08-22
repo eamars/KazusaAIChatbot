@@ -71,7 +71,6 @@ COGNITION_V3_SIDECAR_LLM_MODEL=your-sidecar-model
 COGNITION_V3_SIDECAR_LLM_MAX_COMPLETION_TOKENS=8192
 COGNITION_V3_SIDECAR_LLM_THINKING_ENABLED=false
 COGNITION_V3_SUBCONSCIOUS_ENABLED=false
-COGNITION_V3_APPRAISAL_GROUP_COUNT=2
 COGNITION_V3_TURN_DEADLINE_SECONDS=240
 # Select the following twelve core route bundles when COGNITION_CORE_ENGINE=v2.
 COGNITION_LLM_APPRAISAL_EVENT_AGENCY_BASE_URL=http://localhost:1234/v1
@@ -361,8 +360,8 @@ exact 6,000-character compact-JSON sub-budget before the unchanged
 Keep `COGNITION_CORE_ENGINE=v2` for the documented pre-cutover default. A V3
 startup requires the complete `COGNITION_V3_CHAIN_LLM_*` bundle and uses only
 the optional all-or-nothing `COGNITION_V3_SIDECAR_LLM_*` bundle when configured.
-`COGNITION_V3_APPRAISAL_GROUP_COUNT` accepts `1`, `2`, `3`, or `6` (default `2`)
-and `COGNITION_V3_TURN_DEADLINE_SECONDS` accepts `30..600` (default `240`).
+V3 uses the fixed `fixed_a1_a2` appraisal-stage layout, and
+`COGNITION_V3_TURN_DEADLINE_SECONDS` accepts `30..600` (default `240`).
 The primary caller declares a 50,000-token normal total ceiling; the
 conditional 65,000-token ceiling is available only when
 `COGNITION_V3_CHAIN_LLM_CONTEXT_WINDOW_TOKENS` is at least `65000`. The

@@ -285,6 +285,22 @@ def _materialize_proposition_root(
         )
         incoming["role_refs"] = incoming_roles
         existing = _matching_event(state, incoming)
+    elif existing is None and candidate_subject:
+        incoming = _new_causal_candidate(
+            state,
+            subject_kind,
+            root_id,
+            proposition["semantic_value"],
+            [evidence_ref],
+        )
+        existing = _matching_source_entity(
+            entities,
+            incoming,
+            eligible_statuses={
+                "threat": {"active"},
+                "knowledge_gap": {"open", "reduced"},
+            }[subject_kind],
+        )
     terminal_status = _proposition_terminal_status(
         subject_kind,
         proposition["proposition_kind"],
@@ -1796,7 +1812,15 @@ def _matching_event(
     state: Mapping[str, Any],
     incoming: Mapping[str, Any],
 ) -> dict[str, Any] | None:
-    """Find an existing event by canonical entity identity or affected refs."""
+    """Find an event by source identity, canonical id, or affected refs."""
+
+    source_match = _matching_source_entity(
+        state.get("active_events", []),
+        incoming,
+        eligible_statuses={"active"},
+    )
+    if source_match is not None:
+        return source_match
 
     for entity in state.get("active_events", []):
         if not isinstance(entity, dict):
@@ -1808,6 +1832,37 @@ def _matching_event(
         if _compatible_event_roles(incoming, entity):
             return entity
     return None
+
+
+def _matching_source_entity(
+    entities: Sequence[Mapping[str, Any]],
+    incoming: Mapping[str, Any],
+    *,
+    eligible_statuses: set[str],
+) -> dict[str, Any] | None:
+    """Find one lifecycle-eligible causal row by exact evidence identity."""
+
+    incoming_identities = {
+        (evidence_ref["source_kind"], evidence_ref["source_id"])
+        for evidence_ref in incoming.get("evidence_refs", [])
+    }
+    if not incoming_identities:
+        return None
+    matches = [
+        entity
+        for entity in entities
+        if entity.get("status") in eligible_statuses
+        and incoming_identities.intersection({
+            (evidence_ref["source_kind"], evidence_ref["source_id"])
+            for evidence_ref in entity.get("evidence_refs", [])
+        })
+    ]
+    if len(matches) > 1:
+        raise CognitionStateError(
+            "ambiguous same-source causal entities"
+        )
+    matched_entity = matches[0] if matches else None
+    return matched_entity
 
 
 def _compatible_event_roles(

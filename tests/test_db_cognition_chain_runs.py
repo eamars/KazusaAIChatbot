@@ -57,8 +57,7 @@ class _ChainRunCursor:
         self.rows = [
             row
             for row in rows
-            if row.get("run_id") == query.get("run_id")
-            and row.get("llm_trace_id") == query.get("llm_trace_id")
+            if all(row.get(key) == value for key, value in query.items())
         ]
         self.rows.sort(
             key=lambda row: str(row.get("completed_at", "")),
@@ -104,7 +103,7 @@ def _document(
     """Build one complete sanitized chain-run document."""
 
     return {
-        "schema_version": "cognition_chain_run.v1",
+        "schema_version": "cognition_chain_run.v2",
         "chain_run_id": chain_run_id,
         "engine": "v3",
         "run_id": run_id,
@@ -114,7 +113,7 @@ def _document(
         "chain_model_name": "chain-model",
         "sidecar_model_name": "sidecar-model",
         "subconscious_enabled": False,
-        "appraisal_group_count": 2,
+        "appraisal_stage_layout": "fixed_a1_a2",
         "started_at": "2026-08-20T00:00:00Z",
         "completed_at": "2026-08-20T00:00:01Z",
         "terminal_disposition": "complete",
@@ -182,6 +181,34 @@ async def test_chain_run_read_requires_exact_run_and_trace_ids(
         run_id="",
         llm_trace_id="trace-1",
     ) is None
+
+
+@pytest.mark.asyncio
+async def test_chain_run_read_ignores_legacy_schema_rows(monkeypatch):
+    """Reads return only complete v2 rows and ignore matching v1 rows."""
+
+    collection = _ChainRunCollection()
+    monkeypatch.setattr(
+        chain_runs,
+        "get_db",
+        AsyncMock(return_value=_ChainRunDatabase(collection)),
+    )
+    legacy = _document(chain_run_id="cogchain-legacy")
+    legacy["schema_version"] = "cognition_chain_run.v1"
+    collection.rows["cogchain-legacy"] = legacy
+
+    assert await chain_runs.get_cognition_chain_run(
+        run_id="run-1",
+        llm_trace_id="trace-1",
+    ) is None
+
+    current = _document(chain_run_id="cogchain-current")
+    collection.rows["cogchain-current"] = current
+    found = await chain_runs.get_cognition_chain_run(
+        run_id="run-1",
+        llm_trace_id="trace-1",
+    )
+    assert found == current
 
 
 def test_db_exports_exact_chain_run_helpers() -> None:

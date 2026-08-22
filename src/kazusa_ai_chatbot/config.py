@@ -6,10 +6,12 @@ import json
 import math
 import os
 from dataclasses import dataclass, field
-from typing import Literal, cast
+from typing import Literal
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
+
+COGNITION_V3_APPRAISAL_STAGE_LAYOUT: Literal["fixed_a1_a2"] = "fixed_a1_a2"
 
 
 def _positive_int_from_env(name: str, default: str) -> int:
@@ -275,8 +277,10 @@ class CognitionV3RouteSettingsV1:
     chain: CognitionRouteSettingV1
     sidecar: CognitionRouteSettingV1 | None
     subconscious_enabled: bool
-    appraisal_group_count: Literal[1, 2, 3, 6]
     turn_deadline_seconds: int
+    appraisal_stage_layout: Literal["fixed_a1_a2"] = (
+        COGNITION_V3_APPRAISAL_STAGE_LAYOUT
+    )
 
 
 def load_cognition_v2_route_settings() -> dict[str, CognitionRouteSettingV1]:
@@ -401,17 +405,6 @@ def load_cognition_v3_route_settings() -> CognitionV3RouteSettingsV1:
             "COGNITION_V3_SUBCONSCIOUS_ENABLED requires a V3 sidecar route"
         )
 
-    appraisal_group_value = int(
-        os.getenv("COGNITION_V3_APPRAISAL_GROUP_COUNT", "2")
-    )
-    if appraisal_group_value not in {1, 2, 3, 6}:
-        raise ValueError(
-            "COGNITION_V3_APPRAISAL_GROUP_COUNT must be one of: 1, 2, 3, 6"
-        )
-    appraisal_group_count = cast(
-        Literal[1, 2, 3, 6],
-        appraisal_group_value,
-    )
     turn_deadline_seconds = _bounded_int_from_env(
         "COGNITION_V3_TURN_DEADLINE_SECONDS",
         "240",
@@ -422,8 +415,8 @@ def load_cognition_v3_route_settings() -> CognitionV3RouteSettingsV1:
         chain=chain,
         sidecar=sidecar,
         subconscious_enabled=subconscious_enabled,
-        appraisal_group_count=appraisal_group_count,
         turn_deadline_seconds=turn_deadline_seconds,
+        appraisal_stage_layout=COGNITION_V3_APPRAISAL_STAGE_LAYOUT,
     )
     return settings
 

@@ -9,6 +9,11 @@ import pytest
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     validate_cognition_core_output,
 )
+from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+    bind_v2_attempt_ledger,
+    create_v2_attempt_ledger,
+    reset_v2_attempt_ledger,
+)
 from kazusa_ai_chatbot.cognition_core_v3 import facade as v3_facade
 from kazusa_ai_chatbot.cognition_core_v3.contracts import (
     CognitionChainServicesV3,
@@ -26,13 +31,7 @@ from tests.test_cognition_chain_connector_mapping import _global_state
 
 def _empty_family_rows(families):
     return {
-        family: [
-            {
-                "question_id": family,
-                "proposition": None,
-                "delta": None,
-            }
-        ]
+        family: {"propositions": [], "deltas": []}
         for family in families
     }
 
@@ -154,10 +153,17 @@ async def test_serial_cognition_path_produces_valid_v2_output() -> None:
         if row["evidence_ref"]["source_kind"] == "episode"
     )
     llm = SerialScriptedLLM(episode_handle)
-    output = await v3_facade._run_serial_cognition(
-        payload,
-        _serial_services(llm),
+    ledger_token = bind_v2_attempt_ledger(
+        create_v2_attempt_ledger("serial-integration"),
+        graph_attempt=1,
     )
+    try:
+        output = await v3_facade._run_serial_cognition(
+            payload,
+            _serial_services(llm),
+        )
+    finally:
+        reset_v2_attempt_ledger(ledger_token)
 
     validated = validate_cognition_core_output(output)
     assert validated["schema_version"] == "cognition_core_output.v2"

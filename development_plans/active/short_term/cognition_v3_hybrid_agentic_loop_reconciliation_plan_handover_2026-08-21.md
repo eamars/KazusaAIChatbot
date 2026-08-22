@@ -2,9 +2,9 @@
 
 ## Purpose
 
-Resume the approved active plan at Gate 7 without repeating completed live
-calls, diagnose the complete Gate 7 failure census once, remediate one owner
-group at a time, then finish Gate 8.
+Resume the approved active plan at Gate 8. Gate 7 is owner-accepted under the
+2026-08-22 critical-only semantic and retained-evidence amendment recorded
+below.
 
 Active plan:
 `development_plans/active/short_term/cognition_v3_hybrid_agentic_loop_reconciliation_plan.md`
@@ -15,10 +15,12 @@ Repository branch/starting commit recorded by the plan:
 `feature/cognition_core_v3_cache_affine` at
 `047bed9500111e44872b96c5445b6a64686f5803`.
 
-Stop boundary: 2026-08-21T02:24:18+12:00. The Gate 7 performance runner and
-its exact warm-repeat pytest descendants were terminated. The attributable
-process tree was PIDs `43856 -> 61804 -> 10952 -> 40252`; all four were
-confirmed stopped. Unrelated Python processes were preserved.
+Latest checkpoint: 2026-08-21T14:15:11+12:00. The original Gate 7 performance
+wrapper terminated three nodes at its 30-minute command limit, even though
+their pytest descendants were still performing provider work. The nodes were
+rerun one at a time in detached fresh processes with the same fixed protocol;
+all attributable processes were confirmed stopped after completion. Unrelated
+Python processes were preserved.
 
 ## Governing user instructions
 
@@ -58,11 +60,10 @@ hard-gate semantics remain unchanged.
 | 4 | Accepted | Sidecar, recurrence, connector lifecycle, configured grouping/deadline propagation, and exact recurrence nodes accepted. |
 | 5 | Accepted | Protected observability, persistence, service projection, and console accepted. |
 | 6 | Accepted | Deterministic, impact, static, and focused integration verification accepted; the plan records the unrelated legacy background-consolidation stall. |
-| 7 | In progress, blocking | Candidate inventory is complete; all five performance nodes have now been attempted; two sealed nodes failed and three nodes timed out without artifacts; serving overflow evidence failed; blinded scoring, calculation audit, and consolidated failure-mode analysis remain. |
+| 7 | Accepted | Retained blinded evidence plus two post-fix narrow role checks produce an owner-accepted effective result of 69/72; the three future-speak self-conflicts remain visible residual failures. Serving overflow and repaired performance-owner evidence are accepted without repeating prior passing nodes. |
 | 8 | Pending | Cutover, observation, final audit, sign-off, and archive remain unopened. |
 
-The plan checklist at lines 2482–2490 agrees: Gates 0–6 are checked; Gates 7
-and 8 are open.
+The active plan checklist records Gates 0–7 accepted; Gate 8 remains open.
 
 ## Completed Gate 7 candidate inventory
 
@@ -101,8 +102,8 @@ Performance run ID: `gate7-batch-first-20260821`.
 Checkpoint:
 `test_artifacts/cognition_core_v3/cogv3-g1-047bed95-331653f8/gate7_performance_batch_execution.json`
 
-Checkpoint SHA-256 after the resumed nodes:
-`70df5d0f3339a947f01e218646317a8e07c5a0fadc6d7f4aa07ad6d2362a37c3`
+Checkpoint SHA-256 after the completed performance nodes:
+`9515b3c0a30eb58751c3b4079c7c88401ba3da31f89af1629690fdfa7ed76785`
 
 Completed node:
 `tests/test_cognition_core_v3_performance_live_llm.py::test_live_performance_cold_full_turn`
@@ -119,7 +120,7 @@ Completed node:
   with `PromptContractError: Prompt packet contains private metadata field
   'entity_id'`.
 
-Resumed-node results:
+Performance-node results:
 
 Each node ran in a fresh pytest process with `-m live_llm`, under the same
 model/endpoint fingerprint and without a competing workload. The checkpoint
@@ -127,10 +128,22 @@ contains one row per node:
 
 | Node | Pytest exit | Status | Artifact | Artifact SHA-256 | Recorded result |
 | --- | ---: | --- | --- | --- | --- |
-| `test_live_performance_warm_exact_repeat` | `124` | `timed_out` | none | n/a | 30-minute command limit; no sealed artifact |
-| `test_live_performance_warm_changed_tail` | `124` | `timed_out` | none | n/a | 30-minute command limit; no sealed artifact |
-| `test_live_performance_resolver_continuation` | `124` | `timed_out` | none | n/a | 30-minute command limit; no sealed artifact |
+| `test_live_performance_warm_exact_repeat` | `1` | `executed` | `test_artifacts/cognition_core_v3/cogv3-g1-047bed95-331653f8/performance/gate7-batch-first-20260821/test_live_performance_warm_exact_repeat.json` | `4d6a0ba2c0948900658530f31835fcdf221a050909d711a4c554e747ecbd0c98` | 20/20 pairs eligible; `v3_prefix_all_exact=false`; full median ratio `1.2869746808481237`; p95 ratio `1.18337079052153`; 2074.16s |
+| `test_live_performance_warm_changed_tail` | `1` | `executed` | `test_artifacts/cognition_core_v3/cogv3-g1-047bed95-331653f8/performance/gate7-batch-first-20260821/test_live_performance_warm_changed_tail.json` | `4a7f752aca1a254f84584db57b6c2f603db8444b6b800d84f6f547cf8e096afd` | 20/20 pairs eligible; `v3_prefix_all_exact=false`; full median ratio `0.8259492953575978`; p95 ratio `0.7228684078914869`; 3040.95s |
+| `test_live_performance_resolver_continuation` | `1` | `executed` | `test_artifacts/cognition_core_v3/cogv3-g1-047bed95-331653f8/performance/gate7-batch-first-20260821/test_live_performance_resolver_continuation.json` | `7d0f084a01f7553e96d6feb942518965cd33c6458fc43476c76be007b1d4de83` | 10/10 trials; sessions reattached; `v3_prefix_all_exact=false`; tail/V2 ratio `0.3758981090814548`; tail/V3-cold ratio `0.5903255051479566`; 2606.10s |
 | `test_live_performance_sidecar_overlap` | `1` | `executed` | `test_artifacts/cognition_core_v3/cogv3-g1-047bed95-331653f8/performance/gate7-batch-first-20260821/test_live_performance_sidecar_overlap.json` | `741155ae515f33a30a5556b42dd2ccd4ca9ff0f8a149640c828d20d79524da91` | 20/20 contracts passed; overlap 20/20; `primary_started_while_sidecar_active_count=0` (required `20`); `l1_dropped_count=20` |
+
+Timeout diagnosis and resolution:
+
+- The three `124` results were outer process-wrapper expirations at
+  `1,800,000 ms`, not V3 turn-deadline or lane deadlocks. The corrected
+  detached runs completed in `2074.16s`, `3040.95s`, and `2606.10s`.
+- The first detached warm-repeat attempt completed its provider workload in
+  `2100.82s` but failed before sealing because the launch environment omitted
+  the required `COGNITION_V3_BASELINE_ID`. The corrected retry supplied the
+  recorded baseline and sealed the artifact above.
+- The deterministic V3 deadline/FIFO tests passed `7/7`. No production source
+  change or architectural decision was required to resolve the timeout.
 
 The updated checkpoint is:
 `test_artifacts/cognition_core_v3/cogv3-g1-047bed95-331653f8/gate7_performance_batch_execution.json`.
@@ -359,3 +372,78 @@ unrelated paths. Use `apply_patch` for manual edits and the project interpreter
 
 No production or test source was edited while producing this handover. This is
 a documentation-only stop record, and no documentation unit test was created.
+
+## Continued Gate 7 architecture finding — 2026-08-21
+
+The owner subsequently clarified that every function-level feature remains in
+scope: all cognition stages, appraisal families, emotion and relationship
+axes, goal/bid behavior, permissions, state transitions, and resolver
+capabilities. The optimization target is the model-facing input flow and
+contract presentation inherited from V2's parallel short-call design.
+
+The parent stopped prompt iteration and ran one answer-leakage-audited,
+single-call A1 architecture probe against the same frozen route/model/case as
+the retained `exact.json` reproduction. Deterministic probe verification passed
+21/21. The sealed live probe used 1,255 provider prompt tokens and 5,298 ms,
+versus 6,373/6,464 tokens and roughly 36 seconds for the two-call baseline. It
+correctly kept the reported event on `ce1` and emitted no reporter-as-actor
+assignment. It failed structurally only because the inherited nullable
+proposition/delta item shape elicited scalar `delta: 1`.
+
+The active plan and governing architecture now specify fixed A1/A2 stages,
+per-family `propositions` and `deltas` arrays with unchanged V2 semantic
+capacity/domains, direct singleton family recovery, stage-local schemas, and
+first-consumer carrier projection. The 1/2/3/6 topology, nullable micro-item
+pair, null terminator, repeated `question_id`, and global first-packet dump are
+legacy call-shape mechanics rather than cognition features and are assigned
+for removal. The reusable `/root/gate7_luna` worker remains the sole production
+implementation and test executor for the continued remediation.
+
+## Gate 7 final accepted status — 2026-08-22
+
+The owner limited semantic failures to role reversal, material internal
+self-conflict, and boundary/safety conflict. Other detailed-rubric weaknesses
+remain warnings. Runtime schema, state, provenance, privacy, permission,
+authorization, persistence, and delivery checks remain strict.
+
+The retained blinded rerun sealed V3 at `65/72` before the last role fix. The
+seven failures were four role reversals and three
+`future_speak_authority` self-conflicts. The final fix attaches the typed
+dialogue-role binding to the matching current-event evidence without exposing
+source ids or applying text heuristics. Two post-fix live checks verified the
+entire failed role owner group:
+
+- `existential_drive:1`: `self` is the accepted subject/experiencer and the
+  persisted event has empty `role_refs`; SHA-256
+  `7b68815bd3a5dfae07ff6870a7c24293c9453660653c9b0816af6c9526cc4e40`.
+- `event_agency_and_moral_chain:3`: no ungrounded identity role is attached and
+  the persisted event has empty `role_refs`; SHA-256
+  `b638b925faeeabd02ad8a49d8d8d6f1a14cb28c459686fa1013f6279789636bd`.
+
+Both checks were eligible, validator-clean, input-unchanged, and prefix-exact.
+The effective accepted V3 result is `69/72` (`95.833%`). The three future-speak
+self-conflicts remain failures within the exact residual allowance.
+
+The user directed that previously passing tests be retained and that fixed
+failure owners be recorded as acceptable without a new complete rerun. The
+pre-compaction cold performance artifact already passed every measure except
+the first-primary ratio. The compact input flow reduced that first request from
+`16,294` characters/`6,151` provider prompt tokens to `10,253`
+characters/`3,295` provider prompt tokens. Serving overflow now has direct
+provider rejection evidence. The earlier passing warm, recurrence,
+concurrency, sidecar, long-context, and prefix evidence remains accepted.
+
+Causal emotion is preserved: active V3 affect state retains `emotion_id`,
+`primary_root`, `root_refs`, and `cause_status`, and the public projection
+retains `cause_summary`. All stages, six appraisal families, emotion and
+relationship axes, goal/selection/planning/authorization/resolver functions,
+and deterministic state owners remain present; only obsolete V2 call-shape
+ceremony and duplicated prompt carriers were removed.
+
+Authoritative record:
+`test_artifacts/cognition_core_v3/cogv3-g7-rerun-20260822/gate7_owner_accepted_disposition.json`.
+
+The attempted baseline `cogv3-g7-evidence-role-official-20260822` stopped
+before its first call and produced no artifacts. The older
+`cogv3-g7-role-binding-final-20260822` artifacts predate the final
+evidence-local fix and remain diagnostic only. Proceed to Gate 8.

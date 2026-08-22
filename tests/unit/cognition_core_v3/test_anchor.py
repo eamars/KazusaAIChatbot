@@ -55,9 +55,6 @@ def test_system_head_excludes_dynamic_turn_data_and_is_byte_stable() -> None:
     for contract_name in prompt.CHAIN_CONTRACT_NAMES:
         assert contract_name in anchor.ENGINE_MANUAL
     for stable_schema_field in (
-        "question_id",
-        "proposition",
-        "delta",
         "relational_willingness",
         "selected_response_operation",
         "primary_bid_handle",

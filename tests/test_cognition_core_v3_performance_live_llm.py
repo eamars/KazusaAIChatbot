@@ -6,14 +6,17 @@ import hashlib
 import json
 import math
 import os
+import re
 import statistics
 import threading
 import time
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime, timezone
+from itertools import pairwise
 from pathlib import Path
-from typing import Any, Literal, Mapping, Sequence
+from typing import Any, Literal
 
 import pytest
 from langchain_core.messages import BaseMessage
@@ -30,6 +33,9 @@ from kazusa_ai_chatbot.cognition_core_v2.facade import (
 from kazusa_ai_chatbot.cognition_core_v3 import facade as v3_facade
 from kazusa_ai_chatbot.cognition_core_v3.contracts import (
     CognitionChainServicesV3,
+)
+from kazusa_ai_chatbot.cognition_core_v3.registry import (
+    APPRAISAL_STAGE_FAMILIES,
 )
 from kazusa_ai_chatbot.cognition_core_v3.session import ChainSessionRegistry
 from kazusa_ai_chatbot.config import COGNITION_CORE_ENGINE
@@ -154,6 +160,113 @@ def _route_identity(config: LLMCallConfig | None) -> tuple[str, str] | None:
     return config.base_url.rstrip("/").lower(), config.model
 
 
+def _is_explicit_reanchor_packet(content: str) -> bool:
+    """Recognize the exact re-anchor carrier emitted by the executor."""
+
+    try:
+        packet = json.loads(content)
+    except (TypeError, json.JSONDecodeError):
+        return False
+    if not isinstance(packet, Mapping) or set(packet) != {"reanchor"}:
+        return False
+    anchor = packet["reanchor"]
+    if not isinstance(anchor, Mapping):
+        return False
+    if set(anchor) != {"accepted_products", "current_question"}:
+        return False
+    accepted_products = anchor["accepted_products"]
+    current_question = anchor["current_question"]
+    if not isinstance(accepted_products, list):
+        return False
+    if not all(isinstance(row, Mapping) for row in accepted_products):
+        return False
+    if not isinstance(current_question, Mapping):
+        return False
+    if set(current_question) != {"contract_name", "facts", "interludes"}:
+        return False
+    if (
+        not isinstance(current_question["contract_name"], str)
+        or not current_question["contract_name"]
+    ):
+        return False
+    if not isinstance(current_question["facts"], Mapping):
+        return False
+    interludes = current_question["interludes"]
+    return isinstance(interludes, list) and all(
+        isinstance(row, Mapping) for row in interludes
+    )
+
+
+_REPAIR_STAGE_PATTERN = re.compile(
+    r"^(?P<base>.+)\.repair(?P<attempt>[1-9][0-9]*)$"
+)
+
+
+def _call_stage_name(call: Mapping[str, Any]) -> str | None:
+    """Return one captured call's stage telemetry when it is well-shaped."""
+
+    config = call.get("config")
+    if not isinstance(config, Mapping):
+        return None
+    stage_name = config.get("stage_name")
+    return stage_name if isinstance(stage_name, str) else None
+
+
+def _is_sequential_repair_transition(
+    previous: Mapping[str, Any],
+    current: Mapping[str, Any],
+) -> bool:
+    """Require explicit same-owner, successive repair-stage telemetry."""
+
+    previous_stage = _call_stage_name(previous)
+    current_stage = _call_stage_name(current)
+    if previous_stage is None or current_stage is None:
+        return False
+    current_match = _REPAIR_STAGE_PATTERN.fullmatch(current_stage)
+    if current_match is None:
+        return False
+    current_base = current_match.group("base")
+    current_attempt = int(current_match.group("attempt"))
+    previous_match = _REPAIR_STAGE_PATTERN.fullmatch(previous_stage)
+    if previous_match is None:
+        return current_base == previous_stage and current_attempt == 1
+    previous_base = previous_match.group("base")
+    previous_attempt = int(previous_match.group("attempt"))
+    return (
+        current_base == previous_base
+        and current_attempt == previous_attempt + 1
+    )
+
+
+def _is_appraisal_recovery_stage_transition(
+    previous_stage: str | None,
+    current_stage: str | None,
+) -> bool:
+    """Recognize only registry-ordered grouped-appraisal recovery stages."""
+
+    if previous_stage is None or current_stage is None:
+        return False
+    for prefix in ("", "R."):
+        for stage_index, (stage_id, families) in enumerate(
+            APPRAISAL_STAGE_FAMILIES
+        ):
+            stage_name = f"{prefix}{stage_id}"
+            registered_stages = [
+                stage_name,
+                *(f"{stage_name}.{family}" for family in families),
+            ]
+            if stage_index + 1 < len(APPRAISAL_STAGE_FAMILIES):
+                next_stage_id = APPRAISAL_STAGE_FAMILIES[stage_index + 1][0]
+                registered_stages.append(f"{prefix}{next_stage_id}")
+            else:
+                registered_stages.append(f"{prefix}G1a")
+            if (previous_stage, current_stage) in pairwise(
+                registered_stages
+            ):
+                return True
+    return False
+
+
 def _message_snapshot(message: BaseMessage) -> dict[str, Any]:
     """Project one request message into exact structural performance evidence."""
 
@@ -162,6 +275,7 @@ def _message_snapshot(message: BaseMessage) -> dict[str, Any]:
         "message_type": type(message).__name__,
         "content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
         "content_chars": len(content),
+        "explicit_reanchor": _is_explicit_reanchor_packet(content),
     }
     return snapshot
 
@@ -173,9 +287,24 @@ def _has_nonempty_l1_residue(messages: Sequence[BaseMessage]) -> bool:
         return False
     content = str(getattr(messages[-1], "content", ""))
     try:
-        payload = json.loads(content)
-    except json.JSONDecodeError:
+        packet = json.loads(content)
+    except (TypeError, json.JSONDecodeError):
         return False
+    if not isinstance(packet, list):
+        return False
+
+    question_rows = [
+        section["question"]
+        for section in packet
+        if (
+            isinstance(section, Mapping)
+            and set(section) == {"question"}
+            and isinstance(section["question"], Mapping)
+        )
+    ]
+    if len(question_rows) != 1:
+        return False
+    payload = question_rows[0].get("payload")
     if not isinstance(payload, Mapping):
         return False
     residue = payload.get("l1_residue")
@@ -389,32 +518,112 @@ def _performance_services(
 
 
 def _prefix_evidence(calls: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """Prove exact request-message prefixes across primary continuations."""
+    """Prove exact prefixes or the two sealed continuation transitions."""
 
     primary_calls = [call for call in calls if call["lane"] == "primary"]
     continuations: list[dict[str, Any]] = []
-    for previous, current in zip(primary_calls, primary_calls[1:]):
+    for previous, current in pairwise(primary_calls):
         previous_messages = previous["messages"]
         current_messages = current["messages"]
         exact_prefix = current_messages[: len(previous_messages)] == (
             previous_messages
         )
+        common_prefix_count = 0
+        for previous_row, current_row in zip(
+            previous_messages,
+            current_messages,
+        ):
+            if previous_row != current_row:
+                break
+            common_prefix_count += 1
+        repair_stage_telemetry = _is_sequential_repair_transition(
+            previous,
+            current,
+        )
+        human_tail_replacement = (
+            len(previous_messages) == len(current_messages)
+            and len(previous_messages) >= 2
+            and previous_messages[:-1] == current_messages[:-1]
+            and previous_messages[-1].get("message_type") == "HumanMessage"
+            and current_messages[-1].get("message_type") == "HumanMessage"
+            and previous_messages[-1] != current_messages[-1]
+        )
+        appraisal_recovery_stage_telemetry = (
+            human_tail_replacement
+            and _is_appraisal_recovery_stage_transition(
+                _call_stage_name(previous),
+                _call_stage_name(current),
+            )
+        )
+        appraisal_recovery_tail_replacement = (
+            human_tail_replacement
+            and appraisal_recovery_stage_telemetry
+        )
+        repair_tail_replacement = (
+            human_tail_replacement
+            and repair_stage_telemetry
+        )
+        explicit_reanchor = (
+            len(current_messages) == 2
+            and len(previous_messages) >= 1
+            and current_messages[0] == previous_messages[0]
+            and current_messages[-1].get("message_type") == "HumanMessage"
+            and current_messages[-1].get("explicit_reanchor") is True
+        )
+        if exact_prefix:
+            classification = "exact"
+            transition = None
+            prefix_message_count = len(previous_messages)
+        elif explicit_reanchor:
+            classification = "permitted_transition"
+            transition = "explicit_reanchor"
+            prefix_message_count = 1
+        elif appraisal_recovery_tail_replacement:
+            classification = "permitted_transition"
+            transition = "appraisal_recovery_tail_replacement"
+            prefix_message_count = len(previous_messages) - 1
+        elif repair_tail_replacement:
+            classification = "permitted_transition"
+            transition = "repair_tail_replacement"
+            prefix_message_count = len(previous_messages) - 1
+        else:
+            classification = "invalid"
+            transition = None
+            prefix_message_count = common_prefix_count
         prefix_chars = sum(
-            row["content_chars"] for row in previous_messages
+            row["content_chars"]
+            for row in current_messages[:prefix_message_count]
         )
         suffix_chars = current["serialized_request_chars"] - prefix_chars
         continuations.append({
             "previous_sequence": previous["sequence"],
             "current_sequence": current["sequence"],
+            "classification": classification,
+            "transition": transition,
+            "valid": classification != "invalid",
             "exact_prefix": exact_prefix,
+            "permitted_transition": classification == "permitted_transition",
+            "invalid": classification == "invalid",
+            "previous_stage_name": _call_stage_name(previous),
+            "current_stage_name": _call_stage_name(current),
+            "repair_stage_telemetry": repair_stage_telemetry,
+            "appraisal_recovery_stage_telemetry": (
+                appraisal_recovery_stage_telemetry
+            ),
+            "prefix_message_count": prefix_message_count,
             "prefix_chars": prefix_chars,
             "suffix_chars": suffix_chars,
         })
+    all_valid = bool(continuations) and all(
+        row["valid"] for row in continuations
+    )
     proof = {
         "continuation_count": len(continuations),
         "all_exact": bool(continuations) and all(
             row["exact_prefix"] for row in continuations
         ),
+        "all_continuations_valid": all_valid,
+        "invalid_count": sum(row["invalid"] for row in continuations),
         "continuations": continuations,
     }
     return proof
@@ -545,7 +754,7 @@ async def _execute_engine(
         else:
             candidate = await v3_facade.run_cognition(payload, services)
         output = validate_cognition_core_output(candidate)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - evidence records every failure
         error = {
             "type": type(exc).__name__,
             "message": str(exc),
@@ -709,7 +918,7 @@ def _pair_aggregate(pairs: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "v3_full_p95_ms": _p95(v3_full),
         "full_p95_v2_ratio": _ratio(_p95(v3_full), _p95(v2_full)),
         "v3_prefix_all_exact": all(
-            result["metrics"]["prefix_evidence"]["all_exact"]
+            result["metrics"]["prefix_evidence"]["all_continuations_valid"]
             for result in v3_results
         ),
         "v3_primary_max_in_flight": max(
@@ -1042,7 +1251,7 @@ async def test_live_performance_resolver_continuation() -> None:
         ),
         "v3_prefix_all_exact": all(
             trial["results"]["v3"]["metrics"]["prefix_evidence"][
-                "all_exact"
+                "all_continuations_valid"
             ]
             for trial in trials
         ),

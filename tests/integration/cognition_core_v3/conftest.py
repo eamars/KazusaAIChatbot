@@ -50,17 +50,20 @@ SERVICE_STAGE_NAMES = (
 
 DEFAULT_APPRAISAL_CONTENT = json.dumps(
     {
-        "explanation": "No content to report for this question.",
-        "deltas": [],
-        "propositions": [],
-        "selected_evidence_handles": [],
+        "event_agency": {"propositions": [], "deltas": []},
     }
 )
 
 # Dummy route limit; every scripted response is far shorter than this value.
 DUMMY_MAX_COMPLETION_TOKENS = 8192
 
-DEFAULT_ACTION_PLAN_CONTENT = json.dumps({"goal_resolution": "blocked"})
+DEFAULT_ACTION_PLAN_CONTENT = json.dumps({
+    "action_requests": [],
+    "resolver_requests": [],
+    "goal_resolution": "blocked",
+    "resolver_pending_resolution": None,
+    "resolver_goal_progress": None,
+})
 
 
 def episode_evidence_handle(payload: Mapping[str, Any]) -> str:
@@ -138,9 +141,7 @@ def default_scripted_responses(episode_handle: str) -> dict[str, str]:
     """
     def empty_group(families):
         return {
-            family: [
-                {"question_id": family, "proposition": None, "delta": None}
-            ]
+            family: {"propositions": [], "deltas": []}
             for family in families
         }
 
@@ -153,24 +154,17 @@ def default_scripted_responses(episode_handle: str) -> dict[str, str]:
         ),
         "A2": json.dumps(
             {
-                "relationship_social": [
-                    {
-                        "question_id": "relationship_social",
-                        "proposition": None,
-                        "delta": {
-                            "target_path": "relationship.r1.care",
-                            "delta": 2,
-                            "evidence_handles": [episode_handle],
-                            "reason": "The greeting keeps the relationship attentive.",
-                        },
-                    }
-                ],
-                "moral_identity": [
-                    {"question_id": "moral_identity", "proposition": None, "delta": None}
-                ],
-                "existential_drive": [
-                    {"question_id": "existential_drive", "proposition": None, "delta": None}
-                ],
+                "relationship_social": {
+                    "propositions": [],
+                    "deltas": [{
+                        "target_path": "relationship.r1.care",
+                        "delta": 2,
+                        "evidence_handles": [episode_handle],
+                        "reason": "The greeting keeps the relationship attentive.",
+                    }],
+                },
+                "moral_identity": {"propositions": [], "deltas": []},
+                "existential_drive": {"propositions": [], "deltas": []},
             },
             ensure_ascii=False,
         ),
@@ -192,8 +186,8 @@ class ScriptedLLMInvoker:
 
     def __init__(
         self,
-        responses: Mapping[str, str] | Callable[[str, int], str] = None,
-        defaults: Mapping[str, str] = None,
+        responses: Mapping[str, str] | Callable[[str, int], str] | None = None,
+        defaults: Mapping[str, str] | None = None,
     ) -> None:
         self.calls: list[str] = []
         self.stage_attempts: dict[str, int] = {}

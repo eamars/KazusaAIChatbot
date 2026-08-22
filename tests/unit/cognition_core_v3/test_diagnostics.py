@@ -10,14 +10,26 @@ from kazusa_ai_chatbot.cognition_core_v3.contracts import (
     StageResult,
 )
 from kazusa_ai_chatbot.cognition_core_v3.diagnostics import (
+    CHAIN_LEDGER_DEFAULTS,
+    CHAIN_SIDECAR_DEFAULTS,
+    CHAIN_STEP_FIELDS,
     CONFIG_IDENTITY_FIELDS,
     PROTECTED_CHAIN_FIELDS,
     PROTECTED_FAILURE_FIELDS,
     STAGE_TRACE_PUBLIC_FIELDS,
+    bind_protected_chain_records,
     build_chain_trace_record,
+    current_chain_scope,
     project_config_identity,
     project_protected_chain_failure,
     project_protected_chain_result,
+    record_accepted_transcript,
+    record_chain_step,
+    record_registered_step,
+    record_sidecar_aggregate,
+    record_token_ledger,
+    reset_protected_chain_records,
+    snapshot_protected_chain_records,
 )
 
 
@@ -176,3 +188,62 @@ def test_protected_chain_metadata_excludes_secrets_and_rejected_content():
         projected_text = json.dumps(projection, ensure_ascii=False)
         assert rejected_candidate_body not in projected_text
         assert raw_evidence_only["provider_request_id"] not in projected_text
+
+
+def test_typed_chain_scope_keeps_sanitized_steps_separate_from_transcript():
+    token = bind_protected_chain_records(
+        run_id="run-scope-1",
+        source_kind="live",
+        llm_trace_id="trace-scope-1",
+        cognition_invocation_id="invocation-scope-1",
+    )
+    try:
+        record_chain_step({
+            "step_id": "G1a",
+            "stage_kind": "G1a",
+            "status": "accepted",
+            "disposition": "accepted",
+            "prompt_chars": 120,
+            "raw_output": "rejected provider body",
+        })
+        record_registered_step(
+            step_id="I1",
+            stage_kind="I1",
+            status="accepted",
+            disposition="accepted",
+        )
+        record_accepted_transcript((
+            ("human", "accepted question"),
+            ("assistant", "accepted answer"),
+        ), system_content="static system head")
+        record_token_ledger({
+            "max_estimated_prompt_tokens": 90,
+            "extension_used": 0,
+            "cognition_attempt_ledger": {"private": "drop"},
+        })
+        record_sidecar_aggregate({
+            "sidecar_queue_wait_ms_total": 4,
+            "sidecar_max_in_flight": 1,
+            "sidecar_cancellation_count": 2,
+            "private_counter": 9,
+        })
+        scope = current_chain_scope()
+        assert scope is not None
+        assert scope.run_id == "run-scope-1"
+        assert scope.source_kind == "live"
+        assert set(scope.steps[0]) == set(CHAIN_STEP_FIELDS)
+        assert "raw_output" not in scope.steps[0]
+        assert scope.accepted_messages == (
+            ("system", "static system head"),
+            ("human", "accepted question"),
+            ("assistant", "accepted answer"),
+        )
+        assert set(scope.token_ledger) == set(CHAIN_LEDGER_DEFAULTS)
+        assert "cognition_attempt_ledger" not in scope.token_ledger
+        assert set(scope.sidecar) == set(CHAIN_SIDECAR_DEFAULTS)
+        assert scope.sidecar["queue_wait_ms_total"] == 4
+        assert scope.sidecar["max_in_flight"] == 1
+        assert scope.sidecar["cancellation_count"] == 2
+        assert snapshot_protected_chain_records() == ()
+    finally:
+        reset_protected_chain_records(token)

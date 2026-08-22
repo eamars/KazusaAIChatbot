@@ -513,7 +513,7 @@ async def plan_actions(
             contract_failed=group_self_cognition,
         )
     else:
-        accepted_at_utc = _accepted_at_utc(episode)
+        accepted_at_utc = accepted_at_utc_from_episode(episode)
         messages: list[BaseMessage] = [
             SystemMessage(content=ACTION_PLANNING_PROMPT),
             HumanMessage(content=prompt_text),
@@ -967,13 +967,37 @@ def validate_action_plan_decision(
     """Normalize semantic choices into the canonical planner contract."""
 
     if not isinstance(parsed, Mapping):
-        raise ValueError("action plan must be an object")
+        raise ValueError("action plan must be an object")  # noqa: TRY004
     action_requests = parsed.get("action_requests", [])
     resolver_requests = parsed.get("resolver_requests", [])
     if not isinstance(action_requests, list):
-        raise ValueError("action requests must be an array")
+        raise ValueError("action requests must be an array")  # noqa: TRY004
     if not isinstance(resolver_requests, list):
-        raise ValueError("resolver requests must be an array")
+        raise ValueError("resolver requests must be an array")  # noqa: TRY004
+    if len(action_requests) > ACTION_REQUEST_CAP:
+        raise ValueError(
+            f"action requests exceed maximum of {ACTION_REQUEST_CAP}"
+        )
+    if len(resolver_requests) > ACTION_REQUEST_CAP:
+        raise ValueError(
+            f"resolver requests exceed maximum of {ACTION_REQUEST_CAP}"
+        )
+    required_fields = {
+        "action_requests",
+        "resolver_requests",
+        "goal_resolution",
+        "resolver_pending_resolution",
+        "resolver_goal_progress",
+    }
+    if self_cognition_response_required:
+        required_fields.add("self_cognition_response")
+    if set(parsed) != required_fields:
+        missing_fields = sorted(required_fields - set(parsed))
+        extra_fields = sorted(set(parsed) - required_fields)
+        raise ValueError(
+            "action plan fields are not exact; "
+            f"missing={missing_fields!r}, extra={extra_fields!r}"
+        )
     if action_requests and resolver_requests:
         raise ValueError("action and resolver requests are mutually exclusive")
 
@@ -1178,24 +1202,14 @@ def _normalize_action_request_rows(
 
     normalized: list[dict[str, object]] = []
     for value in values:
-        try:
-            row = _validate_action_request_row(
-                value,
-                bids,
-                actions,
-                evidence=evidence,
-                accepted_at_utc=accepted_at_utc,
-            )
-        except ValueError as exc:
-            logger.warning(
-                f"Action planning dropped an invalid action request row: {exc}"
-            )
-            continue
+        row = _validate_action_request_row(
+            value,
+            bids,
+            actions,
+            evidence=evidence,
+            accepted_at_utc=accepted_at_utc,
+        )
         normalized.append(row)
-        if len(normalized) >= ACTION_REQUEST_CAP:
-            break
-    if values and not normalized:
-        raise ValueError("every proposed action request row was unusable")
     return normalized
 
 
@@ -1210,23 +1224,13 @@ def _normalize_resolver_request_rows(
 
     normalized: list[dict[str, Any]] = []
     for value in values:
-        try:
-            row = _validate_resolver_request_row(
-                value,
-                bids,
-                resolvers,
-                runtime_capability_limits=runtime_capability_limits,
-            )
-        except ValueError as exc:
-            logger.warning(
-                f"Action planning dropped an invalid resolver request row: {exc}"
-            )
-            continue
+        row = _validate_resolver_request_row(
+            value,
+            bids,
+            resolvers,
+            runtime_capability_limits=runtime_capability_limits,
+        )
         normalized.append(row)
-        if len(normalized) >= ACTION_REQUEST_CAP:
-            break
-    if values and not normalized:
-        raise ValueError("every proposed resolver request row was unusable")
     return normalized
 
 
@@ -1276,6 +1280,12 @@ def _validate_action_request_row(
         raise ValueError("action request bid handle is unavailable")
     if action_handle not in actions:
         raise ValueError("action request action handle is unavailable")
+    affordance = actions[action_handle]
+    expected_fields = set(required)
+    if affordance["action_kind"] == "future_speak":
+        expected_fields.add("scheduled_authority_proposal")
+    if set(value) != expected_fields:
+        raise ValueError("action request fields are not exact")
     decision = _bounded_model_text(
         value["decision"],
         "action request decision",
@@ -1287,7 +1297,6 @@ def _validate_action_request_row(
         "action request semantic_goal",
     )
     reason = _bounded_model_text(value["reason"], "action request reason")
-    affordance = actions[action_handle]
     mode = affordance["decision_mode"]
     if mode == "required_text" and not decision:
         raise ValueError(
@@ -1329,10 +1338,6 @@ def _validate_action_request_row(
                 evidence=evidence,
                 accepted_at_utc=accepted_at_utc,
             )
-        )
-    elif "scheduled_authority_proposal" in value:
-        raise ValueError(
-            "scheduled_authority_proposal is only valid for future_speak"
         )
     return return_value
 
@@ -1420,7 +1425,7 @@ def _future_speak_proposal_contract(
     return dict(validated_proposal)
 
 
-def _accepted_at_utc(episode: Mapping[str, Any]) -> str:
+def accepted_at_utc_from_episode(episode: Mapping[str, Any]) -> str:
     """Return the canonical accepted storage UTC instant for an episode."""
 
     created_at = episode.get("created_at")
@@ -1438,7 +1443,7 @@ def _accepted_scheduled_authority_context(
 ) -> tuple[str, str]:
     """Project accepted local datetime and timezone for the planner prompt."""
 
-    accepted_at_utc = _accepted_at_utc(episode)
+    accepted_at_utc = accepted_at_utc_from_episode(episode)
     if not accepted_at_utc:
         accepted_local_datetime = ""
     else:
@@ -1498,7 +1503,7 @@ def _validate_resolver_request_row(
         "reason",
     }
     if not isinstance(value, Mapping):
-        raise ValueError("resolver request fields are incomplete")
+        raise ValueError("resolver request fields are incomplete")  # noqa: TRY004
     if not required.issubset(value):
         raise ValueError("resolver request fields are incomplete")
     bid_handle = value["bid_handle"]
@@ -1532,9 +1537,10 @@ def _validate_resolver_request_row(
             raise ValueError(
                 "task resolution background mode is unavailable"
             )
-    elif "start_in_background" in value:
+    elif set(value) != required:
         raise ValueError(
-            "start_in_background is only valid for task resolution requests"
+            "resolver request fields must be exactly "
+            "bid_handle, resolver_handle, semantic_goal, reason"
         )
     semantic_goal = _bounded_model_text(
         value["semantic_goal"],
@@ -1579,7 +1585,9 @@ def _validate_goal_progress_choice(
         return_value = None
         return return_value
     if not isinstance(value, Mapping):
-        raise ValueError("resolver goal progress must be an object or null")
+        raise ValueError(  # noqa: TRY004
+            "resolver goal progress must be an object or null"
+        )
     if current_goal_progress is None:
         raise ValueError(
             "resolver goal progress requires existing current state"
@@ -1742,7 +1750,7 @@ def _bounded_model_text(
     """Validate one bounded model-authored semantic string."""
 
     if not isinstance(value, str):
-        raise ValueError(f"{label} is invalid")
+        raise ValueError(f"{label} is invalid")  # noqa: TRY004
     normalized = value.strip()
     if (not allow_empty and not normalized) or len(normalized) > maximum:
         raise ValueError(f"{label} is invalid")

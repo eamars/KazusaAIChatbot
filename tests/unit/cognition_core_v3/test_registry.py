@@ -18,17 +18,25 @@ def test_serial_chain_steps_match_contract() -> None:
     )
 
 
-def test_appraisal_grouping_maps_cover_six_families_exactly() -> None:
-    assert registry.VALID_APPRAISAL_GROUP_COUNTS == (1, 2, 3, 6)
-
-    for group_count, groups in registry.APPRAISAL_GROUPING_MAPS.items():
-        families: list[str] = []
-        for step_id, grouped_families in groups:
-            assert step_id in {"A1", "A2"}
-            families.extend(grouped_families)
-        assert tuple(sorted(set(families))) == tuple(
-            sorted(registry.APPRAISAL_FAMILY_ORDER)
-        )
+def test_appraisal_stages_own_the_fixed_family_rosters() -> None:
+    assert registry.APPRAISAL_STAGE_FAMILIES == (
+        (
+            "A1",
+            (
+                "event_agency",
+                "goal_threat_outcome",
+                "epistemic_comparison_memory",
+            ),
+        ),
+        (
+            "A2",
+            (
+                "relationship_social",
+                "moral_identity",
+                "existential_drive",
+            ),
+        ),
+    )
 
 
 def test_appraisal_family_order_is_frozen() -> None:
@@ -40,4 +48,5 @@ def test_appraisal_family_order_is_frozen() -> None:
         "moral_identity",
         "existential_drive",
     )
-    assert registry.APPRAISAL_WORLD_FAMILIES == registry.APPRAISAL_FAMILY_ORDER
+    assert registry.APPRAISAL_WORLD_FAMILIES == registry.APPRAISAL_A1_FAMILIES
+    assert registry.APPRAISAL_RELATION_FAMILIES == registry.APPRAISAL_A2_FAMILIES

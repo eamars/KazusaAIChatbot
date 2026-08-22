@@ -60,7 +60,6 @@ COGNITION_V3_ROUTE_ENV_VARS = (
     "COGNITION_V3_SIDECAR_LLM_MAX_COMPLETION_TOKENS",
     "COGNITION_V3_SIDECAR_LLM_THINKING_ENABLED",
     "COGNITION_V3_SUBCONSCIOUS_ENABLED",
-    "COGNITION_V3_APPRAISAL_GROUP_COUNT",
     "COGNITION_V3_TURN_DEADLINE_SECONDS",
 )
 REMOVED_RESOLVER_ENABLE_FLAG = "COGNITION_" + "RESOLVER_ENABLED"
@@ -1573,10 +1572,6 @@ def test_v3_route_settings_reject_invalid_selected_bundle(tmp_path) -> None:
         (
             {"COGNITION_V3_SUBCONSCIOUS_ENABLED": "true"},
             "COGNITION_V3_SUBCONSCIOUS_ENABLED requires a V3 sidecar route",
-        ),
-        (
-            {"COGNITION_V3_APPRAISAL_GROUP_COUNT": "4"},
-            "COGNITION_V3_APPRAISAL_GROUP_COUNT must be one of: 1, 2, 3, 6",
         ),
         (
             {"COGNITION_V3_TURN_DEADLINE_SECONDS": "29"},

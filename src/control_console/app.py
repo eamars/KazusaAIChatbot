@@ -124,14 +124,14 @@ SAFE_KAZUSA_EVENT_CORRELATION_FIELDS = (
     "tracking_id",
     "background_work_job_id",
 )
-COGNITION_ENGINE_DESCRIPTOR_SCHEMA = "cognition_engine_descriptor.v1"
+COGNITION_ENGINE_DESCRIPTOR_SCHEMA = "cognition_engine_descriptor.v2"
 COGNITION_ENGINE_DESCRIPTOR_FIELDS = (
     "engine_id",
     "chain_model_name",
     "sidecar_model_name",
     "sidecar_enabled",
     "subconscious_enabled",
-    "appraisal_group_count",
+    "appraisal_stage_layout",
     "chain_context_window_tokens",
     "normal_budget_tokens",
     "extended_budget_tokens",

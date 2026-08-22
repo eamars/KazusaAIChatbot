@@ -97,7 +97,6 @@ def test_connector_builds_selected_engine_services_without_inactive_routes(
         ),
         sidecar=None,
         subconscious_enabled=False,
-        appraisal_group_count=6,
         turn_deadline_seconds=417,
     )
 
@@ -145,7 +144,6 @@ def test_connector_builds_selected_engine_services_without_inactive_routes(
     assert v3_services.chain_lane.route_name == "COGNITION_V3_CHAIN_LLM"
     assert v3_services.chain_lane.context_window_tokens == 50_176
     assert v3_services.sidecar_lane is None
-    assert v3_services.appraisal_group_count == 6
     assert v3_services.turn_deadline_seconds == 417
 
 

@@ -9,6 +9,7 @@ import pytest
 from kazusa_ai_chatbot.cognition_core_v2.action_selection import (
     ACTION_PLANNING_PROMPT,
     _validate_goal_progress_choice,
+    accepted_at_utc_from_episode,
     plan_actions,
     validate_action_plan_decision,
 )
@@ -108,11 +109,13 @@ def _goal_progress() -> dict[str, object]:
     }
 
 
-def test_goal_progress_model_output_omits_protocol_metadata() -> None:
-    """The action prompt exposes semantic progress fields only."""
+def test_goal_progress_prompt_marks_protocol_metadata_code_owned() -> None:
+    """The action prompt keeps resolver progress protocol fields code-owned."""
 
-    assert "schema_version" not in ACTION_PLANNING_PROMPT
-    assert "original_goal" not in ACTION_PLANNING_PROMPT
+    assert "current_resolver_goal_progress" in ACTION_PLANNING_PROMPT
+    assert "协议代码从 current_resolver_goal_progress 绑定既有清单元数据" in (
+        ACTION_PLANNING_PROMPT
+    )
 
 
 def test_goal_progress_binds_protocol_metadata_from_current_state() -> None:
@@ -274,6 +277,17 @@ def test_public_action_plan_validator_preserves_existing_normalization() -> None
         "resolver_pending_resolution": None,
         "resolver_goal_progress": None,
     }
+
+
+def test_accepted_timestamp_has_one_public_v2_owner() -> None:
+    """Planner validation receives the episode's canonical accepted instant."""
+
+    episode = canonical_episode(
+        episode_id="accepted-timestamp",
+        content="schedule a future reminder",
+    )
+    assert accepted_at_utc_from_episode(episode) == "2026-07-14T00:00:00+00:00"
+    assert accepted_at_utc_from_episode({"created_at": "not-a-time"}) == ""
 
 
 def test_action_planning_keeps_confidence_descriptor_advisory() -> None:

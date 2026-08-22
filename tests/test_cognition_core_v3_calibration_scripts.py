@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
 import sys
 from dataclasses import asdict
@@ -11,17 +12,20 @@ import httpx
 import pytest
 from openai import BadRequestError
 
+from kazusa_ai_chatbot.cognition_core_v3.budget import estimate_message_tokens
 from kazusa_ai_chatbot.config import CognitionRouteSettingV1
 from kazusa_ai_chatbot.llm_interface import (
     BackendDescriptor,
     LLMCallConfig,
     LLMResponse,
 )
+from scripts import probe_cognition_v3_context_overflow as overflow_probe_module
 from scripts.calibrate_cognition_v3_token_estimator import (
     compute_calibration_report,
 )
 from scripts.probe_cognition_v3_context_overflow import (
     V3_CHAIN_ROUTE_NAME,
+    build_overflow_probe_payload,
     run_overflow_probe_dry_run,
     run_overflow_probe_live,
 )
@@ -138,16 +142,79 @@ def test_token_calibration_is_deterministic_and_meets_holdout_contract() -> None
     assert first.accepted is True
 
 
+def test_overflow_probe_payload_is_exact_deterministic_and_high_density() -> None:
+    """The synthetic probe input is exact, reproducible, and tokenizer-hostile."""
+
+    for char_count in (0, 1, 31, 4_096, 4_097):
+        payload = build_overflow_probe_payload(char_count)
+        assert len(payload) == char_count
+        assert payload == build_overflow_probe_payload(char_count)
+
+    large_payload = build_overflow_probe_payload(260_000)
+    assert len(large_payload) == 260_000
+    assert len(set(large_payload)) >= 80
+    longest_run = max(
+        len(tuple(run))
+        for _, run in itertools.groupby(large_payload)
+    )
+    assert longest_run < 12
+    assert estimate_message_tokens([large_payload]) > 50_176
+
+    with pytest.raises(ValueError, match="cannot be negative"):
+        build_overflow_probe_payload(-1)
+
+
+def test_overflow_probe_cli_uses_the_payload_generator(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The CLI obtains its payload from the deterministic generator."""
+
+    requested_length = 32
+    calls: list[int] = []
+
+    def recording_generator(char_count: int) -> str:
+        calls.append(char_count)
+        return "Ab3!"
+
+    monkeypatch.setattr(
+        overflow_probe_module,
+        "build_overflow_probe_payload",
+        recording_generator,
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "probe_cognition_v3_context_overflow",
+            "--route-name",
+            "CHAIN",
+            "--context-window-tokens",
+            "50000",
+            "--payload-char-count",
+            str(requested_length),
+        ],
+    )
+
+    assert overflow_probe_module.main() == 0
+    cli_evidence = json.loads(capsys.readouterr().out)
+    assert calls == [requested_length]
+    assert cli_evidence["payload_estimate_tokens"] == estimate_message_tokens(
+        ["Ab3!"]
+    )
+
+
 def test_overflow_probe_dry_run_is_effect_free_and_validates_route_contract(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Dry run estimates a synthetic payload and never invokes a provider."""
 
+    generated_payload = build_overflow_probe_payload(250_000)
     oversized = run_overflow_probe_dry_run(
         route_name="CHAIN",
         declared_context_window_tokens=50_000,
-        payload_messages=("x" * 250_000,),
+        payload_messages=(generated_payload,),
     )
     assert oversized.dry_run is True
     assert oversized.payload_exceeds_declared_window is True
@@ -199,7 +266,7 @@ async def test_overflow_probe_live_success_is_cutover_blocking_evidence() -> Non
         route_setting=route_setting,
         route_name=V3_CHAIN_ROUTE_NAME,
         declared_context_window_tokens=50_000,
-        payload_messages=("x" * 250_000,),
+        payload_messages=(build_overflow_probe_payload(250_000),),
         timeout_seconds=45.0,
     )
 
@@ -208,6 +275,7 @@ async def test_overflow_probe_live_success_is_cutover_blocking_evidence() -> Non
     assert evidence.dry_run is False
     assert evidence.wall_time_ms >= 0
     assert evidence.payload_exceeds_declared_window is True
+    assert evidence.payload_character_count == 250_000
     assert evidence.usage_reported is True
     assert evidence.usage == {"input_tokens": 65_100, "output_tokens": 1}
     assert evidence.response_content_characters == 2
@@ -263,11 +331,21 @@ async def test_overflow_probe_live_records_expected_provider_rejection() -> None
     response = httpx.Response(400, request=request)
     error = BadRequestError(
         (
-            "context length exceeded at "
+            "request (200861 tokens) exceeds the available context size "
+            "(50176 tokens), try increasing it at "
             f"{route_setting.base_url} using {route_setting.api_key}"
         ),
         response=response,
-        body={"error": "context length exceeded"},
+        body={
+            "error": {
+                "message": (
+                    "request (200861 tokens) exceeds the available context "
+                    "size (50176 tokens), try increasing it"
+                ),
+                "type": "exceed_context_size_error",
+                "code": "exceed_context_size_error",
+            }
+        },
     )
     llm = _FakeLLM(error=error)
     evidence = await run_overflow_probe_live(
@@ -284,7 +362,7 @@ async def test_overflow_probe_live_records_expected_provider_rejection() -> None
     assert evidence.usage_reported is False
     assert evidence.usage == {}
     assert evidence.error_type == "BadRequestError"
-    assert "context length exceeded" in evidence.error_message
+    assert "exceeds the available context size" in evidence.error_message
     assert len(llm.calls) == 1
     serialized_evidence = json.dumps(asdict(evidence), sort_keys=True)
     assert route_setting.base_url not in serialized_evidence

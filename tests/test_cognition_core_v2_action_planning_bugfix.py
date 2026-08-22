@@ -831,8 +831,8 @@ async def test_contextual_action_binds_ref_without_prompt_exposure() -> None:
     assert "coding_run:private-run-ref" not in captured_prompt
 
 
-def test_action_plan_caps_rows_and_drops_unknown_bids() -> None:
-    """Normalization preserves valid capacity and drops invented provenance."""
+def test_action_plan_rejects_over_cap_or_unknown_rows() -> None:
+    """An over-cap candidate cannot drop invalid rows into an accepted plan."""
 
     response = _planner_response(actions=[{
         "bid_handle": "b1" if index < 4 else "b2",
@@ -842,14 +842,27 @@ def test_action_plan_caps_rows_and_drops_unknown_bids() -> None:
         "reason": "grounded reason",
     } for index in range(1, 5)])
 
-    decision = validate_action_plan_decision(
-        response,
-        bid_handles={"b1": _bid("ordinary_response")},
-        action_handles={"a1": _action("background_work_request")},
-        resolver_handles={"r1": _resolver("task_resolution_request")},
-    )
+    with pytest.raises(ValueError, match="exceed maximum of 3"):
+        validate_action_plan_decision(
+            response,
+            bid_handles={"b1": _bid("ordinary_response")},
+            action_handles={"a1": _action("background_work_request")},
+            resolver_handles={"r1": _resolver("task_resolution_request")},
+        )
 
-    assert len(decision["action_requests"]) == 3
+    resolver_response = _planner_response(resolvers=[{
+        "bid_handle": "b1",
+        "resolver_handle": "r1",
+        "semantic_goal": f"resolve item {index}",
+        "reason": "the current evidence is incomplete",
+    } for index in range(4)])
+    with pytest.raises(ValueError, match="resolver requests exceed maximum of 3"):
+        validate_action_plan_decision(
+            resolver_response,
+            bid_handles={"b1": _bid("ordinary_response")},
+            action_handles={},
+            resolver_handles={"r1": _resolver("human_clarification")},
+        )
 
 
 def test_action_plan_rejects_mixed_action_and_resolver_semantics() -> None:
@@ -880,19 +893,62 @@ def test_action_plan_rejects_mixed_action_and_resolver_semantics() -> None:
         )
 
 
-def test_action_plan_ignores_model_authored_route() -> None:
-    """Protocol route remains derived after unknown fields are stripped."""
+def test_action_plan_rejects_unknown_top_level_fields() -> None:
+    """Unknown planner fields fail closed instead of being silently stripped."""
 
     response = _planner_response()
     response["route"] = "speech"
-    decision = validate_action_plan_decision(
-        response,
-        bid_handles={"b1": _bid("ordinary_response")},
-        action_handles={"a1": _action("background_work_request")},
-        resolver_handles={"r1": _resolver("task_resolution_request")},
-    )
+    with pytest.raises(ValueError, match="action plan fields are not exact"):
+        validate_action_plan_decision(
+            response,
+            bid_handles={"b1": _bid("ordinary_response")},
+            action_handles={"a1": _action("background_work_request")},
+            resolver_handles={"r1": _resolver("task_resolution_request")},
+        )
 
-    assert "route" not in decision
+
+def test_action_plan_requires_exact_top_level_fields() -> None:
+    """Missing and extra planner envelope fields are contract failures."""
+
+    missing = _planner_response()
+    del missing["resolver_goal_progress"]
+    with pytest.raises(ValueError, match="action plan fields are not exact"):
+        validate_action_plan_decision(
+            missing,
+            bid_handles={"b1": _bid("ordinary_response")},
+            action_handles={},
+            resolver_handles={},
+        )
+
+    extra = _planner_response()
+    extra["unknown_field"] = True
+    with pytest.raises(ValueError, match="action plan fields are not exact"):
+        validate_action_plan_decision(
+            extra,
+            bid_handles={"b1": _bid("ordinary_response")},
+            action_handles={},
+            resolver_handles={},
+        )
+
+
+def test_action_plan_rejects_extra_action_row_fields() -> None:
+    """A normal action row must contain exactly its five contract fields."""
+
+    response = _planner_response(actions=[{
+        "bid_handle": "b1",
+        "action_handle": "a1",
+        "decision": "",
+        "semantic_goal": "perform the accepted private action",
+        "reason": "the admitted motive supports this effect",
+        "priority": "now",
+    }])
+    with pytest.raises(ValueError, match="action request fields are not exact"):
+        validate_action_plan_decision(
+            response,
+            bid_handles={"b1": _bid("ordinary_response")},
+            action_handles={"a1": _action("background_work_request")},
+            resolver_handles={},
+        )
 
 
 def test_action_plan_merges_semantic_goal_progress_delta() -> None:
@@ -973,7 +1029,7 @@ def test_action_plan_rejects_invalid_registry_decision_format() -> None:
     })
     with pytest.raises(
         ValueError,
-        match="every proposed action request row was unusable",
+        match="decision must full-match",
     ):
         validate_action_plan_decision(
             _planner_response(
@@ -1019,7 +1075,7 @@ def test_closed_action_with_unknown_decision_invalidates_candidate() -> None:
 
     with pytest.raises(
         ValueError,
-        match="every proposed action request row was unusable",
+        match="decision must be one of",
     ):
         validate_action_plan_decision(
             _planner_response(
@@ -1038,7 +1094,7 @@ def test_closed_action_with_unknown_decision_invalidates_candidate() -> None:
 
 
 def test_invalid_resolver_row_invalidates_valid_sibling() -> None:
-    """A malformed resolver sibling is dropped while the valid row survives."""
+    """A malformed resolver sibling invalidates the complete candidate."""
 
     response = _planner_response(resolvers=[
         {
@@ -1055,24 +1111,17 @@ def test_invalid_resolver_row_invalidates_valid_sibling() -> None:
         },
     ])
 
-    decision = validate_action_plan_decision(
-        response,
-        bid_handles={"b1": _bid("ordinary_response")},
-        action_handles={},
-        resolver_handles={"r1": _resolver("task_resolution_request")},
-    )
-
-    assert decision["resolver_requests"] == [{
-        "bid_handle": "b1",
-        "resolver_handle": "r1",
-        "semantic_goal": "recover grounded context",
-        "reason": "the answer depends on missing context",
-        "start_in_background": False,
-    }]
+    with pytest.raises(ValueError, match="fields are incomplete"):
+        validate_action_plan_decision(
+            response,
+            bid_handles={"b1": _bid("ordinary_response")},
+            action_handles={},
+            resolver_handles={"r1": _resolver("task_resolution_request")},
+        )
 
 
-def test_action_plan_strips_extra_resolver_fields() -> None:
-    """Harmless model metadata cannot block a grounded resolver proposal."""
+def test_action_plan_rejects_extra_resolver_fields() -> None:
+    """Unknown resolver row fields fail closed instead of being stripped."""
 
     response = _planner_response(resolvers=[{
         "bid_handle": "b1",
@@ -1083,19 +1132,13 @@ def test_action_plan_strips_extra_resolver_fields() -> None:
         "priority": "now",
     }])
 
-    decision = validate_action_plan_decision(
-        response,
-        bid_handles={"b1": _bid("ordinary_response")},
-        action_handles={},
-        resolver_handles={"r1": _resolver("human_clarification")},
-    )
-
-    assert decision["resolver_requests"] == [{
-        "bid_handle": "b1",
-        "resolver_handle": "r1",
-        "semantic_goal": "recover the omitted local referent",
-        "reason": "the current phrase is incomplete",
-    }]
+    with pytest.raises(ValueError, match="fields must be exactly"):
+        validate_action_plan_decision(
+            response,
+            bid_handles={"b1": _bid("ordinary_response")},
+            action_handles={},
+            resolver_handles={"r1": _resolver("human_clarification")},
+        )
 
 
 def test_task_resolution_row_requires_exact_routing_boolean() -> None:
@@ -1111,7 +1154,7 @@ def test_task_resolution_row_requires_exact_routing_boolean() -> None:
         }])
         with pytest.raises(
             ValueError,
-            match="every proposed resolver request row was unusable",
+            match="start_in_background must be a boolean",
         ):
             validate_action_plan_decision(
                 response,
@@ -1135,7 +1178,7 @@ def test_inline_only_runtime_rejects_background_task_resolution() -> None:
     }])
     with pytest.raises(
         ValueError,
-        match="every proposed resolver request row was unusable",
+        match="background mode is unavailable",
     ):
         validate_action_plan_decision(
             response,
@@ -1144,10 +1187,10 @@ def test_inline_only_runtime_rejects_background_task_resolution() -> None:
             resolver_handles={"r1": _resolver(
                 "task_resolution_request",
             )},
-            runtime_capability_limits=[
+            runtime_capability_limits=[(
                 "当前通用任务解析只有 inline 能力；task_resolution_request 必须先在本轮"
-                "预算内尝试，不能写成后台已经安排。",
-            ],
+                "预算内尝试，不能写成后台已经安排。"
+            )],
         )
 
     inline_response = _planner_response(resolvers=[{
@@ -1159,10 +1202,10 @@ def test_inline_only_runtime_rejects_background_task_resolution() -> None:
         bid_handles={"b1": _bid("ordinary_response")},
         action_handles={},
         resolver_handles={"r1": _resolver("task_resolution_request")},
-        runtime_capability_limits=[
+        runtime_capability_limits=[(
             "当前通用任务解析只有 inline 能力；task_resolution_request 必须先在本轮"
-            "预算内尝试，不能写成后台已经安排。",
-        ],
+            "预算内尝试，不能写成后台已经安排。"
+        )],
     )
     assert decision["resolver_requests"][0]["start_in_background"] is False
 
@@ -1178,7 +1221,7 @@ def test_task_resolution_row_rejects_missing_or_extra_route_fields() -> None:
     }])
     with pytest.raises(
         ValueError,
-        match="every proposed resolver request row was unusable",
+        match="task resolution request fields must be exactly",
     ):
         validate_action_plan_decision(
             missing_boolean,
@@ -1197,7 +1240,7 @@ def test_task_resolution_row_rejects_missing_or_extra_route_fields() -> None:
     }])
     with pytest.raises(
         ValueError,
-        match="every proposed resolver request row was unusable",
+        match="fields must be exactly",
     ):
         validate_action_plan_decision(
             extra_route,
@@ -1220,7 +1263,7 @@ def test_non_task_resolver_rejects_task_resolution_route_field() -> None:
 
     with pytest.raises(
         ValueError,
-        match="every proposed resolver request row was unusable",
+        match="fields must be exactly",
     ):
         validate_action_plan_decision(
             response,

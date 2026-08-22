@@ -8,11 +8,12 @@ from typing import Any
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v3.contracts import (
-    CognitionChainServicesV3,
-)
+from kazusa_ai_chatbot.cognition_core_v3.contracts import CognitionChainServicesV3
 from kazusa_ai_chatbot.cognition_core_v3.facade import run_cognition
-from kazusa_ai_chatbot.config import COGNITION_CORE_ENGINE
+from kazusa_ai_chatbot.config import (
+    COGNITION_CORE_ENGINE,
+    COGNITION_V3_APPRAISAL_STAGE_LAYOUT,
+)
 from kazusa_ai_chatbot.llm_interface.contracts import LLMCallConfig
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     build_cognition_core_services,
@@ -55,11 +56,11 @@ def sanitized_v3_environment_fingerprint(
             ).hexdigest(),
         })
     fingerprint: dict[str, Any] = {
-        "schema_version": "cognition_v3_environment_fingerprint.v1",
+        "schema_version": "cognition_v3_environment_fingerprint.v2",
         "engine": "v3",
         "route_count": len(route_rows),
         "routes": route_rows,
-        "appraisal_group_count": services.appraisal_group_count,
+        "appraisal_stage_layout": COGNITION_V3_APPRAISAL_STAGE_LAYOUT,
         "subconscious_enabled": services.subconscious_enabled,
         "turn_deadline_seconds": services.turn_deadline_seconds,
     }

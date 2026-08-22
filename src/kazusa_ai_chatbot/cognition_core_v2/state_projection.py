@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
 from copy import deepcopy
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfoNotFoundError
@@ -28,7 +28,6 @@ from kazusa_ai_chatbot.time_boundary import (
     local_minutes_in_zone,
     local_period_bounds,
 )
-
 
 RAW_STATE_KEYS = frozenset({
     "entity_id",
@@ -97,6 +96,24 @@ _ENTITY_KIND_BY_FIELD = {
     "active_events": "event",
     "knowledge_gaps": "knowledge_gap",
 }
+
+
+def evidence_source_identity(
+    evidence_ref: Mapping[str, Any],
+) -> tuple[str, str]:
+    """Return the exact provenance identity carried by one evidence ref."""
+
+    source_kind = evidence_ref.get("source_kind")
+    source_id = evidence_ref.get("source_id")
+    if (
+        not isinstance(source_kind, str)
+        or not source_kind
+        or not isinstance(source_id, str)
+        or not source_id
+    ):
+        raise ValueError("evidence provenance identity is invalid")
+    identity = (source_kind, source_id)
+    return identity
 
 
 @dataclass(frozen=True)
@@ -1116,6 +1133,49 @@ def project_state_for_prompt(
         "character_constraints": _project_constraints(character_constraints),
         "character_identity": goal_identity,
     }
+    evidence_identity_by_handle: dict[str, tuple[str, str]] = {}
+    for row in evidence:
+        evidence_handle = row.get("evidence_handle")
+        evidence_ref = row.get("evidence_ref")
+        if (
+            isinstance(evidence_handle, str)
+            and isinstance(evidence_ref, Mapping)
+        ):
+            evidence_identity_by_handle[evidence_handle] = (
+                evidence_source_identity(evidence_ref)
+            )
+
+    matched_native_evidence: dict[tuple[str, str], str] = {}
+    for field_name, prefix in (
+        ("threats", "t"),
+        ("active_events", "ev"),
+        ("knowledge_gaps", "k"),
+    ):
+        entity_kind = _ENTITY_KIND_BY_FIELD[field_name]
+        eligible_statuses = _ENTITY_PRESSURE_STATUSES[field_name]
+        for evidence_handle, identity in evidence_identity_by_handle.items():
+            matching_handles = [
+                f"{prefix}{index}"
+                for index, entity in enumerate(
+                    state[field_name],
+                    start=1,
+                )
+                if entity["status"] in eligible_statuses
+                and any(
+                    evidence_source_identity(evidence_ref) == identity
+                    for evidence_ref in entity.get("evidence_refs", [])
+                )
+            ]
+            if len(matching_handles) > 1:
+                raise ValueError(
+                    "ambiguous same-source native entity for "
+                    f"{entity_kind}:{evidence_handle}"
+                )
+            if matching_handles:
+                matched_native_evidence[(entity_kind, evidence_handle)] = (
+                    matching_handles[0]
+                )
+
     for field_name, prompt_name, prefix in (
         ("goals", "goals", "g"),
         ("threats", "threats", "t"),
@@ -1130,7 +1190,18 @@ def project_state_for_prompt(
                 "entity_id": entity["entity_id"],
             }
             payload[prompt_name].append(
-                _project_entity(handle, entity, state["updated_at"])
+                _project_entity(
+                    handle,
+                    entity,
+                    state["updated_at"],
+                    evidence_handles=[
+                        evidence_handle
+                        for (matched_kind, evidence_handle), matched_handle
+                        in matched_native_evidence.items()
+                        if matched_kind == _ENTITY_KIND_BY_FIELD[field_name]
+                        and matched_handle == handle
+                    ],
+                )
             )
     relationship = state.get("relationship")
     if (
@@ -1228,6 +1299,8 @@ def project_state_for_prompt(
             ("threat", "ct", "可能的当前威胁"),
             ("knowledge_gap", "ck", "可能的当前知识缺口"),
         ):
+            if (kind, evidence_handle) in matched_native_evidence:
+                continue
             handle = f"{prefix}{index}"
             handle_to_ref[handle] = {
                 "scope": state["state_scope"],
@@ -1294,6 +1367,8 @@ def _project_entity(
     handle: str,
     entity: Mapping[str, Any],
     now: str,
+    *,
+    evidence_handles: Sequence[str],
 ) -> dict[str, Any]:
     """Project one causal entity without ids, timestamps, or raw axes."""
 
@@ -1305,6 +1380,8 @@ def _project_entity(
         "duration": project_duration(entity["created_at"], now),
         "causal_roles": _project_roles(entity.get("role_refs", [])),
     }
+    if evidence_handles:
+        result["evidence_handles"] = list(evidence_handles)
     for field_name, signed in (
         ("importance", False),
         ("progress", False),

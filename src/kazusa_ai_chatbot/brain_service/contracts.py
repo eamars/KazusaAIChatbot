@@ -211,13 +211,13 @@ class CognitionEngineDescriptorResponse(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["cognition_engine_descriptor.v1"]
+    schema_version: Literal["cognition_engine_descriptor.v2"]
     engine_id: Literal["v2", "v3"]
     chain_model_name: str = Field(min_length=1, max_length=256)
     sidecar_model_name: str = Field(max_length=256)
     sidecar_enabled: bool
     subconscious_enabled: bool
-    appraisal_group_count: StrictInt = Field(ge=0, le=6)
+    appraisal_stage_layout: Literal["parallel_v2", "fixed_a1_a2"]
     chain_context_window_tokens: StrictInt = Field(ge=0, le=1_000_000)
     normal_budget_tokens: StrictInt = Field(ge=0, le=65_000)
     extended_budget_tokens: StrictInt = Field(ge=0, le=65_000)
@@ -226,11 +226,6 @@ class CognitionEngineDescriptorResponse(BaseModel):
     @model_validator(mode="after")
     def validate_policy(self) -> CognitionEngineDescriptorResponse:
         """Reject descriptor combinations that cannot describe an engine."""
-
-        if self.appraisal_group_count not in {0, 1, 2, 3, 6}:
-            raise ValueError(
-                "appraisal_group_count must be one of 0, 1, 2, 3, or 6",
-            )
 
         if self.engine_id == "v2":
             if self.sidecar_model_name:
@@ -244,7 +239,6 @@ class CognitionEngineDescriptorResponse(BaseModel):
             if any(
                 value != 0
                 for value in (
-                    self.appraisal_group_count,
                     self.chain_context_window_tokens,
                     self.normal_budget_tokens,
                     self.extended_budget_tokens,
@@ -254,11 +248,15 @@ class CognitionEngineDescriptorResponse(BaseModel):
                 raise ValueError(
                     "V2 descriptor chain-specific numeric fields must be zero",
                 )
+            if self.appraisal_stage_layout != "parallel_v2":
+                raise ValueError(
+                    "V2 descriptor appraisal_stage_layout must be parallel_v2",
+                )
             return self
 
-        if self.appraisal_group_count not in {1, 2, 3, 6}:
+        if self.appraisal_stage_layout != "fixed_a1_a2":
             raise ValueError(
-                "V3 descriptor appraisal_group_count must be one of 1, 2, 3, or 6",
+                "V3 descriptor appraisal_stage_layout must be fixed_a1_a2",
             )
         if self.chain_context_window_tokens < 50_000:
             raise ValueError(

@@ -54,7 +54,13 @@ def estimate_message_tokens(
 
     cjk_count = sum(cjk_codepoint_count(message) for message in messages)
     utf8_bytes = sum(len(message.encode("utf-8")) for message in messages)
-    non_cjk_bytes = max(0, utf8_bytes - cjk_count)
+    cjk_utf8_bytes = sum(
+        len(character.encode("utf-8"))
+        for message in messages
+        for character in message
+        if _in_cjk_range(ord(character))
+    )
+    non_cjk_bytes = max(0, utf8_bytes - cjk_utf8_bytes)
     base_units = (
         cjk_count
         + ceil(non_cjk_bytes / 4)

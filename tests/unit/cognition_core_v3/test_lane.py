@@ -384,3 +384,121 @@ async def test_l1_repair_preemption_and_cancellation_release_sidecar_fifo() -> N
     assert diagnostics["sidecar_max_in_flight"] == 1
     assert diagnostics["l1_preempted_by_repair"] is True
     assert diagnostics["sidecar_cancellation_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_lane_owner_cleanup_survives_second_cancellation() -> None:
+    """A second cancellation cannot strand the FIFO owner or its waiters."""
+
+    fifo = lane._FifoLane((id(object()), "http://lane.test/v1", "model"))
+    owner_entered = asyncio.Event()
+    follower_entered = asyncio.Event()
+
+    async def run_owner() -> None:
+        async with fifo.claim(
+            stream_kind="primary",
+            deadline_monotonic=None,
+        ):
+            owner_entered.set()
+            await asyncio.Event().wait()
+
+    async def run_follower() -> None:
+        async with fifo.claim(
+            stream_kind="primary",
+            deadline_monotonic=None,
+        ):
+            follower_entered.set()
+
+    owner_task = asyncio.create_task(run_owner())
+    await asyncio.wait_for(owner_entered.wait(), timeout=1.0)
+    follower_task = asyncio.create_task(run_follower())
+    await asyncio.sleep(0)
+
+    await fifo._condition.acquire()
+    owner_task.cancel()
+    await asyncio.sleep(0)
+    owner_task.cancel()
+    fifo._condition.release()
+
+    with pytest.raises(asyncio.CancelledError):
+        await owner_task
+    await asyncio.wait_for(follower_entered.wait(), timeout=1.0)
+    await follower_task
+
+    assert fifo.in_flight == 0
+    assert fifo._owner is None
+
+
+@pytest.mark.asyncio
+async def test_failing_l1_task_is_advisory_during_repair_preemption() -> None:
+    """A completed L1 exception becomes a bounded warning instead of raising."""
+
+    invocation = lane.SidecarInvocationState()
+
+    async def fail_l1() -> None:
+        raise ValueError("provider detail must stay out of diagnostics")
+
+    l1_task = asyncio.create_task(fail_l1())
+    invocation.register_l1_task(l1_task)
+    await asyncio.sleep(0)
+
+    assert await invocation.preempt_l1_for_repair() is False
+    assert invocation.l1_preempted_by_repair is False
+    assert invocation.consume_l1_warning() == "sidecar_l1_unavailable"
+    assert invocation.consume_l1_warning() is None
+
+
+@pytest.mark.asyncio
+async def test_repair_preemption_propagates_outer_cancellation_after_l1_drain() -> None:
+    """Repair cleanup drains L1 before returning an outer cancellation."""
+
+    invocation = lane.SidecarInvocationState()
+    cancellation_seen = asyncio.Event()
+    release_l1_cleanup = asyncio.Event()
+
+    async def run_l1() -> None:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancellation_seen.set()
+            await release_l1_cleanup.wait()
+            raise
+
+    l1_task = asyncio.create_task(run_l1())
+    invocation.register_l1_task(l1_task)
+    preempt_task = asyncio.create_task(invocation.preempt_l1_for_repair())
+    await asyncio.wait_for(cancellation_seen.wait(), timeout=1.0)
+
+    preempt_task.cancel()
+    await asyncio.sleep(0)
+    assert not preempt_task.done()
+    release_l1_cleanup.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await preempt_task
+    assert l1_task.cancelled()
+    assert invocation.l1_preempted_by_repair is True
+    assert invocation.cancellation_count == 1
+
+
+@pytest.mark.asyncio
+async def test_repair_cancellation_failure_keeps_preemption_and_warning() -> None:
+    """A repair-caused L1 failure remains advisory and records preemption."""
+
+    invocation = lane.SidecarInvocationState()
+    started = asyncio.Event()
+
+    async def fail_after_repair_cancellation() -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError as exc:
+            raise ValueError("provider detail stays outside diagnostics") from exc
+
+    l1_task = asyncio.create_task(fail_after_repair_cancellation())
+    invocation.register_l1_task(l1_task)
+    await asyncio.wait_for(started.wait(), timeout=1.0)
+
+    assert await invocation.preempt_l1_for_repair() is True
+    assert invocation.l1_preempted_by_repair is True
+    assert invocation.consume_l1_warning() == "sidecar_l1_unavailable"

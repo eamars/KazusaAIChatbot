@@ -254,8 +254,8 @@ recurrence reattaches the same episode session and runs only its bounded
 observation -> delta-appraisal -> bid-revision -> fresh-P1 tail before the
 single terminal replacement-state commit. This connector does not launch
 parallel V3 waves or add a second checkpoint/commit authority.
-The caller configures `COGNITION_V3_APPRAISAL_GROUP_COUNT` (`1`, `2`, `3`, or
-`6`, default `2`) and `COGNITION_V3_TURN_DEADLINE_SECONDS` (`30..600`, default
+The V3 connector uses the fixed `fixed_a1_a2` appraisal-stage layout. The
+caller configures `COGNITION_V3_TURN_DEADLINE_SECONDS` (`30..600`, default
 `240`). V3 starts with the 50,000-token total ceiling and can use the
 conditional 65,000-token tier only when the caller-local serving window
 declaration supports it.

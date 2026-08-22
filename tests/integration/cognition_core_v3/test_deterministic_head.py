@@ -41,7 +41,6 @@ from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
     apply_state_update,
     create_deterministic_goals,
 )
-from kazusa_ai_chatbot.cognition_core_v3 import facade as v3_facade
 from kazusa_ai_chatbot.cognition_core_v3 import run_cognition
 from tests.integration.cognition_core_v3.conftest import (
     ScriptedLLMInvoker,
@@ -212,7 +211,6 @@ async def test_stage_call_sequence_is_stable_across_two_runs(
 @pytest.mark.asyncio
 async def test_cold_serial_chain_preserves_complete_v2_state_emotion_relationship_goal_and_action_output(
     cognition_payload,
-    monkeypatch: pytest.MonkeyPatch,
 ):
     """One cold chain emits the complete V2 state-to-action surface."""
 
@@ -223,56 +221,10 @@ async def test_cold_serial_chain_preserves_complete_v2_state_emotion_relationshi
     ]
     episode_handle = episode_evidence_handle(payload)
     defaults = default_scripted_responses(episode_handle)
-    appraisal_families = {
-        "A1": (
-            "event_agency",
-            "goal_threat_outcome",
-            "epistemic_comparison_memory",
-        ),
-        "A2": (
-            "relationship_social",
-            "moral_identity",
-            "existential_drive",
-        ),
-    }
-
-    def scripted_response(stage_name: str, attempt_index: int) -> str:
-        families = appraisal_families.get(stage_name)
-        if families is not None:
-            family = families[attempt_index]
-            return json.dumps(
-                {
-                    family: [{
-                        "question_id": family,
-                        "proposition": None,
-                        "delta": None,
-                    }],
-                },
-                ensure_ascii=False,
-            )
-        return defaults[stage_name]
-
-    invoker = ScriptedLLMInvoker(responses=scripted_response)
-    group_counts: list[int] = []
-    original_group_builder = v3_facade.v3_prompt.build_grouped_appraisal_questions
-
-    def capture_group_count(*, planned_questions, group_count, l1_residue=None):
-        group_counts.append(group_count)
-        return original_group_builder(
-            planned_questions=planned_questions,
-            group_count=group_count,
-            l1_residue=l1_residue,
-        )
-
-    monkeypatch.setattr(
-        v3_facade.v3_prompt,
-        "build_grouped_appraisal_questions",
-        capture_group_count,
-    )
-
+    invoker = ScriptedLLMInvoker(defaults=defaults)
     output = await run_cognition(
         payload,
-        replace(make_v3_services(invoker), appraisal_group_count=6),
+        replace(make_v3_services(invoker)),
     )
     validated = validate_cognition_core_output(output)
     replacement_state = validated["state_update"]["replacement_state"]
@@ -289,7 +241,6 @@ async def test_cold_serial_chain_preserves_complete_v2_state_emotion_relationshi
     assert validated["action_requests"] == []
     assert validated["resolver_requests"] == []
     assert validated["goal_resolution"] == "blocked"
-    assert group_counts == [6]
 
 
 @pytest.mark.asyncio

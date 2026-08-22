@@ -57,19 +57,9 @@ def test_v3_contracts_reject_unknown_fields_types_and_enums() -> None:
         "chain_lane",
         "sidecar_lane",
         "subconscious_enabled",
-        "appraisal_group_count",
         "turn_deadline_seconds",
     ]
-    assert services.appraisal_group_count == 2
     assert services.turn_deadline_seconds == 240
-    for invalid_group in (True, 0, 4):
-        with pytest.raises((TypeError, ValueError)):
-            contracts.CognitionChainServicesV3(
-                llm=LLInterface(),
-                chain_lane=chain_lane,
-                sidecar_lane=None,
-                appraisal_group_count=invalid_group,
-            )
     for invalid_deadline in (False, 29, 601):
         with pytest.raises((TypeError, ValueError)):
             contracts.CognitionChainServicesV3(
@@ -82,10 +72,8 @@ def test_v3_contracts_reject_unknown_fields_types_and_enums() -> None:
         llm=LLInterface(),
         chain_lane=chain_lane,
         sidecar_lane=None,
-        appraisal_group_count=6,
         turn_deadline_seconds=600,
     )
-    assert bounded_services.appraisal_group_count == 6
     assert bounded_services.turn_deadline_seconds == 600
     with pytest.raises(TypeError):
         contracts.CognitionChainServicesV3(

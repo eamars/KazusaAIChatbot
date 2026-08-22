@@ -4,9 +4,17 @@ from __future__ import annotations
 
 import pytest
 
+from kazusa_ai_chatbot.cognition_core_v2 import (
+    action_authorization as v2_action_authorization,
+)
+from kazusa_ai_chatbot.cognition_core_v2 import (
+    resolver_authorization as v2_resolver_authorization,
+)
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     CognitionContractError,
+    CognitionExecutionError,
 )
+from kazusa_ai_chatbot.cognition_core_v3 import action_selection as act
 from kazusa_ai_chatbot.cognition_episode import GOAL_CONTINUATION_REF_VERSION
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     RESOLVER_GOAL_PROGRESS_VERSION,
@@ -14,7 +22,6 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
 from kazusa_ai_chatbot.time_boundary import (
     local_llm_datetime_to_storage_utc_iso,
 )
-from kazusa_ai_chatbot.cognition_core_v3 import action_selection as act
 
 
 def _decision() -> dict:
@@ -86,7 +93,7 @@ def test_non_accepting_stance_suppresses_effects():
     assert insensitive["action_requests"] == _decision()["action_requests"]
 
     # A bid without any willingness decision passes through unchanged.
-    bare, suppressed = act.apply_stance_suppression(
+    _bare, suppressed = act.apply_stance_suppression(
         _decision(),
         {k: v for k, v in _primary_bid().items() if k != "relational_willingness"},
     )
@@ -112,14 +119,39 @@ def test_non_accepting_stance_suppresses_effects():
     assert rows == []
     assert goal_resolution == "blocked"
 
-    # A settled answerable_now resolution never escalates and clears effects.
+    # A denied proposed action escalates even when the planner said it was
+    # answerable_now.
+    settled = dict(_decision())
+    settled["goal_resolution"] = "answerable_now"
+    rows, goal_resolution = act.settle_resolver_outcome(
+        settled,
+        suppressed=False,
+        action_requests_materialized=0,
+        resolver_requests_materialized=[{"resolver_handle": "res_1"}],
+    )
+    assert rows == []
+    assert goal_resolution == "blocked"
+
+    # A successfully materialized action preserves answerable_now.
     settled = dict(_decision())
     settled["goal_resolution"] = "answerable_now"
     rows, goal_resolution = act.settle_resolver_outcome(
         settled,
         suppressed=False,
         action_requests_materialized=1,
-        resolver_requests_materialized=[{"resolver_handle": "res_1"}],
+        resolver_requests_materialized=[],
+    )
+    assert rows == []
+    assert goal_resolution == "answerable_now"
+
+    # No proposed effect leaves answerable_now unchanged.
+    no_effects = dict(settled)
+    no_effects["action_requests"] = []
+    rows, goal_resolution = act.settle_resolver_outcome(
+        no_effects,
+        suppressed=False,
+        action_requests_materialized=0,
+        resolver_requests_materialized=[],
     )
     assert rows == []
     assert goal_resolution == "answerable_now"
@@ -202,6 +234,143 @@ def test_action_and_resolver_authorizers_receive_fresh_minimal_context():
         )
 
 
+@pytest.mark.asyncio
+async def test_authorizers_use_canonical_v2_prompts_and_validator(monkeypatch):
+    """X1/X2 retain V2 prompt and validation ownership through V3 lanes."""
+
+    calls: list[tuple[str, list[object]]] = []
+    validator_calls: list[tuple[str, ...]] = []
+    original_validator = (
+        v2_action_authorization.validate_authorization_decisions
+    )
+
+    def recording_validator(parsed, *, candidate_handles):
+        validator_calls.append(tuple(candidate_handles))
+        return original_validator(
+            parsed,
+            candidate_handles=candidate_handles,
+        )
+
+    monkeypatch.setattr(
+        v2_action_authorization,
+        "validate_authorization_decisions",
+        recording_validator,
+    )
+    bid_handles = {
+        "b1": {
+            "intention": "grounded response",
+            "desired_outcome": "the user receives a response",
+            "concrete_detail": "answer from the current evidence",
+            "reason": "the current request supports it",
+            "evidence_handles": ["ev_1"],
+        }
+    }
+    evidence = [{
+        "evidence_handle": "ev_1",
+        "evidence_ref": {"source_kind": "episode"},
+        "semantic_text": "the current request",
+    }]
+
+    async def authorization_executor(
+        *,
+        messages,
+        candidate_handles,
+        stage_name,
+        **_kwargs,
+    ):
+        calls.append((stage_name, list(messages)))
+        validated = v2_action_authorization.validate_authorization_decisions(
+            {"decisions": {handle: True for handle in candidate_handles}},
+            candidate_handles=candidate_handles,
+        )
+        return validated
+
+    action_rows = await act.authorize_action_requests(
+        action_requests=[{
+            "bid_handle": "b1",
+            "action_handle": "a1",
+            "decision": "run",
+            "semantic_goal": "perform the grounded action",
+            "reason": "the evidence supports the action",
+        }],
+        bid_handles=bid_handles,
+        evidence=evidence,
+        action_handles={
+            "a1": {
+                "action_kind": "background_work_request",
+                "capability": "grounded_action",
+            }
+        },
+        runtime_capability_limits=[],
+        authorization_executor=authorization_executor,
+    )
+    resolver_rows = await act.authorize_resolver_requests(
+        resolver_requests=[{
+            "bid_handle": "b1",
+            "resolver_handle": "r1",
+            "semantic_goal": "retrieve the missing evidence",
+            "reason": "the current evidence is insufficient",
+        }],
+        bid_handles=bid_handles,
+        evidence=evidence,
+        resolver_handles={
+            "r1": {
+                "capability": "task_resolution_request",
+                "semantic_capability": "bounded evidence retrieval",
+            }
+        },
+        resolver_context="resolver is idle",
+        authorization_executor=authorization_executor,
+    )
+
+    assert action_rows[0]["action_handle"] == "a1"
+    assert resolver_rows[0]["resolver_handle"] == "r1"
+    assert validator_calls == [("c1",), ("c1",)]
+    assert calls[0][1][0].content == (
+        v2_action_authorization.ACTION_AUTHORIZATION_PROMPT
+    )
+    assert calls[1][1][0].content == (
+        v2_resolver_authorization.RESOLVER_AUTHORIZATION_PROMPT
+    )
+
+
+@pytest.mark.asyncio
+async def test_nonempty_authorization_requires_explicit_executor():
+    """A nonempty authorization candidate cannot use a provider fallback."""
+
+    with pytest.raises(
+        CognitionExecutionError,
+        match="action authorization requires an explicit executor",
+    ):
+        await act.authorize_action_requests(
+            action_requests=[{
+                "bid_handle": "b1",
+                "action_handle": "a1",
+                "decision": "run",
+                "semantic_goal": "perform the grounded action",
+                "reason": "the evidence supports it",
+            }],
+            bid_handles={
+                "b1": {
+                    "intention": "grounded response",
+                    "desired_outcome": "the user receives a response",
+                    "concrete_detail": "answer from current evidence",
+                    "reason": "the request supports it",
+                    "evidence_handles": [],
+                }
+            },
+            evidence=[],
+            action_handles={
+                "a1": {
+                    "action_kind": "background_work_request",
+                    "capability": "grounded action",
+                }
+            },
+            runtime_capability_limits=[],
+            authorization_executor=None,
+        )
+
+
 def test_invalid_authority_proposal_denies_all_effects():
     evidence = [
         {
@@ -233,8 +402,6 @@ def test_invalid_authority_proposal_denies_all_effects():
         "decision": "2026-07-02 09:00",
         "scheduled_authority_proposal": valid_proposal(),
     }
-    kinds = {"fs_1": "future_speak"}
-
     # A fully valid future-speak row validates through with the trigger strictly
     # after a one-day-earlier accepted instant.
     validated = act.future_speak_proposal_contract(

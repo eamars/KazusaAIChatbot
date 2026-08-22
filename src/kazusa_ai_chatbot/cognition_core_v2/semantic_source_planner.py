@@ -6,16 +6,18 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
-    CognitionEvidenceV2,
     EVIDENCE_SOURCE_QUESTION_IDS,
     ROLE_ENTITY_KINDS,
     SEMANTIC_QUESTION_KINDS,
+    CognitionEvidenceV2,
     SemanticQuestionV2,
 )
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     ENTITY_LIST_FIELDS,
 )
-
+from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+    evidence_source_identity,
+)
 
 MAX_SEMANTIC_QUESTIONS_PER_EPISODE = 6
 MAX_EVIDENCE_HANDLES_PER_QUESTION = 8
@@ -135,17 +137,25 @@ def plan_semantic_questions(
             for row in evidence_rows
             if question_id in row["visible_to"]
         ][:MAX_EVIDENCE_HANDLES_PER_QUESTION]
+        question_evidence_identities = {
+            row["evidence_handle"]: evidence_source_identity(
+                row["evidence_ref"]
+            )
+            for row in question_evidence
+        }
         permitted_paths = _permitted_delta_paths(
             question_kind,
             handle_map,
             mutable_state,
             [row["evidence_handle"] for row in question_evidence],
+            question_evidence_identities,
         )
         permitted_handles = _permitted_role_handles(
             question_kind,
             handle_map,
             mutable_state,
             [row["evidence_handle"] for row in question_evidence],
+            question_evidence_identities,
         )
         permitted_assignment_handles = _permitted_role_assignment_handles(
             handle_to_ref,
@@ -241,6 +251,7 @@ def _permitted_delta_paths(
     handle_map: Mapping[str, str],
     state: Mapping[str, Any],
     evidence_handles: Sequence[str],
+    evidence_identities: Mapping[str, tuple[str, str]],
 ) -> list[str]:
     """Return exactly the allowlisted target paths owned by one family."""
 
@@ -248,7 +259,11 @@ def _permitted_delta_paths(
     if question_kind == "event_agency":
         paths.extend(
             f"active_events.{handle_map[entity['entity_id']]}.{axis}"
-            for entity in state["active_events"]
+            for entity in _source_linked_eligible_entities(
+                state,
+                "event",
+                evidence_identities,
+            )
             for axis in ("responsibility", "intentionality")
         )
     elif question_kind == "relationship_social":
@@ -271,7 +286,11 @@ def _permitted_delta_paths(
     elif question_kind == "moral_identity":
         paths.extend(
             f"active_events.{handle_map[entity['entity_id']]}.{axis}"
-            for entity in state["active_events"]
+            for entity in _source_linked_eligible_entities(
+                state,
+                "event",
+                evidence_identities,
+            )
             for axis in (
                 "harm",
                 "unfairness",
@@ -286,7 +305,11 @@ def _permitted_delta_paths(
     elif question_kind == "goal_threat_outcome":
         paths.extend(
             f"goals.{handle_map[entity['entity_id']]}.{axis}"
-            for entity in _goal_outcome_eligible_entities(state, "goal")
+            for entity in _goal_outcome_eligible_entities(
+                state,
+                "goal",
+                evidence_identities,
+            )
             for axis in (
                 "obstruction",
                 "expected_success",
@@ -297,7 +320,11 @@ def _permitted_delta_paths(
         )
         paths.extend(
             f"threats.{handle_map[entity['entity_id']]}.{axis}"
-            for entity in _goal_outcome_eligible_entities(state, "threat")
+            for entity in _goal_outcome_eligible_entities(
+                state,
+                "threat",
+                evidence_identities,
+            )
             for axis in (
                 "likelihood",
                 "expected_harm",
@@ -309,13 +336,21 @@ def _permitted_delta_paths(
         )
         paths.extend(
             f"active_events.{handle_map[entity['entity_id']]}.{axis}"
-            for entity in _goal_outcome_eligible_entities(state, "event")
+            for entity in _goal_outcome_eligible_entities(
+                state,
+                "event",
+                evidence_identities,
+            )
             for axis in ("outcome_impact", "expectation_mismatch")
         )
     elif question_kind == "epistemic_comparison_memory":
         paths.extend(
             f"active_events.{handle_map[entity['entity_id']]}.{axis}"
-            for entity in state["active_events"]
+            for entity in _source_linked_eligible_entities(
+                state,
+                "event",
+                evidence_identities,
+            )
             for axis in (
                 "comparison_gap",
                 "vastness",
@@ -325,7 +360,11 @@ def _permitted_delta_paths(
         )
         paths.extend(
             f"knowledge_gaps.{handle_map[entity['entity_id']]}.{axis}"
-            for entity in state["knowledge_gaps"]
+            for entity in _source_linked_eligible_entities(
+                state,
+                "knowledge_gap",
+                evidence_identities,
+            )
             for axis in (
                 "relevance",
                 "uncertainty",
@@ -425,6 +464,7 @@ def _permitted_role_handles(
     handle_map: Mapping[str, str],
     state: Mapping[str, Any],
     evidence_handles: Sequence[str],
+    evidence_identities: Mapping[str, tuple[str, str]],
 ) -> list[str]:
     """Return only entity and role handles owned by one question family."""
 
@@ -442,13 +482,23 @@ def _permitted_role_handles(
         raise ValueError(
             f"unknown semantic question kind: {question_kind}"
         ) from exc
-    eligible_native_handles: set[str] = set()
-    if question_kind == "goal_threat_outcome":
-        eligible_native_handles = {
-            handle_map[entity["entity_id"]]
-            for entity_kind in _GOAL_OUTCOME_ELIGIBLE_STATUSES
-            for entity in _goal_outcome_eligible_entities(state, entity_kind)
-        }
+    source_filtered_prefixes = {
+        "event_agency": ("ev",),
+        "relationship_social": (),
+        "moral_identity": ("ev",),
+        "goal_threat_outcome": ("g", "t", "ev", "k"),
+        "epistemic_comparison_memory": ("ev", "k"),
+        "existential_drive": (),
+    }[question_kind]
+    source_linked_native_handles = {
+        handle_map[entity["entity_id"]]
+        for entity_kind in _question_native_entity_kinds(question_kind)
+        for entity in _source_linked_eligible_entities(
+            state,
+            entity_kind,
+            evidence_identities,
+        )
+    }
     handles: list[str] = []
     for entity_id, handle in handle_map.items():
         if handle in {"self", "current_user"}:
@@ -457,9 +507,9 @@ def _permitted_role_handles(
         if not handle.startswith(permitted_prefixes):
             continue
         if (
-            question_kind == "goal_threat_outcome"
-            and not entity_id.startswith("candidate:")
-            and handle not in eligible_native_handles
+            not entity_id.startswith("candidate:")
+            and handle.startswith(source_filtered_prefixes)
+            and handle not in source_linked_native_handles
         ):
             continue
         if entity_id.startswith("candidate:") and not _candidate_is_permitted(
@@ -506,6 +556,7 @@ def _permitted_role_assignment_handles(
 def _goal_outcome_eligible_entities(
     state: Mapping[str, Any],
     entity_kind: str,
+    evidence_identities: Mapping[str, tuple[str, str]] | None = None,
 ) -> list[Mapping[str, Any]]:
     """Return native entities whose lifecycle permits an outcome appraisal."""
 
@@ -516,7 +567,62 @@ def _goal_outcome_eligible_entities(
         for entity in state[field_name]
         if entity["status"] in eligible_statuses
     ]
+    if evidence_identities is not None:
+        entities = [
+            entity
+            for entity in entities
+            if _entity_has_source_identity(entity, evidence_identities)
+        ]
     return entities
+
+
+def _question_native_entity_kinds(question_kind: str) -> tuple[str, ...]:
+    """Return causal native kinds owned by one semantic question family."""
+
+    native_kinds = {
+        "event_agency": ("event",),
+        "relationship_social": (),
+        "moral_identity": ("event",),
+        "goal_threat_outcome": tuple(_GOAL_OUTCOME_ELIGIBLE_STATUSES),
+        "epistemic_comparison_memory": ("event", "knowledge_gap"),
+        "existential_drive": (),
+    }
+    try:
+        selected_kinds = native_kinds[question_kind]
+    except KeyError as exc:
+        raise ValueError(
+            f"unknown semantic question kind: {question_kind}"
+        ) from exc
+    return selected_kinds
+
+
+def _source_linked_eligible_entities(
+    state: Mapping[str, Any],
+    entity_kind: str,
+    evidence_identities: Mapping[str, tuple[str, str]],
+) -> list[Mapping[str, Any]]:
+    """Return lifecycle-eligible native rows linked to current evidence."""
+
+    entities = _goal_outcome_eligible_entities(
+        state,
+        entity_kind,
+        evidence_identities,
+    )
+    return entities
+
+
+def _entity_has_source_identity(
+    entity: Mapping[str, Any],
+    evidence_identities: Mapping[str, tuple[str, str]],
+) -> bool:
+    """Return whether an entity cites one current question provenance row."""
+
+    current_identities = set(evidence_identities.values())
+    matches = {
+        evidence_source_identity(evidence_ref)
+        for evidence_ref in entity.get("evidence_refs", [])
+    }
+    return bool(matches & current_identities)
 
 
 def _candidate_is_permitted(

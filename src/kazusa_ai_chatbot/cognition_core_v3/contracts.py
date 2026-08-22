@@ -11,7 +11,6 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Literal
 
 from kazusa_ai_chatbot.llm_interface import LLMCallConfig, LLMInvoker
 
@@ -311,7 +310,6 @@ class CognitionChainServicesV3:
     chain_lane: LLMCallConfig
     sidecar_lane: LLMCallConfig | None
     subconscious_enabled: bool = False
-    appraisal_group_count: Literal[1, 2, 3, 6] = 2
     turn_deadline_seconds: int = 240
 
     def __post_init__(self) -> None:
@@ -319,13 +317,6 @@ class CognitionChainServicesV3:
             raise TypeError("V3 services require an LLM invoker")
         if not isinstance(self.subconscious_enabled, bool):
             raise TypeError("subconscious_enabled must be a bool")
-        if not isinstance(self.appraisal_group_count, int) or isinstance(
-            self.appraisal_group_count,
-            bool,
-        ):
-            raise TypeError("appraisal_group_count must be an integer")
-        if self.appraisal_group_count not in {1, 2, 3, 6}:
-            raise ValueError("appraisal_group_count must be one of 1, 2, 3, or 6")
         if not isinstance(self.turn_deadline_seconds, int) or isinstance(
             self.turn_deadline_seconds,
             bool,

@@ -130,7 +130,6 @@ async def test_live_and_idle_connectors_construct_the_same_selected_engine_famil
         ),
         sidecar=None,
         subconscious_enabled=False,
-        appraisal_group_count=2,
         turn_deadline_seconds=240,
     )
     monkeypatch.setattr(connector_module, "COGNITION_CORE_ENGINE", engine)

@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import string
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from time import perf_counter
@@ -36,6 +37,12 @@ from kazusa_ai_chatbot.llm_interface import (
 OVERFLOW_PROBE_SCHEMA_VERSION = "cognition_v3_context_overflow_probe.v1"
 V3_CHAIN_ROUTE_NAME = "COGNITION_V3_CHAIN_LLM"
 ERROR_MESSAGE_MAX_CHARS = 2_000
+_OVERFLOW_PAYLOAD_DOMAIN = b"kazusa:cognition-v3:context-overflow:v1:"
+_OVERFLOW_PAYLOAD_CHUNK_SIZE = 4_096
+_OVERFLOW_PAYLOAD_COUNTER_BYTES = 8
+_OVERFLOW_PAYLOAD_ALPHABET = (
+    string.ascii_letters + string.digits + string.punctuation
+)
 CONTEXT_OVERFLOW_REJECTION_MARKERS = (
     "context length",
     "context_length",
@@ -43,6 +50,8 @@ CONTEXT_OVERFLOW_REJECTION_MARKERS = (
     "maximum context",
     "prompt is too long",
     "too many tokens",
+    "exceeds the available context size",
+    "exceed_context_size_error",
 )
 
 OverflowProbeDisposition = Literal[
@@ -50,6 +59,39 @@ OverflowProbeDisposition = Literal[
     "success",
     "transport_failure",
 ]
+
+
+def build_overflow_probe_payload(char_count: int) -> str:
+    """Build exact-length deterministic high-entropy printable ASCII input."""
+
+    if char_count < 0:
+        raise ValueError("overflow probe payload length cannot be negative")
+    if char_count == 0:
+        return ""
+
+    chunks: list[str] = []
+    remaining = char_count
+    chunk_index = 0
+    alphabet_length = len(_OVERFLOW_PAYLOAD_ALPHABET)
+    while remaining > 0:
+        chunk_length = min(remaining, _OVERFLOW_PAYLOAD_CHUNK_SIZE)
+        counter_bytes = chunk_index.to_bytes(
+            _OVERFLOW_PAYLOAD_COUNTER_BYTES,
+            "big",
+        )
+        digest = hashlib.shake_256(
+            _OVERFLOW_PAYLOAD_DOMAIN + counter_bytes,
+        ).digest(chunk_length)
+        chunk = "".join(
+            _OVERFLOW_PAYLOAD_ALPHABET[value % alphabet_length]
+            for value in digest
+        )
+        chunks.append(chunk)
+        remaining -= chunk_length
+        chunk_index += 1
+
+    payload = "".join(chunks)
+    return payload
 
 
 @dataclass(frozen=True)
@@ -328,7 +370,7 @@ def main() -> int:
     args = parser.parse_args()
     if args.payload_char_count <= 0:
         parser.error("--payload-char-count must be positive")
-    payload = ("x" * args.payload_char_count,)
+    payload = (build_overflow_probe_payload(args.payload_char_count),)
     dry_run = run_overflow_probe_dry_run(
         route_name=args.route_name,
         declared_context_window_tokens=args.context_window_tokens,

@@ -602,13 +602,13 @@ def test_cognition_chain_panels_render_correlated_sanitized_runs(
                 "status": "running",
                 "workers": {},
                 "cognition_engine": {
-                    "schema_version": "cognition_engine_descriptor.v1",
+                    "schema_version": "cognition_engine_descriptor.v2",
                     "engine_id": "v3",
                     "chain_model_name": "chain-model",
                     "sidecar_model_name": "sidecar-model",
                     "sidecar_enabled": True,
                     "subconscious_enabled": True,
-                    "appraisal_group_count": 6,
+                    "appraisal_stage_layout": "fixed_a1_a2",
                     "chain_context_window_tokens": 50176,
                     "normal_budget_tokens": 50000,
                     "extended_budget_tokens": 65000,
@@ -681,13 +681,13 @@ def test_cognition_chain_panels_render_correlated_sanitized_runs(
     assert payload["latest_self_cognition_chain_run"]["run_id"] == "self-run"
     assert payload["overview"]["cognition_engine"] == {
         "status": "available",
-        "schema_version": "cognition_engine_descriptor.v1",
+        "schema_version": "cognition_engine_descriptor.v2",
         "engine_id": "v3",
         "chain_model_name": "chain-model",
         "sidecar_model_name": "sidecar-model",
         "sidecar_enabled": True,
         "subconscious_enabled": True,
-        "appraisal_group_count": 6,
+        "appraisal_stage_layout": "fixed_a1_a2",
         "chain_context_window_tokens": 50176,
         "normal_budget_tokens": 50000,
         "extended_budget_tokens": 65000,
@@ -740,7 +740,7 @@ def test_cognition_chain_panels_render_correlated_sanitized_runs(
         "sidecar_model_name",
         "sidecar_enabled",
         "subconscious_enabled",
-        "appraisal_group_count",
+        "appraisal_stage_layout",
         "chain_context_window_tokens",
         "normal_budget_tokens",
         "extended_budget_tokens",
@@ -750,7 +750,7 @@ def test_cognition_chain_panels_render_correlated_sanitized_runs(
     assert "function renderCognitionChainRun" in script.text
     assert "function projectCognitionEngineDescriptor" in script.text
     assert "function renderCognitionEngineDescriptor" in script.text
-    assert "cognition_engine_descriptor.v1" in script.text
+    assert "cognition_engine_descriptor.v2" in script.text
     assert (
         "cognitionChainFieldValue(fieldName, fieldValue, chainStatus)"
         in script.text
@@ -774,13 +774,13 @@ def test_cognition_engine_projection_fails_closed_for_unknown_or_incomplete_data
     from control_console import app as app_module
 
     base_descriptor = {
-        "schema_version": "cognition_engine_descriptor.v1",
+        "schema_version": "cognition_engine_descriptor.v2",
         "engine_id": "v3",
         "chain_model_name": "chain-model",
         "sidecar_model_name": "sidecar-model",
         "sidecar_enabled": True,
         "subconscious_enabled": False,
-        "appraisal_group_count": 2,
+        "appraisal_stage_layout": "fixed_a1_a2",
         "chain_context_window_tokens": 50176,
         "normal_budget_tokens": 50000,
         "extended_budget_tokens": 65000,

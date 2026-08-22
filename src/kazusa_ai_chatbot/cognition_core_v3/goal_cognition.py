@@ -21,10 +21,13 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from kazusa_ai_chatbot.cognition_core_v2 import goal_cognition as v2_goal_cognition
+from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
+    DEFAULT_BRANCH_DEFINITIONS,
+)
 from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     RELATIONAL_WILLINGNESS_SCHEMA_VERSION,
     project_evidence_provenance_role,
-    validate_relational_willingness,
 )
 from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
     selection_goal_draft_to_goal_bid as materialize_v2_selection_goal_draft,
@@ -41,7 +44,6 @@ from kazusa_ai_chatbot.cognition_episode import (
 # Closed limits ported from the V2 goal cognition contract.
 GOAL_BID_EVIDENCE_HANDLE_LIMIT = 9
 GOAL_BID_ROLE_HANDLE_LIMIT = 8
-GOAL_BID_TEXT_CHAR_LIMIT = 500
 GOAL_CONFIDENCE_CHAR_LIMIT = 40
 CONSEQUENCE_CHAR_LIMIT = 240
 EXPECTED_CONSEQUENCE_ITEM_LIMIT = 8
@@ -137,190 +139,6 @@ def goal_kind_owns_relational_willingness(goal_kind: str) -> bool:
     return goal_kind == ORDINARY_GOAL_KIND
 
 
-def _bounded_text(value: object, label: str, maximum: int) -> None:
-    """Validate one bounded narrative field.
-
-    Args:
-        value: Candidate field value from a model-owned draft.
-        label: Field label used in the error message.
-        maximum: Inclusive character limit for the non-empty text.
-
-    Raises:
-        ValueError: when the value is not non-empty text within ``maximum``.
-    """
-    if not isinstance(value, str) or not value.strip() or len(value) > maximum:
-        raise ValueError(f"{label} is invalid")
-
-
-def validate_handle_list(
-    value: object,
-    authorized_handles: set[str],
-    label: str,
-    limit: int,
-) -> list[str]:
-    """Validate a typed handle list against its authorized domain.
-
-    Args:
-        value: Candidate handle list from a model-owned draft.
-        authorized_handles: Complete authorized handle set for this call.
-        label: Field label used in the error message.
-        limit: Inclusive maximum number of handles.
-
-    Returns:
-        The normalized handle list, preserving candidate order.
-
-    Raises:
-        ValueError: when any handle is missing from ``authorized_handles`` or
-            the list exceeds ``limit``.
-    """
-    if not isinstance(value, list):
-        raise ValueError(f"goal bid {label} handles are invalid")
-    normalized = []
-    for handle in value:
-        if (
-            not isinstance(handle, str)
-            or not handle.strip()
-            or handle not in authorized_handles
-        ):
-            raise ValueError(f"goal bid {label} handles are invalid")
-        normalized.append(handle)
-    if len(normalized) > limit:
-        raise ValueError(f"goal bid {label} handles exceed the limit")
-    return normalized
-
-
-def _validate_expected_consequences(value: object) -> list[str]:
-    """Validate the bounded non-empty consequence list.
-
-    Args:
-        value: Candidate ``expected_consequences`` field.
-
-    Returns:
-        The consequence list, preserving candidate order.
-
-    Raises:
-        ValueError: when the list is empty, over-sized, or holds an invalid
-            narrative item.
-    """
-    if not isinstance(value, list) or len(value) > EXPECTED_CONSEQUENCE_ITEM_LIMIT:
-        raise ValueError("goal bid consequences are invalid")
-    for consequence in value:
-        _bounded_text(consequence, "consequence", CONSEQUENCE_CHAR_LIMIT)
-    return list(value)
-
-
-def validate_relational_decision(
-    candidate: object,
-    *,
-    evidence_handles: set[str],
-) -> dict[str, Any]:
-    """Validate one relational-willingness decision owned by ordinary_response.
-
-    The sub-contract is the unchanged V2 contract: this function delegates to
-    ``validate_relational_willingness`` with the code-stamped schema version so
-    the closed value sets and cross-field rules stay a single source of truth.
-
-    Args:
-        candidate: Model-owned decision object without ``schema_version``.
-        evidence_handles: Complete authorized handle set for this call; cited
-            handles outside it are a structural contract error.
-
-    Returns:
-        The validated decision with the code-stamped schema version.
-
-    Raises:
-        ValueError: when ``candidate`` is not a mapping or carries a model-
-            submitted ``schema_version`` field.
-        CognitionContractError: when the V2 decision-level contract (closed
-            value sets, cross-field rules, Simplified Chinese reason) is
-            violated by the delegated validator.
-    """
-    if not isinstance(candidate, Mapping):
-        raise ValueError("relational willingness must be an object")
-    decision = dict(candidate)
-    if "schema_version" in decision:
-        raise ValueError(
-            "relational willingness schema_version is code-owned"
-        )
-    decision["schema_version"] = RELATIONAL_WILLINGNESS_SCHEMA_VERSION
-    return validate_relational_willingness(
-        decision,
-        evidence_handles=evidence_handles,
-    )
-
-
-def validate_goal_bid_draft(
-    candidate: object,
-    *,
-    goal_kind: str,
-    evidence_handles: set[str],
-    role_handles: set[str],
-) -> dict[str, Any]:
-    """Validate one model-owned goal bid draft before materialization.
-
-    The exact field set depends on the kind owner rule: only ``ordinary_response``
-    carries ``relational_willingness``, and every other known kind rejects the
-    field as a structural contract error.
-
-    Args:
-        candidate: Parsed model output for one goal chain.
-        goal_kind: Goal kind label from the closed V2 ``GOAL_KINDS`` set.
-        evidence_handles: Complete authorized evidence handle set.
-        role_handles: Complete authorized role handle set.
-
-    Returns:
-        The normalized draft with validated handle lists and, when owned, the
-        validated relational decision.
-
-    Raises:
-        ValueError: on any field-set, type, bound, or domain violation of the
-            model-owned draft.
-        CognitionContractError: when the owned relational decision violates the
-            V2 decision-level contract during delegation.
-    """
-    if not isinstance(candidate, Mapping):
-        raise ValueError("goal bid draft must be an object")
-    owns_willingness = goal_kind_owns_relational_willingness(goal_kind)
-    expected_fields = set(GOAL_BID_FIELDS)
-    if owns_willingness:
-        expected_fields.add("relational_willingness")
-    if set(candidate) != expected_fields:
-        raise ValueError("goal bid draft fields are not exact")
-
-    for field_name in (
-        "intention",
-        "desired_outcome",
-        "concrete_detail",
-        "reason",
-        "private_monologue",
-    ):
-        _bounded_text(candidate[field_name], field_name, GOAL_BID_TEXT_CHAR_LIMIT)
-    _bounded_text(candidate["confidence"], "confidence", GOAL_CONFIDENCE_CHAR_LIMIT)
-
-    normalized = dict(candidate)
-    normalized["target_role_handles"] = validate_handle_list(
-        candidate["target_role_handles"],
-        role_handles,
-        "role",
-        GOAL_BID_ROLE_HANDLE_LIMIT,
-    )
-    normalized["evidence_handles"] = validate_handle_list(
-        candidate["evidence_handles"],
-        evidence_handles,
-        "evidence",
-        GOAL_BID_EVIDENCE_HANDLE_LIMIT,
-    )
-    normalized["expected_consequences"] = _validate_expected_consequences(
-        candidate["expected_consequences"]
-    )
-    if owns_willingness:
-        normalized["relational_willingness"] = validate_relational_decision(
-            candidate["relational_willingness"],
-            evidence_handles=evidence_handles,
-        )
-    return normalized
-
-
 def validate_recurrence_ordinary_goal_bid_draft(
     candidate: object,
     *,
@@ -334,8 +152,10 @@ def validate_recurrence_ordinary_goal_bid_draft(
     observation, but the original ordinary semantic owner retains its
     already-validated relational decision for the whole resolver turn. The
     model therefore supplies the standard bid fields only; this boundary adds
-    the carried decision before the canonical ordinary validator revalidates
-    its existing evidence references.
+    the carried decision before the canonical V2 ordinary validator
+    revalidates its existing evidence references. ``episode_handles`` remains
+    unset because recurrence carries the prior accepted decision instead of
+    authoring a new current-episode relational stance.
     """
 
     if not isinstance(candidate, Mapping):
@@ -350,11 +170,12 @@ def validate_recurrence_ordinary_goal_bid_draft(
         raise ValueError("carried relational willingness schema is invalid")
     candidate_with_carrier = dict(candidate)
     candidate_with_carrier["relational_willingness"] = carried_candidate
-    return validate_goal_bid_draft(
+    return v2_goal_cognition.validate_goal_bid_draft(
         candidate_with_carrier,
-        goal_kind=ORDINARY_GOAL_KIND,
         evidence_handles=evidence_handles,
         role_handles=role_handles,
+        require_relational_willingness=True,
+        episode_handles=None,
     )
 
 
@@ -925,6 +746,57 @@ def resolve_goal_disposition(
         )
     return GoalBidDisposition(goal_kind, False, error_code=failure.error_code)
 
+
+def _validate_active_goal_roster(
+    branch_roster: Sequence[Mapping[str, object]],
+) -> list[str]:
+    """Validate canonical branch labels and their goal-kind bindings.
+
+    The active-group model contract addresses each registered branch by its
+    stable branch label. The label and the V2 goal kind are separate fields:
+    several registered branches intentionally use a more specific branch name
+    while sharing a different closed goal-kind value.
+
+    Args:
+        branch_roster: Deterministic active-branch rows supplied to the group
+            question and its validator.
+
+    Returns:
+        The validated branch labels in their frozen roster order.
+
+    Raises:
+        TypeError: If a roster row is not a mapping.
+        ValueError: If a row has an unknown, malformed, duplicate, or
+            incorrectly bound branch label or goal kind.
+    """
+
+    branch_ids: list[str] = []
+    seen_branch_ids: set[str] = set()
+    for roster_row in branch_roster:
+        if not isinstance(roster_row, Mapping):
+            raise TypeError("active goal roster rows must be mappings")
+        branch_id = roster_row.get("branch_id")
+        if (
+            not isinstance(branch_id, str)
+            or not branch_id
+            or branch_id != branch_id.strip()
+            or branch_id not in DEFAULT_BRANCH_DEFINITIONS
+        ):
+            raise ValueError("active goal roster branch_id is invalid")
+        if branch_id in seen_branch_ids:
+            raise ValueError("active goal roster branch_id is duplicated")
+        goal_kind = roster_row.get("goal_kind")
+        if not isinstance(goal_kind, str) or goal_kind not in GOAL_KINDS:
+            raise ValueError("active goal roster goal_kind is invalid")
+        if DEFAULT_BRANCH_DEFINITIONS[branch_id].goal_kind != goal_kind:
+            raise ValueError(
+                "active goal roster branch and goal kind binding is invalid"
+            )
+        seen_branch_ids.add(branch_id)
+        branch_ids.append(branch_id)
+    return branch_ids
+
+
 def validate_active_goal_group_output(
     raw: object,
     *,
@@ -934,33 +806,96 @@ def validate_active_goal_group_output(
 ) -> list[dict[str, Any]]:
     """Validate an ordered active-branch group bid output."""
 
+    branch_ids = _validate_active_goal_roster(branch_roster)
     if not isinstance(raw, Mapping) or set(raw) != {"bids"}:
         raise ValueError("active goal group output fields are not exact")
     bids = raw["bids"]
     if not isinstance(bids, list):
-        raise ValueError("active goal group bids must be a list")
-    if len(bids) != len(branch_roster):
+        raise TypeError("active goal group bids must be a list")
+    if len(bids) != len(branch_ids):
         raise ValueError("active goal group bid count must equal the roster")
 
     validated_bids: list[dict[str, Any]] = []
-    for roster_row, bid_row in zip(branch_roster, bids):
-        if not isinstance(roster_row, Mapping):
-            raise ValueError("active goal roster rows must be mappings")
-        branch_id = roster_row.get("branch_id")
-        if not isinstance(branch_id, str) or branch_id not in GOAL_KINDS:
-            raise ValueError("active goal roster branch_id is invalid")
+    for branch_id, bid_row in zip(branch_ids, bids):
         if not isinstance(bid_row, Mapping):
-            raise ValueError("active goal group rows must be mappings")
+            raise TypeError("active goal group rows must be mappings")
         if bid_row.get("branch_id") != branch_id:
             raise ValueError("active goal group bid order must equal the roster")
         candidate = dict(bid_row)
         candidate.pop("branch_id", None)
-        validated = validate_goal_bid_draft(
+        validated = v2_goal_cognition.validate_goal_bid_draft(
             candidate,
-            goal_kind=branch_id,
             evidence_handles=evidence_handles,
             role_handles=role_handles,
+            require_relational_willingness=False,
+            episode_handles=None,
         )
         validated["branch_id"] = branch_id
         validated_bids.append(validated)
     return validated_bids
+
+
+def salvage_active_goal_group_output(
+    raw: object,
+    *,
+    branch_roster: Sequence[Mapping[str, object]],
+    evidence_handles: set[str],
+    role_handles: set[str],
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """Retain independently valid siblings from a failed final group output.
+
+    This is a post-exhaustion boundary, not a repair path.  It never changes
+    a candidate field and never accepts an unlisted, duplicated, missing, or
+    independently invalid branch.  The returned rows remain in the frozen
+    roster order and the failure map contains one typed disposition per
+    omitted roster branch.
+    """
+
+    branch_ids = _validate_active_goal_roster(branch_roster)
+    failures: dict[str, str] = {}
+    if not isinstance(raw, Mapping) or set(raw) != {"bids"}:
+        return [], {
+            branch_id: "active_goal_group_contract_invalid"
+            for branch_id in branch_ids
+        }
+    bids = raw["bids"]
+    if not isinstance(bids, list):
+        return [], {
+            branch_id: "active_goal_group_contract_invalid"
+            for branch_id in branch_ids
+        }
+
+    by_branch: dict[str, list[Mapping[str, object]]] = {}
+    for bid in bids:
+        if not isinstance(bid, Mapping):
+            continue
+        branch_id = bid.get("branch_id")
+        if isinstance(branch_id, str):
+            by_branch.setdefault(branch_id, []).append(bid)
+
+    validated_rows: list[dict[str, Any]] = []
+    for roster_row in branch_roster:
+        branch_id = roster_row["branch_id"]
+        candidates = by_branch.get(branch_id, [])
+        if not candidates:
+            failures[branch_id] = "active_goal_group_missing_branch"
+            continue
+        if len(candidates) != 1:
+            failures[branch_id] = "active_goal_group_duplicate_branch"
+            continue
+        candidate = dict(candidates[0])
+        candidate.pop("branch_id", None)
+        try:
+            validated = v2_goal_cognition.validate_goal_bid_draft(
+                candidate,
+                evidence_handles=evidence_handles,
+                role_handles=role_handles,
+                require_relational_willingness=False,
+                episode_handles=None,
+            )
+        except (AttributeError, KeyError, TypeError, ValueError):
+            failures[branch_id] = "active_goal_group_invalid_bid"
+            continue
+        validated["branch_id"] = branch_id
+        validated_rows.append(validated)
+    return validated_rows, failures

@@ -43,14 +43,14 @@ const LEGACY_THEME_NAMES = {
   expo: "dark",
   ollama: "bright",
 };
-const COGNITION_ENGINE_DESCRIPTOR_SCHEMA = "cognition_engine_descriptor.v1";
+const COGNITION_ENGINE_DESCRIPTOR_SCHEMA = "cognition_engine_descriptor.v2";
 const COGNITION_ENGINE_DESCRIPTOR_FIELDS = [
   "engine_id",
   "chain_model_name",
   "sidecar_model_name",
   "sidecar_enabled",
   "subconscious_enabled",
-  "appraisal_group_count",
+  "appraisal_stage_layout",
   "chain_context_window_tokens",
   "normal_budget_tokens",
   "extended_budget_tokens",

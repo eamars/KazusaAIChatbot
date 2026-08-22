@@ -71,3 +71,11 @@ def test_budget_ledger_calibration_extension_reanchor_and_overflow() -> None:
             estimated_prompt_tokens=70_000,
             reserved_completion_tokens=4_096,
         )
+
+
+def test_estimator_subtracts_cjk_utf8_bytes_from_mixed_messages() -> None:
+    """CJK byte accounting preserves the fixed calibrated formula."""
+
+    assert budget.estimate_message_tokens(["中中中"]) == 51
+    assert budget.estimate_message_tokens(["abcd中"]) == 50
+    assert budget.estimate_message_tokens(["abcd", "中中"]) == 67

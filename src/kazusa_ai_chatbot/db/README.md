@@ -556,12 +556,13 @@ prune stale data.
 
 ### `cognition_chain_runs`
 
-Stores one sanitized `cognition_chain_run.v1` document for each V3
+Stores one sanitized `cognition_chain_run.v2` document for each V3
 invocation. The row carries `chain_run_id`, exact `run_id`, `llm_trace_id`,
 and `cognition_invocation_id` correlation, source/model names, bounded step
 records, ledger and sidecar counters, terminal disposition, warning codes, and
-`expires_at`. It contains no prompt, answer, private metadata, evidence text,
-credential, or endpoint.
+`expires_at`. Its appraisal topology is the fixed `fixed_a1_a2` layout, not a
+tunable group count. It contains no prompt, answer, private metadata, evidence
+text, credential, or endpoint.
 
 The owner creates a unique `chain_run_id` index, an exact
 `(run_id, llm_trace_id, completed_at)` lookup index, an invocation and engine

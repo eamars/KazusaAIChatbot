@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from unittest.mock import AsyncMock
 
 import httpx
@@ -13,6 +14,21 @@ from control_console.kazusa_client import KazusaClient
 from kazusa_ai_chatbot import db as db_facade
 from kazusa_ai_chatbot import event_logging, service
 from kazusa_ai_chatbot import llm_tracing as tracing
+from kazusa_ai_chatbot.cognition_core_v2.contracts import CognitionExecutionError
+from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+    bind_v2_attempt_ledger,
+    create_v2_attempt_ledger,
+    reset_v2_attempt_ledger,
+)
+from kazusa_ai_chatbot.cognition_core_v3 import facade as v3_facade
+from kazusa_ai_chatbot.cognition_core_v3.diagnostics import (
+    CHAIN_LEDGER_DEFAULTS,
+    CHAIN_SIDECAR_DEFAULTS,
+    CHAIN_STEP_FIELDS,
+    bind_protected_chain_records,
+    current_chain_scope,
+    reset_protected_chain_records,
+)
 from kazusa_ai_chatbot.db import cognition_chain_runs as chain_runs
 from kazusa_ai_chatbot.event_logging import recording
 from kazusa_ai_chatbot.llm_tracing import chain_transcript
@@ -139,7 +155,7 @@ def _chain_run_document(
     """Build one complete sanitized chain-run document."""
 
     return {
-        "schema_version": "cognition_chain_run.v1",
+        "schema_version": "cognition_chain_run.v2",
         "chain_run_id": chain_run_id,
         "engine": "v3",
         "run_id": run_id,
@@ -149,7 +165,7 @@ def _chain_run_document(
         "chain_model_name": "chain-model",
         "sidecar_model_name": "sidecar-model",
         "subconscious_enabled": False,
-        "appraisal_group_count": 2,
+        "appraisal_stage_layout": "fixed_a1_a2",
         "started_at": "2026-08-20T00:00:00Z",
         "completed_at": "2026-08-20T00:00:01Z",
         "terminal_disposition": "complete",
@@ -319,8 +335,16 @@ async def test_protected_and_sanitized_records_share_exact_service_console_corre
         assert mismatch_response.cognition_chain_run is None
 
     assert collection.find_queries[-2:] == [
-        {"run_id": run_id, "llm_trace_id": "trace-other"},
-        {"run_id": "run-other", "llm_trace_id": trace_id},
+        {
+            "run_id": run_id,
+            "llm_trace_id": "trace-other",
+            "schema_version": "cognition_chain_run.v2",
+        },
+        {
+            "run_id": "run-other",
+            "llm_trace_id": trace_id,
+            "schema_version": "cognition_chain_run.v2",
+        },
     ]
     mismatch_payload = mismatch_response.model_dump(mode="json")
 
@@ -374,3 +398,281 @@ async def test_protected_and_sanitized_records_share_exact_service_console_corre
         AsyncMock(return_value=_FailingDatabase()),
     )
     assert await db_facade.save_cognition_chain_run(chain_document) is False
+
+
+@pytest.mark.asyncio
+async def test_scripted_v3_engine_produces_exact_correlated_observability(
+    cognition_payload,
+    v3_services,
+    monkeypatch,
+    caplog,
+) -> None:
+    """The real V3 engine emits protected and sanitized producer records."""
+
+    transcript_writer = AsyncMock(return_value={"status": "recorded"})
+    event_writer = AsyncMock(return_value={"status": "recorded"})
+    database_writer = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        v3_facade.llm_tracing,
+        "record_cognition_chain_transcript",
+        transcript_writer,
+    )
+    monkeypatch.setattr(
+        v3_facade.event_logging,
+        "record_cognition_chain_event",
+        event_writer,
+    )
+    monkeypatch.setattr(
+        v3_facade.db,
+        "save_cognition_chain_run",
+        database_writer,
+    )
+
+    ledger_token = bind_v2_attempt_ledger(
+        create_v2_attempt_ledger("invocation-scripted-1"),
+        graph_attempt=1,
+    )
+    trace_token = tracing.bind_trace_id("trace-scripted-1")
+    try:
+        output = await v3_facade.run_cognition(cognition_payload, v3_services)
+    finally:
+        tracing.reset_trace_id(trace_token)
+        reset_v2_attempt_ledger(ledger_token)
+
+    assert output["schema_version"] == "cognition_core_output.v2"
+    assert transcript_writer.await_count == 1
+    assert event_writer.await_count == 1
+    assert database_writer.await_count == 1
+    transcript_call = transcript_writer.await_args.kwargs
+    event_call = event_writer.await_args.kwargs
+    database_document = database_writer.await_args.kwargs["document"]
+    assert transcript_call["run_id"] == "invocation-scripted-1"
+    assert transcript_call["trace_id"] == "trace-scripted-1"
+    assert event_call["run_id"] == "invocation-scripted-1"
+    assert event_call["cognition_invocation_id"] == "invocation-scripted-1"
+    assert event_call["deadline_consumption_ratio"] == pytest.approx(
+        event_call["duration_ms"] / event_call["deadline_ms"]
+    )
+    assert 0.0 <= event_call["deadline_consumption_ratio"] <= 1.0
+    assert database_document["run_id"] == "invocation-scripted-1"
+    assert database_document["llm_trace_id"] == "trace-scripted-1"
+    assert database_document["cognition_invocation_id"] == (
+        "invocation-scripted-1"
+    )
+    assert database_document["chain_run_id"].startswith("cogchain_")
+    assert database_document["source_kind"] == "debug"
+    assert {
+        "schema_version",
+        "chain_run_id",
+        "engine",
+        "run_id",
+        "llm_trace_id",
+        "cognition_invocation_id",
+        "source_kind",
+        "chain_model_name",
+        "sidecar_model_name",
+        "subconscious_enabled",
+        "appraisal_stage_layout",
+        "started_at",
+        "completed_at",
+        "terminal_disposition",
+        "steps",
+        "ledger",
+        "sidecar",
+        "session_events",
+        "degradation_markers",
+        "warning_codes",
+        "expires_at",
+    } <= set(database_document)
+    assert len(database_document["steps"]) <= 96
+    assert len(database_document["session_events"]) <= 16
+    assert len(database_document["degradation_markers"]) <= 32
+    assert len(database_document["warning_codes"]) <= 32
+    assert set(database_document["ledger"]) == set(CHAIN_LEDGER_DEFAULTS)
+    assert set(database_document["sidecar"]) == set(CHAIN_SIDECAR_DEFAULTS)
+    assert "cognition_attempt_ledger" not in database_document["ledger"]
+    assert all(
+        set(step) == set(CHAIN_STEP_FIELDS)
+        for step in database_document["steps"]
+    )
+    assert "O" in {step["step_id"] for step in database_document["steps"]}
+    assert database_document["session_events"] == ["cold"]
+    assert "private_monologue" not in repr(database_document)
+    assert "typed_product" not in repr(database_document)
+    assert transcript_call["messages"][0].type == "system"
+    assert all(
+        message.type in {"human", "ai"}
+        for message in transcript_call["messages"][1:]
+    )
+    assert "typed_product" not in repr(event_call)
+
+    async def failing_writer(*args, **kwargs):
+        del args, kwargs
+        raise RuntimeError("writer failure")
+
+    monkeypatch.setattr(
+        v3_facade.llm_tracing,
+        "record_cognition_chain_transcript",
+        failing_writer,
+    )
+    monkeypatch.setattr(
+        v3_facade.event_logging,
+        "record_cognition_chain_event",
+        failing_writer,
+    )
+    monkeypatch.setattr(
+        v3_facade.db,
+        "save_cognition_chain_run",
+        failing_writer,
+    )
+    failure_ledger_token = bind_v2_attempt_ledger(
+        create_v2_attempt_ledger("invocation-scripted-failure"),
+        graph_attempt=1,
+    )
+    failure_trace_token = tracing.bind_trace_id("trace-scripted-failure")
+    try:
+        failure_output = await v3_facade.run_cognition(
+            cognition_payload,
+            v3_services,
+        )
+    finally:
+        tracing.reset_trace_id(failure_trace_token)
+        reset_v2_attempt_ledger(failure_ledger_token)
+    assert failure_output["schema_version"] == output["schema_version"]
+    assert "writer failure" not in caplog.text
+    assert "RuntimeError" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_each_run_uses_fresh_producer_scope_under_ambient_identity(
+    cognition_payload,
+    v3_services,
+    monkeypatch,
+) -> None:
+    """Ambient node identity survives while producer state stays per-run."""
+
+    database_writer = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        v3_facade.llm_tracing,
+        "record_cognition_chain_transcript",
+        AsyncMock(return_value={"status": "recorded"}),
+    )
+    monkeypatch.setattr(
+        v3_facade.event_logging,
+        "record_cognition_chain_event",
+        AsyncMock(return_value={"status": "recorded"}),
+    )
+    monkeypatch.setattr(
+        v3_facade.db,
+        "save_cognition_chain_run",
+        database_writer,
+    )
+
+    outer_token = bind_protected_chain_records(
+        run_id="ambient-run",
+        source_kind="live",
+        llm_trace_id="ambient-trace",
+        cognition_invocation_id="ambient-invocation",
+    )
+    ledger_token = bind_v2_attempt_ledger(
+        create_v2_attempt_ledger("ambient-invocation"),
+        graph_attempt=1,
+    )
+    trace_token = tracing.bind_trace_id("ambient-trace")
+    try:
+        outer_scope = current_chain_scope()
+        assert outer_scope is not None
+        first_output = await v3_facade.run_cognition(
+            deepcopy(cognition_payload),
+            v3_services,
+        )
+        assert current_chain_scope() is outer_scope
+        second_output = await v3_facade.run_cognition(
+            deepcopy(cognition_payload),
+            v3_services,
+        )
+        assert current_chain_scope() is outer_scope
+        assert outer_scope.steps == []
+        assert outer_scope.accepted_messages == ()
+    finally:
+        tracing.reset_trace_id(trace_token)
+        reset_v2_attempt_ledger(ledger_token)
+        reset_protected_chain_records(outer_token)
+
+    assert first_output["schema_version"] == second_output["schema_version"]
+    assert database_writer.await_count == 2
+    first_document = database_writer.await_args_list[0].kwargs["document"]
+    second_document = database_writer.await_args_list[1].kwargs["document"]
+    assert first_document["chain_run_id"] != second_document["chain_run_id"]
+    assert first_document["chain_run_id"].startswith("cogchain_")
+    assert second_document["chain_run_id"].startswith("cogchain_")
+    for field_name in ("run_id", "llm_trace_id", "cognition_invocation_id"):
+        assert first_document[field_name] == second_document[field_name]
+    assert len(first_document["steps"]) == len(second_document["steps"])
+    assert [step["step_id"] for step in first_document["steps"]] == [
+        step["step_id"] for step in second_document["steps"]
+    ]
+
+
+@pytest.mark.asyncio
+async def test_terminal_failure_persists_latest_accepted_observability(
+    cognition_payload,
+    v3_services,
+    monkeypatch,
+) -> None:
+    """Failure projection keeps accepted data and exact sanitized aggregates."""
+
+    transcript_writer = AsyncMock(return_value={"status": "recorded"})
+    event_writer = AsyncMock(return_value={"status": "recorded"})
+    database_writer = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        v3_facade.llm_tracing,
+        "record_cognition_chain_transcript",
+        transcript_writer,
+    )
+    monkeypatch.setattr(
+        v3_facade.event_logging,
+        "record_cognition_chain_event",
+        event_writer,
+    )
+    monkeypatch.setattr(
+        v3_facade.db,
+        "save_cognition_chain_run",
+        database_writer,
+    )
+    original_ainvoke = v3_services.llm.ainvoke
+
+    async def failing_ainvoke(messages, *, config):
+        if config.stage_name.split(".")[0] == "G1a":
+            raise ConnectionError("provider endpoint secret")
+        return await original_ainvoke(messages, config=config)
+
+    monkeypatch.setattr(v3_services.llm, "ainvoke", failing_ainvoke)
+    ledger_token = bind_v2_attempt_ledger(
+        create_v2_attempt_ledger("invocation-terminal-failure"),
+        graph_attempt=1,
+    )
+    trace_token = tracing.bind_trace_id("trace-terminal-failure")
+    try:
+        with pytest.raises(CognitionExecutionError):
+            await v3_facade.run_cognition(cognition_payload, v3_services)
+    finally:
+        tracing.reset_trace_id(trace_token)
+        reset_v2_attempt_ledger(ledger_token)
+
+    assert transcript_writer.await_count == 1
+    assert event_writer.await_count == 1
+    assert database_writer.await_count == 1
+    transcript_call = transcript_writer.await_args.kwargs
+    assert transcript_call["messages"][0].type == "system"
+    assert any(
+        message.type == "ai"
+        for message in transcript_call["messages"]
+    )
+    document = database_writer.await_args.kwargs["document"]
+    assert set(document["ledger"]) == set(CHAIN_LEDGER_DEFAULTS)
+    assert set(document["sidecar"]) == set(CHAIN_SIDECAR_DEFAULTS)
+    assert document["ledger"]["max_estimated_prompt_tokens"] > 0
+    assert document["terminal_disposition"] == "terminal failure"
+    assert "cognition_attempt_ledger" not in repr(document["ledger"])
+    assert "provider endpoint secret" not in repr(document)

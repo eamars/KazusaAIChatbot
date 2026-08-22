@@ -185,6 +185,7 @@ from kazusa_ai_chatbot.config import (
     CHARACTER_GLOBAL_USER_ID,
     CHAT_HISTORY_RECENT_LIMIT,
     COGNITION_CORE_ENGINE,
+    COGNITION_V3_APPRAISAL_STAGE_LAYOUT,
     COGNITION_VISUAL_DIRECTIVES_ENABLED,
     CONVERSATION_HISTORY_LIMIT,
     KAZUSA_CONTROL_BRAIN_SHARED_SECRET,
@@ -2414,13 +2415,13 @@ def _cognition_engine_descriptor() -> dict[str, object]:
             raise RuntimeError("selected V3 chain context window is unavailable")
         sidecar = selected_settings.sidecar
         descriptor = {
-            "schema_version": "cognition_engine_descriptor.v1",
+            "schema_version": "cognition_engine_descriptor.v2",
             "engine_id": "v3",
             "chain_model_name": selected_settings.chain.model,
             "sidecar_model_name": sidecar.model if sidecar else "",
             "sidecar_enabled": sidecar is not None,
             "subconscious_enabled": selected_settings.subconscious_enabled,
-            "appraisal_group_count": selected_settings.appraisal_group_count,
+            "appraisal_stage_layout": COGNITION_V3_APPRAISAL_STAGE_LAYOUT,
             "chain_context_window_tokens": context_window_tokens,
             "normal_budget_tokens": 50_000,
             "extended_budget_tokens": 65_000,
@@ -2437,13 +2438,13 @@ def _cognition_engine_descriptor() -> dict[str, object]:
     if not stage_models:
         raise RuntimeError("selected V2 cognition stage models are unavailable")
     descriptor = {
-        "schema_version": "cognition_engine_descriptor.v1",
+        "schema_version": "cognition_engine_descriptor.v2",
         "engine_id": "v2",
         "chain_model_name": ", ".join(stage_models),
         "sidecar_model_name": "",
         "sidecar_enabled": False,
         "subconscious_enabled": False,
-        "appraisal_group_count": 0,
+        "appraisal_stage_layout": "parallel_v2",
         "chain_context_window_tokens": 0,
         "normal_budget_tokens": 0,
         "extended_budget_tokens": 0,
@@ -6827,7 +6828,7 @@ async def _process_queued_chat_item(
         cognition_graph = _build_response_cognition_graph(
             graph_result=result,
             consolidation_state=consolidation_state_dict,
-            run_id=delivery_tracking_id or correlation_id,
+            run_id=cognition_attempt_ledger.cognition_invocation_id,
             cognition_invocation_id=(
                 cognition_attempt_ledger.cognition_invocation_id
             ),

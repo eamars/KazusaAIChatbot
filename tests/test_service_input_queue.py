@@ -13,13 +13,13 @@ from pydantic import ValidationError
 
 from kazusa_ai_chatbot import chat_input_queue as queue_module
 from kazusa_ai_chatbot import service as service_module
-from kazusa_ai_chatbot.cognition_core_v2 import model_attempt_policy
-from kazusa_ai_chatbot.cognition_resolver import guardrail
 from kazusa_ai_chatbot.brain_service import intake as brain_intake
 from kazusa_ai_chatbot.brain_service.turn_settlement import (
     AssessmentLease,
     PersistedChatFragment,
 )
+from kazusa_ai_chatbot.cognition_core_v2 import model_attempt_policy
+from kazusa_ai_chatbot.cognition_resolver import guardrail
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
 from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
 from tests.cognition_core_v2_test_helpers import (
@@ -1939,10 +1939,16 @@ async def test_service_graph_retry_reuses_goal_attempt_ledger(
             }
 
     graph = _Graph()
+    captured_graphs: list[dict[str, object]] = []
     monkeypatch.setattr(
         service_module,
         "_save_assistant_message",
         AsyncMock(),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_record_latest_cognition_graph",
+        lambda cognition_graph: captured_graphs.append(cognition_graph),
     )
     _patch_common_dependencies(monkeypatch, graph)
     item = _item(1, direct_address=True)
@@ -1975,6 +1981,13 @@ async def test_service_graph_retry_reuses_goal_attempt_ledger(
         row["cognition_invocation_id"]
         for row in graph.coordinates
     }) == 1
+    assert captured_graphs
+    latest_graph = captured_graphs[-1]
+    assert latest_graph["run_id"] == graph.coordinates[-1][
+        "cognition_invocation_id"
+    ]
+    assert latest_graph["cognition_invocation_id"] == latest_graph["run_id"]
+    assert latest_graph["run_id"] != response.delivery_tracking_id
     await _reset_queue_state()
 
 

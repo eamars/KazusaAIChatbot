@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from kazusa_ai_chatbot.cognition_core_v2 import workspace as v2_workspace
 from kazusa_ai_chatbot.cognition_core_v2.branch_activation import branch_order_key
 from kazusa_ai_chatbot.cognition_core_v3 import workspace as ws
 
@@ -49,7 +50,10 @@ def test_workspace_preserves_ordinary_relational_authority():
         _complete_bid("loss_recovery", entity_id="g3"),
     ]
 
-    envelope = ws.collapse_authoritative_relational_bid(bids, decision)
+    envelope = v2_workspace.collapse_authoritative_relational_bid(
+        bids,
+        decision,
+    )
     assert envelope["primary_branch_id"] == "ordinary_response"
     assert envelope["supporting_branch_ids"] == []
     assert envelope["suppressed_branch_ids"] == ["bond_protection", "loss_recovery"]
@@ -63,7 +67,10 @@ def test_workspace_preserves_ordinary_relational_authority():
     inverted = [dict(bid) for bid in bids]
     inverted[0]["confidence"] = "high"
     inverted[2]["confidence"] = "low"
-    re_collapsed = ws.collapse_authoritative_relational_bid(inverted, decision)
+    re_collapsed = v2_workspace.collapse_authoritative_relational_bid(
+        inverted,
+        decision,
+    )
     assert re_collapsed["primary_branch_id"] == envelope["primary_branch_id"]
     assert re_collapsed["supporting_branch_ids"] == envelope["supporting_branch_ids"]
     assert re_collapsed["suppressed_branch_ids"] == envelope["suppressed_branch_ids"]
@@ -75,11 +82,17 @@ def test_workspace_preserves_ordinary_relational_authority():
     non_sensitive = dict(decision)
     non_sensitive["applicability"] = "not_relationship_sensitive"
     with pytest.raises(ValueError, match="requires a sensitive decision"):
-        ws.collapse_authoritative_relational_bid(bids, non_sensitive)
+        v2_workspace.collapse_authoritative_relational_bid(
+            bids,
+            non_sensitive,
+        )
 
     without_ordinary = [bid for bid in bids if bid["branch_id"] != "ordinary_response"]
     with pytest.raises(ValueError, match="exactly one ordinary bid"):
-        ws.collapse_authoritative_relational_bid(without_ordinary, decision)
+        v2_workspace.collapse_authoritative_relational_bid(
+            without_ordinary,
+            decision,
+        )
 
     duplicate_ordinary = [
         _complete_bid("bond_protection", entity_id="g2"),
@@ -87,13 +100,19 @@ def test_workspace_preserves_ordinary_relational_authority():
         _complete_bid("ordinary_response"),
     ]
     with pytest.raises(ValueError, match="exactly one ordinary bid"):
-        ws.collapse_authoritative_relational_bid(duplicate_ordinary, decision)
+        v2_workspace.collapse_authoritative_relational_bid(
+            duplicate_ordinary,
+            decision,
+        )
 
     mismatched = [dict(bid) for bid in bids]
     mismatched[1]["relational_willingness"] = dict(decision)
     mismatched[1]["relational_willingness"]["stance"] = "reject"
     with pytest.raises(ValueError, match="requires the equal decision"):
-        ws.collapse_authoritative_relational_bid(mismatched, decision)
+        v2_workspace.collapse_authoritative_relational_bid(
+            mismatched,
+            decision,
+        )
 
 
 def test_workspace_admits_only_complete_current_matter_bids():
@@ -163,7 +182,7 @@ def test_workspace_admits_only_complete_current_matter_bids():
     request = ws.prepare_partition(
         [persistent, ordinary],
         [{"text": "current event row"}],
-        {"g2": {"kind": "bond_protection", "matter": "bond matter context"}},
+        {"g2": {"goal_kind": "bond_protection", "status": "pursuing"}},
     )
 
     expected_order = sorted(
@@ -179,10 +198,14 @@ def test_workspace_admits_only_complete_current_matter_bids():
     persistent_handle = next(
         handle for handle, bid in request.handles.items() if bid["branch_id"] == "bond_protection"
     )
-    assert request.prompt_payload["bids"][ordinary_handle]["persistent_goal"] is None
-    assert request.prompt_payload["bids"][persistent_handle]["persistent_goal"] == {
-        "kind": "bond_protection",
-        "matter": "bond matter context",
+    assert request.prompt_payload["bid_index"][ordinary_handle][
+        "persistent_goal"
+    ] is None
+    assert request.prompt_payload["bid_index"][persistent_handle][
+        "persistent_goal"
+    ] == {
+        "goal_kind": "bond_protection",
+        "lifecycle": "pursuing",
     }
 
     # A persistent bid whose goal ref has no matter context fails fail-fast.
@@ -199,7 +222,10 @@ def test_workspace_admits_only_complete_current_matter_bids():
         "supporting_bid_handles": [ordinary_handle],
         "suppressed_bid_handles": [],
     }
-    assert ws.validate_partition(partition, handles) == partition
+    assert v2_workspace.validate_workspace_partition(
+        partition,
+        set(handles),
+    ) == partition
 
     envelope = ws.materialize_partition(handles, partition)
     assert envelope["primary_branch_id"] == "bond_protection"
@@ -209,16 +235,19 @@ def test_workspace_admits_only_complete_current_matter_bids():
 
     extra_field = {**partition, "invented_field": True}
     with pytest.raises(ValueError, match="fields are not exact"):
-        ws.validate_partition(extra_field, handles)
+        v2_workspace.validate_workspace_partition(extra_field, set(handles))
 
     bad_primary = dict(partition)
     bad_primary["primary_bid_handle"] = "b9"
     with pytest.raises(ValueError, match="primary handle is unavailable"):
-        ws.validate_partition(bad_primary, handles)
+        v2_workspace.validate_workspace_partition(bad_primary, set(handles))
 
     unknown_supporting = {**partition, "supporting_bid_handles": ["b9"]}
     with pytest.raises(ValueError, match="handle is unavailable"):
-        ws.validate_partition(unknown_supporting, handles)
+        v2_workspace.validate_workspace_partition(
+            unknown_supporting,
+            set(handles),
+        )
 
     incomplete_without_suppressed = {
         "primary_bid_handle": persistent_handle,
@@ -226,7 +255,10 @@ def test_workspace_admits_only_complete_current_matter_bids():
         "suppressed_bid_handles": [],
     }
     with pytest.raises(ValueError, match="partition is incomplete"):
-        ws.validate_partition(incomplete_without_suppressed, handles)
+        v2_workspace.validate_workspace_partition(
+            incomplete_without_suppressed,
+            set(handles),
+        )
 
     duplicated_ordinary = {
         "primary_bid_handle": persistent_handle,
@@ -234,7 +266,10 @@ def test_workspace_admits_only_complete_current_matter_bids():
         "suppressed_bid_handles": [ordinary_handle],
     }
     with pytest.raises(ValueError, match="partition is incomplete"):
-        ws.validate_partition(duplicated_ordinary, handles)
+        v2_workspace.validate_workspace_partition(
+            duplicated_ordinary,
+            set(handles),
+        )
 
     fallback = ws.fallback_partition_envelope([persistent, ordinary])
     assert fallback["primary_branch_id"] == "bond_protection"

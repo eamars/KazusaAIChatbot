@@ -57,6 +57,9 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     _validate_scene_context,
     validate_cognition_core_input,
 )
+from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+    current_v2_attempt_ledger,
+)
 from kazusa_ai_chatbot.cognition_core_v2.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
@@ -72,6 +75,11 @@ from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
 )
 from kazusa_ai_chatbot.cognition_core_v3.contracts import (
     CognitionChainServicesV3,
+)
+from kazusa_ai_chatbot.cognition_core_v3.diagnostics import (
+    bind_protected_chain_records,
+    current_chain_scope,
+    reset_protected_chain_records,
 )
 from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisodeValidationError,
@@ -302,7 +310,6 @@ def build_cognition_core_services(
         chain_lane=chain_lane,
         sidecar_lane=sidecar_lane,
         subconscious_enabled=route_settings_v3.subconscious_enabled,
-        appraisal_group_count=route_settings_v3.appraisal_group_count,
         turn_deadline_seconds=route_settings_v3.turn_deadline_seconds,
     )
     return services
@@ -806,18 +813,41 @@ async def call_cognition_subgraph(
         str(state.get("llm_trace_id") or ""),
     )
     coordinator_token = None
+    diagnostics_token = None
     try:
         if retry_coordinator is not None:
             coordinator_token = bind_cognition_retry_coordinator(
                 retry_coordinator,
             )
         cognition_services = build_cognition_core_services()
-        if commit:
-            output = await run_cognition(
-                cognition_input,
-                cognition_services,
+        if COGNITION_CORE_ENGINE == "v3" and current_chain_scope() is None:
+            attempt_ledger = current_v2_attempt_ledger()
+            invocation_id = (
+                attempt_ledger.cognition_invocation_id
+                if attempt_ledger is not None
+                else ""
             )
-        elif retry_coordinator is None:
+            input_episode = cognition_input.get("episode")
+            target_scope = (
+                input_episode.get("target_scope")
+                if isinstance(input_episode, Mapping)
+                else None
+            )
+            platform = (
+                str(target_scope.get("platform", "")).strip().lower()
+                if isinstance(target_scope, Mapping)
+                else ""
+            )
+            source_kind = "debug" if platform == "debug" else "live"
+            run_id = invocation_id or episode_id
+            trace_id = str(state.get("llm_trace_id") or run_id)
+            diagnostics_token = bind_protected_chain_records(
+                run_id=run_id,
+                source_kind=source_kind,
+                llm_trace_id=trace_id,
+                cognition_invocation_id=(invocation_id or run_id),
+            )
+        if commit or retry_coordinator is None:
             output = await run_cognition(
                 cognition_input,
                 cognition_services,
@@ -829,6 +859,8 @@ async def call_cognition_subgraph(
                 run_child=run_cognition,
             )
     finally:
+        if diagnostics_token is not None:
+            reset_protected_chain_records(diagnostics_token)
         if coordinator_token is not None:
             reset_cognition_retry_coordinator(coordinator_token)
         llm_tracing.reset_trace_id(trace_token)

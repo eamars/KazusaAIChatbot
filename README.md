@@ -148,8 +148,8 @@ tokens.
 The selected `v3` branch constructs only its own chain and optional sidecar
 services; the generic `COGNITION_LLM` route remains shared non-core plumbing.
 V3 runs one serialized primary chain with a single-stream sidecar, not the
-superseded parallel-wave/checkpoint topology. Its caller-local settings are
-`COGNITION_V3_APPRAISAL_GROUP_COUNT` (`1`, `2`, `3`, or `6`) and
+superseded parallel-wave/checkpoint topology. Its appraisal-stage layout is
+fixed as `fixed_a1_a2`; the caller configures
 `COGNITION_V3_TURN_DEADLINE_SECONDS` (`30..600`). The request-window ceiling is
 50,000 tokens normally and conditionally 65,000 when the declared serving
 window supports it. Timing evidence is non-streaming elapsed milliseconds;

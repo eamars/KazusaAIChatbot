@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
-from typing import Literal, Mapping, TypedDict, cast
+from typing import Literal, TypedDict, cast
 from uuid import uuid4
-
 
 V2_MODEL_TOTAL_ATTEMPTS = 3
 V2_APPRAISAL_TOTAL_ATTEMPTS = 2
@@ -287,7 +287,9 @@ def set_v2_attempt_epoch(epoch: int) -> None:
     """Select the bounded epoch used by the guarded producer ledger."""
 
     if isinstance(epoch, bool) or not isinstance(epoch, int):
-        raise ValueError("V2 attempt epoch must be an integer")
+        raise ValueError(  # noqa: TRY004 - preserve the sealed V2 contract
+            "V2 attempt epoch must be an integer"
+        )
     if epoch not in (0, 1):
         raise ValueError("V2 attempt epoch is outside the two-epoch bound")
     ledger = _CURRENT_ATTEMPT_LEDGER.get()
@@ -390,6 +392,70 @@ def reserve_v2_model_attempt(
             "attempt_disposition": "started",
         })
     return coordinates
+
+
+def reserve_v2_model_attempt_batch(
+    *,
+    stage: str,
+    branch_ids: Sequence[str],
+    local_attempt: int,
+) -> tuple[V2AttemptCoordinates, ...]:
+    """Atomically reserve one producer attempt for every listed branch.
+
+    The preflight checks the complete stable roster before delegating to the
+    canonical single-coordinate owner.  Reservation is synchronous, so no
+    caller can observe a partially reserved roster between the preflight and
+    the append operations.  A failed preflight leaves the invocation ledger
+    unchanged.
+    """
+
+    ledger = _CURRENT_ATTEMPT_LEDGER.get()
+    if ledger is None:
+        raise RuntimeError("V2 model attempt requires an invocation ledger")
+    stable_branch_ids = tuple(branch_ids)
+    if not stable_branch_ids:
+        raise ValueError("V2 model attempt branch roster is required")
+    if len(set(stable_branch_ids)) != len(stable_branch_ids):
+        raise ValueError("V2 model attempt branch roster must be unique")
+    if stage not in V2_MODEL_OWNER_POLICIES:
+        raise ValueError("V2 model attempt stage is invalid")
+    if (
+        isinstance(local_attempt, bool)
+        or not isinstance(local_attempt, int)
+        or local_attempt < 1
+    ):
+        raise ValueError("V2 local attempt must be a positive integer")
+    for branch_id in stable_branch_ids:
+        if not isinstance(branch_id, str) or not branch_id.strip():
+            raise ValueError("V2 model attempt branch id is required")
+
+    configured_limit = V2_MODEL_OWNER_POLICIES[stage][
+        "total_attempt_limit"
+    ]
+    for branch_id in stable_branch_ids:
+        if ledger.guarded:
+            consumed = ledger.guarded_producer_attempts.get(
+                (ledger.epoch, stage, branch_id),
+                0,
+            )
+        else:
+            consumed = ledger.producer_attempts.get((stage, branch_id), 0)
+        if consumed >= configured_limit:
+            raise V2AttemptBudgetExhausted(
+                stage=stage,
+                branch_id=branch_id,
+                configured_limit=configured_limit,
+            )
+
+    reserved = tuple(
+        reserve_v2_model_attempt(
+            stage=stage,
+            branch_id=branch_id,
+            local_attempt=local_attempt,
+        )
+        for branch_id in stable_branch_ids
+    )
+    return reserved
 
 
 def record_v2_attempt_disposition(

@@ -308,13 +308,13 @@ def test_cognition_engine_descriptor_v2_uses_stable_stage_model_set(
     ]
 
     assert descriptor == {
-        "schema_version": "cognition_engine_descriptor.v1",
+        "schema_version": "cognition_engine_descriptor.v2",
         "engine_id": "v2",
         "chain_model_name": "model-a, model-b",
         "sidecar_model_name": "",
         "sidecar_enabled": False,
         "subconscious_enabled": False,
-        "appraisal_group_count": 0,
+        "appraisal_stage_layout": "parallel_v2",
         "chain_context_window_tokens": 0,
         "normal_budget_tokens": 0,
         "extended_budget_tokens": 0,
@@ -349,7 +349,6 @@ def test_cognition_engine_descriptor_v3_uses_selected_loaded_settings(
         chain=chain,
         sidecar=sidecar,
         subconscious_enabled=True,
-        appraisal_group_count=6,
         turn_deadline_seconds=333,
     )
     monkeypatch.setattr(service_module, "COGNITION_CORE_ENGINE", "v3")
@@ -364,13 +363,13 @@ def test_cognition_engine_descriptor_v3_uses_selected_loaded_settings(
     ]
 
     assert descriptor == {
-        "schema_version": "cognition_engine_descriptor.v1",
+        "schema_version": "cognition_engine_descriptor.v2",
         "engine_id": "v3",
         "chain_model_name": "chain-model",
         "sidecar_model_name": "sidecar-model",
         "sidecar_enabled": True,
         "subconscious_enabled": True,
-        "appraisal_group_count": 6,
+        "appraisal_stage_layout": "fixed_a1_a2",
         "chain_context_window_tokens": 50176,
         "normal_budget_tokens": 50000,
         "extended_budget_tokens": 65000,
@@ -388,13 +387,13 @@ def test_cognition_engine_descriptor_contract_is_strict_and_bounded() -> None:
     )
 
     descriptor = {
-        "schema_version": "cognition_engine_descriptor.v1",
+        "schema_version": "cognition_engine_descriptor.v2",
         "engine_id": "v3",
         "chain_model_name": "chain-model",
         "sidecar_model_name": "",
         "sidecar_enabled": False,
         "subconscious_enabled": False,
-        "appraisal_group_count": 2,
+        "appraisal_stage_layout": "fixed_a1_a2",
         "chain_context_window_tokens": 50176,
         "normal_budget_tokens": 50000,
         "extended_budget_tokens": 65000,
@@ -419,7 +418,7 @@ def test_cognition_engine_descriptor_contract_is_strict_and_bounded() -> None:
         "sidecar_model_name": "",
         "sidecar_enabled": False,
         "subconscious_enabled": False,
-        "appraisal_group_count": 0,
+        "appraisal_stage_layout": "parallel_v2",
         "chain_context_window_tokens": 0,
         "normal_budget_tokens": 0,
         "extended_budget_tokens": 0,
@@ -434,17 +433,17 @@ def test_cognition_engine_descriptor_contract_is_strict_and_bounded() -> None:
     invalid_descriptors = (
         {"engine_id": "v1"},
         {"chain_model_name": ""},
-        {"appraisal_group_count": 4},
-        {"appraisal_group_count": True},
+        {"appraisal_stage_layout": "unsupported"},
+        {"appraisal_stage_layout": "parallel_v2"},
         {"engine_id": "v2", "sidecar_model_name": "sidecar-model"},
         {"engine_id": "v2", "sidecar_enabled": True},
         {"engine_id": "v2", "subconscious_enabled": True},
-        {"engine_id": "v2", "appraisal_group_count": 2},
+        {"engine_id": "v2", "appraisal_stage_layout": "fixed_a1_a2"},
         {"engine_id": "v2", "chain_context_window_tokens": 1},
         {"engine_id": "v2", "normal_budget_tokens": 1},
         {"engine_id": "v2", "extended_budget_tokens": 1},
         {"engine_id": "v2", "turn_deadline_seconds": 1},
-        {"appraisal_group_count": 0},
+        {"appraisal_stage_layout": "parallel_v2"},
         {"chain_context_window_tokens": 49_999},
         {"chain_context_window_tokens": True},
         {"normal_budget_tokens": 49_999},

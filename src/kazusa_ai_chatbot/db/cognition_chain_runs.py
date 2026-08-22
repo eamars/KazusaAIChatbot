@@ -6,10 +6,11 @@ from collections.abc import Mapping
 
 from pymongo.errors import PyMongoError
 
+from kazusa_ai_chatbot.config import COGNITION_V3_APPRAISAL_STAGE_LAYOUT
 from kazusa_ai_chatbot.db._client import get_db
 
 COGNITION_CHAIN_RUNS_COLLECTION = "cognition_chain_runs"
-_SCHEMA_VERSION = "cognition_chain_run.v1"
+_SCHEMA_VERSION = "cognition_chain_run.v2"
 _IMMUTABLE_FIELDS = (
     "run_id",
     "llm_trace_id",
@@ -26,7 +27,7 @@ _REQUIRED_FIELDS = (
     "chain_model_name",
     "sidecar_model_name",
     "subconscious_enabled",
-    "appraisal_group_count",
+    "appraisal_stage_layout",
     "started_at",
     "completed_at",
     "terminal_disposition",
@@ -57,6 +58,10 @@ def _validate_chain_run_document(document: Mapping[str, object]) -> None:
             raise ValueError(
                 f"cognition_chain_run {field_name} must be non-empty"
             )
+    if document["appraisal_stage_layout"] != COGNITION_V3_APPRAISAL_STAGE_LAYOUT:
+        raise ValueError(
+            "cognition_chain_run appraisal_stage_layout must be fixed_a1_a2"
+        )
     if not isinstance(document["steps"], list):
         raise TypeError("cognition_chain_run steps must be a list")
     if not isinstance(document["ledger"], Mapping):
@@ -153,6 +158,7 @@ async def get_cognition_chain_run(
             {
                 "run_id": run_id,
                 "llm_trace_id": llm_trace_id,
+                "schema_version": _SCHEMA_VERSION,
             },
             projection={"_id": 0},
         ).sort("completed_at", -1).limit(1)
@@ -166,6 +172,10 @@ async def get_cognition_chain_run(
         row.get("run_id") != run_id
         or row.get("llm_trace_id") != llm_trace_id
     ):
+        return None
+    try:
+        _validate_chain_run_document(row)
+    except (TypeError, ValueError):
         return None
     return dict(row)
 

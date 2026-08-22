@@ -156,15 +156,16 @@ messages, and provider metadata never appear in these projections.
 
 ## Timing and observability
 
-`COGNITION_V3_APPRAISAL_GROUP_COUNT` is configurable to `1`, `2`, `3`, or `6`
-and defaults to `2`. `COGNITION_V3_TURN_DEADLINE_SECONDS` defaults to `240` and
+The appraisal-stage layout is fixed as `fixed_a1_a2` (A1 world families,
+followed by A2 relationship families). `COGNITION_V3_TURN_DEADLINE_SECONDS`
+defaults to `240` and
 is bounded to `30..600`; the deadline is checked between model steps and does
 not bypass deterministic validation, reduction, or the one final commit.
 Runtime telemetry records non-streaming elapsed duration in milliseconds. The
 runtime does not claim or expose time-to-first-token (TTFT).
 
 The chain's `run_id`, `llm_trace_id`, and `cognition_invocation_id` are carried
-with the sanitized `cognition_chain_run.v1` row. Protected transcript capture
+with the sanitized `cognition_chain_run.v2` row. Protected transcript capture
 uses `off`, `metadata`, or `full` mode in the protected trace store; the
 bounded `cognition_chain` event family accepts only sanitized aggregate fields
 and best-effort writes. The brain and console read only the exact paired

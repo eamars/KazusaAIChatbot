@@ -70,6 +70,27 @@ class LaneClaim:
     in_flight_at_start: int
 
 
+def _consume_cleanup_task_result(task: asyncio.Task[None]) -> None:
+    """Observe a detached lane cleanup task without changing cancellation."""
+
+    if not task.cancelled():
+        task.exception()
+
+
+async def _observe_l1_task(
+    task: asyncio.Task[object],
+) -> tuple[bool, bool]:
+    """Drain one L1 task and classify child cancellation versus failure."""
+
+    try:
+        await task
+    except asyncio.CancelledError:
+        return True, False
+    except Exception:  # noqa: BLE001 - advisory task boundary
+        return False, True
+    return False, False
+
+
 class _FifoLane:
     """One fair non-reentrant async lane shared by one resident model."""
 
@@ -83,6 +104,15 @@ class _FifoLane:
         self._owner: asyncio.Task[object] | None = None
         self._in_flight = 0
         self._maximum_in_flight = 0
+
+    async def _release_owner(self, task: asyncio.Task[object]) -> None:
+        """Release one owner in a task that is independent of its caller."""
+
+        async with self._condition:
+            if self._owner is task:
+                self._owner = None
+                self._in_flight = 0
+                self._condition.notify_all()
 
     @property
     def in_flight(self) -> int:
@@ -178,11 +208,9 @@ class _FifoLane:
         try:
             yield admitted_claim
         finally:
-            async with self._condition:
-                if self._owner is task:
-                    self._owner = None
-                    self._in_flight = 0
-                    self._condition.notify_all()
+            cleanup_task = asyncio.create_task(self._release_owner(task))
+            cleanup_task.add_done_callback(_consume_cleanup_task_result)
+            await asyncio.shield(cleanup_task)
 
     async def _wait_until_owner(
         self,
@@ -668,6 +696,7 @@ class SidecarInvocationState:
         default_factory=set,
         init=False,
     )
+    _l1_warning: str | None = field(default=None, init=False)
 
     @property
     def cancellation_count(self) -> int:
@@ -731,6 +760,13 @@ class SidecarInvocationState:
             )
         self._l1_task = task
 
+    def consume_l1_warning(self) -> str | None:
+        """Consume the bounded warning recorded for a failed L1 task."""
+
+        warning = self._l1_warning
+        self._l1_warning = None
+        return warning
+
     async def preempt_l1_for_repair(self) -> bool:
         """Cancel and drain unfinished L1 work before repair claims the lane.
 
@@ -740,20 +776,57 @@ class SidecarInvocationState:
         """
 
         task = self._l1_task
-        if task is None or task.done():
+        if task is None:
             return False
-        if task is asyncio.current_task():
+        current_task = asyncio.current_task()
+        if task is current_task:
             raise LaneContractError(
                 "An L1 task cannot preempt itself for JSON repair"
             )
+        initial_cancelling = (
+            current_task.cancelling()
+            if current_task is not None
+            else 0
+        )
+
+        if task.done():
+            try:
+                task.result()
+            except asyncio.CancelledError:
+                return False
+            except Exception:  # noqa: BLE001 - advisory task boundary
+                self._l1_warning = "sidecar_l1_unavailable"
+            if (
+                current_task is not None
+                and current_task.cancelling() > initial_cancelling
+            ):
+                raise asyncio.CancelledError
+            return False
 
         self.record_cancellation(task)
         task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+        drain_task = asyncio.create_task(_observe_l1_task(task))
+        outer_cancelled = False
+        while True:
+            try:
+                _, child_failed = await asyncio.shield(
+                    drain_task
+                )
+                break
+            except asyncio.CancelledError:
+                outer_cancelled = True
+                continue
+        if child_failed:
+            self._l1_warning = "sidecar_l1_unavailable"
         self.l1_preempted_by_repair = True
+        if (
+            outer_cancelled
+            or (
+                current_task is not None
+                and current_task.cancelling() > initial_cancelling
+            )
+        ):
+            raise asyncio.CancelledError
         return True
 
 

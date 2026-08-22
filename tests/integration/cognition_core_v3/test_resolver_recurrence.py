@@ -78,19 +78,13 @@ def _empty_appraisal_group(messages: Sequence[object]) -> str:
     """Return an exact empty result for the dynamically supplied families."""
 
     payload = _question_payload(messages)
-    questions = payload.get("questions")
-    if not isinstance(questions, list):
-        raise TypeError("appraisal packet has no question list")
+    families = payload.get("families")
+    if not isinstance(families, list):
+        raise TypeError("appraisal packet has no family list")
     return json.dumps(
         {
-            row["family"]: [
-                {
-                    "question_id": row["family"],
-                    "proposition": None,
-                    "delta": None,
-                }
-            ]
-            for row in questions
+            row["family"]: {"propositions": [], "deltas": []}
+            for row in families
             if isinstance(row, Mapping) and isinstance(row.get("family"), str)
         },
         ensure_ascii=False,
@@ -101,7 +95,12 @@ def _tail_ordinary_draft(messages: Sequence[object]) -> str:
     """Build a recurrence ordinary draft without a regenerated stance."""
 
     payload = _question_payload(messages)
-    evidence_handles = payload.get("evidence_handles")
+    contract = payload.get("goal_output_contract")
+    evidence_handles = (
+        contract.get("allowed_evidence_handles")
+        if isinstance(contract, Mapping)
+        else None
+    )
     if not isinstance(evidence_handles, list) or not evidence_handles:
         raise AssertionError("tail ordinary question has no evidence handles")
     draft = json.loads(ordinary_goal_draft(str(evidence_handles[-1])))
@@ -174,7 +173,12 @@ class _RecurrenceLLM:
             return _empty_appraisal_group(messages)
         if stage_name == "G1a":
             payload = _question_payload(messages)
-            handles = payload.get("evidence_handles")
+            contract = payload.get("goal_output_contract")
+            handles = (
+                contract.get("allowed_evidence_handles")
+                if isinstance(contract, Mapping)
+                else None
+            )
             if not isinstance(handles, list) or not handles:
                 raise AssertionError("cold ordinary question has no evidence")
             return ordinary_goal_draft(str(handles[0]))
@@ -231,7 +235,13 @@ class _RecurrenceLLM:
                 ensure_ascii=False,
             )
         if stage_name in {"P1", "R.P1"}:
-            return json.dumps({"goal_resolution": "blocked"})
+            return json.dumps({
+                "action_requests": [],
+                "resolver_requests": [],
+                "goal_resolution": "blocked",
+                "resolver_pending_resolution": None,
+                "resolver_goal_progress": None,
+            })
         if stage_name in {
             "action_authorization",
             "resolver_authorization",
@@ -248,7 +258,7 @@ class _RecurrenceLLM:
                     }
                 }
             )
-        if stage_name == "R.G1b":
+        if stage_name in {"G1b", "R.G1b"}:
             payload = _question_payload(messages)
             roster = payload.get("branch_roster")
             if not isinstance(roster, list):
@@ -257,11 +267,34 @@ class _RecurrenceLLM:
             for row in roster:
                 if not isinstance(row, Mapping):
                     raise TypeError("active recurrence roster row is invalid")
-                draft = json.loads(_tail_ordinary_draft(messages))
+                if stage_name == "G1b":
+                    evidence_handles = payload.get(
+                        "allowed_evidence_handles"
+                    )
+                    if not isinstance(evidence_handles, list):
+                        raise AssertionError(
+                            "active cold question has no evidence handles"
+                        )
+                    draft = json.loads(
+                        ordinary_goal_draft(str(evidence_handles[0]))
+                    )
+                    draft.pop("relational_willingness")
+                else:
+                    evidence_handles = payload.get(
+                        "allowed_evidence_handles"
+                    )
+                    if not isinstance(evidence_handles, list):
+                        raise AssertionError(
+                            "active recurrence question has no evidence handles"
+                        )
+                    draft = json.loads(
+                        ordinary_goal_draft(str(evidence_handles[0]))
+                    )
+                    draft.pop("relational_willingness")
                 draft["branch_id"] = row["branch_id"]
                 bids.append(draft)
             return json.dumps({"bids": bids}, ensure_ascii=False)
-        if stage_name == "R.W1":
+        if stage_name in {"W1", "R.W1"}:
             return json.dumps(
                 {
                     "primary_bid_handle": "b1",
@@ -322,6 +355,34 @@ def _fresh_session_registry(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+def _payload_with_active_recurrence_goal(
+    payload: CognitionCoreInputV2,
+) -> CognitionCoreInputV2:
+    """Add one active sibling so cold and recurrence both exercise G1b."""
+
+    variant = deepcopy(payload)
+    evidence_ref = variant["evidence"][0]["evidence_ref"]
+    variant["mutable_state"]["goals"] = [{
+        "entity_id": "goal:bond-protection",
+        "description": "Protect the current boundary.",
+        "salience": 70,
+        "role_refs": [],
+        "evidence_refs": [dict(evidence_ref)],
+        "created_at": "2026-07-14T00:00:00Z",
+        "updated_at": "2026-07-14T00:00:00Z",
+        "status": "pursuing",
+        "goal_kind": "bond_protection",
+        "importance": 80,
+        "progress": 10,
+        "obstruction": 0,
+        "urgency": 60,
+        "expected_success": 50,
+        "controllability": 50,
+        "recoverability": 50,
+    }]
+    return validate_cognition_core_input(variant)
+
+
 @pytest.mark.asyncio
 async def test_resolver_observation_reattaches_short_tail_and_commits_once(
     cognition_payload: CognitionCoreInputV2,
@@ -331,25 +392,39 @@ async def test_resolver_observation_reattaches_short_tail_and_commits_once(
 
     _fresh_session_registry(monkeypatch)
     llm = _RecurrenceLLM()
-    group_counts: list[int] = []
-    original_group_builder = v3_facade.v3_prompt.build_grouped_appraisal_questions
+    family_batches: list[tuple[str, tuple[str, ...]]] = []
+    original_stage_builder = v3_facade.v3_prompt.build_appraisal_stage_question
 
-    def capture_group_count(*, planned_questions, group_count, l1_residue=None):
-        group_counts.append(group_count)
-        return original_group_builder(
+    def capture_stage(
+        *,
+        planned_questions,
+        stage_name,
+        l1_residue=None,
+        relation_context=None,
+    ):
+        family_batches.append(
+            (
+                stage_name,
+                tuple(
+                    str(question["question_kind"])
+                    for question in planned_questions
+                ),
+            )
+        )
+        return original_stage_builder(
             planned_questions=planned_questions,
-            group_count=group_count,
+            stage_name=stage_name,
             l1_residue=l1_residue,
+            relation_context=relation_context,
         )
 
     monkeypatch.setattr(
         v3_facade.v3_prompt,
-        "build_grouped_appraisal_questions",
-        capture_group_count,
+        "build_appraisal_stage_question",
+        capture_stage,
     )
     services = replace(
         make_v3_services(llm),
-        appraisal_group_count=3,
         turn_deadline_seconds=417,
     )
 
@@ -391,8 +466,8 @@ async def test_resolver_observation_reattaches_short_tail_and_commits_once(
     output = await v3_facade.run_cognition(continuation, services)
 
     validate_cognition_core_output(output)
-    assert llm.calls[:5] == ["A1", "A1", "A2", "G1a", "P1"]
-    assert llm.calls[5:] == ["R.A1", "R.A2", "R.A3", "R.G1a", "R.P1"]
+    assert llm.calls[:5] == ["A1", "A2", "G1a", "P1", "R.A1"]
+    assert llm.calls[5:] == ["R.A2", "R.G1a", "R.P1"]
     assert output["state_update"]["expected_previous_state"] == (
         continuation["mutable_state"]
     )
@@ -429,7 +504,7 @@ async def test_resolver_observation_reattaches_short_tail_and_commits_once(
     appended_handle = continuation["evidence"][-1]["evidence_handle"]
     for packet in tail_packets:
         question = next(section["question"] for section in packet if "question" in section)
-        for row in question["payload"]["questions"]:
+        for row in question["payload"]["families"]:
             assert row["evidence_handles"] == [appended_handle]
 
     assert "R.G1b" not in llm.messages_by_stage
@@ -445,7 +520,147 @@ async def test_resolver_observation_reattaches_short_tail_and_commits_once(
         for section in planning_packet
         for interlude in section.get("interludes", [])
     )
-    assert group_counts == [3, 3]
+    assert family_batches == [
+        (
+            "A1",
+            ("event_agency", "goal_threat_outcome", "epistemic_comparison_memory"),
+        ),
+        (
+            "A2",
+            ("relationship_social", "moral_identity", "existential_drive"),
+        ),
+        (
+            "A1",
+            ("event_agency", "goal_threat_outcome", "epistemic_comparison_memory"),
+        ),
+        (
+            "A2",
+            ("relationship_social", "moral_identity"),
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cold_and_recurrence_goal_questions_share_dialogue_bindings(
+    cognition_payload: CognitionCoreInputV2,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cold and R-tail G1 questions carry one exact dialogue binding set."""
+
+    _fresh_session_registry(monkeypatch)
+    payload = _payload_with_active_recurrence_goal(cognition_payload)
+    llm = _RecurrenceLLM()
+    services = make_v3_services(llm)
+
+    cold_output = await v3_facade.run_cognition(payload, services)
+    continuation = _cycle_input(payload, cold_output, cycle_index=1)
+    await v3_facade.run_cognition(continuation, services)
+
+    expected_bindings = [{
+        "speaker_handle": "current_user",
+        "addressee_handle": "self",
+        "first_person_handle": "current_user",
+        "implicit_imperative_subject_handle": "self",
+        "second_person_handle": "self",
+    }]
+    payloads = {}
+    for stage_name in ("G1a", "G1b", "R.G1a", "R.G1b"):
+        packet = json.loads(llm.messages_by_stage[stage_name][0][-1])
+        payloads[stage_name] = next(
+            section["question"]["payload"]
+            for section in packet
+            if isinstance(section, Mapping) and "question" in section
+        )
+        assert payloads[stage_name]["dialogue_role_bindings"] == (
+            expected_bindings
+        )
+
+    assert payloads["G1a"]["dialogue_role_bindings"] == (
+        payloads["G1b"]["dialogue_role_bindings"]
+    )
+    assert payloads["R.G1a"]["dialogue_role_bindings"] == (
+        payloads["R.G1b"]["dialogue_role_bindings"]
+    )
+    assert "hello" not in json.dumps(payloads, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+async def test_recurrence_goal_projection_uses_post_reduction_matter_state(
+    cognition_payload: CognitionCoreInputV2,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Resolver-tail G1a receives lifecycle facts from the reduced state."""
+
+    _fresh_session_registry(monkeypatch)
+    llm = _RecurrenceLLM()
+    services = make_v3_services(llm)
+    original_reduce = v3_facade._reduce_serial_appraisals
+    reduction_count = 0
+
+    def inject_resolved_threat(*args, **kwargs):
+        nonlocal reduction_count
+        reduction_count += 1
+        result = original_reduce(*args, **kwargs)
+        if reduction_count != 2:
+            return result
+        final_state = deepcopy(result[0])
+        final_state["threats"] = [{
+            "entity_id": "threat:resolver-tail",
+            "description": "The resolver observation closed this threat.",
+            "salience": 60,
+            "role_refs": [],
+            "evidence_refs": [],
+            "created_at": cognition_payload["episode"]["created_at"],
+            "updated_at": cognition_payload["episode"]["created_at"],
+            "status": "resolved",
+            "likelihood": 0,
+            "expected_harm": 0,
+            "uncertainty": 0,
+            "controllability": 50,
+            "coping_potential": 50,
+            "residual_pressure": 0,
+        }]
+        return (final_state, *result[1:])
+
+    monkeypatch.setattr(
+        v3_facade,
+        "_reduce_serial_appraisals",
+        inject_resolved_threat,
+    )
+    cold_output = await v3_facade.run_cognition(cognition_payload, services)
+    continuation = _cycle_input(cognition_payload, cold_output, cycle_index=1)
+
+    await v3_facade.run_cognition(continuation, services)
+
+    recurrence_packet = json.loads(llm.messages_by_stage["R.G1a"][0][-1])
+    recurrence_payload = next(
+        section["question"]["payload"]
+        for section in recurrence_packet
+        if isinstance(section, Mapping) and "question" in section
+    )
+    authoritative_state = recurrence_payload["authoritative_state"]
+    threat_rows = authoritative_state["matter_projections"]["threats"]
+    assert len(threat_rows) == 1
+    threat_row = threat_rows[0]
+    assert set(threat_row) == {
+        "handle",
+        "description",
+        "lifecycle",
+        "salience",
+        "duration",
+        "causal_roles",
+        "uncertainty",
+        "residual_pressure",
+    }
+    assert threat_row["handle"] == "t1"
+    assert threat_row["description"] == (
+        "The resolver observation closed this threat."
+    )
+    assert threat_row["lifecycle"] == "已解决"
+    assert "entity_id" not in json.dumps(authoritative_state)
+    assert recurrence_packet[-1]["question"]["payload"][
+        "authoritative_state"
+    ] == authoritative_state
 
 
 @pytest.mark.asyncio
@@ -620,34 +835,45 @@ async def test_live_resolver_loop_commits_one_terminal_replacement_after_recurre
     assert resolved["cognition_state_committed"] is True
 
 
-def test_revision_roster_unions_prior_participants_and_new_final_branches(
+def test_post_i1_roster_uses_only_current_active_goal_statuses(
     cognition_payload: CognitionCoreInputV2,
 ) -> None:
-    """Revision retains prior participants and adds final active branches."""
+    """Terminal or absent prior goals cannot authorize the next G1 roster."""
 
     session = create_cold_session(
         payload=cognition_payload,
         episode_id=cognition_payload["episode"]["episode_id"],
         owner_identity="recurrence-roster-test",
+        ttl_seconds=60,
         current_roster=("social_care", "ordinary_response"),
     )
-    roster = v3_facade._revision_roster(
-        session=session,
-        final_state={
-            "goals": [
-                {
-                    "goal_kind": "relationship_connection",
-                    "status": "pursuing",
-                }
-            ]
-        },
-        appraisal_rows=[{"question_id": "relationship_social"}],
-    )
+    assert session.current_roster == ("social_care", "ordinary_response")
+    roster = v3_facade._post_i1_goal_roster({
+        "goals": [
+            {
+                "goal_kind": "relationship_connection",
+                "status": "pursuing",
+            },
+            {
+                "goal_kind": "safety",
+                "status": "satisfied",
+            },
+        ]
+    })
 
     assert [definition.branch_id for definition in roster] == [
         "ordinary_response",
         "relationship_connection",
-        "social_care",
+    ]
+    active_safety_roster = v3_facade._post_i1_goal_roster({
+        "goals": [{
+            "goal_kind": "safety",
+            "status": "pursuing",
+        }]
+    })
+    assert [definition.branch_id for definition in active_safety_roster] == [
+        "ordinary_response",
+        "safety_coping",
     ]
 
 
