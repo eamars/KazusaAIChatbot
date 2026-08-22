@@ -70,12 +70,12 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
-| [unified_llm_json_schema_fallback_no_text_bugfix_plan_2026-08-23.md](active/bugfix/unified_llm_json_schema_fallback_no_text_bugfix_plan_2026-08-23.md) | Unified LLM JSON Schema fallback without text correction | draft |
 
 ### Completed Bugfix Plans
 
 | Document | Type | Status |
 |---|---|---|
+| [unified_llm_json_schema_fallback_no_text_bugfix_plan_2026-08-23.md](archive/completed/unified_llm_json_schema_fallback_no_text_bugfix_plan_2026-08-23.md) | Unified LLM JSON Schema fallback without text correction | completed |
 | [cognition_v3_first_pass_appraisal_structural_exhaustion_diagnosis_2026-08-22.md](archive/completed/cognition_v3_first_pass_appraisal_structural_exhaustion_diagnosis_2026-08-22.md) | First-pass cognition appraisal structural-exhaustion diagnosis | completed |
 | [cognition_v2_semantic_admission_original_contract_restoration_plan.md](archive/completed/cognition_v2_semantic_admission_original_contract_restoration_plan.md) | Cognition V2 semantic-admission original-contract restoration | completed |
 | [dialog_final_generator_evaluator_decommission_plan.md](archive/completed/dialog_final_generator_evaluator_decommission_plan.md) | Final dialog evaluator/verifier and scheduled semantic-evaluator decommission | completed |

@@ -141,11 +141,12 @@ The caller chooses which config profile to pass. `LLInterface` only maps that
 config into backend-compatible request fields.
 
 `output_mode="json_object"` is the shared default. The OpenAI-compatible
-provider requests native JSON-object output while each semantic stage keeps
-ownership of parsing, field validation, normalization, repair, and bounded
-regeneration. Intentionally free-form stages set `output_mode="text"`; the
-current exceptions are the coding writer, RAG evaluator summarizer, and RAG
-finalizer.
+provider first requests native JSON-object output. A narrowly recognized
+unsupported rejection receives exactly one provider-private retry with the
+fixed generic JSON Schema. Each semantic stage keeps ownership of parsing,
+field validation, normalization, repair, and bounded regeneration.
+Intentionally free-form stages select `output_mode="text"`; the current
+exceptions are the coding writer, RAG evaluator summarizer, and RAG finalizer.
 
 `context_window_tokens` remains local metadata. Provider adapters omit it from
 request/client kwargs; Cognition V3 uses it to reject oversized requests before
@@ -379,7 +380,9 @@ Provider adapters own:
   `top_p`, `max_completion_tokens`, `presence_penalty`, and provider-specific
   `extra_body`;
 - native `response_format={"type": "json_object"}` mapping for the default
-  output mode and omission of `response_format` for explicit text mode;
+  output mode, one fixed generic `json_schema` retry after a recognized
+  unsupported rejection, and omission of `response_format` for explicit text
+  mode;
 - conversion from provider-native responses to `LLMResponse`;
 - provider-local chat-model cache identity.
 
@@ -413,9 +416,10 @@ Session cache keys and diagnostic fingerprints are separate. Raw API keys are
 hashed for cache identity and must never appear in repr output, diagnostics,
 route reports, logs, or test failure text.
 
-Provider chat-model cache identity and diagnostic fingerprints include
-`output_mode`, preventing text and JSON-object calls from sharing incompatible
-request configuration.
+Provider-local chat-model cache identity includes the effective output
+transport, separating primary JSON object, fallback JSON Schema, and explicit
+text model construction. Diagnostic fingerprints include the caller-selected
+`output_mode` without exposing provider credentials.
 
 ## Reload Retry Contract
 
@@ -524,13 +528,15 @@ thinking payload fields and returning a backend descriptor with
 
 Provider failures propagate unless the error matches the LM Studio unload
 retry signature or a recognized unsupported JSON-object feature response. For
-the latter, the provider logs the rejection and retries that call once with
-text transport. Recognition is limited to errors that name
+the latter, the provider logs the rejection and retries that call exactly once
+with the fixed generic JSON Schema. Recognition is limited to errors that name
 `response_format`/JSON-object mode and clearly reject the parameter or feature,
 including endpoints whose allowed `response_format.type` list excludes
-`json_object`. Authentication, timeout, rate-limit, server, schema/content, and
-unrelated bad-request errors continue to propagate. Parser failures remain owned by the caller after
-`LLMResponse.content` is returned.
+`json_object`. A failed JSON Schema retry propagates immediately, as do
+authentication, timeout, rate-limit, server, schema/content, and unrelated
+primary bad-request errors. Plain-text transport remains caller-selected only.
+Parser failures remain owned by the caller after `LLMResponse.content` is
+returned.
 
 ## Test Contract
 

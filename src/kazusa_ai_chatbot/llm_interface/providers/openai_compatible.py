@@ -5,8 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
-from dataclasses import replace
-from typing import Callable, Sequence
+from typing import Callable, Literal, Sequence
 
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
 from langchain_openai import ChatOpenAI
@@ -21,6 +20,7 @@ from kazusa_ai_chatbot.llm_interface.reload import ReloadingChatModel
 
 ChatModelFactory = Callable[..., object]
 ChatModelCacheKey = tuple[object, ...]
+_ProviderOutputTransport = Literal["json_object", "json_schema", "text"]
 GEMMA4_THINKING_TRIGGER = "/think"
 QWEN3_THINKING_PREFILL = "<think>\n"
 _JSON_OBJECT_ALLOWED_MODE_ERROR = re.compile(
@@ -50,7 +50,11 @@ class OpenAICompatibleProvider:
     ) -> LLMResponse:
         """Invoke an OpenAI-compatible chat model asynchronously."""
 
-        chat_model = self._build_chat_model(config=config, backend=backend)
+        chat_model = self._build_chat_model(
+            config=config,
+            backend=backend,
+            output_transport=config.output_mode,
+        )
         provider_messages = _provider_messages(
             messages,
             backend=backend,
@@ -62,12 +66,12 @@ class OpenAICompatibleProvider:
                 raise
             logger.warning(
                 f"Provider rejected JSON-object output for {config.model}; "
-                f"retrying once in text mode: {exc}"
+                f"retrying once with JSON Schema: {exc}"
             )
-            fallback_config = replace(config, output_mode="text")
             fallback_model = self._build_chat_model(
-                config=fallback_config,
+                config=config,
                 backend=backend,
+                output_transport="json_schema",
             )
             raw_response = await fallback_model.ainvoke(provider_messages)
         response = LLMResponse.from_raw(raw_response, backend=backend)
@@ -82,7 +86,11 @@ class OpenAICompatibleProvider:
     ) -> LLMResponse:
         """Invoke an OpenAI-compatible chat model synchronously."""
 
-        chat_model = self._build_chat_model(config=config, backend=backend)
+        chat_model = self._build_chat_model(
+            config=config,
+            backend=backend,
+            output_transport=config.output_mode,
+        )
         provider_messages = _provider_messages(
             messages,
             backend=backend,
@@ -94,12 +102,12 @@ class OpenAICompatibleProvider:
                 raise
             logger.warning(
                 f"Provider rejected JSON-object output for {config.model}; "
-                f"retrying once in text mode: {exc}"
+                f"retrying once with JSON Schema: {exc}"
             )
-            fallback_config = replace(config, output_mode="text")
             fallback_model = self._build_chat_model(
-                config=fallback_config,
+                config=config,
                 backend=backend,
+                output_transport="json_schema",
             )
             raw_response = fallback_model.invoke(provider_messages)
         response = LLMResponse.from_raw(raw_response, backend=backend)
@@ -115,10 +123,15 @@ class OpenAICompatibleProvider:
         *,
         config: LLMCallConfig,
         backend: BackendDescriptor,
+        output_transport: _ProviderOutputTransport,
     ) -> ReloadingChatModel:
         """Build the configured chat model for one provider request."""
 
-        cache_key = _chat_model_cache_key(config=config, backend=backend)
+        cache_key = _chat_model_cache_key(
+            config=config,
+            backend=backend,
+            output_transport=output_transport,
+        )
         cached_model = self._chat_models.get(cache_key)
         if cached_model is not None:
             return cached_model
@@ -138,9 +151,23 @@ class OpenAICompatibleProvider:
             kwargs["presence_penalty"] = config.presence_penalty
         if config.timeout_seconds is not None:
             kwargs["timeout"] = config.timeout_seconds
-        if config.output_mode == "json_object":
+        if output_transport == "json_object":
             kwargs["model_kwargs"] = {
                 "response_format": {"type": "json_object"},
+            }
+        elif output_transport == "json_schema":
+            kwargs["model_kwargs"] = {
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "kazusa_json_object",
+                        "strict": True,
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": True,
+                        },
+                    },
+                },
             }
         if backend.thinking_strategy == "gemma4_enabled":
             kwargs["extra_body"] = {
@@ -252,6 +279,7 @@ def _chat_model_cache_key(
     *,
     config: LLMCallConfig,
     backend: BackendDescriptor,
+    output_transport: _ProviderOutputTransport,
 ) -> ChatModelCacheKey:
     """Build a provider-local chat model cache key."""
 
@@ -266,7 +294,7 @@ def _chat_model_cache_key(
         config.max_completion_tokens,
         config.presence_penalty,
         config.timeout_seconds,
-        config.output_mode,
+        output_transport,
         backend.thinking_strategy,
     )
     return cache_key

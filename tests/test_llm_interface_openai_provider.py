@@ -117,27 +117,36 @@ def test_provider_maps_config_to_chat_model_constructor() -> None:
     assert response.usage == {"completion_tokens": 2}
 
 
-def test_provider_maps_json_object_text_and_unsupported_fallback() -> None:
-    """Native JSON mode falls back once while text mode stays unformatted."""
+def test_provider_retries_unsupported_json_object_with_json_schema() -> None:
+    """Unsupported JSON-object mode retries with a private JSON Schema."""
 
     created_models: list[_FakeChatModel] = []
 
     class _FallbackChatModel(_FakeChatModel):
-        """Reject native JSON mode once to exercise the bounded fallback."""
+        """Reject native JSON-object mode and accept the structured retry."""
 
         def invoke(self, messages: list[object]) -> AIMessage:
             self.sync_calls.append(messages)
-            if "model_kwargs" in self.constructor_kwargs:
+            if self.constructor_kwargs.get("model_kwargs") == {
+                "response_format": {"type": "json_object"},
+            }:
                 response = httpx.Response(
                     400,
                     request=httpx.Request("POST", "http://localhost:1234/v1"),
                 )
                 raise BadRequestError(
-                    "response_format is unsupported",
+                    "'response_format.type' must be 'json_schema' or 'text'",
                     response=response,
-                    body={"error": {"message": "response_format is unsupported"}},
+                    body={
+                        "error": {
+                            "message": (
+                                "'response_format.type' must be "
+                                "'json_schema' or 'text'"
+                            ),
+                        },
+                    },
                 )
-            return AIMessage(content="fallback ok")
+            return AIMessage(content='{"fallback": true}')
 
     def _factory(**kwargs: object) -> _FallbackChatModel:
         model = _FallbackChatModel(**kwargs)
@@ -161,10 +170,106 @@ def test_provider_maps_json_object_text_and_unsupported_fallback() -> None:
     assert created_models[0].constructor_kwargs["model_kwargs"] == {
         "response_format": {"type": "json_object"},
     }
-    assert "model_kwargs" not in created_models[1].constructor_kwargs
-    assert response.content == "fallback ok"
+    assert created_models[1].constructor_kwargs["model_kwargs"] == {
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "kazusa_json_object",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "additionalProperties": True,
+                },
+            },
+        },
+    }
+    assert "model_kwargs" not in created_models[2].constructor_kwargs
+    assert response.content == '{"fallback": true}'
     assert len(created_models[0].sync_calls) == 1
-    assert len(created_models[1].sync_calls) == 2
+    assert len(created_models[1].sync_calls) == 1
+    assert len(created_models[2].sync_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_provider_propagates_json_schema_fallback_failure() -> None:
+    """A failed JSON Schema retry propagates without a text or third attempt."""
+
+    created_models: list[_FakeChatModel] = []
+    fallback_response = httpx.Response(
+        400,
+        request=httpx.Request("POST", "http://localhost:1234/v1"),
+    )
+    fallback_error = BadRequestError(
+        "json_schema fallback failed",
+        response=fallback_response,
+        body={"error": {"message": "json_schema fallback failed"}},
+    )
+
+    class _FailingFallbackChatModel(_FakeChatModel):
+        """Reject JSON-object mode, then fail the JSON Schema retry."""
+
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config=None,
+        ) -> AIMessage:
+            self.async_calls.append(messages)
+            model_kwargs = self.constructor_kwargs.get("model_kwargs")
+            if model_kwargs == {
+                "response_format": {"type": "json_object"},
+            }:
+                response = httpx.Response(
+                    400,
+                    request=httpx.Request("POST", "http://localhost:1234/v1"),
+                )
+                raise BadRequestError(
+                    "response_format is unsupported",
+                    response=response,
+                    body={
+                        "error": {
+                            "message": "response_format is unsupported",
+                        },
+                    },
+                )
+            if model_kwargs is not None:
+                raise fallback_error
+            raise AssertionError("provider attempted an unexpected text retry")
+
+    def _factory(**kwargs: object) -> _FailingFallbackChatModel:
+        model = _FailingFallbackChatModel(**kwargs)
+        created_models.append(model)
+        return model
+
+    provider = OpenAICompatibleProvider(chat_model_factory=_factory)
+
+    with pytest.raises(BadRequestError) as raised:
+        await provider.ainvoke(
+            [HumanMessage(content="hello")],
+            config=_config(),
+            backend=_backend(),
+        )
+
+    assert raised.value is fallback_error
+    assert len(created_models) == 2
+    assert created_models[0].constructor_kwargs["model_kwargs"] == {
+        "response_format": {"type": "json_object"},
+    }
+    assert created_models[1].constructor_kwargs["model_kwargs"] == {
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "kazusa_json_object",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "additionalProperties": True,
+                },
+            },
+        },
+    }
+    assert len(created_models[0].async_calls) == 1
+    assert len(created_models[1].async_calls) == 1
 
 
 @pytest.mark.asyncio
