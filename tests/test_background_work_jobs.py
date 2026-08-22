@@ -13,7 +13,7 @@ from tests.test_task_resolution_orchestrator import (
     _goal_continuation_ref,
 )
 from kazusa_ai_chatbot.cognition_episode import build_goal_continuation_ref
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     build_scheduled_future_speech_authority,
 )
 from kazusa_ai_chatbot.db.errors import DatabaseOperationError

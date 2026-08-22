@@ -6,10 +6,10 @@ import json
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     validate_cognition_core_output,
 )
-from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
     bind_v2_attempt_ledger,
     create_v2_attempt_ledger,
     reset_v2_attempt_ledger,

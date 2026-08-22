@@ -8,7 +8,8 @@ final reduction, relationship maintenance, workspace collapse, action planning,
 and output assembly reuse the V2 helpers verbatim.
 
 Engine selection happens in `cognition_core_selector`. The closed set is
-`v2` / `v3`, selected by the `COGNITION_CORE_ENGINE` setting (default `v2`).
+`v2` / `v3`, selected by the `COGNITION_CORE_ENGINE` setting (default `v3`).
+Select `v2` explicitly only to roll back to the V2 route bundles.
 The persona supervisor connector imports one module-level binding from that
 selector, so its live, idle, and guarded call sites all share the same engine.
 The selected branch constructs only its own core services. The generic

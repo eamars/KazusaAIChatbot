@@ -212,12 +212,12 @@ class CognitionEngineDescriptorResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal["cognition_engine_descriptor.v2"]
-    engine_id: Literal["v2", "v3"]
+    engine_id: Literal["v3"]
     chain_model_name: str = Field(min_length=1, max_length=256)
     sidecar_model_name: str = Field(max_length=256)
     sidecar_enabled: bool
     subconscious_enabled: bool
-    appraisal_stage_layout: Literal["parallel_v2", "fixed_a1_a2"]
+    appraisal_stage_layout: Literal["fixed_a1_a2"]
     chain_context_window_tokens: StrictInt = Field(ge=0, le=1_000_000)
     normal_budget_tokens: StrictInt = Field(ge=0, le=65_000)
     extended_budget_tokens: StrictInt = Field(ge=0, le=65_000)
@@ -227,37 +227,6 @@ class CognitionEngineDescriptorResponse(BaseModel):
     def validate_policy(self) -> CognitionEngineDescriptorResponse:
         """Reject descriptor combinations that cannot describe an engine."""
 
-        if self.engine_id == "v2":
-            if self.sidecar_model_name:
-                raise ValueError("V2 descriptor sidecar model must be empty")
-            if self.sidecar_enabled:
-                raise ValueError("V2 descriptor sidecar must be disabled")
-            if self.subconscious_enabled:
-                raise ValueError(
-                    "V2 descriptor subconscious mode must be disabled",
-                )
-            if any(
-                value != 0
-                for value in (
-                    self.chain_context_window_tokens,
-                    self.normal_budget_tokens,
-                    self.extended_budget_tokens,
-                    self.turn_deadline_seconds,
-                )
-            ):
-                raise ValueError(
-                    "V2 descriptor chain-specific numeric fields must be zero",
-                )
-            if self.appraisal_stage_layout != "parallel_v2":
-                raise ValueError(
-                    "V2 descriptor appraisal_stage_layout must be parallel_v2",
-                )
-            return self
-
-        if self.appraisal_stage_layout != "fixed_a1_a2":
-            raise ValueError(
-                "V3 descriptor appraisal_stage_layout must be fixed_a1_a2",
-            )
         if self.chain_context_window_tokens < 50_000:
             raise ValueError(
                 "V3 descriptor context window must be at least 50000",

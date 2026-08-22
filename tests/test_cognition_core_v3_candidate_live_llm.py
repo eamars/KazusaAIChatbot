@@ -11,14 +11,13 @@ import pytest
 from kazusa_ai_chatbot.cognition_core_v3.contracts import CognitionChainServicesV3
 from kazusa_ai_chatbot.cognition_core_v3.facade import run_cognition
 from kazusa_ai_chatbot.config import (
-    COGNITION_CORE_ENGINE,
     COGNITION_V3_APPRAISAL_STAGE_LAYOUT,
 )
 from kazusa_ai_chatbot.llm_interface.contracts import LLMCallConfig
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     build_cognition_core_services,
 )
-from tests.cognition_core_v3_comparison_harness import (
+from tests.cognition_v3_candidate_support import (
     DEFAULT_ARTIFACT_ROOT,
     ELIGIBLE_RESULT,
     TrialIdentity,
@@ -70,8 +69,6 @@ def sanitized_v3_environment_fingerprint(
 async def _run_live_v3_candidate_case(case_id: str) -> None:
     """Run and seal one V3 candidate trial from the frozen manifest."""
 
-    if COGNITION_CORE_ENGINE != "v3":
-        raise RuntimeError("Gate 7 candidate capture requires the V3 engine")
     services = build_cognition_core_services()
     if not isinstance(services, CognitionChainServicesV3):
         raise TypeError("selected cognition services are not V3 services")

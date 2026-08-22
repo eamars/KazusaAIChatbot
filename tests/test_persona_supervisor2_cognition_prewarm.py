@@ -8,16 +8,16 @@ import pytest
 from kazusa_ai_chatbot.cognition_resolver.capabilities import (
     project_resolver_observation_for_cognition,
 )
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionExecutionError,
 )
-from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
     bind_v2_attempt_ledger,
     create_v2_attempt_ledger,
     reset_v2_attempt_ledger,
 )
 from kazusa_ai_chatbot.cognition_resolver import guardrail
-from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
 )

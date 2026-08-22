@@ -23,7 +23,7 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     validate_resolver_capability_request,
     validate_resolver_observation,
 )
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionContractError,
     CognitionEvidenceV2,
     DirectFactV2,

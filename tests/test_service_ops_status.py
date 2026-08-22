@@ -275,55 +275,6 @@ async def test_ops_runtime_status_merges_config_and_worker_liveness(
     build_runtime_status.assert_awaited_once_with(window_hours=6)
 
 
-def test_cognition_engine_descriptor_v2_uses_stable_stage_model_set(
-    monkeypatch,
-) -> None:
-    """V2 status exposes only stable configured stage model names."""
-
-    route = CognitionRouteSettingV1(
-        base_url="https://private.example/v1",
-        api_key="private-key",
-        model="model-b",
-        max_completion_tokens=1024,
-        thinking_enabled=False,
-        context_window_tokens=None,
-    )
-    duplicate_route = CognitionRouteSettingV1(
-        base_url="https://private.example/v1",
-        api_key="private-key-2",
-        model="model-a",
-        max_completion_tokens=1024,
-        thinking_enabled=False,
-        context_window_tokens=None,
-    )
-    monkeypatch.setattr(service_module, "COGNITION_CORE_ENGINE", "v2")
-    monkeypatch.setattr(
-        service_module,
-        "get_selected_cognition_route_settings",
-        lambda: {"one": route, "two": duplicate_route, "three": route},
-    )
-
-    descriptor = service_module._ops_runtime_status_payload({})[
-        "cognition_engine"
-    ]
-
-    assert descriptor == {
-        "schema_version": "cognition_engine_descriptor.v2",
-        "engine_id": "v2",
-        "chain_model_name": "model-a, model-b",
-        "sidecar_model_name": "",
-        "sidecar_enabled": False,
-        "subconscious_enabled": False,
-        "appraisal_stage_layout": "parallel_v2",
-        "chain_context_window_tokens": 0,
-        "normal_budget_tokens": 0,
-        "extended_budget_tokens": 0,
-        "turn_deadline_seconds": 0,
-    }
-    assert "private-key" not in str(descriptor)
-    assert "private.example" not in str(descriptor)
-
-
 def test_cognition_engine_descriptor_v3_uses_selected_loaded_settings(
     monkeypatch,
 ) -> None:
@@ -351,10 +302,9 @@ def test_cognition_engine_descriptor_v3_uses_selected_loaded_settings(
         subconscious_enabled=True,
         turn_deadline_seconds=333,
     )
-    monkeypatch.setattr(service_module, "COGNITION_CORE_ENGINE", "v3")
     monkeypatch.setattr(
         service_module,
-        "get_selected_cognition_route_settings",
+        "get_cognition_v3_route_settings",
         lambda: settings,
     )
 
@@ -412,18 +362,6 @@ def test_cognition_engine_descriptor_contract_is_strict_and_bounded() -> None:
         "sidecar_enabled": True,
         "subconscious_enabled": True,
     }
-    assert CognitionEngineDescriptorResponse.model_validate({
-        **descriptor,
-        "engine_id": "v2",
-        "sidecar_model_name": "",
-        "sidecar_enabled": False,
-        "subconscious_enabled": False,
-        "appraisal_stage_layout": "parallel_v2",
-        "chain_context_window_tokens": 0,
-        "normal_budget_tokens": 0,
-        "extended_budget_tokens": 0,
-        "turn_deadline_seconds": 0,
-    }).engine_id == "v2"
     with pytest.raises(ValueError):
         CognitionEngineDescriptorResponse.model_validate({
             **descriptor,
@@ -434,16 +372,6 @@ def test_cognition_engine_descriptor_contract_is_strict_and_bounded() -> None:
         {"engine_id": "v1"},
         {"chain_model_name": ""},
         {"appraisal_stage_layout": "unsupported"},
-        {"appraisal_stage_layout": "parallel_v2"},
-        {"engine_id": "v2", "sidecar_model_name": "sidecar-model"},
-        {"engine_id": "v2", "sidecar_enabled": True},
-        {"engine_id": "v2", "subconscious_enabled": True},
-        {"engine_id": "v2", "appraisal_stage_layout": "fixed_a1_a2"},
-        {"engine_id": "v2", "chain_context_window_tokens": 1},
-        {"engine_id": "v2", "normal_budget_tokens": 1},
-        {"engine_id": "v2", "extended_budget_tokens": 1},
-        {"engine_id": "v2", "turn_deadline_seconds": 1},
-        {"appraisal_stage_layout": "parallel_v2"},
         {"chain_context_window_tokens": 49_999},
         {"chain_context_window_tokens": True},
         {"normal_budget_tokens": 49_999},

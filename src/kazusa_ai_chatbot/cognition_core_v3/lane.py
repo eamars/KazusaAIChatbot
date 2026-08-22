@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Literal
 
-from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
     current_v2_attempt_ledger,
 )
 from kazusa_ai_chatbot.llm_interface import LLMCallConfig, LLMInvoker

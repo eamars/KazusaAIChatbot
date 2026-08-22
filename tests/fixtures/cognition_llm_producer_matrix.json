@@ -2,14 +2,6 @@
   "schema_version": "cognition_llm_producer_matrix.v1",
   "call_site_rules": [
     {
-      "pattern": "src/kazusa_ai_chatbot/cognition_core_v2/**",
-      "owner": "cognition_v2",
-      "route": "cognition_core_v2",
-      "parser": "parse_llm_json_output",
-      "attempt_cap": 2,
-      "fault_selector": "producer_v2_contract"
-    },
-    {
       "pattern": "src/kazusa_ai_chatbot/cognition_chain_core/**",
       "owner": "legacy_cognition_baseline",
       "route": "legacy_cognition_chain",

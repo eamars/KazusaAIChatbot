@@ -3,19 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import re
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
+from itertools import pairwise
 from typing import Any
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
-    CognitionCoreInputV2,
-    validate_cognition_core_input,
-    validate_cognition_core_output,
-)
 from kazusa_ai_chatbot.cognition_core_v3 import facade as v3_facade
 from kazusa_ai_chatbot.cognition_core_v3.registry import (
     APPRAISAL_STAGE_FAMILIES,
@@ -23,6 +21,11 @@ from kazusa_ai_chatbot.cognition_core_v3.registry import (
 from kazusa_ai_chatbot.cognition_core_v3.session import ChainSessionRegistry
 from kazusa_ai_chatbot.cognition_resolver.capabilities import (
     project_resolver_observation_for_cognition,
+)
+from kazusa_ai_chatbot.cognition_shared.contracts import (
+    CognitionCoreInputV2,
+    validate_cognition_core_input,
+    validate_cognition_core_output,
 )
 from kazusa_ai_chatbot.llm_interface.contracts import (
     BackendDescriptor,
@@ -32,11 +35,225 @@ from tests.integration.cognition_core_v3.conftest import (
     make_v3_services,
     ordinary_goal_draft,
 )
-from tests.test_cognition_core_v3_performance_live_llm import (
-    _has_nonempty_l1_residue,
-    _message_snapshot,
-    _prefix_evidence,
+
+
+def _is_explicit_reanchor_packet(content: str) -> bool:
+    """Recognize the exact re-anchor carrier emitted by the executor."""
+
+    try:
+        packet = json.loads(content)
+    except (TypeError, json.JSONDecodeError):
+        return False
+    if not isinstance(packet, Mapping) or set(packet) != {"reanchor"}:
+        return False
+    anchor = packet["reanchor"]
+    if not isinstance(anchor, Mapping):
+        return False
+    if set(anchor) != {"accepted_products", "current_question"}:
+        return False
+    accepted_products = anchor["accepted_products"]
+    current_question = anchor["current_question"]
+    if not isinstance(accepted_products, list):
+        return False
+    if not all(isinstance(row, Mapping) for row in accepted_products):
+        return False
+    if not isinstance(current_question, Mapping):
+        return False
+    if set(current_question) != {"contract_name", "facts", "interludes"}:
+        return False
+    if not isinstance(current_question["contract_name"], str):
+        return False
+    if not current_question["contract_name"]:
+        return False
+    if not isinstance(current_question["facts"], Mapping):
+        return False
+    interludes = current_question["interludes"]
+    return isinstance(interludes, list) and all(
+        isinstance(row, Mapping) for row in interludes
+    )
+
+
+def _message_snapshot(message: object) -> dict[str, Any]:
+    """Project one request message into exact structural evidence."""
+
+    content = str(getattr(message, "content", ""))
+    return {
+        "message_type": type(message).__name__,
+        "content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+        "content_chars": len(content),
+        "explicit_reanchor": _is_explicit_reanchor_packet(content),
+    }
+
+
+def _has_nonempty_l1_residue(messages: Sequence[object]) -> bool:
+    """Detect the sealed question payload's nested L1 residue."""
+
+    if not messages:
+        return False
+    try:
+        packet = json.loads(str(getattr(messages[-1], "content", "")))
+    except (TypeError, json.JSONDecodeError):
+        return False
+    if not isinstance(packet, list):
+        return False
+    question_rows = [
+        section["question"]
+        for section in packet
+        if (
+            isinstance(section, Mapping)
+            and set(section) == {"question"}
+            and isinstance(section["question"], Mapping)
+        )
+    ]
+    if len(question_rows) != 1:
+        return False
+    payload = question_rows[0].get("payload")
+    residue = payload.get("l1_residue") if isinstance(payload, Mapping) else None
+    return isinstance(residue, Mapping) and bool(residue)
+
+
+_REPAIR_STAGE_PATTERN = re.compile(
+    r"^(?P<base>.+)\.repair(?P<attempt>[1-9][0-9]*)$"
 )
+
+
+def _call_stage_name(call: Mapping[str, Any]) -> str | None:
+    config = call.get("config")
+    stage_name = config.get("stage_name") if isinstance(config, Mapping) else None
+    return stage_name if isinstance(stage_name, str) else None
+
+
+def _is_sequential_repair_transition(
+    previous: Mapping[str, Any],
+    current: Mapping[str, Any],
+) -> bool:
+    """Require explicit same-owner, successive repair-stage telemetry."""
+
+    previous_stage = _call_stage_name(previous)
+    current_stage = _call_stage_name(current)
+    if previous_stage is None or current_stage is None:
+        return False
+    current_match = _REPAIR_STAGE_PATTERN.fullmatch(current_stage)
+    if current_match is None:
+        return False
+    current_base = current_match.group("base")
+    current_attempt = int(current_match.group("attempt"))
+    previous_match = _REPAIR_STAGE_PATTERN.fullmatch(previous_stage)
+    if previous_match is None:
+        return current_base == previous_stage and current_attempt == 1
+    return (
+        current_base == previous_match.group("base")
+        and current_attempt == int(previous_match.group("attempt")) + 1
+    )
+
+
+def _is_appraisal_recovery_stage_transition(
+    previous_stage: str | None,
+    current_stage: str | None,
+) -> bool:
+    """Recognize only registry-ordered grouped-appraisal recovery stages."""
+
+    if previous_stage is None or current_stage is None:
+        return False
+    for prefix in ("", "R."):
+        for stage_index, (stage_id, families) in enumerate(
+            APPRAISAL_STAGE_FAMILIES
+        ):
+            stage_name = f"{prefix}{stage_id}"
+            registered_stages = [
+                stage_name,
+                *(f"{stage_name}.{family}" for family in families),
+            ]
+            if stage_index + 1 < len(APPRAISAL_STAGE_FAMILIES):
+                next_stage_id = APPRAISAL_STAGE_FAMILIES[stage_index + 1][0]
+                registered_stages.append(f"{prefix}{next_stage_id}")
+            else:
+                registered_stages.append(f"{prefix}G1a")
+            if (previous_stage, current_stage) in pairwise(registered_stages):
+                return True
+    return False
+
+
+def _prefix_evidence(calls: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Prove exact prefixes or the two sealed continuation transitions."""
+
+    primary_calls = [call for call in calls if call["lane"] == "primary"]
+    continuations: list[dict[str, Any]] = []
+    for previous, current in pairwise(primary_calls):
+        previous_messages = previous["messages"]
+        current_messages = current["messages"]
+        exact_prefix = current_messages[: len(previous_messages)] == previous_messages
+        common_prefix_count = 0
+        for previous_row, current_row in zip(previous_messages, current_messages):
+            if previous_row != current_row:
+                break
+            common_prefix_count += 1
+        repair_stage_telemetry = _is_sequential_repair_transition(previous, current)
+        human_tail_replacement = (
+            len(previous_messages) == len(current_messages)
+            and len(previous_messages) >= 2
+            and previous_messages[:-1] == current_messages[:-1]
+            and previous_messages[-1].get("message_type") == "HumanMessage"
+            and current_messages[-1].get("message_type") == "HumanMessage"
+            and previous_messages[-1] != current_messages[-1]
+        )
+        appraisal_recovery_stage_telemetry = (
+            human_tail_replacement
+            and _is_appraisal_recovery_stage_transition(
+                _call_stage_name(previous), _call_stage_name(current)
+            )
+        )
+        explicit_reanchor = (
+            len(current_messages) == 2
+            and len(previous_messages) >= 1
+            and current_messages[0] == previous_messages[0]
+            and current_messages[-1].get("message_type") == "HumanMessage"
+            and current_messages[-1].get("explicit_reanchor") is True
+        )
+        if exact_prefix:
+            classification, transition = "exact", None
+            prefix_message_count = len(previous_messages)
+        elif explicit_reanchor:
+            classification, transition = "permitted_transition", "explicit_reanchor"
+            prefix_message_count = 1
+        elif appraisal_recovery_stage_telemetry:
+            classification, transition = (
+                "permitted_transition", "appraisal_recovery_tail_replacement"
+            )
+            prefix_message_count = len(previous_messages) - 1
+        elif human_tail_replacement and repair_stage_telemetry:
+            classification, transition = "permitted_transition", "repair_tail_replacement"
+            prefix_message_count = len(previous_messages) - 1
+        else:
+            classification, transition = "invalid", None
+            prefix_message_count = common_prefix_count
+        prefix_chars = sum(
+            row["content_chars"] for row in current_messages[:prefix_message_count]
+        )
+        continuations.append({
+            "previous_sequence": previous["sequence"],
+            "current_sequence": current["sequence"],
+            "classification": classification,
+            "transition": transition,
+            "valid": classification != "invalid",
+            "exact_prefix": exact_prefix,
+            "permitted_transition": classification == "permitted_transition",
+            "invalid": classification == "invalid",
+            "previous_stage_name": _call_stage_name(previous),
+            "current_stage_name": _call_stage_name(current),
+            "repair_stage_telemetry": repair_stage_telemetry,
+            "appraisal_recovery_stage_telemetry": appraisal_recovery_stage_telemetry,
+            "prefix_message_count": prefix_message_count,
+            "prefix_chars": prefix_chars,
+            "suffix_chars": current["serialized_request_chars"] - prefix_chars,
+        })
+    return {
+        "continuation_count": len(continuations),
+        "all_exact": bool(continuations) and all(row["exact_prefix"] for row in continuations),
+        "all_continuations_valid": bool(continuations) and all(row["valid"] for row in continuations),
+        "invalid_count": sum(row["invalid"] for row in continuations),
+        "continuations": continuations,
+    }
 
 
 def _question_payload(messages: Sequence[object]) -> dict[str, object]:

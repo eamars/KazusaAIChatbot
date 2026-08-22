@@ -8,7 +8,7 @@ import pytest
 
 from kazusa_ai_chatbot.llm_interface.contracts import BackendDescriptor, LLMResponse
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
-from tests.cognition_core_v2_test_helpers import canonical_episode
+from tests.cognition_test_helpers import canonical_episode
 
 
 class _CapturingLLM:

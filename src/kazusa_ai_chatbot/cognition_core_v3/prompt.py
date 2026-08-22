@@ -8,20 +8,23 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
+    GOAL_RESOLUTION_VALUES,
     SCHEDULED_AUTHORITY_CURRENT_ROLE_VALUES,
     SCHEDULED_AUTHORITY_PROPOSAL_SCHEMA_VERSION,
+    SELF_COGNITION_RESPONSE_DECISION_VALUES,
+    SELF_COGNITION_RESPONSE_PARTICIPATION_VALUES,
     TEMPORAL_ALIGNMENT_VALUES,
     project_evidence_provenance_role,
 )
-from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
+from kazusa_ai_chatbot.cognition_core_v3.goal_cognition import (
     build_goal_output_contract,
 )
-from kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal import (
+from kazusa_ai_chatbot.cognition_core_v3.semantic_appraisal import (
     DELTA_LIMIT_NARROW,
     DELTA_LIMIT_WIDE,
 )
-from kazusa_ai_chatbot.cognition_core_v2.semantic_source_planner import (
+from kazusa_ai_chatbot.cognition_core_v3.semantic_source_planner import (
     question_proposition_kind_semantics,
     question_proposition_kinds,
 )
@@ -60,6 +63,14 @@ APPRAISAL_ROLE_VALUES = (
     "object",
     "affected_goal",
     "affected_relationship",
+)
+SELF_COGNITION_RESPONSE_REQUIRED_FIELDS = (
+    "decision",
+    "evidence_handles",
+    "semantic_target_handle",
+    "participation_basis",
+    "response_goal",
+    "reason",
 )
 
 
@@ -1620,11 +1631,11 @@ def build_action_plan_question_payload(
                 "self_cognition_response_context must be a mapping"
             )
         expected_fields = {
-            "required",
-            "target_handles",
-            "current_episode_evidence_handles",
+            "required_fields",
             "allowed_decisions",
-            "participation_basis_values",
+            "allowed_evidence_handles",
+            "allowed_semantic_target_handles",
+            "allowed_participation_basis_values",
             "response_goal_max_chars",
             "reason_max_chars",
         }
@@ -1632,15 +1643,19 @@ def build_action_plan_question_payload(
             raise PromptContractError(
                 "self_cognition_response_context fields are not exact"
             )
-        if self_cognition_response_context["required"] is not True:
+        required_fields = self_cognition_response_context["required_fields"]
+        expected_required_fields = list(
+            SELF_COGNITION_RESPONSE_REQUIRED_FIELDS
+        )
+        if required_fields != expected_required_fields:
             raise PromptContractError(
-                "self_cognition_response_context.required must be true"
+                "self_cognition_response_context.required_fields are invalid"
             )
         for field_name in (
-            "target_handles",
-            "current_episode_evidence_handles",
             "allowed_decisions",
-            "participation_basis_values",
+            "allowed_evidence_handles",
+            "allowed_semantic_target_handles",
+            "allowed_participation_basis_values",
         ):
             values = self_cognition_response_context[field_name]
             if not isinstance(values, list) or any(
@@ -1650,6 +1665,34 @@ def build_action_plan_question_payload(
                 raise PromptContractError(
                     "self_cognition_response_context list is invalid"
                 )
+            if len(values) != len(set(values)):
+                raise PromptContractError(
+                    "self_cognition_response_context list values are duplicated"
+                )
+        allowed_decisions = self_cognition_response_context[
+            "allowed_decisions"
+        ]
+        if not allowed_decisions or not set(allowed_decisions).issubset(
+            SELF_COGNITION_RESPONSE_DECISION_VALUES
+        ):
+            raise PromptContractError(
+                "self_cognition_response_context decisions are invalid"
+            )
+        allowed_participation_values = self_cognition_response_context[
+            "allowed_participation_basis_values"
+        ]
+        if not allowed_participation_values or not set(
+            allowed_participation_values
+        ).issubset(SELF_COGNITION_RESPONSE_PARTICIPATION_VALUES):
+            raise PromptContractError(
+                "self_cognition_response_context participation values are invalid"
+            )
+        if not self_cognition_response_context[
+            "allowed_semantic_target_handles"
+        ]:
+            raise PromptContractError(
+                "self_cognition_response_context target domain is empty"
+            )
         for field_name in ("response_goal_max_chars", "reason_max_chars"):
             maximum = self_cognition_response_context[field_name]
             if (
@@ -1663,4 +1706,45 @@ def build_action_plan_question_payload(
         payload["self_cognition_response_context"] = dict(
             self_cognition_response_context
         )
+    output_required_fields = [
+        "action_requests",
+        "resolver_requests",
+        "goal_resolution",
+        "resolver_pending_resolution",
+        "resolver_goal_progress",
+    ]
+    output_properties: dict[str, object] = {
+        "action_requests": {
+            "type": "array",
+            "items": {"type": "object"},
+        },
+        "resolver_requests": {
+            "type": "array",
+            "items": {"type": "object"},
+        },
+        "goal_resolution": {
+            "type": "string",
+            "enum": sorted(GOAL_RESOLUTION_VALUES),
+        },
+        "resolver_pending_resolution": {
+            "type": ["object", "null"],
+        },
+        "resolver_goal_progress": {
+            "type": ["object", "null"],
+        },
+    }
+    if self_cognition_response_context is not None:
+        output_required_fields.append("self_cognition_response")
+        output_properties["self_cognition_response"] = {
+            "type": "object",
+            "required_fields": list(
+                SELF_COGNITION_RESPONSE_REQUIRED_FIELDS
+            ),
+            "additionalProperties": False,
+        }
+    payload["action_plan_output_contract"] = {
+        "required_fields": output_required_fields,
+        "additionalProperties": False,
+        "properties": output_properties,
+    }
     return _sanitize_prompt_value(payload)

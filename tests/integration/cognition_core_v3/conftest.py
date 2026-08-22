@@ -37,7 +37,7 @@ APPRAISAL_STAGE_NAMES = (
     "existential_drive",
 )
 
-# One dummy route config per semantic owner bound by CognitionCoreServicesV2.
+# One dummy route config per semantic owner bound by CognitionChainServicesV3.
 SERVICE_STAGE_NAMES = (
     *APPRAISAL_STAGE_NAMES,
     "goal_ordinary_response",

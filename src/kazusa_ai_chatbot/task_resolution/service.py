@@ -20,7 +20,7 @@ from kazusa_ai_chatbot.background_work.models import (
     BackgroundWorkQueueRequest,
     BackgroundWorkQueueResult,
 )
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     ResolverCapabilityRequestV2,
 )
 from kazusa_ai_chatbot.task_resolution.contracts import (

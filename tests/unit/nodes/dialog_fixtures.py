@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tests.cognition_core_v2_test_helpers import canonical_episode
+from tests.cognition_test_helpers import canonical_episode
 
 
 def build_dialog_state() -> dict[str, object]:

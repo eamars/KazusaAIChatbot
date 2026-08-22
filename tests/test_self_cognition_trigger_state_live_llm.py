@@ -10,13 +10,13 @@ from typing import Any
 import httpx
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_character_production_state,
 )
 from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as connector
 from kazusa_ai_chatbot.self_cognition import models, projection, runner
-from tests.cognition_core_v2_test_helpers import (
+from tests.cognition_test_helpers import (
     canonical_service_character_profile,
 )
 

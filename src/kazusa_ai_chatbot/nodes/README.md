@@ -478,7 +478,8 @@ actions, deliver messages, schedule work, or reopen cognition.
 
 The cognition entrypoint the connector binds resolves through the closed
 process-level selector `kazusa_ai_chatbot.cognition_core_selector`:
-`COGNITION_CORE_ENGINE` accepts exactly `v2` or `v3` (default `v2`) and is
+`COGNITION_CORE_ENGINE` accepts exactly `v2` or `v3` (default `v3`) and is
 resolved once at import, so every live/idle/self-cognition call site runs the
-single selected engine. The surface planning APIs (`run_text_surface_planning(...)`,
+single selected engine. Select `v2` explicitly only to roll back to the V2
+route bundles. The surface planning APIs (`run_text_surface_planning(...)`,
 `run_visual_surface_planning(...)`) remain in `kazusa_ai_chatbot.cognition_core_v2`.

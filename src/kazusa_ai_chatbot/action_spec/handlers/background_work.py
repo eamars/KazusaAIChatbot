@@ -27,7 +27,7 @@ from kazusa_ai_chatbot.config import (
     CHARACTER_TIME_ZONE,
     CODING_AGENT_WORKSPACE_ROOT,
 )
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionContractError,
     build_scheduled_future_speech_authority,
     validate_scheduled_authority_proposal,

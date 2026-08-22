@@ -11,7 +11,7 @@ from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
 from kazusa_ai_chatbot.brain_service.delivery_mentions import (
     build_inline_delivery_mentions,
 )
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionContractError,
     SCHEDULED_SPEECH_GATE_CODES,
     validate_self_cognition_response_decision,

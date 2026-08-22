@@ -14,8 +14,8 @@ from control_console.kazusa_client import KazusaClient
 from kazusa_ai_chatbot import db as db_facade
 from kazusa_ai_chatbot import event_logging, service
 from kazusa_ai_chatbot import llm_tracing as tracing
-from kazusa_ai_chatbot.cognition_core_v2.contracts import CognitionExecutionError
-from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+from kazusa_ai_chatbot.cognition_shared.contracts import CognitionExecutionError
+from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
     bind_v2_attempt_ledger,
     create_v2_attempt_ledger,
     reset_v2_attempt_ledger,

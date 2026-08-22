@@ -11,7 +11,7 @@ import math
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2.output_projection import (
+from kazusa_ai_chatbot.cognition_shared.output_projection import (
     build_state_update,
 )
 from kazusa_ai_chatbot.cognition_core_v3 import session

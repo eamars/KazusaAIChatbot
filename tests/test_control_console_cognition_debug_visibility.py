@@ -963,7 +963,7 @@ async def test_character_entity_shows_growth_and_revision_carry_over() -> None:
     """Character should show redacted identity process and continuity."""
 
     from control_console.repository import ControlConsoleRepository
-    from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    from kazusa_ai_chatbot.cognition_shared.state_models import (
         build_character_production_state,
     )
 

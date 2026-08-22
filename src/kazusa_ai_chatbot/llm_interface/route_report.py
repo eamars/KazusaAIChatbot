@@ -30,36 +30,6 @@ _ROUTES_AFTER_COGNITION_CORE = (
     "CODING_AGENT_PROGRAMMER_LLM",
     "CODING_AGENT_ACTION_LOOP_LLM",
 )
-_V2_COGNITION_ROUTES = (
-    ("appraisal_event_agency", "COGNITION_LLM_APPRAISAL_EVENT_AGENCY"),
-    (
-        "appraisal_relationship_social",
-        "COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL",
-    ),
-    ("appraisal_moral_identity", "COGNITION_LLM_APPRAISAL_MORAL_IDENTITY"),
-    (
-        "appraisal_goal_threat_outcome",
-        "COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME",
-    ),
-    (
-        "appraisal_epistemic_comparison_memory",
-        "COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY",
-    ),
-    (
-        "appraisal_existential_drive",
-        "COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE",
-    ),
-    ("goal_ordinary_response", "COGNITION_LLM_GOAL_ORDINARY_RESPONSE"),
-    ("goal_active_branch", "COGNITION_LLM_GOAL_ACTIVE_BRANCH"),
-    ("workspace_collapse", "COGNITION_LLM_WORKSPACE_COLLAPSE"),
-    ("action_planning", "COGNITION_LLM_ACTION_PLANNING"),
-    ("action_authorization", "COGNITION_LLM_ACTION_AUTHORIZATION"),
-    ("resolver_authorization", "COGNITION_LLM_RESOLVER_AUTHORIZATION"),
-)
-_V2_COGNITION_ROUTE_NAMES = frozenset(
-    route_name
-    for _key, route_name in _V2_COGNITION_ROUTES
-)
 _V3_COGNITION_ROUTE_NAMES = frozenset({
     "COGNITION_V3_CHAIN_LLM",
     "COGNITION_V3_SIDECAR_LLM",
@@ -119,17 +89,9 @@ def _setting_route_config(
 
 
 def _selected_cognition_routes() -> tuple[LLMCallConfig, ...]:
-    """Return only the configured cognition engine's core route bindings."""
+    """Return the configured V3 chain and optional sidecar bindings."""
 
-    if cfg.COGNITION_CORE_ENGINE == "v2":
-        settings = cfg.load_cognition_v2_route_settings()
-        routes = tuple(
-            _setting_route_config(route_name, settings[key])
-            for key, route_name in _V2_COGNITION_ROUTES
-        )
-        return routes
-
-    settings_v3 = cfg.load_cognition_v3_route_settings()
+    settings_v3 = cfg.get_cognition_v3_route_settings()
     route_list = [
         _setting_route_config(
             "COGNITION_V3_CHAIN_LLM",
@@ -165,13 +127,10 @@ def _configured_chat_routes() -> tuple[LLMCallConfig, ...]:
 
 
 def _required_routes() -> set[str]:
-    """Return required shared routes plus the selected cognition core routes."""
+    """Return required shared routes plus the V3 chain route."""
 
     required_routes = set(_SHARED_REQUIRED_ROUTES)
-    if cfg.COGNITION_CORE_ENGINE == "v2":
-        required_routes.update(_V2_COGNITION_ROUTE_NAMES)
-    else:
-        required_routes.add("COGNITION_V3_CHAIN_LLM")
+    required_routes.add("COGNITION_V3_CHAIN_LLM")
     return required_routes
 
 
@@ -216,9 +175,6 @@ def _optional_feature_tags(diagnostic: RouteDiagnostic) -> str:
 def _route_group(route_name: str) -> str:
     """Classify one route for selected-family operator diagnostics."""
 
-    if route_name in _V2_COGNITION_ROUTE_NAMES:
-        return_value = "v2_cognition"
-        return return_value
     if route_name in _V3_COGNITION_ROUTE_NAMES:
         return_value = "v3_cognition"
         return return_value

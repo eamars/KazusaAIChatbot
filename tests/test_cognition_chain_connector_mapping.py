@@ -13,7 +13,7 @@ from kazusa_ai_chatbot.character_identity_growth.projection import (
 )
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as connector
 
-from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
 )
@@ -21,7 +21,7 @@ from kazusa_ai_chatbot.cognition_resolver import capabilities as resolver_capabi
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     new_empty_goal_progress,
 )
-from tests.cognition_core_v2_test_helpers import (
+from tests.cognition_test_helpers import (
     canonical_character_identity,
     canonical_episode,
 )

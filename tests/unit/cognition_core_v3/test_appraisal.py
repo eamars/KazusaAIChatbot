@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2.semantic_source_planner import (
+from kazusa_ai_chatbot.cognition_core_v3.semantic_source_planner import (
     question_proposition_kind_semantics,
     question_proposition_kinds,
 )

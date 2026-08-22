@@ -68,14 +68,11 @@ class _StaticStoppedSupervisor:
         return 0
 
 
-def test_model_routes_mark_only_selected_core_family_active_and_generic_cognition_shared(
-    monkeypatch,
-) -> None:
-    """Mark selected core routes active and required; keep generic cognition shared."""
+def test_model_routes_keep_v3_active_and_generic_cognition_shared() -> None:
+    """Keep both V3 routes active and generic cognition shared."""
 
     from control_console import brain_model_routes
 
-    monkeypatch.setattr(brain_model_routes, "COGNITION_CORE_ENGINE", "v3")
     snapshot = SimpleNamespace(fields=[])
     rows = brain_model_routes.project_brain_model_routes(snapshot, {})
     by_prefix = {row["env_prefix"]: row for row in rows}
@@ -87,12 +84,8 @@ def test_model_routes_mark_only_selected_core_family_active_and_generic_cognitio
     assert by_prefix["COGNITION_LLM"]["family"] == "shared_non_core"
     assert by_prefix["COGNITION_LLM"]["active"] is False
     assert by_prefix["COGNITION_LLM"]["required"] is True
-    assert by_prefix["COGNITION_LLM_APPRAISAL_EVENT_AGENCY"]["active"] is False
-    assert by_prefix["COGNITION_LLM_APPRAISAL_EVENT_AGENCY"]["required"] is False
-    assert any(
-        row["family"] == "v2" and row["active"] is False
-        for row in rows
-    )
+    assert all(row["family"] != "v2" for row in rows)
+    assert all(row["active"] for row in rows if row["family"] == "v3")
 
 
 def _client_with_login(tmp_path, *, supervisor=None):

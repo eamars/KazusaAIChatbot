@@ -4,20 +4,15 @@ from __future__ import annotations
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2 import (
-    action_authorization as v2_action_authorization,
-)
-from kazusa_ai_chatbot.cognition_core_v2 import (
-    resolver_authorization as v2_resolver_authorization,
-)
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
-    CognitionContractError,
-    CognitionExecutionError,
-)
 from kazusa_ai_chatbot.cognition_core_v3 import action_selection as act
+from kazusa_ai_chatbot.cognition_core_v3 import authorization as v3_authorization
 from kazusa_ai_chatbot.cognition_episode import GOAL_CONTINUATION_REF_VERSION
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     RESOLVER_GOAL_PROGRESS_VERSION,
+)
+from kazusa_ai_chatbot.cognition_shared.contracts import (
+    CognitionContractError,
+    CognitionExecutionError,
 )
 from kazusa_ai_chatbot.time_boundary import (
     local_llm_datetime_to_storage_utc_iso,
@@ -241,7 +236,7 @@ async def test_authorizers_use_canonical_v2_prompts_and_validator(monkeypatch):
     calls: list[tuple[str, list[object]]] = []
     validator_calls: list[tuple[str, ...]] = []
     original_validator = (
-        v2_action_authorization.validate_authorization_decisions
+        v3_authorization.validate_authorization_decisions
     )
 
     def recording_validator(parsed, *, candidate_handles):
@@ -252,7 +247,7 @@ async def test_authorizers_use_canonical_v2_prompts_and_validator(monkeypatch):
         )
 
     monkeypatch.setattr(
-        v2_action_authorization,
+        v3_authorization,
         "validate_authorization_decisions",
         recording_validator,
     )
@@ -279,7 +274,7 @@ async def test_authorizers_use_canonical_v2_prompts_and_validator(monkeypatch):
         **_kwargs,
     ):
         calls.append((stage_name, list(messages)))
-        validated = v2_action_authorization.validate_authorization_decisions(
+        validated = v3_authorization.validate_authorization_decisions(
             {"decisions": {handle: True for handle in candidate_handles}},
             candidate_handles=candidate_handles,
         )
@@ -327,10 +322,10 @@ async def test_authorizers_use_canonical_v2_prompts_and_validator(monkeypatch):
     assert resolver_rows[0]["resolver_handle"] == "r1"
     assert validator_calls == [("c1",), ("c1",)]
     assert calls[0][1][0].content == (
-        v2_action_authorization.ACTION_AUTHORIZATION_PROMPT
+        v3_authorization.ACTION_AUTHORIZATION_PROMPT
     )
     assert calls[1][1][0].content == (
-        v2_resolver_authorization.RESOLVER_AUTHORIZATION_PROMPT
+        v3_authorization.RESOLVER_AUTHORIZATION_PROMPT
     )
 
 

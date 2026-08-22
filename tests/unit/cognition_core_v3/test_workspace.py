@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2 import workspace as v2_workspace
-from kazusa_ai_chatbot.cognition_core_v2.branch_activation import branch_order_key
 from kazusa_ai_chatbot.cognition_core_v3 import workspace as ws
+from kazusa_ai_chatbot.cognition_core_v3.registry import branch_order_key
 
 
 def _complete_bid(
@@ -50,7 +49,7 @@ def test_workspace_preserves_ordinary_relational_authority():
         _complete_bid("loss_recovery", entity_id="g3"),
     ]
 
-    envelope = v2_workspace.collapse_authoritative_relational_bid(
+    envelope = ws.collapse_authoritative_relational_bid(
         bids,
         decision,
     )
@@ -67,7 +66,7 @@ def test_workspace_preserves_ordinary_relational_authority():
     inverted = [dict(bid) for bid in bids]
     inverted[0]["confidence"] = "high"
     inverted[2]["confidence"] = "low"
-    re_collapsed = v2_workspace.collapse_authoritative_relational_bid(
+    re_collapsed = ws.collapse_authoritative_relational_bid(
         inverted,
         decision,
     )
@@ -82,14 +81,14 @@ def test_workspace_preserves_ordinary_relational_authority():
     non_sensitive = dict(decision)
     non_sensitive["applicability"] = "not_relationship_sensitive"
     with pytest.raises(ValueError, match="requires a sensitive decision"):
-        v2_workspace.collapse_authoritative_relational_bid(
+        ws.collapse_authoritative_relational_bid(
             bids,
             non_sensitive,
         )
 
     without_ordinary = [bid for bid in bids if bid["branch_id"] != "ordinary_response"]
     with pytest.raises(ValueError, match="exactly one ordinary bid"):
-        v2_workspace.collapse_authoritative_relational_bid(
+        ws.collapse_authoritative_relational_bid(
             without_ordinary,
             decision,
         )
@@ -100,7 +99,7 @@ def test_workspace_preserves_ordinary_relational_authority():
         _complete_bid("ordinary_response"),
     ]
     with pytest.raises(ValueError, match="exactly one ordinary bid"):
-        v2_workspace.collapse_authoritative_relational_bid(
+        ws.collapse_authoritative_relational_bid(
             duplicate_ordinary,
             decision,
         )
@@ -109,7 +108,7 @@ def test_workspace_preserves_ordinary_relational_authority():
     mismatched[1]["relational_willingness"] = dict(decision)
     mismatched[1]["relational_willingness"]["stance"] = "reject"
     with pytest.raises(ValueError, match="requires the equal decision"):
-        v2_workspace.collapse_authoritative_relational_bid(
+        ws.collapse_authoritative_relational_bid(
             mismatched,
             decision,
         )
@@ -222,7 +221,7 @@ def test_workspace_admits_only_complete_current_matter_bids():
         "supporting_bid_handles": [ordinary_handle],
         "suppressed_bid_handles": [],
     }
-    assert v2_workspace.validate_workspace_partition(
+    assert ws.validate_workspace_partition(
         partition,
         set(handles),
     ) == partition
@@ -235,16 +234,16 @@ def test_workspace_admits_only_complete_current_matter_bids():
 
     extra_field = {**partition, "invented_field": True}
     with pytest.raises(ValueError, match="fields are not exact"):
-        v2_workspace.validate_workspace_partition(extra_field, set(handles))
+        ws.validate_workspace_partition(extra_field, set(handles))
 
     bad_primary = dict(partition)
     bad_primary["primary_bid_handle"] = "b9"
     with pytest.raises(ValueError, match="primary handle is unavailable"):
-        v2_workspace.validate_workspace_partition(bad_primary, set(handles))
+        ws.validate_workspace_partition(bad_primary, set(handles))
 
     unknown_supporting = {**partition, "supporting_bid_handles": ["b9"]}
     with pytest.raises(ValueError, match="handle is unavailable"):
-        v2_workspace.validate_workspace_partition(
+        ws.validate_workspace_partition(
             unknown_supporting,
             set(handles),
         )
@@ -255,7 +254,7 @@ def test_workspace_admits_only_complete_current_matter_bids():
         "suppressed_bid_handles": [],
     }
     with pytest.raises(ValueError, match="partition is incomplete"):
-        v2_workspace.validate_workspace_partition(
+        ws.validate_workspace_partition(
             incomplete_without_suppressed,
             set(handles),
         )
@@ -266,7 +265,7 @@ def test_workspace_admits_only_complete_current_matter_bids():
         "suppressed_bid_handles": [ordinary_handle],
     }
     with pytest.raises(ValueError, match="partition is incomplete"):
-        v2_workspace.validate_workspace_partition(
+        ws.validate_workspace_partition(
             duplicated_ordinary,
             set(handles),
         )

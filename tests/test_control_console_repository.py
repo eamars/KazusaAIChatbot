@@ -8,7 +8,7 @@ import pytest
 def _console_identity_profile() -> dict[str, object]:
     """Build one complete generic identity for console projection tests."""
 
-    from tests.cognition_core_v2_test_helpers import (
+    from tests.cognition_test_helpers import (
         canonical_character_identity,
     )
 
@@ -247,11 +247,11 @@ async def test_repository_projects_native_v2_character_and_user_state() -> None:
     """Owner pages should expose native V2 state without legacy identifiers."""
 
     from control_console.repository import ControlConsoleRepository
-    from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    from kazusa_ai_chatbot.cognition_shared.state_models import (
         build_acquaintance_user_state,
         build_character_production_state,
     )
-    from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+    from kazusa_ai_chatbot.cognition_shared.state_projection import (
         project_numeric_band,
     )
 
@@ -551,7 +551,7 @@ async def test_repository_operational_panels_accept_console_utc_offset() -> None
         _project_character_operational_posture,
         _project_relationship_operational_panel,
     )
-    from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    from kazusa_ai_chatbot.cognition_shared.state_models import (
         build_acquaintance_user_state,
         build_character_production_state,
     )
@@ -583,7 +583,7 @@ async def test_repository_lists_safe_user_and_group_directories() -> None:
     """Owner pages should discover bounded users and groups from real owners."""
 
     from control_console.repository import ControlConsoleRepository
-    from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    from kazusa_ai_chatbot.cognition_shared.state_models import (
         build_acquaintance_user_state,
     )
 
@@ -1393,7 +1393,7 @@ async def test_character_identity_lineage_health_and_growth_are_redacted() -> No
     """Character should expose identity continuity without internal lineage."""
 
     from control_console.repository import ControlConsoleRepository
-    from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    from kazusa_ai_chatbot.cognition_shared.state_models import (
         build_character_production_state,
     )
 

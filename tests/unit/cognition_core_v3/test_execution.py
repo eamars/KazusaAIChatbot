@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
     bind_v2_attempt_ledger,
     create_v2_attempt_ledger,
     current_v2_attempt_ledger,

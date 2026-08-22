@@ -50,7 +50,7 @@ WEB_SEARCH_LLM_MODEL=your-chat-model
 COGNITION_LLM_BASE_URL=http://localhost:1234/v1
 COGNITION_LLM_API_KEY=lm-studio
 COGNITION_LLM_MODEL=your-chat-model
-COGNITION_CORE_ENGINE=v2
+COGNITION_CORE_ENGINE=v3
 COGNITION_STAGE_TIMEOUT_SECONDS=120
 COGNITION_LLM_CHARACTER_CARRYOVER_BASE_URL=http://localhost:1234/v1
 COGNITION_LLM_CHARACTER_CARRYOVER_API_KEY=lm-studio
@@ -72,7 +72,8 @@ COGNITION_V3_SIDECAR_LLM_MAX_COMPLETION_TOKENS=8192
 COGNITION_V3_SIDECAR_LLM_THINKING_ENABLED=false
 COGNITION_V3_SUBCONSCIOUS_ENABLED=false
 COGNITION_V3_TURN_DEADLINE_SECONDS=240
-# Select the following twelve core route bundles when COGNITION_CORE_ENGINE=v2.
+# Retain these twelve Core V2 route bundles for explicit rollback only:
+# select them when COGNITION_CORE_ENGINE=v2.
 COGNITION_LLM_APPRAISAL_EVENT_AGENCY_BASE_URL=http://localhost:1234/v1
 COGNITION_LLM_APPRAISAL_EVENT_AGENCY_API_KEY=lm-studio
 COGNITION_LLM_APPRAISAL_EVENT_AGENCY_MODEL=your-chat-model
@@ -279,11 +280,21 @@ the background artifact route when omitted. Code-reading PM and programmer
 routes are required first-class routes. Final code-reading synthesis reuses the
 PM route and has no separate route identity.
 The generic `COGNITION_LLM` bundle remains required for cognition callers
-outside Cognition Core V2. Core V2 requires all thirteen complete
+outside the selected Cognition Core branch. Cognition V3 is the current
+default and requires the complete V3 chain bundle plus an optional complete
+sidecar bundle. Core V2 requires all thirteen complete
 `COGNITION_LLM_<STAGE>` bundles shown above. Each stage reads its own
 `BASE_URL`, `API_KEY`, `MODEL`, `MAX_COMPLETION_TOKENS`, and
 `THINKING_ENABLED` values directly; stage routes have no inheritance or
 fallback.
+The V2 bundles are loaded only when `COGNITION_CORE_ENGINE=v2` is selected;
+they remain available as the explicit rollback configuration. The fixed V3
+layout is `fixed_a1_a2`, with `COGNITION_V3_TURN_DEADLINE_SECONDS` bounded to
+`30..600` (default `240`) and a declared chain context window of at least
+50,000 tokens. The normal total ceiling is 50,000 tokens, with the
+conditional 65,000-token tier available only when the declared serving window
+supports it. This documents the current route configuration without claiming
+that Gate 8 observation is complete.
 `COGNITION_LLM_CHARACTER_CARRYOVER` is the state-only background operational
 carry-over route; its completion-token setting is capped at 8,192.
 Typed required-selection goal turns use the
@@ -357,11 +368,12 @@ exact 6,000-character compact-JSON sub-budget before the unchanged
 
 ## Cognition V3 operator runbook
 
-Keep `COGNITION_CORE_ENGINE=v2` for the documented pre-cutover default. A V3
-startup requires the complete `COGNITION_V3_CHAIN_LLM_*` bundle and uses only
-the optional all-or-nothing `COGNITION_V3_SIDECAR_LLM_*` bundle when configured.
-V3 uses the fixed `fixed_a1_a2` appraisal-stage layout, and
-`COGNITION_V3_TURN_DEADLINE_SECONDS` accepts `30..600` (default `240`).
+The current default is `COGNITION_CORE_ENGINE=v3`. A V3 startup requires the
+complete `COGNITION_V3_CHAIN_LLM_*` bundle and uses only the optional
+all-or-nothing `COGNITION_V3_SIDECAR_LLM_*` bundle when configured. V3 uses the
+fixed `fixed_a1_a2` appraisal-stage layout, and
+`COGNITION_V3_TURN_DEADLINE_SECONDS` accepts `30..600` (default `240`). The
+chain context-window declaration must be at least 50,000 tokens.
 The primary caller declares a 50,000-token normal total ceiling; the
 conditional 65,000-token ceiling is available only when
 `COGNITION_V3_CHAIN_LLM_CONTEXT_WINDOW_TOKENS` is at least `65000`. The
@@ -369,19 +381,19 @@ context-window declaration remains caller-local and is not sent to the
 provider. Runtime timing evidence is non-streaming elapsed milliseconds, with
 no TTFT claim.
 
-Before a reviewed cutover, collect deterministic evidence with the exact
-commands below; passing local tests does not by itself claim a sealed gate:
+Collect deterministic evidence with the exact commands below; passing local
+tests does not by itself claim that Gate 8 observation is complete:
 
 ```powershell
 venv\Scripts\python -m pytest -q tests/integration/cognition_core_v3/test_chain_observability.py::test_protected_and_sanitized_records_share_exact_service_console_correlation
 venv\Scripts\python -m scripts.validate_test_impact --base-ref HEAD
 ```
 
-For rollback, set `COGNITION_CORE_ENGINE=v2` and restart the brain process so
-the closed selector binds V2. Retain V3 diagnostic rows for review and do not
-rewrite or globally substitute correlation records. The brain endpoint and
-control console pair each graph with its exact chain run; missing or mismatched
-`run_id`/`llm_trace_id` is shown as `not_reported`.
+For rollback, explicitly set `COGNITION_CORE_ENGINE=v2` and restart the brain
+process so the closed selector binds the V2 route bundles. Retain V3 diagnostic
+rows for review and do not rewrite or globally substitute correlation records.
+The brain endpoint and control console pair each graph with its exact chain
+run; missing or mismatched `run_id`/`llm_trace_id` is shown as `not_reported`.
 
 ## Relevance Turn Settlement
 

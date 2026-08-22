@@ -42,7 +42,7 @@ from kazusa_ai_chatbot.cognition_episode import (
     replace_text_chat_media_percepts,
     validate_dialog_response_operation,
 )
-from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
     V2_MODEL_TOTAL_ATTEMPTS,
 )
 from kazusa_ai_chatbot.channel_scene_projection import project_channel_topic_text

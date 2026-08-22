@@ -13,12 +13,12 @@ from typing import Literal, TypeVar
 from uuid import uuid4
 
 from kazusa_ai_chatbot import llm_tracing
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionCoreInputV2,
     CognitionCoreOutputV2,
     CognitionExecutionError,
 )
-from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
     current_v2_attempt_ledger,
     enable_guarded_v2_attempt_ledger,
     set_v2_attempt_epoch,

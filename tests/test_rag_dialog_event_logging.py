@@ -10,7 +10,7 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from kazusa_ai_chatbot.cognition_resolver import capabilities as capabilities_module
-from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
+from tests.cognition_test_helpers import canonical_user_message_episode
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as supervisor_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_dispatch as dispatch_module

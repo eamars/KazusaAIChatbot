@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_surface
 from kazusa_ai_chatbot.cognition_episode import (
     CURRENT_CHARACTER_ROLE,
     CURRENT_USER_ROLE,
     NO_ROLE,
 )
-from tests.unit.cognition_core_v2.surface_fixtures import (
+from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_surface
+from tests.cognition_test_helpers import canonical_episode
+from tests.unit.nodes.surface_fixtures import (
     build_relational_decision,
     build_surface_state,
 )
-from tests.cognition_core_v2_test_helpers import canonical_episode
 
 
 def test_l3_surface_preserves_relational_willingness_v2() -> None:

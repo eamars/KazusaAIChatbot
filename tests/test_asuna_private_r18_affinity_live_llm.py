@@ -3,22 +3,21 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping, Sequence
-from copy import deepcopy
-from datetime import datetime, timezone
 import hashlib
 import json
 import os
-from pathlib import Path
 import sys
 import time
 import traceback
+from collections.abc import Mapping, Sequence
+from copy import deepcopy
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 import httpx
 import pytest
-
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm, pytest.mark.live_db]
 
@@ -431,7 +430,7 @@ async def _seed_empty_condition_baseline(
 ) -> dict[str, Any]:
     """Seed only identity and affinity; the twenty inputs create all history."""
 
-    from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+    from kazusa_ai_chatbot.cognition_shared.state_models import (
         build_acquaintance_user_state,
     )
     from kazusa_ai_chatbot.db import create_user_profile

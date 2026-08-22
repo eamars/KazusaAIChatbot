@@ -11,7 +11,7 @@ from .constants import (
 )
 
 if TYPE_CHECKING:
-    from kazusa_ai_chatbot.cognition_core_v2.contracts import SceneContextV2
+    from kazusa_ai_chatbot.cognition_shared.contracts import SceneContextV2
 
 LOCAL_CONTEXT_ARTIFACT_VERSION = "local_context_artifact.v1"
 LOCAL_CONTEXT_GRAPH_VERSION = "local_context_graph.v1"
@@ -297,7 +297,7 @@ def validate_local_context_resolver_context(
     ):
         _require_string(data, field_name)
     scene_context = _require_dict(data, "scene_context")
-    from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    from kazusa_ai_chatbot.cognition_shared.contracts import (
         CognitionContractError,
         _validate_scene_context,
     )

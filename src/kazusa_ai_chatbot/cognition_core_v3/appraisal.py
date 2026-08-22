@@ -1,14 +1,14 @@
-"""Validate fixed A1/A2 appraisal family objects through canonical V2 owners."""
+"""Validate fixed A1/A2 appraisal family objects through canonical owners."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from kazusa_ai_chatbot.cognition_core_v2.semantic_appraisal import (
+from kazusa_ai_chatbot.cognition_core_v3.semantic_appraisal import (
     merge_semantic_appraisal_item,
     validate_semantic_appraisal_result,
 )
-from kazusa_ai_chatbot.cognition_core_v2.semantic_source_planner import (
+from kazusa_ai_chatbot.cognition_core_v3.semantic_source_planner import (
     question_proposition_kind_semantics,
     question_proposition_kinds,
 )

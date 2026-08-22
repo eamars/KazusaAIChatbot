@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2 import goal_cognition as v2_goal_cognition
-from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
+from kazusa_ai_chatbot.cognition_core_v3 import goal_cognition as gc
+from kazusa_ai_chatbot.cognition_core_v3.registry import (
     DEFAULT_BRANCH_DEFINITIONS,
 )
-from kazusa_ai_chatbot.cognition_core_v2.contracts import CognitionContractError
-from kazusa_ai_chatbot.cognition_core_v3 import goal_cognition as gc
+from kazusa_ai_chatbot.cognition_shared.contracts import CognitionContractError
 
 
 def test_ordinary_goal_remains_relational_willingness_owner() -> None:
@@ -219,7 +218,7 @@ def test_required_selection_preserves_code_owned_fields() -> None:
                 "evidence_handles": ["ev_1"],
             },
         }
-        v2_goal_cognition.validate_goal_bid_draft(
+        gc.validate_goal_bid_draft(
             bad_stance,
             evidence_handles={"ev_1"},
             role_handles={"self"},
@@ -259,7 +258,7 @@ def test_cold_ordinary_willingness_requires_current_episode_evidence() -> None:
         CognitionContractError,
         match="must cite current episode evidence",
     ):
-        v2_goal_cognition.validate_goal_bid_draft(
+        gc.validate_goal_bid_draft(
             candidate,
             evidence_handles={"prior_1", "episode_1"},
             role_handles=set(),

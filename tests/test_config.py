@@ -24,24 +24,7 @@ SHARED_REQUIRED_ROUTE_PREFIXES = (
     "CODING_AGENT_PM_LLM",
     "CODING_AGENT_PROGRAMMER_LLM",
 )
-COGNITION_CORE_V2_ROUTE_PREFIXES = (
-    "COGNITION_LLM_APPRAISAL_EVENT_AGENCY",
-    "COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL",
-    "COGNITION_LLM_APPRAISAL_MORAL_IDENTITY",
-    "COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME",
-    "COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY",
-    "COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE",
-    "COGNITION_LLM_GOAL_ORDINARY_RESPONSE",
-    "COGNITION_LLM_GOAL_ACTIVE_BRANCH",
-    "COGNITION_LLM_WORKSPACE_COLLAPSE",
-    "COGNITION_LLM_ACTION_PLANNING",
-    "COGNITION_LLM_ACTION_AUTHORIZATION",
-    "COGNITION_LLM_RESOLVER_AUTHORIZATION",
-)
-REQUIRED_ROUTE_PREFIXES = (
-    *SHARED_REQUIRED_ROUTE_PREFIXES,
-    *COGNITION_CORE_V2_ROUTE_PREFIXES,
-)
+REQUIRED_ROUTE_PREFIXES = SHARED_REQUIRED_ROUTE_PREFIXES
 REQUIRED_ROUTE_ENV_VARS = tuple(
     f"{route_prefix}_{suffix}"
     for route_prefix in REQUIRED_ROUTE_PREFIXES
@@ -95,6 +78,16 @@ def _configured_subprocess_env_without_dotenv() -> dict[str, str]:
     env["EMBEDDING_API_KEY"] = "configured"
     env["EMBEDDING_MODEL"] = "configured"
     env["CHARACTER_GLOBAL_USER_ID"] = "character-global"
+    env.update({
+        "COGNITION_V3_CHAIN_LLM_BASE_URL": "http://chain.example/v1",
+        "COGNITION_V3_CHAIN_LLM_API_KEY": "chain-key",
+        "COGNITION_V3_CHAIN_LLM_MODEL": "chain-model",
+        "COGNITION_V3_CHAIN_LLM_MAX_COMPLETION_TOKENS": "8192",
+        "COGNITION_V3_CHAIN_LLM_CONTEXT_WINDOW_TOKENS": "50176",
+        "COGNITION_V3_CHAIN_LLM_THINKING_ENABLED": "false",
+        "COGNITION_V3_SUBCONSCIOUS_ENABLED": "false",
+        "COGNITION_V3_TURN_DEADLINE_SECONDS": "240",
+    })
     return env
 
 
@@ -105,16 +98,6 @@ def _v3_configured_subprocess_env_without_dotenv(
     """Return complete shared and V3 settings without any V2 core bundle."""
 
     env = _configured_subprocess_env_without_dotenv()
-    env["COGNITION_CORE_ENGINE"] = "v3"
-    for route_prefix in COGNITION_CORE_V2_ROUTE_PREFIXES:
-        for suffix in (
-            "BASE_URL",
-            "API_KEY",
-            "MODEL",
-            "MAX_COMPLETION_TOKENS",
-            "THINKING_ENABLED",
-        ):
-            env.pop(f"{route_prefix}_{suffix}", None)
     for name in COGNITION_V3_ROUTE_ENV_VARS:
         env.pop(name, None)
 
@@ -154,36 +137,6 @@ class TestCognitionCompletionBudgets:
                 "COGNITION_LLM_CHARACTER_CARRYOVER_MAX_COMPLETION_TOKENS",
                 8192,
             ),
-            (
-                "COGNITION_LLM_APPRAISAL_EVENT_AGENCY_MAX_COMPLETION_TOKENS",
-                2048,
-            ),
-            (
-                "COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_MAX_COMPLETION_TOKENS",
-                2048,
-            ),
-            (
-                "COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_MAX_COMPLETION_TOKENS",
-                2048,
-            ),
-            (
-                "COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_MAX_COMPLETION_TOKENS",
-                2048,
-            ),
-            (
-                "COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_MAX_COMPLETION_TOKENS",
-                2048,
-            ),
-            (
-                "COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_MAX_COMPLETION_TOKENS",
-                2048,
-            ),
-            ("COGNITION_LLM_GOAL_ORDINARY_RESPONSE_MAX_COMPLETION_TOKENS", 8192),
-            ("COGNITION_LLM_GOAL_ACTIVE_BRANCH_MAX_COMPLETION_TOKENS", 8192),
-            ("COGNITION_LLM_WORKSPACE_COLLAPSE_MAX_COMPLETION_TOKENS", 1024),
-            ("COGNITION_LLM_ACTION_PLANNING_MAX_COMPLETION_TOKENS", 8192),
-            ("COGNITION_LLM_ACTION_AUTHORIZATION_MAX_COMPLETION_TOKENS", 1024),
-            ("COGNITION_LLM_RESOLVER_AUTHORIZATION_MAX_COMPLETION_TOKENS", 1024),
         ],
     )
     def test_cognition_completion_budget_caps_values_above_ceiling(
@@ -192,7 +145,7 @@ class TestCognitionCompletionBudgets:
         environment_name: str,
         maximum: int,
     ) -> None:
-        """Every Core V2 route caps a completion budget above its ceiling."""
+        """Shared route budgets cap a completion value above its ceiling."""
 
         env = _configured_subprocess_env_without_dotenv()
         env[environment_name] = str(maximum + 1)
@@ -665,7 +618,7 @@ class TestRouteLlmConfig:
         env["EMBEDDING_API_KEY"] = "configured"
         env["EMBEDDING_MODEL"] = "configured"
         env["CHARACTER_GLOBAL_USER_ID"] = "character-global"
-        missing_name = "COGNITION_LLM_ACTION_PLANNING_MODEL"
+        missing_name = "COGNITION_LLM_MODEL"
         del env[missing_name]
 
         result = subprocess.run(
@@ -1416,60 +1369,18 @@ class TestCalendarSchedulerConfig:
             assert f"{name} must be >= 1" in result.stderr
 
 
-def test_cognition_core_engine_accepts_only_v2_or_v3(tmp_path):
-    for engine in ("v2", "v3"):
-        if engine == "v3":
-            env = _v3_configured_subprocess_env_without_dotenv()
-        else:
-            env = _configured_subprocess_env_without_dotenv()
-        env["COGNITION_CORE_ENGINE"] = engine
-
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                (
-                    "import os\n"
-                    "from kazusa_ai_chatbot.config import COGNITION_CORE_ENGINE\n"
-                    "assert COGNITION_CORE_ENGINE == os.environ['COGNITION_CORE_ENGINE']\n"
-                ),
-            ],
-            cwd=tmp_path,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-        assert result.returncode == 0, result.stderr
-
-    env = _configured_subprocess_env_without_dotenv()
-    env["COGNITION_CORE_ENGINE"] = "v9"
-
-    result = subprocess.run(
-        [sys.executable, "-c", "import kazusa_ai_chatbot.config"],
-        cwd=tmp_path,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert result.returncode != 0
-    assert "COGNITION_CORE_ENGINE must be one of" in result.stderr
-
-
 def test_cognition_core_engine_default_matches_cutover_state(tmp_path):
-    env = _configured_subprocess_env_without_dotenv()
-    env.pop("COGNITION_CORE_ENGINE", None)
+    env = _v3_configured_subprocess_env_without_dotenv()
 
     result = subprocess.run(
         [
             sys.executable,
             "-c",
             (
-                "from kazusa_ai_chatbot.config import COGNITION_CORE_ENGINE\n"
-                "assert COGNITION_CORE_ENGINE == 'v2'\n"
+                "from kazusa_ai_chatbot.config import "
+                "get_cognition_v3_route_settings\n"
+                "assert get_cognition_v3_route_settings().appraisal_stage_layout "
+                "== 'fixed_a1_a2'\n"
             ),
         ],
         cwd=tmp_path,
@@ -1482,32 +1393,25 @@ def test_cognition_core_engine_default_matches_cutover_state(tmp_path):
     assert result.returncode == 0, result.stderr
 
 
-def test_selected_cognition_route_settings_are_loaded_once(monkeypatch) -> None:
-    """The selected route accessor does not reread environment settings."""
+def test_cognition_v3_route_settings_are_loaded_once(monkeypatch) -> None:
+    """The V3 route accessor does not reread environment settings."""
 
     import kazusa_ai_chatbot.config as config
 
-    selected_settings = config.get_selected_cognition_route_settings()
+    selected_settings = config.get_cognition_v3_route_settings()
 
     def fail_reload(*args, **kwargs):
         """Fail if the accessor attempts to reload route settings."""
 
-        raise AssertionError("selected route settings were reloaded")
+        raise AssertionError("V3 route settings were reloaded")
 
-    monkeypatch.setattr(config, "load_cognition_v2_route_settings", fail_reload)
     monkeypatch.setattr(config, "load_cognition_v3_route_settings", fail_reload)
-    loaded_again = config.get_selected_cognition_route_settings()
+    loaded_again = config.get_cognition_v3_route_settings()
 
-    if config.COGNITION_CORE_ENGINE == "v2":
-        assert loaded_again is not selected_settings
-        assert loaded_again == selected_settings
-        selected_settings.clear()
-        assert loaded_again
-    else:
-        assert loaded_again is selected_settings
+    assert loaded_again is selected_settings
 
 
-def test_v3_service_import_succeeds_with_shared_routes_and_without_twelve_v2_stage_bundles(
+def test_v3_service_import_succeeds_with_shared_routes_and_without_legacy_stage_bundles(
     tmp_path,
 ) -> None:
     """The real service graph imports at normal and extended V3 windows."""
@@ -1527,26 +1431,6 @@ def test_v3_service_import_succeeds_with_shared_routes_and_without_twelve_v2_sta
         )
 
         assert result.returncode == 0, result.stderr
-
-
-def test_v2_service_import_succeeds_without_v3_routes(tmp_path) -> None:
-    """The real service graph imports from shared plus selected V2 routes."""
-
-    env = _configured_subprocess_env_without_dotenv()
-    env["COGNITION_CORE_ENGINE"] = "v2"
-    for name in COGNITION_V3_ROUTE_ENV_VARS:
-        env.pop(name, None)
-
-    result = subprocess.run(
-        [sys.executable, "-c", "import kazusa_ai_chatbot.service"],
-        cwd=tmp_path,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert result.returncode == 0, result.stderr
 
 
 def test_v3_route_settings_reject_invalid_selected_bundle(tmp_path) -> None:

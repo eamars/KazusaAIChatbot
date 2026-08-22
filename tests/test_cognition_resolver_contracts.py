@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
+from tests.cognition_test_helpers import canonical_user_message_episode
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     MAX_RESOLVER_SUMMARY_CHARS,
     MAX_RESOLVER_TRACE_CHARS,

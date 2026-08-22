@@ -18,11 +18,11 @@ from kazusa_ai_chatbot.brain_service.turn_settlement import (
     AssessmentLease,
     PersistedChatFragment,
 )
-from kazusa_ai_chatbot.cognition_core_v2 import model_attempt_policy
+from kazusa_ai_chatbot.cognition_shared import model_attempt_policy
 from kazusa_ai_chatbot.cognition_resolver import guardrail
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
 from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
-from tests.cognition_core_v2_test_helpers import (
+from tests.cognition_test_helpers import (
     canonical_episode_identity_snapshot,
     canonical_service_character_profile,
 )

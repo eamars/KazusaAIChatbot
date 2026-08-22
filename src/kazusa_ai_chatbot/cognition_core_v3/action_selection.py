@@ -17,18 +17,20 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
-from kazusa_ai_chatbot.cognition_core_v2 import (
-    action_authorization as v2_action_authorization,
-)
-from kazusa_ai_chatbot.cognition_core_v2 import (
-    resolver_authorization as v2_resolver_authorization,
-)
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_core_v3 import authorization as v3_authorization
+from kazusa_ai_chatbot.cognition_shared.contracts import (
+    GOAL_RESOLUTION_VALUES,
+    ActionAffordanceV2,
+    ActionBidV2,
+    CognitionEvidenceV2,
     CognitionExecutionError,
+    GoalResolutionV2,
+    ResolverAffordanceV2,
+    validate_self_cognition_response_decision,
     is_targetless_group_self_cognition_episode,
     project_evidence_provenance_role,
     validate_scheduled_authority_proposal,
@@ -38,10 +40,13 @@ from kazusa_ai_chatbot.cognition_episode import (
     validate_goal_continuation_ref,
 )
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
+    ALLOWED_PENDING_DECISIONS,
+    RequiredResolverEvidenceDependencyV1,
     validate_resolver_goal_progress,
 )
 from kazusa_ai_chatbot.time_boundary import (
     local_llm_datetime_to_storage_utc_iso,
+    normalize_storage_utc_iso,
     parse_storage_utc_datetime,
 )
 
@@ -71,6 +76,10 @@ BLOCKED_GOAL_RESOLUTION = "blocked"
 FUTURE_SPEAK_ACTION_KIND = "future_speak"
 
 DECISION_TEXT_CHAR_LIMIT = 200
+
+ACTION_REQUEST_CAP = 3
+
+MODEL_TEXT_CAP = 500
 
 GOAL_PROGRESS_PROTOCOL_FIELDS = frozenset({"schema_version", "original_goal"})
 
@@ -774,14 +783,14 @@ async def authorize_action_requests(
     }
     prompt_text = json.dumps(prompt_payload, ensure_ascii=False, sort_keys=True)
     if (
-        len(v2_action_authorization.ACTION_AUTHORIZATION_PROMPT)
+        len(v3_authorization.ACTION_AUTHORIZATION_PROMPT)
         + len(prompt_text)
-        > v2_action_authorization.ACTION_AUTHORIZATION_PROMPT_CAP
+        > v3_authorization.ACTION_AUTHORIZATION_PROMPT_CAP
     ):
         return []
     messages: list[BaseMessage] = [
         SystemMessage(
-            content=v2_action_authorization.ACTION_AUTHORIZATION_PROMPT
+            content=v3_authorization.ACTION_AUTHORIZATION_PROMPT
         ),
         HumanMessage(content=prompt_text),
     ]
@@ -791,7 +800,7 @@ async def authorize_action_requests(
         stage_name="action_authorization",
         output_state_fields=["authorized_action_requests"],
         runtime_capability_limits=runtime_capability_limits,
-        prompt_cap=v2_action_authorization.ACTION_AUTHORIZATION_PROMPT_CAP,
+        prompt_cap=v3_authorization.ACTION_AUTHORIZATION_PROMPT_CAP,
     )
     authorized_handles = {
         handle for handle, authorized in decisions.items() if authorized
@@ -919,14 +928,14 @@ async def authorize_resolver_requests(
         sort_keys=True,
     )
     if (
-        len(v2_resolver_authorization.RESOLVER_AUTHORIZATION_PROMPT)
+        len(v3_authorization.RESOLVER_AUTHORIZATION_PROMPT)
         + len(prompt_text)
-        > v2_resolver_authorization.RESOLVER_AUTHORIZATION_PROMPT_CAP
+        > v3_authorization.RESOLVER_AUTHORIZATION_PROMPT_CAP
     ):
         return []
     messages: list[BaseMessage] = [
         SystemMessage(
-            content=v2_resolver_authorization.RESOLVER_AUTHORIZATION_PROMPT
+            content=v3_authorization.RESOLVER_AUTHORIZATION_PROMPT
         ),
         HumanMessage(content=prompt_text),
     ]
@@ -936,7 +945,7 @@ async def authorize_resolver_requests(
         stage_name="resolver_authorization",
         output_state_fields=["authorized_resolver_requests"],
         runtime_capability_limits=(),
-        prompt_cap=v2_resolver_authorization.RESOLVER_AUTHORIZATION_PROMPT_CAP,
+        prompt_cap=v3_authorization.RESOLVER_AUTHORIZATION_PROMPT_CAP,
     )
     authorized_handles = {
         handle for handle, authorized in decisions.items() if authorized
@@ -946,3 +955,506 @@ async def authorize_resolver_requests(
         for handle in candidate_requests
         if handle in authorized_handles
     ]
+
+
+def validate_action_plan_decision(
+    parsed: object,
+    *,
+    bid_handles: Mapping[str, ActionBidV2],
+    action_handles: Mapping[str, ActionAffordanceV2],
+    resolver_handles: Mapping[str, ResolverAffordanceV2],
+    current_goal_progress: Mapping[str, Any] | None = None,
+    required_resolver_evidence_dependency: (
+        RequiredResolverEvidenceDependencyV1 | None
+    ) = None,
+    runtime_capability_limits: Sequence[str] = (),
+    self_cognition_response_required: bool = False,
+    evidence: Sequence[CognitionEvidenceV2] = (),
+    target_handles: Sequence[str] = (),
+    accepted_at_utc: str = "",
+) -> dict[str, Any]:
+    """Normalize semantic choices into the canonical planner contract."""
+
+    if not isinstance(parsed, Mapping):
+        raise ValueError("action plan must be an object")  # noqa: TRY004
+    action_requests = parsed.get("action_requests", [])
+    resolver_requests = parsed.get("resolver_requests", [])
+    if not isinstance(action_requests, list):
+        raise ValueError("action requests must be an array")  # noqa: TRY004
+    if not isinstance(resolver_requests, list):
+        raise ValueError("resolver requests must be an array")  # noqa: TRY004
+    if len(action_requests) > ACTION_REQUEST_CAP:
+        raise ValueError(
+            f"action requests exceed maximum of {ACTION_REQUEST_CAP}"
+        )
+    if len(resolver_requests) > ACTION_REQUEST_CAP:
+        raise ValueError(
+            f"resolver requests exceed maximum of {ACTION_REQUEST_CAP}"
+        )
+    required_fields = {
+        "action_requests",
+        "resolver_requests",
+        "goal_resolution",
+        "resolver_pending_resolution",
+        "resolver_goal_progress",
+    }
+    if self_cognition_response_required:
+        required_fields.add("self_cognition_response")
+    if set(parsed) != required_fields:
+        missing_fields = sorted(required_fields - set(parsed))
+        extra_fields = sorted(set(parsed) - required_fields)
+        raise ValueError(
+            "action plan fields are not exact; "
+            f"missing={missing_fields!r}, extra={extra_fields!r}"
+        )
+    if action_requests and resolver_requests:
+        raise ValueError("action and resolver requests are mutually exclusive")
+
+    _validate_future_speak_proposal_rows(
+        action_requests,
+        action_handles=action_handles,
+        evidence=evidence,
+        accepted_at_utc=accepted_at_utc,
+    )
+    normalized_actions = _normalize_action_request_rows(
+        action_requests,
+        bid_handles,
+        action_handles,
+        evidence=evidence,
+        accepted_at_utc=accepted_at_utc,
+    )
+    normalized_resolvers = _normalize_resolver_request_rows(
+        resolver_requests,
+        bid_handles,
+        resolver_handles,
+        runtime_capability_limits=runtime_capability_limits,
+    )
+    pending_resolution = _validate_pending_resolution_choice(
+        parsed.get("resolver_pending_resolution")
+    )
+    goal_progress = _validate_goal_progress_choice(
+        parsed.get("resolver_goal_progress"),
+        current_goal_progress=current_goal_progress,
+    )
+    response: dict[str, Any] | None = None
+    response_contract_status = "not_required"
+    if self_cognition_response_required:
+        if "self_cognition_response" not in parsed:
+            raise ValueError(
+                "self-cognition response decision is required"
+            )
+        response = dict(
+            validate_self_cognition_response_decision(
+                parsed["self_cognition_response"],
+                evidence=evidence,
+                target_handles=target_handles,
+            )
+        )
+        response_contract_status = "valid"
+    goal_resolution = _validate_goal_resolution(
+        parsed.get("goal_resolution"),
+        required_resolver_evidence_dependency=(
+            required_resolver_evidence_dependency
+        ),
+    )
+    return_value = {
+        "action_requests": normalized_actions,
+        "resolver_requests": normalized_resolvers,
+        "goal_resolution": goal_resolution,
+        "resolver_pending_resolution": pending_resolution,
+        "resolver_goal_progress": goal_progress,
+    }
+    _validate_no_primary_background_factual_route(
+        goal_resolution=goal_resolution,
+        resolver_requests=normalized_resolvers,
+        resolver_handles=resolver_handles,
+        primary_bid_handle=next(iter(bid_handles), ""),
+    )
+    if self_cognition_response_required:
+        return_value["self_cognition_response"] = response
+        return_value["self_cognition_response_contract_status"] = (
+            response_contract_status
+        )
+    return return_value
+
+def _validate_goal_resolution(
+    value: object,
+    *,
+    required_resolver_evidence_dependency: (
+        RequiredResolverEvidenceDependencyV1 | None
+    ) = None,
+) -> GoalResolutionV2:
+    """Validate the model-owned answerability decision."""
+
+    if not isinstance(value, str) or value not in GOAL_RESOLUTION_VALUES:
+        raise ValueError("goal_resolution is invalid")
+    if (
+        value == "answerable_now"
+        and required_resolver_evidence_dependency is not None
+        and required_resolver_evidence_dependency["state"] != "complete"
+    ):
+        raise ValueError(
+            "answerable_now requires complete required resolver evidence"
+        )
+    return cast(GoalResolutionV2, value)
+
+def _validate_no_primary_background_factual_route(
+    *,
+    goal_resolution: GoalResolutionV2,
+    resolver_requests: Sequence[Mapping[str, Any]],
+    resolver_handles: Mapping[str, ResolverAffordanceV2],
+    primary_bid_handle: str,
+) -> None:
+    """Reject a planner candidate that mixes direct facts with pending work."""
+
+    if goal_resolution != "answerable_now":
+        return
+    for request in resolver_requests:
+        resolver_handle = request["resolver_handle"]
+        if (
+            request["bid_handle"] == primary_bid_handle
+            and resolver_handles[resolver_handle]["capability"]
+            == "task_resolution_request"
+            and request.get("start_in_background") is True
+        ):
+            raise ValueError(
+                "answerable_now cannot share the primary goal with a "
+                "pending background task-resolution request"
+            )
+
+def _normalize_action_request_rows(
+    values: Sequence[object],
+    bids: Mapping[str, ActionBidV2],
+    actions: Mapping[str, ActionAffordanceV2],
+    *,
+    evidence: Sequence[CognitionEvidenceV2] = (),
+    accepted_at_utc: str = "",
+) -> list[dict[str, str]]:
+    """Keep bounded canonical action proposals with valid trusted handles."""
+
+    normalized: list[dict[str, object]] = []
+    for value in values:
+        row = _validate_action_request_row(
+            value,
+            bids,
+            actions,
+            evidence=evidence,
+            accepted_at_utc=accepted_at_utc,
+        )
+        normalized.append(row)
+    return normalized
+
+def _normalize_resolver_request_rows(
+    values: Sequence[object],
+    bids: Mapping[str, ActionBidV2],
+    resolvers: Mapping[str, ResolverAffordanceV2],
+    *,
+    runtime_capability_limits: Sequence[str] = (),
+) -> list[dict[str, Any]]:
+    """Keep bounded canonical resolver proposals with valid trusted handles."""
+
+    normalized: list[dict[str, Any]] = []
+    for value in values:
+        row = _validate_resolver_request_row(
+            value,
+            bids,
+            resolvers,
+            runtime_capability_limits=runtime_capability_limits,
+        )
+        normalized.append(row)
+    return normalized
+
+def _validate_action_request_row(
+    value: object,
+    bids: Mapping[str, ActionBidV2],
+    actions: Mapping[str, ActionAffordanceV2],
+    *,
+    evidence: Sequence[CognitionEvidenceV2] = (),
+    accepted_at_utc: str = "",
+) -> dict[str, object]:
+    """Validate one action row and its registry-derived decision semantics."""
+
+    required = {
+        "bid_handle",
+        "action_handle",
+        "decision",
+        "semantic_goal",
+        "reason",
+    }
+    if not isinstance(value, Mapping) or not required.issubset(value):
+        raise ValueError("action request fields are incomplete")
+    bid_handle = value["bid_handle"]
+    action_handle = value["action_handle"]
+    if bid_handle not in bids:
+        raise ValueError("action request bid handle is unavailable")
+    if action_handle not in actions:
+        raise ValueError("action request action handle is unavailable")
+    affordance = actions[action_handle]
+    expected_fields = set(required)
+    if affordance["action_kind"] == "future_speak":
+        expected_fields.add("scheduled_authority_proposal")
+    if set(value) != expected_fields:
+        raise ValueError("action request fields are not exact")
+    decision = _bounded_model_text(
+        value["decision"],
+        "action request decision",
+        maximum=200,
+        allow_empty=True,
+    )
+    semantic_goal = _bounded_model_text(
+        value["semantic_goal"],
+        "action request semantic_goal",
+    )
+    reason = _bounded_model_text(value["reason"], "action request reason")
+    mode = affordance["decision_mode"]
+    if mode == "required_text" and not decision:
+        raise ValueError(
+            f"action request {action_handle} requires a concrete decision"
+        )
+    if mode == "closed" and decision not in affordance["allowed_decisions"]:
+        allowed_decisions = affordance["allowed_decisions"]
+        raise ValueError(
+            f"action request {action_handle} decision must be one of "
+            f"{allowed_decisions!r}"
+        )
+    if mode == "optional" and decision not in {
+        "",
+        affordance["default_decision"],
+    }:
+        default_decision = affordance["default_decision"]
+        raise ValueError(
+            f"action request {action_handle} decision must be empty or "
+            f"{default_decision!r}"
+        )
+    decision_pattern = affordance["decision_pattern"]
+    if decision_pattern and re.fullmatch(decision_pattern, decision) is None:
+        raise ValueError(
+            f"action request {action_handle} decision must full-match "
+            f"{decision_pattern!r}"
+        )
+    return_value: dict[str, object] = {
+        "bid_handle": bid_handle,
+        "action_handle": action_handle,
+        "decision": decision,
+        "semantic_goal": semantic_goal,
+        "reason": reason,
+    }
+    if affordance["action_kind"] == "future_speak":
+        return_value["scheduled_authority_proposal"] = (
+            future_speak_proposal_contract(
+                value,
+                action_kind=affordance["action_kind"],
+                evidence=evidence,
+                accepted_at_utc=accepted_at_utc,
+            )
+        )
+    return return_value
+
+def _validate_future_speak_proposal_rows(
+    values: Sequence[object],
+    *,
+    action_handles: Mapping[str, ActionAffordanceV2],
+    evidence: Sequence[CognitionEvidenceV2],
+    accepted_at_utc: str,
+) -> None:
+    """Require every future-speak row to carry a valid authority proposal.
+
+    A temporal or authority mismatch on any future-speak row invalidates the
+    whole candidate so the existing bounded planner replacement owns the
+    repair instead of silently dropping the row.
+    """
+
+    for value in values:
+        if not isinstance(value, Mapping):
+            continue
+        action_handle = value.get("action_handle")
+        if not isinstance(action_handle, str) or action_handle not in action_handles:
+            continue
+        affordance = action_handles[action_handle]
+        if affordance["action_kind"] != "future_speak":
+            if "scheduled_authority_proposal" in value:
+                raise ValueError(
+                    "scheduled_authority_proposal is only valid for future_speak"
+                )
+            continue
+        future_speak_proposal_contract(
+            value,
+            action_kind=affordance["action_kind"],
+            evidence=evidence,
+            accepted_at_utc=accepted_at_utc,
+        )
+
+
+def accepted_at_utc_from_episode(episode: Mapping[str, Any]) -> str:
+    """Return the canonical accepted storage UTC instant for an episode."""
+
+    created_at = episode.get("created_at")
+    if not isinstance(created_at, str) or not created_at.strip():
+        return ""
+    try:
+        accepted_at_utc = normalize_storage_utc_iso(created_at)
+    except ValueError:
+        return ""
+    return accepted_at_utc
+
+def _validate_resolver_request_row(
+    value: object,
+    bids: Mapping[str, ActionBidV2],
+    resolvers: Mapping[str, ResolverAffordanceV2],
+    *,
+    runtime_capability_limits: Sequence[str] = (),
+) -> dict[str, Any]:
+    """Validate one resolver row and its admitted-bid provenance.
+
+    A generic task-resolution row requires the exact model-selected
+    ``start_in_background`` JSON boolean.  Other resolver rows retain the
+    exact four-field shape without the routing boolean.
+    """
+
+    required = {
+        "bid_handle",
+        "resolver_handle",
+        "semantic_goal",
+        "reason",
+    }
+    if not isinstance(value, Mapping):
+        raise ValueError("resolver request fields are incomplete")  # noqa: TRY004
+    if not required.issubset(value):
+        raise ValueError("resolver request fields are incomplete")
+    bid_handle = value["bid_handle"]
+    resolver_handle = value["resolver_handle"]
+    if bid_handle not in bids:
+        raise ValueError("resolver request bid handle is unavailable")
+    if resolver_handle not in resolvers:
+        raise ValueError("resolver request resolver handle is unavailable")
+    affordance = resolvers[resolver_handle]
+    start_in_background = None
+    if affordance["capability"] == "task_resolution_request":
+        task_required = required | {"start_in_background"}
+        if set(value) != task_required:
+            raise ValueError(
+                "task resolution request fields must be exactly "
+                "bid_handle, resolver_handle, semantic_goal, reason, "
+                "start_in_background"
+            )
+        start_in_background = value["start_in_background"]
+        if not isinstance(start_in_background, bool):
+            raise ValueError(
+                "task resolution start_in_background must be a boolean"
+            )
+        if (
+            start_in_background
+            and any(
+                "当前通用任务解析只有 inline 能力" in limit
+                for limit in runtime_capability_limits
+            )
+        ):
+            raise ValueError(
+                "task resolution background mode is unavailable"
+            )
+    elif set(value) != required:
+        raise ValueError(
+            "resolver request fields must be exactly "
+            "bid_handle, resolver_handle, semantic_goal, reason"
+        )
+    semantic_goal = _bounded_model_text(
+        value["semantic_goal"],
+        "resolver request semantic_goal",
+    )
+    reason = _bounded_model_text(value["reason"], "resolver request reason")
+    return_value = {
+        "bid_handle": bid_handle,
+        "resolver_handle": resolver_handle,
+        "semantic_goal": semantic_goal,
+        "reason": reason,
+    }
+    if start_in_background is not None:
+        return_value["start_in_background"] = start_in_background
+    return return_value
+
+def _validate_pending_resolution_choice(value: object) -> dict | None:
+    """Validate the model-owned semantic choice before active-row binding."""
+
+    if value is None:
+        return_value = None
+        return return_value
+    if not isinstance(value, Mapping) or set(value) != {"decision", "reason"}:
+        raise ValueError("pending resolution fields are not exact")
+    decision = value["decision"]
+    if decision not in ALLOWED_PENDING_DECISIONS:
+        raise ValueError("pending resolution decision is invalid")
+    reason = _bounded_model_text(value["reason"], "pending resolution reason")
+    return_value = {"decision": decision, "reason": reason}
+    return return_value
+
+def _validate_goal_progress_choice(
+    value: object,
+    *,
+    current_goal_progress: Mapping[str, Any] | None,
+) -> dict | None:
+    """Merge one semantic delta into protocol-owned resolver progress."""
+
+    if value is None:
+        return_value = None
+        return return_value
+    if not isinstance(value, Mapping):
+        raise ValueError(  # noqa: TRY004
+            "resolver goal progress must be an object or null"
+        )
+    if current_goal_progress is None:
+        raise ValueError(
+            "resolver goal progress requires existing current state"
+        )
+
+    current = dict(validate_resolver_goal_progress(current_goal_progress))
+    if _is_empty_goal_progress_shell(current):
+        raise ValueError(
+            "resolver goal progress cannot update an empty shell"
+        )
+    protocol_fields = {"schema_version", "original_goal"}
+    if protocol_fields.intersection(value):
+        raise ValueError(
+            "resolver goal progress protocol fields are code-owned"
+        )
+    allowed_fields = set(current) - protocol_fields
+    if not set(value).issubset(allowed_fields):
+        raise ValueError("resolver goal progress update fields are invalid")
+    raw_progress = dict(current)
+    raw_progress.update(value)
+    validated = validate_resolver_goal_progress(raw_progress)
+    return_value = dict(validated)
+    return return_value
+
+def _is_empty_goal_progress_shell(
+    progress: Mapping[str, Any],
+) -> bool:
+    """Return whether progress has no checklist content to update."""
+
+    content_fields = (
+        "current_focus",
+        "deliverables",
+        "missing_user_inputs",
+        "evidence_dependencies",
+        "attempted_paths",
+        "source_backed_facts",
+        "assumptions_or_inferences",
+        "blockers",
+        "final_response_requirements",
+    )
+    return not any(progress[field] for field in content_fields)
+
+def _bounded_model_text(
+    value: object,
+    label: str,
+    *,
+    maximum: int = MODEL_TEXT_CAP,
+    allow_empty: bool = False,
+) -> str:
+    """Validate one bounded model-authored semantic string."""
+
+    if not isinstance(value, str):
+        raise ValueError(f"{label} is invalid")  # noqa: TRY004
+    normalized = value.strip()
+    if (not allow_empty and not normalized) or len(normalized) > maximum:
+        raise ValueError(f"{label} is invalid")
+    return normalized

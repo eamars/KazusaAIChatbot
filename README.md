@@ -147,6 +147,8 @@ operational carry-over route and has a maximum completion budget of 8,192
 tokens.
 The selected `v3` branch constructs only its own chain and optional sidecar
 services; the generic `COGNITION_LLM` route remains shared non-core plumbing.
+`COGNITION_CORE_ENGINE` defaults to `v3`; select `v2` explicitly only when
+rolling back to the V2 route bundles.
 V3 runs one serialized primary chain with a single-stream sidecar, not the
 superseded parallel-wave/checkpoint topology. Its appraisal-stage layout is
 fixed as `fixed_a1_a2`; the caller configures
@@ -759,15 +761,15 @@ uvicorn kazusa_ai_chatbot.service:app --host 0.0.0.0 --port 8000
 
 ### Cognition V3 startup and rollback notes
 
-The documented pre-cutover selector remains `COGNITION_CORE_ENGINE=v2`.
-Operators preparing a V3 run set the complete
+The current selector default is `COGNITION_CORE_ENGINE=v3`. Operators use the
+complete
 `COGNITION_V3_CHAIN_LLM_*` bundle, optionally set the all-or-nothing
-`COGNITION_V3_SIDECAR_LLM_*` bundle, and choose the appraisal-group and turn-
-deadline settings in `docs/HOWTO.md`. A cutover is an explicit reviewed
-configuration change after its required evidence is available; this document
-does not assert that any gate is sealed. Rollback sets
-`COGNITION_CORE_ENGINE=v2` and restarts the process so the selector binds V2;
-existing V3 diagnostic rows remain available for review.
+`COGNITION_V3_SIDECAR_LLM_*` bundle, and use the fixed `fixed_a1_a2`
+appraisal-stage layout with the configured turn deadline and context window
+described in `docs/HOWTO.md`. This documents the current cutover configuration
+without asserting that Gate 8 observation is complete. Rollback explicitly sets
+`COGNITION_CORE_ENGINE=v2` and restarts the process so the selector binds the
+V2 route bundles; existing V3 diagnostic rows remain available for review.
 
 Useful read-only evidence commands are:
 

@@ -4,9 +4,9 @@ Every goal kind in ``GOAL_KINDS`` runs as one isolated single-stage chain on a
 fresh canonical projection. All goal chains share one byte-identical static
 system prompt; per-chain dynamic facts (goal kind, output shape, authorized
 handles, state projection) stay in human tails only. The bid output contract
-and the relational-willingness sub-contract are unchanged V2 contracts: this
-module reuses the V2 closed value sets and the decision-level validator as the
-single source of truth, so ``ordinary_response`` remains the only owner of
+and the relational-willingness sub-contract retain their versioned protocol
+fields: this module owns the closed value sets and decision-level validator as
+the single source of truth, so ``ordinary_response`` remains the only owner of
 ``relational_willingness``. Required-selection chains bind code-owned operation
 direction fields from authoritative episode evidence and project conversation
 progress evidence as factual context. Goal-chain exhaustion fails closed with
@@ -21,24 +21,29 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from kazusa_ai_chatbot.cognition_core_v2 import goal_cognition as v2_goal_cognition
-from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
-    DEFAULT_BRANCH_DEFINITIONS,
-)
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
+    GoalBidDraftV2,
+    MAX_RELATIONAL_WILLINGNESS_EVIDENCE_HANDLES,
+    RELATIONAL_APPLICABILITY_VALUES,
+    RELATIONAL_CURRENT_USER_RELATIONSHIP_STATE_VALUES,
+    RELATIONAL_STANCE_VALUES,
+    RELATIONAL_WILLINGNESS_MAX_REASON_CHARS,
     RELATIONAL_WILLINGNESS_SCHEMA_VERSION,
     project_evidence_provenance_role,
+    validate_relational_willingness,
 )
-from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
-    selection_goal_draft_to_goal_bid as materialize_v2_selection_goal_draft,
+from kazusa_ai_chatbot.cognition_shared.state_models import GOAL_KINDS
+from kazusa_ai_chatbot.cognition_core_v3.registry import (
+    DEFAULT_BRANCH_DEFINITIONS,
 )
-from kazusa_ai_chatbot.cognition_core_v2.goal_cognition import (
-    validate_selection_goal_draft as validate_v2_selection_goal_draft,
-)
-from kazusa_ai_chatbot.cognition_core_v2.state_models import GOAL_KINDS
 from kazusa_ai_chatbot.cognition_episode import (
     NO_ROLE,
+    CURRENT_CHARACTER_ROLE,
+    CURRENT_USER_ROLE,
+    MAX_RESPONSE_OPERATION_CHARS,
+    OTHER_PARTICIPANT_ROLE,
     validate_dialog_response_operation,
+    validate_selected_response_operation,
 )
 
 # Closed limits ported from the V2 goal cognition contract.
@@ -170,7 +175,7 @@ def validate_recurrence_ordinary_goal_bid_draft(
         raise ValueError("carried relational willingness schema is invalid")
     candidate_with_carrier = dict(candidate)
     candidate_with_carrier["relational_willingness"] = carried_candidate
-    return v2_goal_cognition.validate_goal_bid_draft(
+    return validate_goal_bid_draft(
         candidate_with_carrier,
         evidence_handles=evidence_handles,
         role_handles=role_handles,
@@ -179,67 +184,8 @@ def validate_recurrence_ordinary_goal_bid_draft(
     )
 
 
-def validate_selection_goal_draft(
-    candidate: object,
-    *,
-    evidence_handles: set[str],
-    role_handles: set[str],
-    required_evidence_handles: set[str],
-    required_operations: Sequence[Mapping[str, Any]],
-    episode_handles: set[str] | None,
-    require_relational_willingness: bool,
-    maximum_evidence_handles: int,
-) -> dict[str, Any]:
-    """Validate one selection draft through the canonical V2 owner.
-
-    Args:
-        candidate: Parsed model output for a selection-mode goal chain.
-        evidence_handles: Complete authorized evidence handle set.
-        role_handles: Complete authorized role handle set.
-        required_evidence_handles: Required-selection evidence handles that
-            must appear in the accepted draft.
-        required_operations: Canonical typed selection-operation facts.
-        episode_handles: Current-episode evidence handles for the ordinary
-            relational-willingness validator.
-        require_relational_willingness: Whether this ordinary G1a producer
-            owns a new relational decision rather than carrying one forward.
-        maximum_evidence_handles: The current V2 selection-contract cap.
-
-    Returns:
-        The V2-normalized selection draft, including the bound response
-        operation and, when owned by this cold ordinary G1a, the validated
-        relational decision.
-
-    Raises:
-        ValueError: On any canonical V2 field, role, evidence, operation, or
-            relational-willingness contract violation.
-    """
-    validated_selection_draft = validate_v2_selection_goal_draft(
-        candidate,
-        evidence_handles=evidence_handles,
-        role_handles=role_handles,
-        required_evidence_handles=required_evidence_handles,
-        required_operations=required_operations,
-        episode_handles=episode_handles,
-        require_relational_willingness=require_relational_willingness,
-        maximum_evidence_handles=maximum_evidence_handles,
-    )
-    return validated_selection_draft
 
 
-def materialize_selection_goal_draft(
-    selection_draft: Mapping[str, Any],
-    *,
-    include_relational_willingness: bool,
-) -> dict[str, Any]:
-    """Materialize one validated selection draft through the V2 owner."""
-
-    materialized_selection_draft = materialize_v2_selection_goal_draft(
-        selection_draft,
-        branch_id=ORDINARY_GOAL_KIND,
-        include_relational_willingness=include_relational_willingness,
-    )
-    return materialized_selection_draft
 
 
 def bind_selected_response_operation(
@@ -823,7 +769,7 @@ def validate_active_goal_group_output(
             raise ValueError("active goal group bid order must equal the roster")
         candidate = dict(bid_row)
         candidate.pop("branch_id", None)
-        validated = v2_goal_cognition.validate_goal_bid_draft(
+        validated = validate_goal_bid_draft(
             candidate,
             evidence_handles=evidence_handles,
             role_handles=role_handles,
@@ -886,7 +832,7 @@ def salvage_active_goal_group_output(
         candidate = dict(candidates[0])
         candidate.pop("branch_id", None)
         try:
-            validated = v2_goal_cognition.validate_goal_bid_draft(
+            validated = validate_goal_bid_draft(
                 candidate,
                 evidence_handles=evidence_handles,
                 role_handles=role_handles,
@@ -899,3 +845,523 @@ def salvage_active_goal_group_output(
         validated["branch_id"] = branch_id
         validated_rows.append(validated)
     return validated_rows, failures
+
+
+def validate_selection_goal_draft(
+    parsed: object,
+    *,
+    evidence_handles: set[str],
+    role_handles: set[str],
+    required_evidence_handles: set[str],
+    required_operations: Sequence[Mapping[str, Any]] | None = None,
+    episode_handles: set[str] | None = None,
+    require_relational_willingness: bool = False,
+    maximum_evidence_handles: int,
+) -> dict[str, Any]:
+    """Validate one authoritative selection and required operation coverage."""
+
+    if not isinstance(parsed, Mapping):
+        raise ValueError("selection goal draft must be an object")
+    parsed, _normalizations = _normalize_nonowning_goal_fields(
+        parsed,
+        branch_id="unknown",
+        require_relational_willingness=require_relational_willingness,
+    )
+    required_fields = {
+        "selection",
+        "selected_response_operation",
+        "reason",
+        "private_monologue",
+        "target_role_handles",
+        "evidence_handles",
+        "expected_consequences",
+        "confidence",
+    }
+    if require_relational_willingness:
+        required_fields.add("relational_willingness")
+    if set(parsed) != required_fields:
+        raise ValueError("selection goal draft fields are not exact")
+    for field_name, maximum in (
+        ("selection", 500),
+        ("reason", 500),
+        ("private_monologue", 500),
+        ("confidence", 40),
+    ):
+        _bounded_text(parsed[field_name], field_name, maximum)
+    target_roles = _handles(
+        parsed["target_role_handles"],
+        role_handles,
+        "role",
+        maximum_handles=GOAL_BID_ROLE_HANDLE_LIMIT,
+    )
+    cited_evidence = _handles(
+        parsed["evidence_handles"],
+        evidence_handles,
+        "evidence",
+        maximum_handles=maximum_evidence_handles,
+    )
+    if not required_evidence_handles.issubset(cited_evidence):
+        raise ValueError(
+            "selection goal lacks required evidence coverage"
+        )
+    if not required_operations:
+        raise ValueError(
+            "selection goal requires input response operations"
+        )
+    raw_selected_operation = parsed["selected_response_operation"]
+    if not isinstance(raw_selected_operation, Mapping):
+        raise ValueError("selected response operation must be an object")
+    selected_operation = None
+    for operation_row in required_operations:
+        if not isinstance(operation_row, Mapping):
+            raise ValueError("selection goal response operation row is invalid")
+        input_operation = operation_row.get("response_operation")
+        authoritative_operation = validate_dialog_response_operation(
+            input_operation
+        )
+        if selected_operation is None:
+            selected_operation = bind_selected_response_operation(
+                raw_selected_operation,
+                authoritative_operation,
+            )
+        validate_selected_response_operation(
+            selected_operation,
+            input_operation,
+        )
+    consequences = parsed["expected_consequences"]
+    if not isinstance(consequences, list) or not 1 <= len(consequences) <= 8:
+        raise ValueError("selection goal consequences are invalid")
+    for consequence in consequences:
+        _bounded_text(consequence, "consequence", 240)
+    result = dict(parsed)
+    result["selected_response_operation"] = selected_operation
+    result["target_role_handles"] = target_roles
+    result["evidence_handles"] = cited_evidence
+    result["expected_consequences"] = list(consequences)
+    if require_relational_willingness:
+        relational_candidate = parsed["relational_willingness"]
+        if not isinstance(relational_candidate, Mapping):
+            raise ValueError("relational willingness must be an object")
+        if "schema_version" in relational_candidate:
+            raise ValueError(
+                "relational willingness schema_version is code-owned"
+            )
+        relational_candidate = dict(relational_candidate)
+        relational_candidate["schema_version"] = (
+            RELATIONAL_WILLINGNESS_SCHEMA_VERSION
+        )
+        relational_decision = validate_relational_willingness(
+            relational_candidate,
+            evidence_handles=evidence_handles,
+            episode_handles=episode_handles,
+        )
+        result["relational_willingness"] = relational_decision
+    return result
+
+def selection_goal_draft_to_goal_bid(
+    selection_draft: Mapping[str, Any],
+    *,
+    branch_id: str,
+    include_relational_willingness: bool = True,
+) -> GoalBidDraftV2:
+    """Map one authoritative selection string into the complete bid shape."""
+
+    selection = selection_draft["selection"]
+    if not isinstance(selection, str):
+        raise TypeError("validated selection must be text")
+    result: GoalBidDraftV2 = {
+        "intention": selection,
+        "desired_outcome": selection,
+        "concrete_detail": selection,
+        "reason": selection_draft["reason"],
+        "private_monologue": selection_draft["private_monologue"],
+        "target_role_handles": list(
+            selection_draft["target_role_handles"]
+        ),
+        "evidence_handles": list(selection_draft["evidence_handles"]),
+        "expected_consequences": list(
+            selection_draft["expected_consequences"]
+        ),
+        "confidence": selection_draft["confidence"],
+        "selected_response_operation": dict(
+            selection_draft["selected_response_operation"]
+        ),
+    }
+    if branch_id == "ordinary_response" and include_relational_willingness:
+        result["relational_willingness"] = dict(
+            selection_draft["relational_willingness"]
+        )
+    return result
+
+def validate_goal_bid_draft(
+    parsed: object,
+    *,
+    evidence_handles: set[str],
+    role_handles: set[str],
+    require_relational_willingness: bool = False,
+    episode_handles: set[str] | None = None,
+) -> GoalBidDraftV2:
+    """Validate model-owned fields before any complete bid is constructed."""
+
+    if not isinstance(parsed, Mapping):
+        raise ValueError("goal bid draft must be an object")
+    parsed, _normalizations = _normalize_nonowning_goal_fields(
+        parsed,
+        branch_id="unknown",
+        require_relational_willingness=require_relational_willingness,
+    )
+    required = {
+        "intention",
+        "desired_outcome",
+        "concrete_detail",
+        "reason",
+        "private_monologue",
+        "target_role_handles",
+        "evidence_handles",
+        "expected_consequences",
+        "confidence",
+    }
+    if require_relational_willingness:
+        required.add("relational_willingness")
+    if set(parsed) != required:
+        raise ValueError("goal bid draft fields are not exact")
+    for field_name in (
+        "intention",
+        "desired_outcome",
+        "concrete_detail",
+        "reason",
+        "private_monologue",
+    ):
+        _bounded_text(parsed[field_name], field_name, 500)
+    _bounded_text(parsed["confidence"], "confidence", 40)
+    target_roles = _handles(
+        parsed["target_role_handles"],
+        role_handles,
+        "role",
+        maximum_handles=GOAL_BID_ROLE_HANDLE_LIMIT,
+    )
+    cited_evidence = _handles(
+        parsed["evidence_handles"],
+        evidence_handles,
+        "evidence",
+        maximum_handles=GOAL_BID_EVIDENCE_HANDLE_LIMIT,
+    )
+    consequences = parsed["expected_consequences"]
+    if not isinstance(consequences, list) or not 1 <= len(consequences) <= 8:
+        raise ValueError("goal bid consequences are invalid")
+    for consequence in consequences:
+        _bounded_text(consequence, "consequence", 240)
+    if require_relational_willingness:
+        relational_candidate = parsed["relational_willingness"]
+        if not isinstance(relational_candidate, Mapping):
+            raise ValueError("relational willingness must be an object")
+        if "schema_version" in relational_candidate:
+            raise ValueError(
+                "relational willingness schema_version is code-owned"
+            )
+        relational_candidate = dict(relational_candidate)
+        relational_candidate["schema_version"] = (
+            RELATIONAL_WILLINGNESS_SCHEMA_VERSION
+        )
+        relational_decision = validate_relational_willingness(
+            relational_candidate,
+            evidence_handles=evidence_handles,
+            episode_handles=episode_handles,
+        )
+    result = dict(parsed)
+    result["target_role_handles"] = target_roles
+    result["evidence_handles"] = cited_evidence
+    result["expected_consequences"] = consequences
+    if require_relational_willingness:
+        result["relational_willingness"] = relational_decision
+    return result
+
+def _handles(
+    value: Any,
+    allowed: set[str],
+    label: str,
+    *,
+    maximum_handles: int,
+) -> list[str]:
+    """Validate a duplicate-free bounded handle partition."""
+
+    if (
+        not isinstance(value, list)
+        or len(value) > maximum_handles
+    ):
+        raise ValueError(f"{label} handles are invalid")
+    if len(value) != len(set(value)) or any(handle not in allowed for handle in value):
+        raise ValueError(f"{label} handles are not permitted")
+    return list(value)
+
+def _normalize_nonowning_goal_fields(
+    parsed: object,
+    *,
+    branch_id: str,
+    require_relational_willingness: bool,
+) -> tuple[object, list[dict[str, str]]]:
+    """Strip one non-owning relational field before exact-shape validation."""
+
+    if (
+        require_relational_willingness
+        or not isinstance(parsed, Mapping)
+        or "relational_willingness" not in parsed
+    ):
+        return parsed, []
+    normalized = dict(parsed)
+    normalized.pop("relational_willingness")
+    return normalized, [{
+        "branch": branch_id,
+        "field_name": "relational_willingness",
+        "reason": "non_owning_branch_field",
+    }]
+
+def _bounded_text(value: Any, label: str, maximum: int) -> None:
+    """Validate bounded model-owned prose."""
+
+    if not isinstance(value, str) or not value.strip() or len(value) > maximum:
+        raise ValueError(f"{label} is invalid")
+
+def build_goal_output_contract(
+    *,
+    evidence_handles: set[str],
+    episode_evidence_handles: set[str],
+    required_evidence_handles: set[str],
+    role_bindings: Mapping[str, Any],
+    selection_required: bool,
+    require_relational_willingness: bool,
+    maximum_evidence_handles: int,
+    authoritative_operation: Mapping[str, Any] | None = None,
+    recurrence_relational_willingness: bool = False,
+) -> dict[str, Any]:
+    """Project the exact current-run output contract for one goal mode."""
+
+    if selection_required:
+        top_level_fields = [
+            "selection",
+            "selected_response_operation",
+            "reason",
+            "private_monologue",
+            "target_role_handles",
+            "evidence_handles",
+            "expected_consequences",
+            "confidence",
+        ]
+        field_types = {
+            "selection": "non_empty_string_max_500",
+            "selected_response_operation": (
+                "per_input_writable_selected_response_operation"
+            ),
+            "reason": "non_empty_string_max_500",
+            "private_monologue": "non_empty_string_max_500",
+            "target_role_handles": "array_of_strings_max_8",
+            "evidence_handles": (
+                f"array_of_strings_max_{maximum_evidence_handles}"
+            ),
+            "expected_consequences": (
+                "non_empty_array_of_strings_max_8_each_max_240"
+            ),
+            "confidence": "non_empty_string_max_40",
+        }
+    else:
+        top_level_fields = [
+            "intention",
+            "desired_outcome",
+            "concrete_detail",
+            "reason",
+            "private_monologue",
+            "target_role_handles",
+            "evidence_handles",
+            "expected_consequences",
+            "confidence",
+        ]
+        field_types = {
+            "intention": "non_empty_string_max_500",
+            "desired_outcome": "non_empty_string_max_500",
+            "concrete_detail": "non_empty_string_max_500",
+            "reason": "non_empty_string_max_500",
+            "private_monologue": "non_empty_string_max_500",
+            "target_role_handles": "array_of_strings_max_8",
+            "evidence_handles": (
+                f"array_of_strings_max_{maximum_evidence_handles}"
+            ),
+            "expected_consequences": (
+                "non_empty_array_of_strings_max_8_each_max_240"
+            ),
+            "confidence": "non_empty_string_max_40",
+        }
+
+    if require_relational_willingness:
+        top_level_fields.append("relational_willingness")
+        field_types["relational_willingness"] = "object"
+
+    contract: dict[str, Any] = {
+        "top_level_fields": top_level_fields,
+        "field_types": field_types,
+        "confidence_type": "string_descriptor",
+        "allowed_role_handles": sorted(role_bindings),
+        "allowed_evidence_handles": sorted(evidence_handles),
+        "required_evidence_handles": sorted(required_evidence_handles),
+        "current_episode_evidence_handles": sorted(
+            episode_evidence_handles
+        ),
+        "role_handles_forbidden_in_evidence_handles": sorted(role_bindings),
+        "max_role_handles": GOAL_BID_ROLE_HANDLE_LIMIT,
+        "max_evidence_handles": maximum_evidence_handles,
+        "unavailable_target_role_handles": [],
+        "target_role_handles_rule": (
+            "use [] when no permitted target role is grounded; never invent "
+            "a handle"
+        ),
+        "bounds": {
+            "target_role_handles": {
+                "minimum_items": 0,
+                "maximum_items": GOAL_BID_ROLE_HANDLE_LIMIT,
+            },
+            "evidence_handles": {
+                "minimum_items": 0,
+                "maximum_items": maximum_evidence_handles,
+            },
+            "expected_consequences": {
+                "minimum_items": 1,
+                "maximum_items": 8,
+                "item_maximum_chars": 240,
+            },
+            "model_text": {
+                "minimum_chars": 1,
+                "maximum_chars": 500,
+            },
+            "confidence": {
+                "minimum_chars": 1,
+                "maximum_chars": 40,
+            },
+        },
+    }
+    if selection_required:
+        if not isinstance(authoritative_operation, Mapping):
+            raise ValueError(
+                "selection output contract requires authoritative operation"
+            )
+        writable_fields = ["operation"]
+        optional_fields: list[str] = []
+        selected_field_types = {
+            "operation": (
+                f"non_empty_string_max_{MAX_RESPONSE_OPERATION_CHARS}"
+            ),
+        }
+        code_owned_fields: dict[str, Any] = {
+            "response_owner_role": authoritative_operation[
+                "response_owner_role"
+            ],
+            "selection_owner_role": authoritative_operation[
+                "selection_owner_role"
+            ],
+            "selection_required": authoritative_operation[
+                "selection_required"
+            ],
+        }
+        for endpoint_field in (
+            "embedded_actor_role",
+            "embedded_target_role",
+        ):
+            endpoint_value = authoritative_operation[endpoint_field]
+            if endpoint_value == NO_ROLE:
+                writable_fields.append(endpoint_field)
+                optional_fields.append(endpoint_field)
+                selected_field_types[endpoint_field] = (
+                    "one_of_response_operation_roles"
+                )
+            else:
+                code_owned_fields[endpoint_field] = endpoint_value
+        selected_response_operation_contract = {
+            "writable_fields": writable_fields,
+            "required_fields": ["operation"],
+            "optional_fields": optional_fields,
+            "field_types": selected_field_types,
+            "role_values": [
+                CURRENT_CHARACTER_ROLE,
+                CURRENT_USER_ROLE,
+                OTHER_PARTICIPANT_ROLE,
+                NO_ROLE,
+            ],
+            "code_owned_fields": code_owned_fields,
+            "rule": (
+                "write one concrete embedded action in operation; use only "
+                "writable_fields; authoritative wording is acceptable when "
+                "it already states the usable selected action"
+            ),
+        }
+        contract["selected_response_operation"] = (
+            selected_response_operation_contract
+        )
+        contract["selection_required"] = True
+    if require_relational_willingness or recurrence_relational_willingness:
+        sensitive_stance_order = [
+            "reject",
+            "deflect",
+            "negotiate",
+            "conditional_accept",
+            "accept",
+        ]
+        real_relationship_states = sorted(
+            RELATIONAL_CURRENT_USER_RELATIONSHIP_STATE_VALUES
+            - {"not_applicable"}
+        )
+        contract["relational_willingness_contract"] = {
+            "mode": (
+                "model_output"
+                if require_relational_willingness
+                else "validated_carry_forward"
+            ),
+            "required_fields": [
+                "applicability",
+                "stance",
+                "current_user_relationship_state",
+                "reason",
+                "evidence_handles",
+            ],
+            "applicability_values": sorted(RELATIONAL_APPLICABILITY_VALUES),
+            "stance_values": sorted(RELATIONAL_STANCE_VALUES),
+            "current_user_relationship_state_values": sorted(
+                RELATIONAL_CURRENT_USER_RELATIONSHIP_STATE_VALUES
+            ),
+            "relationship_state_rule": (
+                "relationship state is descriptive; every real state can "
+                "pair with one ordered sensitive stance"
+            ),
+            "non_sensitive_pairing": {
+                "applicability": "not_relationship_sensitive",
+                "stance": "not_applicable",
+                "current_user_relationship_state": "not_applicable",
+            },
+            "sensitive_pairing": {
+                "applicability": "relationship_sensitive",
+                "stance_values_in_order": sensitive_stance_order,
+                "current_user_relationship_state_values": (
+                    real_relationship_states
+                ),
+            },
+            "reason": "non_empty_simplified_chinese_string",
+            "maximum_reason_chars": RELATIONAL_WILLINGNESS_MAX_REASON_CHARS,
+            "allowed_evidence_handles": sorted(evidence_handles),
+            "current_episode_evidence_handles": sorted(
+                episode_evidence_handles
+            ),
+            "minimum_evidence_handles": 1,
+            "minimum_current_episode_evidence_handles": 1,
+            "maximum_evidence_handles": (
+                MAX_RELATIONAL_WILLINGNESS_EVIDENCE_HANDLES
+            ),
+        }
+    if recurrence_relational_willingness:
+        contract["recurrence_relational_willingness"] = {
+            "mode": "validated_carry_forward",
+            "source": "current_turn_relational_willingness",
+            "current_episode_evidence_handles": sorted(
+                episode_evidence_handles
+            ),
+            "minimum_current_episode_evidence_handles": 1,
+            "action": "copy_and_revalidate_after_goal_validation",
+            "model_regeneration": False,
+        }
+    return contract

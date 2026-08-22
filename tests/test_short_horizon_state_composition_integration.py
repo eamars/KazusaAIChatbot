@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     build_cognition_input_from_global_state,
 )
-from tests.cognition_core_v2_test_helpers import (
+from tests.cognition_test_helpers import (
     canonical_character_identity,
     canonical_episode,
     canonical_identity_context,

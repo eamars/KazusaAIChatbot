@@ -17,25 +17,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2 import (
-    action_selection as v2_action_selection,
-)
-from kazusa_ai_chatbot.cognition_core_v2 import goal_cognition as v2_goal_cognition
-from kazusa_ai_chatbot.cognition_core_v2 import workspace as v2_workspace
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
-    CognitionExecutionError,
-)
-from kazusa_ai_chatbot.cognition_core_v2.facade import (
-    _episode_interaction_date_utc,
-)
-from kazusa_ai_chatbot.cognition_core_v2.state_models import (
-    validate_cognition_state,
-)
-from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
-    FAMILIARITY_DAILY_BONUS_INCREMENT,
-    FAMILIARITY_DATE_INCREMENT,
-    apply_state_update,
-)
 from kazusa_ai_chatbot.cognition_core_v3 import facade as facade_module
 from kazusa_ai_chatbot.cognition_core_v3 import run_cognition
 from kazusa_ai_chatbot.cognition_core_v3.budget import (
@@ -47,8 +28,22 @@ from kazusa_ai_chatbot.cognition_core_v3.execution import (
     AttemptLedger,
     SerialChainHarness,
 )
+from kazusa_ai_chatbot.cognition_core_v3.facade_helpers import (
+    _episode_interaction_date_utc,
+)
 from kazusa_ai_chatbot.cognition_core_v3.prompt import ChainQuestion
 from kazusa_ai_chatbot.cognition_core_v3.transcript import ChainTranscriptV1
+from kazusa_ai_chatbot.cognition_shared.contracts import (
+    CognitionExecutionError,
+)
+from kazusa_ai_chatbot.cognition_shared.state_models import (
+    validate_cognition_state,
+)
+from kazusa_ai_chatbot.cognition_shared.state_reducers import (
+    FAMILIARITY_DAILY_BONUS_INCREMENT,
+    FAMILIARITY_DATE_INCREMENT,
+    apply_state_update,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     build_cognition_input_from_global_state,
 )
@@ -250,7 +245,7 @@ async def test_cold_p1_calls_canonical_v2_action_plan_validator(
 
     validator_calls: list[dict[str, object]] = []
     validator_kwargs: list[dict[str, object]] = []
-    original_validator = v2_action_selection.validate_action_plan_decision
+    original_validator = facade_module.validate_action_plan_decision
 
     def recording_validator(parsed, **kwargs):
         validator_calls.append(dict(parsed))
@@ -258,7 +253,7 @@ async def test_cold_p1_calls_canonical_v2_action_plan_validator(
         return original_validator(parsed, **kwargs)
 
     monkeypatch.setattr(
-        v2_action_selection,
+        facade_module,
         "validate_action_plan_decision",
         recording_validator,
     )
@@ -323,11 +318,18 @@ async def test_targetless_self_cognition_p1_receives_required_context(
     assert captured
     context = captured[0]["self_cognition_response_context"]
     assert context == {
-        "required": True,
-        "target_handles": ["self", "current_group_scene"],
-        "current_episode_evidence_handles": [handle],
+        "required_fields": [
+            "decision",
+            "evidence_handles",
+            "semantic_target_handle",
+            "participation_basis",
+            "response_goal",
+            "reason",
+        ],
         "allowed_decisions": ["stay_silent", "propose_visible_reply"],
-        "participation_basis_values": [
+        "allowed_evidence_handles": [handle],
+        "allowed_semantic_target_handles": ["self", "current_group_scene"],
+        "allowed_participation_basis_values": [
             "direct_address",
             "explicit_character_reference",
             "grounded_scene_intervention",
@@ -1171,7 +1173,7 @@ async def test_cold_ordinary_goal_uses_v2_validator_and_episode_handles(
 ):
     """Cold G1a binds relational evidence to the current episode domain."""
 
-    canonical_validator = v2_goal_cognition.validate_goal_bid_draft
+    canonical_validator = facade_module.validate_goal_bid_draft
     ordinary_calls: list[dict[str, object]] = []
 
     def recording_goal_validator(
@@ -1183,7 +1185,7 @@ async def test_cold_ordinary_goal_uses_v2_validator_and_episode_handles(
         return canonical_validator(parsed, **kwargs)
 
     monkeypatch.setattr(
-        v2_goal_cognition,
+        facade_module,
         "validate_goal_bid_draft",
         recording_goal_validator,
     )
@@ -1298,7 +1300,7 @@ async def test_cold_workspace_question_uses_prompt_safe_partition_handles(
     })
     invoker, services = make_facade_bundle(payload, responses=responses)
     canonical_partition_calls: list[set[str]] = []
-    canonical_validator = v2_workspace.validate_workspace_partition
+    canonical_validator = facade_module.validate_workspace_partition
 
     def recording_partition_validator(
         parsed: object,
@@ -1308,7 +1310,7 @@ async def test_cold_workspace_question_uses_prompt_safe_partition_handles(
         return canonical_validator(parsed, handles)
 
     monkeypatch.setattr(
-        v2_workspace,
+        facade_module,
         "validate_workspace_partition",
         recording_partition_validator,
     )

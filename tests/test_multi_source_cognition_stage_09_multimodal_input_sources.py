@@ -18,11 +18,11 @@ from kazusa_ai_chatbot.cognition_episode import (
 from kazusa_ai_chatbot.nodes import (
     persona_supervisor2_msg_decontextualizer as decontextualizer_module,
 )
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     EVIDENCE_SOURCE_QUESTION_IDS,
     validate_cognition_core_input,
 )
-from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
 )
@@ -30,7 +30,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     build_cognition_input_from_global_state,
 )
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
-from tests.cognition_core_v2_test_helpers import (
+from tests.cognition_test_helpers import (
     canonical_service_character_profile,
     canonical_user_message_episode,
 )

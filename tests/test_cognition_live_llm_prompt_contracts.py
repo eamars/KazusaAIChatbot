@@ -9,7 +9,7 @@ import pytest
 from kazusa_ai_chatbot.cognition_episode import (
     project_text_chat_compatibility_fields,
 )
-from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
+from tests.cognition_test_helpers import canonical_user_message_episode
 from kazusa_ai_chatbot.time_boundary import (
     build_turn_clock_from_storage_utc,
     storage_utc_now_iso,

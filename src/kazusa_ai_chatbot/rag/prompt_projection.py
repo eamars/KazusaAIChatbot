@@ -9,7 +9,7 @@ from kazusa_ai_chatbot.conversation_history_prompt_projection import (
     project_conversation_history_for_llm,
 )
 from kazusa_ai_chatbot.time_boundary import format_storage_utc_fields_for_llm
-from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+from kazusa_ai_chatbot.cognition_shared.state_projection import (
     project_relationship_context,
 )
 

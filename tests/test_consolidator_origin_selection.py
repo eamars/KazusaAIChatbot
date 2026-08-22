@@ -8,7 +8,7 @@ from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisodeV1,
     build_self_cognition_episode,
 )
-from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_acquaintance_user_state,
 )
 from kazusa_ai_chatbot.consolidation import core as consolidator_module

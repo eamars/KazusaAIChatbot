@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_acquaintance_user_state,
 )
 from kazusa_ai_chatbot.cognition_episode import build_user_message_episode
@@ -16,7 +16,7 @@ from kazusa_ai_chatbot.consolidation.origin import (
     build_user_message_consolidation_origin,
 )
 from kazusa_ai_chatbot.time_boundary import local_time_context_from_storage_utc
-from tests.cognition_core_v2_test_helpers import canonical_cognition_output
+from tests.cognition_test_helpers import canonical_cognition_output
 
 
 STORAGE_TIMESTAMP_UTC = "2026-04-26T12:00:00+00:00"

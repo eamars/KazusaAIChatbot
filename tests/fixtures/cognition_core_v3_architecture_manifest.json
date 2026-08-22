@@ -1,15 +1,15 @@
 {
-  "schema_version": "cognition_v3_architecture_manifest.v1",
-  "baseline_id": "cogv3-g1-047bed95-331653f8",
+  "schema_version": "cognition_v3_architecture_manifest.v2",
+  "baseline_id": "cogv3-d2-v3-shared-20260822",
   "repository": {
     "branch": "feature/cognition_core_v3_cache_affine",
-    "head": "047bed9500111e44872b96c5445b6a64686f5803"
+    "head": "2a22d2381efa4596cb800204c4905c3a4dace33b"
   },
   "governing_documents": [
     {
       "path": "development_plans/active/short_term/cognition_v3_hybrid_agentic_loop_reconciliation_plan.md",
       "sha256": "331653f8cd8c42a60620ea267e1af3d157d8cf03855295665f79a922b3f16fd0",
-      "role": "approved_execution_contract_at_gate_1_entry"
+      "role": "approved_execution_contract"
     },
     {
       "path": "docs/architecture/cognition_v3_hybrid_agentic_loop_architecture.md",
@@ -20,7 +20,7 @@
   "sealed_inputs": {
     "live_case_manifest": {
       "path": "tests/fixtures/cognition_core_v3_live_case_manifest.json",
-      "sha256": "2c3c04ad168d6adb4493c6d6c81479b5c08ff1d594038c24b8bfe1d062a8cd3f",
+      "sha256": "a0e1bf705f3042ed9a1230a99191eb6546dfce5e8a6f6a16d93c28d4b257a384",
       "case_count": 24,
       "trials_per_engine": 3
     },
@@ -32,7 +32,7 @@
     }
   },
   "public_contract": {
-    "input_type": "kazusa_ai_chatbot.cognition_core_v2.contracts:CognitionCoreInputV2",
+    "input_type": "kazusa_ai_chatbot.cognition_shared.contracts:CognitionCoreInputV2",
     "input_schema_version": "cognition_core_input.v2",
     "input_fields": [
       "schema_version",
@@ -59,7 +59,7 @@
       "past_dialog_cognition_context",
       "group_engagement_action_context"
     ],
-    "output_type": "kazusa_ai_chatbot.cognition_core_v2.contracts:CognitionCoreOutputV2",
+    "output_type": "kazusa_ai_chatbot.cognition_shared.contracts:CognitionCoreOutputV2",
     "output_schema_version": "cognition_core_output.v2",
     "output_fields": [
       "schema_version",
@@ -85,44 +85,41 @@
       "self_cognition_response",
       "self_cognition_response_contract_status"
     ],
-    "validator_module_sha256": "624037091c4f63c129471fcd3c56364500dbd4a01b2a63910fc511bd703b7a5e",
+    "validator_module": "kazusa_ai_chatbot.cognition_shared.contracts",
     "validators": [
-      "kazusa_ai_chatbot.cognition_core_v2.contracts:validate_cognition_core_input",
-      "kazusa_ai_chatbot.cognition_core_v2.contracts:validate_cognition_core_output"
+      "kazusa_ai_chatbot.cognition_shared.contracts:validate_cognition_core_input",
+      "kazusa_ai_chatbot.cognition_shared.contracts:validate_cognition_core_output"
     ]
   },
-  "canonical_v2_substrate": [
-    {"path": "src/kazusa_ai_chatbot/cognition_core_v2/facade.py", "sha256": "e62cfc0720aae00053af52813a31187be50a434a23985a3849f463a1d78acaca"},
-    {"path": "src/kazusa_ai_chatbot/cognition_core_v2/semantic_appraisal.py", "sha256": "2f6acbd2a85f4d4dec86569ae052e8e93517de7c3e759d6081e8f8f28d0a9e5e"},
-    {"path": "src/kazusa_ai_chatbot/cognition_core_v2/goal_cognition.py", "sha256": "0baaa3e2a579d4a066589d8df729dcc390cbd599e3295db621ed51a242a42d9d"},
-    {"path": "src/kazusa_ai_chatbot/cognition_core_v2/workspace.py", "sha256": "7490be1420cd7a31a899bc46d75c54c6d122a3d24700cee92b6b1ea5934a1718"},
-    {"path": "src/kazusa_ai_chatbot/cognition_core_v2/action_selection.py", "sha256": "7abfe12b60f6ff2a2e0f41e48c4f166aff593e556e4edcfdebeacf27095f3563"},
-    {"path": "src/kazusa_ai_chatbot/cognition_core_v2/action_authorization.py", "sha256": "7aee35acc493a011887624ad990b6396e78a50184f2b8196ce64c6eedec27544"}
+  "canonical_shared_owners": [
+    "src/kazusa_ai_chatbot/cognition_shared/contracts.py",
+    "src/kazusa_ai_chatbot/cognition_shared/state_models.py",
+    "src/kazusa_ai_chatbot/cognition_shared/state_projection.py",
+    "src/kazusa_ai_chatbot/cognition_shared/state_reducers.py",
+    "src/kazusa_ai_chatbot/cognition_shared/transition_guards.py",
+    "src/kazusa_ai_chatbot/cognition_shared/emotion_definitions.py",
+    "src/kazusa_ai_chatbot/cognition_shared/emotion_derivation.py",
+    "src/kazusa_ai_chatbot/cognition_shared/output_projection.py",
+    "src/kazusa_ai_chatbot/cognition_shared/model_attempt_policy.py",
+    "src/kazusa_ai_chatbot/cognition_shared/surface.py",
+    "src/kazusa_ai_chatbot/cognition_shared/surface_stages.py",
+    "src/kazusa_ai_chatbot/cognition_shared/character_carryover.py",
+    "src/kazusa_ai_chatbot/cognition_shared/morning_refresh.py"
   ],
   "current_topology": {
-    "v2": {
-      "entrypoint": "kazusa_ai_chatbot.cognition_core_v2:run_cognition",
-      "services": "CognitionCoreServicesV2",
-      "model_route_count": 12,
-      "effect_boundary": "facade_returns_replacement_state_and_requests; connector_owns_commit_and_execution"
-    },
-    "partial_v3": {
-      "entrypoint": "kazusa_ai_chatbot.cognition_core_v3:run_cognition",
-      "services": "CognitionCoreServicesV2",
-      "topology": "parallel_first_wave_plus_isolated_goal_chains_and_terminal_wave",
-      "gap_codes": [
-        "parallel_primary_chains",
-        "isolated_sibling_goal_transcripts",
-        "per_stage_static_prompts",
-        "v2_twelve_route_service_binding",
-        "no_invocation_primary_fifo_lane",
-        "no_distinct_sidecar_lane",
-        "no_stable_anchor_head",
-        "no_total_request_budget_ledger",
-        "no_resolver_chain_session_reattachment",
-        "no_chain_run_persistence_or_console_projection"
-      ]
-    }
+    "entrypoint": "kazusa_ai_chatbot.cognition_core_v3:run_cognition",
+    "services": "CognitionChainServicesV3",
+    "appraisal_stage_layout": "fixed_a1_a2",
+    "appraisal_families": [
+      "event_agency",
+      "relationship_social",
+      "moral_identity",
+      "goal_threat_outcome",
+      "epistemic_comparison_memory",
+      "existential_drive"
+    ],
+    "model_route_count": 1,
+    "effect_boundary": "facade_returns_replacement_state_and_requests; connector_owns_commit_and_execution"
   },
   "target_topology": {
     "primary_serial_steps": [
@@ -158,7 +155,6 @@
       "task_progress",
       "conversation_continuity"
     ],
-    "score_values": [0, 1, 2],
     "v3_trial_denominator": 72,
     "minimum_semantic_success_count": 69,
     "maximum_semantic_failure_count": 3,
@@ -168,36 +164,25 @@
     "score_rewrite": false
   },
   "performance_protocol": {
-    "nodes": [
-      "tests/test_cognition_core_v3_performance_live_llm.py::test_live_performance_cold_full_turn",
-      "tests/test_cognition_core_v3_performance_live_llm.py::test_live_performance_warm_exact_repeat",
-      "tests/test_cognition_core_v3_performance_live_llm.py::test_live_performance_warm_changed_tail",
-      "tests/test_cognition_core_v3_performance_live_llm.py::test_live_performance_resolver_continuation",
-      "tests/test_cognition_core_v3_performance_live_llm.py::test_live_performance_sidecar_overlap"
-    ],
-    "cold_trial_count": 5,
-    "warm_exact_repeat_trial_count": 20,
-    "warm_changed_tail_trial_count": 20,
-    "resolver_continuation_trial_count": 20,
-    "sidecar_overlap_trial_count": 20,
+    "nodes": [],
+    "cold_trial_count": 0,
+    "warm_exact_repeat_trial_count": 0,
+    "warm_changed_tail_trial_count": 0,
+    "resolver_continuation_trial_count": 0,
+    "sidecar_overlap_trial_count": 0,
     "thresholds": {
-      "changed_tail_and_exact_repeat_primary_median_reduction_minimum": 0.25,
-      "cold_first_primary_request_v2_ratio_maximum": 1.2,
-      "full_run_median_v2_ratio_maximum": 1.1,
-      "full_run_p95_v2_ratio_maximum": 1.15,
-      "resolver_tail_v2_recurrence_ratio_maximum": 0.75,
-      "resolver_tail_v3_cold_rebuild_ratio_maximum": 0.6,
       "primary_max_in_flight": 1,
       "foreign_primary_interleave_allowance": 0
     }
   },
   "environment_fingerprint_schema": {
-    "schema_version": "cognition_v3_environment_fingerprint.v1",
+    "schema_version": "cognition_v3_environment_fingerprint.v2",
     "required_fields": [
       "recorded_at_utc",
       "repository_head",
       "python_version",
       "selected_engine",
+      "appraisal_stage_layout",
       "service_health",
       "mongodb_health",
       "route_count",
@@ -207,8 +192,6 @@
       "primary_model_loaded",
       "primary_declared_context",
       "primary_loaded_context",
-      "normal_50000_tier_available",
-      "extended_65000_tier_available",
       "sidecar_model",
       "sidecar_model_loaded",
       "models_are_distinct",
@@ -220,136 +203,42 @@
       "mongodb_uri",
       "raw_endpoint",
       "raw_database_name",
-      "raw_user_identifier"
+      "raw_user_identifier",
+      "appraisal_group_count"
     ]
   },
   "owned_paths": {
     "delete": [],
     "create": [
-      "src/kazusa_ai_chatbot/cognition_core_v3/prompt.py",
-      "src/kazusa_ai_chatbot/cognition_core_v3/anchor.py",
-      "src/kazusa_ai_chatbot/cognition_core_v3/budget.py",
-      "src/kazusa_ai_chatbot/cognition_core_v3/lane.py",
-      "src/kazusa_ai_chatbot/cognition_core_v3/session.py",
-      "src/kazusa_ai_chatbot/cognition_core_v3/subconscious.py",
+      "src/kazusa_ai_chatbot/cognition_shared",
+      "src/kazusa_ai_chatbot/cognition_core_v3/authorization.py",
+      "src/kazusa_ai_chatbot/cognition_core_v3/execution_types.py",
+      "src/kazusa_ai_chatbot/cognition_core_v3/facade_helpers.py",
+      "src/kazusa_ai_chatbot/cognition_core_v3/semantic_appraisal.py",
+      "src/kazusa_ai_chatbot/cognition_core_v3/semantic_source_planner.py",
+      "tests/cognition_test_helpers.py",
+      "tests/cognition_v3_candidate_support.py",
+      "tests/unit/nodes/surface_fixtures.py"
+    ],
+    "modify": [
+      "src/kazusa_ai_chatbot/cognition_core_v3",
+      "src/kazusa_ai_chatbot/config.py",
+      "src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition.py",
+      "src/kazusa_ai_chatbot/service.py",
+      "src/kazusa_ai_chatbot/brain_service/contracts.py",
       "src/kazusa_ai_chatbot/db/cognition_chain_runs.py",
-      "src/kazusa_ai_chatbot/llm_tracing/chain_transcript.py",
-      "src/scripts/calibrate_cognition_v3_token_estimator.py",
-      "src/scripts/probe_cognition_v3_context_overflow.py",
-      "tests/unit/cognition_core_v3/test_prompt.py",
-      "tests/unit/cognition_core_v3/test_anchor.py",
-      "tests/unit/cognition_core_v3/test_budget.py",
-      "tests/unit/cognition_core_v3/test_lane.py",
-      "tests/unit/cognition_core_v3/test_session.py",
-      "tests/unit/cognition_core_v3/test_subconscious.py",
-      "tests/integration/cognition_core_v3/test_resolver_recurrence.py",
-      "tests/integration/cognition_core_v3/test_sidecar_failure.py",
-      "tests/integration/cognition_core_v3/test_chain_observability.py",
-      "tests/test_db_cognition_chain_runs.py",
-      "tests/test_cognition_chain_event_logging.py",
-      "tests/test_llm_chain_transcript.py",
-      "tests/test_cognition_core_v3_calibration_scripts.py",
-      "tests/test_cognition_core_v3_comparison_contract.py",
-      "tests/test_cognition_core_v3_documentation.py",
-      "tests/test_cognition_core_v3_manifest_contract.py",
-      "tests/test_cognition_core_v3_live_llm.py",
-      "tests/test_cognition_core_v3_performance_live_llm.py",
+      "src/control_console/brain_model_routes.py",
       "tests/fixtures/cognition_core_v3_architecture_manifest.json",
       "tests/fixtures/cognition_core_v3_live_case_manifest.json",
       "tests/fixtures/cognition_core_v3_token_calibration_corpus.json",
-      "tests/cognition_core_v3_comparison_harness.py"
-    ],
-    "modify": [
-      "src/kazusa_ai_chatbot/cognition_core_v3/__init__.py",
-      "src/kazusa_ai_chatbot/cognition_core_v3/contracts.py",
-      "src/kazusa_ai_chatbot/cognition_core_v3/registry.py",
-      "src/kazusa_ai_chatbot/cognition_core_v3/transcript.py",
-      "src/kazusa_ai_chatbot/cognition_core_v3/execution.py",
-      "src/kazusa_ai_chatbot/cognition_core_v3/appraisal.py",
-      "src/kazusa_ai_chatbot/cognition_core_v3/goal_cognition.py",
-      "src/kazusa_ai_chatbot/cognition_core_v3/workspace.py",
-      "src/kazusa_ai_chatbot/cognition_core_v3/action_selection.py",
-      "src/kazusa_ai_chatbot/cognition_core_v3/diagnostics.py",
-      "src/kazusa_ai_chatbot/cognition_core_v3/facade.py",
-      "src/kazusa_ai_chatbot/cognition_core_v3/README.md",
-      "src/kazusa_ai_chatbot/cognition_core_v2/semantic_appraisal.py",
-      "src/kazusa_ai_chatbot/cognition_core_v2/goal_cognition.py",
-      "src/kazusa_ai_chatbot/cognition_core_v2/workspace.py",
-      "src/kazusa_ai_chatbot/cognition_core_v2/action_selection.py",
-      "src/kazusa_ai_chatbot/cognition_core_v2/action_authorization.py",
-      "src/kazusa_ai_chatbot/cognition_core_v2/README.md",
-      "src/kazusa_ai_chatbot/llm_interface/contracts.py",
-      "src/kazusa_ai_chatbot/llm_interface/route_report.py",
-      "src/kazusa_ai_chatbot/llm_interface/README.md",
-      "src/kazusa_ai_chatbot/utils.py",
-      "src/kazusa_ai_chatbot/config.py",
-      "src/kazusa_ai_chatbot/cognition_core_selector.py",
-      "src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition.py",
-      "src/kazusa_ai_chatbot/nodes/README.md",
-      "src/kazusa_ai_chatbot/cognition_resolver/guardrail.py",
-      "src/kazusa_ai_chatbot/cognition_resolver/README.md",
-      "src/kazusa_ai_chatbot/db/__init__.py",
-      "src/kazusa_ai_chatbot/db/bootstrap.py",
-      "src/kazusa_ai_chatbot/db/README.md",
-      "src/kazusa_ai_chatbot/llm_tracing/__init__.py",
-      "src/kazusa_ai_chatbot/llm_tracing/README.md",
-      "src/kazusa_ai_chatbot/event_logging/__init__.py",
-      "src/kazusa_ai_chatbot/event_logging/models.py",
-      "src/kazusa_ai_chatbot/event_logging/recording.py",
-      "src/kazusa_ai_chatbot/event_logging/sanitization.py",
-      "src/kazusa_ai_chatbot/event_logging/README.md",
-      "src/kazusa_ai_chatbot/brain_service/contracts.py",
-      "src/kazusa_ai_chatbot/brain_service/README.md",
-      "src/kazusa_ai_chatbot/service.py",
-      "src/control_console/contracts.py",
-      "src/control_console/kazusa_client.py",
-      "src/control_console/brain_model_routes.py",
-      "src/control_console/static/index.html",
-      "src/control_console/static/console.js",
-      "src/control_console/static/console.css",
-      "src/control_console/README.md",
-      "tests/unit/cognition_core_v3/test_action_selection.py",
-      "tests/unit/cognition_core_v3/test_appraisal.py",
-      "tests/unit/cognition_core_v3/test_contracts.py",
-      "tests/unit/cognition_core_v3/test_diagnostics.py",
-      "tests/unit/cognition_core_v3/test_execution.py",
-      "tests/unit/cognition_core_v3/test_facade.py",
-      "tests/unit/cognition_core_v3/test_goal_cognition.py",
-      "tests/unit/cognition_core_v3/test_public_api.py",
-      "tests/unit/cognition_core_v3/test_registry.py",
-      "tests/unit/cognition_core_v3/test_transcript.py",
-      "tests/unit/cognition_core_v3/test_workspace.py",
-      "tests/integration/cognition_core_v3/test_deterministic_head.py",
-      "tests/integration/cognition_core_v3/test_engine_selector.py",
-      "tests/integration/cognition_core_v3/test_external_contract_parity.py",
-      "tests/unit/cognition_core_v2/test_semantic_appraisal.py",
-      "tests/unit/cognition_core_v2/test_goal_cognition.py",
-      "tests/unit/cognition_core_v2/test_workspace.py",
-      "tests/unit/cognition_core_v2/test_action_selection.py",
-      "tests/unit/cognition_core_v2/test_action_authorization.py",
-      "tests/unit/cognition_resolver/test_guardrail.py",
-      "tests/test_utils.py",
-      "tests/test_llm_interface_contracts.py",
-      "tests/test_llm_interface_route_report.py",
-      "tests/test_config.py",
-      "tests/unit/test_cognition_core_selector.py",
-      "tests/unit/nodes/test_persona_supervisor2_cognition.py",
-      "tests/test_service_cognition_graph.py",
-      "tests/test_control_console_contracts.py",
-      "tests/test_control_console_kazusa_client.py",
-      "tests/test_control_console_cognition_graph.py",
-      "tests/test_control_console_web_surface.py",
-      "tests/control_console_e2e/test_cognition_graph_e2e.py",
-      "tests/control_console_e2e/fake_brain.py",
+      "tests/fixtures/cognition_llm_producer_matrix.json",
       "tests/ownership/source_test_impact_manifest.json",
-      "README.md",
-      "docs/HOWTO.md"
+      "tests/unit/cognition_core_v3",
+      "tests/integration/cognition_core_v3"
     ]
   },
   "generated_artifact_patterns": [
     "test_artifacts/cognition_core_v3/<baseline_id>/baseline_index.json",
-    "test_artifacts/cognition_core_v3/<baseline_id>/v2_semantic_baseline_defects.json",
-    "test_artifacts/cognition_core_v3/<baseline_id>/production_data_extracts/*.json",
     "test_artifacts/cognition_core_v3/<run_id>/local_semantic_resets/*.json",
     "test_artifacts/cognition_core_v3/<run_id>/inherited_semantic_residuals.json"
   ]

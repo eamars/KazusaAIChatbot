@@ -10,7 +10,7 @@ import pytest
 from kazusa_ai_chatbot.consolidation.target import (
     build_consolidation_target_plan,
 )
-from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_acquaintance_user_state,
 )
 

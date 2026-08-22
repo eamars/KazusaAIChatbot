@@ -20,7 +20,7 @@ from kazusa_ai_chatbot.cognition_episode import (
     GoalContinuationRefV1,
     validate_goal_continuation_ref,
 )
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionContractError,
     validate_scheduled_future_speech_authority,
 )

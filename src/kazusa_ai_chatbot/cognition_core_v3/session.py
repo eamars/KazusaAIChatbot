@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Self
 from uuid import uuid4
 
-from kazusa_ai_chatbot.cognition_core_v2.output_projection import (
+from kazusa_ai_chatbot.cognition_shared.output_projection import (
     build_state_update,
 )
 from kazusa_ai_chatbot.cognition_resolver.contracts import (

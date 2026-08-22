@@ -21,13 +21,13 @@ from kazusa_ai_chatbot.action_spec.results import (
     build_private_surface_output,
     build_text_surface_output,
 )
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionContractError,
     is_targetless_group_self_cognition_episode,
     validate_scheduled_future_speech_authority,
     validate_text_surface_output,
 )
-from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+from kazusa_ai_chatbot.cognition_shared.state_models import (
     resolve_state_scope,
 )
 from kazusa_ai_chatbot.cognition_core_v3.diagnostics import (

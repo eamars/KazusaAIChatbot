@@ -136,7 +136,7 @@ def settle_episode_trace(
                     "schema_version": "evidence_ref.v1",
                     "evidence_kind": "cognition_output",
                     "evidence_id": run_id,
-                    "owner": "cognition_core_v2",
+                    "owner": "cognition_core_v3",
                     "observed_at": settled_at,
                 }]
     attempt_ids: set[str] = set()

@@ -11,7 +11,7 @@ import json
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     validate_action_bid,
     validate_cognition_core_output,
     validate_relational_willingness,

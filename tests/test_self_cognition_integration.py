@@ -14,10 +14,10 @@ import kazusa_ai_chatbot.dispatcher.handlers as handlers_module
 from kazusa_ai_chatbot import service
 from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
 from kazusa_ai_chatbot.calendar_scheduler import models as calendar_models
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     build_scheduled_future_speech_authority,
 )
-from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
 )
@@ -34,7 +34,7 @@ from kazusa_ai_chatbot.self_cognition import (
     tracking,
     worker,
 )
-from tests.cognition_core_v2_test_helpers import (
+from tests.cognition_test_helpers import (
     canonical_service_character_profile,
 )
 

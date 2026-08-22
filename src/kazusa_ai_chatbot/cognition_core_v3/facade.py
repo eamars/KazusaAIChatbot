@@ -8,8 +8,8 @@ transcript. Recurrence retains its carried relational decision and resolver
 tail while sharing the prompt-safe projection owners.
 
 The deterministic head, state reduction, relationship maintenance, workspace
-collapse, action planning, authorization, and output assembly reuse the V2
-substrate helpers, so the public contract remains exactly
+collapse, action planning, authorization, and output assembly use the
+canonical protocol owners, so the public contract remains exactly
 ``CognitionCoreInputV2``/``CognitionCoreOutputV2``. Each semantic producer has
 its bounded attempt ledger and typed fail-closed contract.
 
@@ -42,23 +42,11 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from openai import OpenAIError
 
 from kazusa_ai_chatbot import db, event_logging, llm_tracing
-from kazusa_ai_chatbot.cognition_core_v2 import (
-    action_authorization as v2_action_authorization,
-)
-from kazusa_ai_chatbot.cognition_core_v2 import (
-    action_selection as v2_action_selection,
-)
-from kazusa_ai_chatbot.cognition_core_v2 import (
-    goal_cognition as v2_goal_cognition,
-)
-from kazusa_ai_chatbot.cognition_core_v2 import (
-    workspace as v2_workspace,
-)
-from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
+from kazusa_ai_chatbot.cognition_core_v3.registry import (
     branch_order_key,
     select_preliminary_branches,
 )
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     CURRENT_EPISODE_EVIDENCE_SOURCE_KINDS,
     SELF_COGNITION_RESPONSE_DECISION_VALUES,
     SELF_COGNITION_RESPONSE_PARTICIPATION_VALUES,
@@ -72,7 +60,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     validate_cognition_core_input,
     validate_cognition_core_output,
 )
-from kazusa_ai_chatbot.cognition_core_v2.facade import (
+from kazusa_ai_chatbot.cognition_core_v3.facade_helpers import (
     _apply_final_relationship_maintenance,
     _bids_with_live_goals,
     _bind_pending_resolution,
@@ -95,7 +83,7 @@ from kazusa_ai_chatbot.cognition_core_v2.facade import (
     _workspace_current_event,
     _workspace_goal_contexts,
 )
-from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
     V2_APPRAISAL_TOTAL_ATTEMPTS,
     V2_MODEL_TOTAL_ATTEMPTS,
     V2AttemptBudgetExhausted,
@@ -108,31 +96,32 @@ from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
     reset_v2_attempt_ledger,
     snapshot_v2_attempt_ledger,
 )
-from kazusa_ai_chatbot.cognition_core_v2.output_projection import (
+from kazusa_ai_chatbot.cognition_shared.output_projection import (
     build_state_update,
     default_expression_policy,
     project_affect,
     project_relationship,
 )
-from kazusa_ai_chatbot.cognition_core_v2.parallel_executor import (
+from kazusa_ai_chatbot.cognition_core_v3.execution_types import (
     BranchFailure,
     ParallelExecutionResult,
 )
-from kazusa_ai_chatbot.cognition_core_v2.semantic_source_planner import (
+from kazusa_ai_chatbot.cognition_core_v3.semantic_source_planner import (
     plan_semantic_questions,
 )
-from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+from kazusa_ai_chatbot.cognition_shared.state_models import (
     validate_cognition_state,
 )
-from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+from kazusa_ai_chatbot.cognition_shared.state_projection import (
     PromptProjectionV2,
     project_state_for_prompt,
 )
-from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
+from kazusa_ai_chatbot.cognition_shared.state_reducers import (
     apply_state_update,
     create_deterministic_goals,
 )
 from kazusa_ai_chatbot.cognition_core_v3 import anchor as v3_anchor
+from kazusa_ai_chatbot.cognition_core_v3 import authorization as v3_authorization
 from kazusa_ai_chatbot.cognition_core_v3 import prompt as v3_prompt
 from kazusa_ai_chatbot.cognition_core_v3.action_selection import (
     _authorization_repair_message,
@@ -143,6 +132,8 @@ from kazusa_ai_chatbot.cognition_core_v3.action_selection import (
     authorize_action_requests,
     authorize_resolver_requests,
     derive_action_route,
+    accepted_at_utc_from_episode,
+    validate_action_plan_decision,
     settle_resolver_outcome,
 )
 from kazusa_ai_chatbot.cognition_core_v3.appraisal import (
@@ -189,13 +180,18 @@ from kazusa_ai_chatbot.cognition_core_v3.execution import (
 from kazusa_ai_chatbot.cognition_core_v3.goal_cognition import (
     GOAL_BID_EVIDENCE_HANDLE_LIMIT,
     ORDINARY_GOAL_KIND,
-    materialize_selection_goal_draft,
+    validate_goal_bid_draft,
+    selection_goal_draft_to_goal_bid,
     project_conversation_progress_evidence,
     project_required_selection_operations,
     salvage_active_goal_group_output,
     validate_active_goal_group_output,
     validate_recurrence_ordinary_goal_bid_draft,
     validate_selection_goal_draft,
+)
+from kazusa_ai_chatbot.cognition_core_v3.workspace import (
+    collapse_authoritative_relational_bid,
+    validate_workspace_partition,
 )
 from kazusa_ai_chatbot.cognition_core_v3.lane import (
     SidecarAdmissionLedger,
@@ -658,8 +654,9 @@ def _validate_and_materialize_selection_goal_draft(
             len(required_evidence_handles),
         ),
     )
-    return materialize_selection_goal_draft(
+    return selection_goal_draft_to_goal_bid(
         validated_draft,
+        branch_id=ORDINARY_GOAL_KIND,
         include_relational_willingness=require_relational_willingness,
     )
 
@@ -1329,7 +1326,7 @@ async def _invoke_v3_sidecar_authorizer(
                 deadline_monotonic=deadline_monotonic,
             ) or {}
         try:
-            decisions = v2_action_authorization.validate_authorization_decisions(
+            decisions = v3_authorization.validate_authorization_decisions(
                 parsed,
                 candidate_handles=candidate_handles,
             )
@@ -1614,7 +1611,7 @@ def _reduce_serial_appraisals(
     dict[str, Any],
     list[dict[str, Any]],
 ]:
-    """Reduce accepted appraisal rows through the unchanged V2 owners."""
+    """Reduce accepted appraisal rows through the canonical V3 owners."""
 
     (
         final_state,
@@ -1705,7 +1702,7 @@ def _build_serial_output(
         )
     relational_decision = _ordinary_relational_decision(eligible_bids)
     collapse = (
-        v2_workspace.collapse_authoritative_relational_bid(
+        collapse_authoritative_relational_bid(
             eligible_bids,
             relational_decision,
         )
@@ -1989,19 +1986,21 @@ def _self_cognition_response_context(
         "grounded_scene_intervention",
     )
     return {
-        "required": True,
-        "target_handles": _self_cognition_target_handles(
-            payload["scene_context"]
-        ),
-        "current_episode_evidence_handles": sorted(
-            current_episode_evidence_handles
+        "required_fields": list(
+            v3_prompt.SELF_COGNITION_RESPONSE_REQUIRED_FIELDS
         ),
         "allowed_decisions": [
             value
             for value in decision_order
             if value in SELF_COGNITION_RESPONSE_DECISION_VALUES
         ],
-        "participation_basis_values": [
+        "allowed_evidence_handles": sorted(
+            current_episode_evidence_handles
+        ),
+        "allowed_semantic_target_handles": _self_cognition_target_handles(
+            payload["scene_context"]
+        ),
+        "allowed_participation_basis_values": [
             value
             for value in participation_order
             if value in SELF_COGNITION_RESPONSE_PARTICIPATION_VALUES
@@ -2101,7 +2100,7 @@ def _collapse_for_action_plan(
         )
     relational_decision = _ordinary_relational_decision(eligible_bids)
     collapse = (
-        v2_workspace.collapse_authoritative_relational_bid(
+        collapse_authoritative_relational_bid(
             eligible_bids,
             relational_decision,
         )
@@ -2948,7 +2947,7 @@ async def _run_reattached_resolver_tail(
                 ),
                 question=workspace_question,
                 validator=partial(
-                    v2_workspace.validate_workspace_partition,
+                    validate_workspace_partition,
                     handles=set(partition_request.handles),
                 ),
                 attempt_limit=V2_MODEL_TOTAL_ATTEMPTS,
@@ -3013,12 +3012,12 @@ async def _run_reattached_resolver_tail(
         ),
     )
 
-    accepted_at_utc = v2_action_selection.accepted_at_utc_from_episode(
+    accepted_at_utc = accepted_at_utc_from_episode(
         payload["episode"]
     )
 
     def action_validator(parsed: dict[str, object]) -> object:
-        return v2_action_selection.validate_action_plan_decision(
+        return validate_action_plan_decision(
             parsed,
             bid_handles=bid_handles,
             action_handles=action_handles,
@@ -4160,7 +4159,7 @@ async def _run_cold_serial_cognition(
                 episode_handles=episode_evidence_handles,
                 require_relational_willingness=True,
             )
-        return v2_goal_cognition.validate_goal_bid_draft(
+        return validate_goal_bid_draft(
             parsed,
             evidence_handles=set(evidence_handles),
             role_handles=set(goal_role_bindings),
@@ -4369,7 +4368,7 @@ async def _run_cold_serial_cognition(
         def workspace_validator(
             parsed: dict[str, object],
         ) -> object:
-            return v2_workspace.validate_workspace_partition(
+            return validate_workspace_partition(
                 parsed,
                 set(partition_request.handles),
             )
@@ -4451,7 +4450,7 @@ async def _run_cold_serial_cognition(
         ),
     )
 
-    accepted_at_utc = v2_action_selection.accepted_at_utc_from_episode(
+    accepted_at_utc = accepted_at_utc_from_episode(
         payload["episode"]
     )
 
@@ -4462,7 +4461,7 @@ async def _run_cold_serial_cognition(
         action_handles: Mapping[str, object] = action_handles,
         resolver_handles: Mapping[str, object] = resolver_handles,
     ) -> object:
-        return v2_action_selection.validate_action_plan_decision(
+        return validate_action_plan_decision(
             parsed,
             bid_handles=bid_handles,
             action_handles=action_handles,

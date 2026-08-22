@@ -12,7 +12,7 @@ from kazusa_ai_chatbot.background_work.result_source import (
     build_result_ready_episode_from_job,
 )
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
-from tests.cognition_core_v2_test_helpers import canonical_episode
+from tests.cognition_test_helpers import canonical_episode
 
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]

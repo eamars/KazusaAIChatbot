@@ -6,14 +6,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2 import run_text_surface_planning
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.surface import run_text_surface_planning
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionContractError,
     TextSurfaceServicesV2,
     validate_text_surface_input,
 )
 from llm_test_helpers import make_llm_call_config
-from tests.cognition_core_v2_test_helpers import canonical_episode
+from tests.cognition_test_helpers import canonical_episode
 
 
 class _PromptCaptureLLM:

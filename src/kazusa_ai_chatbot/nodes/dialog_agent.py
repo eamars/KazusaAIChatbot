@@ -26,13 +26,13 @@ from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisodeV1,
     project_model_visible_percepts,
 )
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     TextSurfaceInputV2,
     TextSurfaceOutputV2,
     validate_text_surface_input,
     validate_text_surface_output,
 )
-from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
     V2_MODEL_TOTAL_ATTEMPTS,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState

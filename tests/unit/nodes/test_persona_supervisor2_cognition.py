@@ -11,13 +11,7 @@ from kazusa_ai_chatbot.action_spec.registry import (
     FUTURE_SPEAK_CAPABILITY,
     SPEAK_CAPABILITY,
 )
-from kazusa_ai_chatbot.cognition_core_selector import (
-    run_cognition as selected_run_cognition,
-)
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
-    CognitionCoreServicesV2,
-)
-from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
 )
@@ -39,20 +33,6 @@ EXPECTED_SYMBOLS = [
     "build_cognition_input_from_global_state",
     "build_scene_context_from_global_state",
 ]
-COGNITION_V2_ROUTE_KEYS = (
-    "appraisal_event_agency",
-    "appraisal_relationship_social",
-    "appraisal_moral_identity",
-    "appraisal_goal_threat_outcome",
-    "appraisal_epistemic_comparison_memory",
-    "appraisal_existential_drive",
-    "goal_ordinary_response",
-    "goal_active_branch",
-    "workspace_collapse",
-    "action_planning",
-    "action_authorization",
-    "resolver_authorization",
-)
 
 
 def test_persona_supervisor2_cognition_exposes_owned_contract() -> None:
@@ -70,22 +50,11 @@ def test_persona_supervisor2_cognition_exposes_owned_contract() -> None:
     )
 
 
-def test_connector_builds_selected_engine_services_without_inactive_routes(
+def test_connector_builds_v3_services_from_the_canonical_route_accessor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Only the selected engine loader contributes model bindings."""
+    """The V3 service builder uses only the canonical route settings."""
 
-    v2_settings = {
-        key: CognitionRouteSettingV1(
-            base_url=f"http://{key}.example/v1",
-            api_key=f"{key}-key",
-            model=f"{key}-model",
-            max_completion_tokens=8_192,
-            thinking_enabled=False,
-            context_window_tokens=None,
-        )
-        for key in COGNITION_V2_ROUTE_KEYS
-    }
     v3_settings = CognitionV3RouteSettingsV1(
         chain=CognitionRouteSettingV1(
             base_url="http://chain.example/v1",
@@ -100,41 +69,9 @@ def test_connector_builds_selected_engine_services_without_inactive_routes(
         turn_deadline_seconds=417,
     )
 
-    def inactive_v3_loader() -> CognitionV3RouteSettingsV1:
-        raise AssertionError("V2 construction read the inactive V3 family")
-
-    monkeypatch.setattr(cognition_module, "COGNITION_CORE_ENGINE", "v2")
     monkeypatch.setattr(
         cognition_module,
-        "load_cognition_v2_route_settings",
-        lambda: v2_settings,
-    )
-    monkeypatch.setattr(
-        cognition_module,
-        "load_cognition_v3_route_settings",
-        inactive_v3_loader,
-    )
-
-    v2_services = cognition_module.build_cognition_core_services()
-
-    assert isinstance(v2_services, CognitionCoreServicesV2)
-    assert v2_services.appraisal_event_agency_config.context_window_tokens is None
-    assert v2_services.goal_active_branch_config.model == (
-        "goal_active_branch-model"
-    )
-
-    def inactive_v2_loader() -> dict[str, CognitionRouteSettingV1]:
-        raise AssertionError("V3 construction read the inactive V2 family")
-
-    monkeypatch.setattr(cognition_module, "COGNITION_CORE_ENGINE", "v3")
-    monkeypatch.setattr(
-        cognition_module,
-        "load_cognition_v2_route_settings",
-        inactive_v2_loader,
-    )
-    monkeypatch.setattr(
-        cognition_module,
-        "load_cognition_v3_route_settings",
+        "get_cognition_v3_route_settings",
         lambda: v3_settings,
     )
 
@@ -380,7 +317,9 @@ async def test_connector_calls_selected_engine_with_canonical_input(
 ) -> None:
     """The connector hands one canonical input to the selected engine."""
 
-    assert cognition_module.run_cognition is selected_run_cognition
+    from kazusa_ai_chatbot.cognition_core_v3 import run_cognition
+
+    assert cognition_module.run_cognition is run_cognition
 
     state = _global_state()
     captured_inputs: list[dict[str, object]] = []

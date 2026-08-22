@@ -3,17 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
+import os
+import sys
+import time
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
-import hashlib
-import json
-import os
 from pathlib import Path
-import sys
 from typing import Any
-import time
 from uuid import uuid4
 
 import pytest
@@ -24,37 +24,14 @@ from tests.stage3_fresh_database import (
     validate_stage3_environment,
 )
 
-
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm, pytest.mark.live_db]
 
 _FIXTURE_PATH = Path("tests/fixtures/stage3_fresh_database_cases.json")
-_OUTPUT_ROOT = Path(
-    "test_artifacts/cognition_core_v2/stage_3/focused_live"
-)
-_COGNITION_CORE_V2_ROUTE_PREFIXES = (
-    "COGNITION_LLM_APPRAISAL_EVENT_AGENCY",
-    "COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL",
-    "COGNITION_LLM_APPRAISAL_MORAL_IDENTITY",
-    "COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME",
-    "COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY",
-    "COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE",
-    "COGNITION_LLM_GOAL_ORDINARY_RESPONSE",
-    "COGNITION_LLM_GOAL_ACTIVE_BRANCH",
-    "COGNITION_LLM_WORKSPACE_COLLAPSE",
-    "COGNITION_LLM_ACTION_PLANNING",
-    "COGNITION_LLM_ACTION_AUTHORIZATION",
-    "COGNITION_LLM_RESOLVER_AUTHORIZATION",
-)
-_COGNITION_CORE_V2_ROUTE_ENV = tuple(
+_OUTPUT_ROOT = Path("test_artifacts/cognition_core_v3/stage_3/focused_live")
+_COGNITION_V3_ROUTE_ENV = tuple(
     f"{prefix}_{suffix}"
-    for prefix in _COGNITION_CORE_V2_ROUTE_PREFIXES
-    for suffix in (
-        "BASE_URL",
-        "API_KEY",
-        "MODEL",
-        "MAX_COMPLETION_TOKENS",
-        "THINKING_ENABLED",
-    )
+    for prefix in ("COGNITION_V3_CHAIN_LLM", "COGNITION_V3_SIDECAR_LLM")
+    for suffix in ("BASE_URL", "API_KEY", "MODEL")
 )
 _REQUIRED_LLM_ENV = (
     "RELEVANCE_AGENT_LLM_BASE_URL",
@@ -78,7 +55,7 @@ _REQUIRED_LLM_ENV = (
     "COGNITION_LLM_BASE_URL",
     "COGNITION_LLM_API_KEY",
     "COGNITION_LLM_MODEL",
-    *_COGNITION_CORE_V2_ROUTE_ENV,
+    *_COGNITION_V3_ROUTE_ENV,
     "DIALOG_GENERATOR_LLM_BASE_URL",
     "DIALOG_GENERATOR_LLM_API_KEY",
     "DIALOG_GENERATOR_LLM_MODEL",
@@ -609,9 +586,9 @@ async def _prepare_stage3_group_review_reflection(
 ) -> dict[str, object]:
     """Run production reflection promotion before a group-review case."""
 
+    from kazusa_ai_chatbot import reflection_cycle
     from kazusa_ai_chatbot.db import create_user_profile
     from kazusa_ai_chatbot.db._client import get_db
-    from kazusa_ai_chatbot import reflection_cycle
     from kazusa_ai_chatbot.reflection_cycle import promotion as reflection_promotion
     from kazusa_ai_chatbot.reflection_cycle import repository
     from kazusa_ai_chatbot.reflection_cycle import worker as reflection_worker
@@ -821,7 +798,6 @@ async def _run_chat_case(
     """Run one real user-message turn through the service queue."""
 
     _prepare_stage3_runtime()
-    from kazusa_ai_chatbot import llm_tracing
     from kazusa_ai_chatbot import service
     from kazusa_ai_chatbot.brain_service import post_turn
     from kazusa_ai_chatbot.brain_service.contracts import ChatRequest
@@ -1416,8 +1392,8 @@ async def _run_tool_result_case(case_id: str) -> dict[str, object]:
         build_result_ready_episode_from_job,
     )
     from kazusa_ai_chatbot.brain_service import post_turn
-    from kazusa_ai_chatbot.dispatcher import AdapterRegistry
     from kazusa_ai_chatbot.db._client import get_db
+    from kazusa_ai_chatbot.dispatcher import AdapterRegistry
 
     now = _storage_now()
     run_token = uuid4().hex[:10]

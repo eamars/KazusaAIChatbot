@@ -14,7 +14,7 @@ from kazusa_ai_chatbot import service as service_module
 from kazusa_ai_chatbot.brain_service import post_turn as post_turn_module
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
-from tests.cognition_core_v2_test_helpers import (
+from tests.cognition_test_helpers import (
     canonical_episode_identity_snapshot,
     canonical_service_character_profile,
 )

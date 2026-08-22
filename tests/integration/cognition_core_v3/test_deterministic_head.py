@@ -15,33 +15,35 @@ from dataclasses import replace
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2.branch_activation import (
-    select_final_branches,
-    select_preliminary_branches,
-)
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
-    SEMANTIC_QUESTION_KINDS,
-    validate_cognition_core_input,
-    validate_cognition_core_output,
-)
-from kazusa_ai_chatbot.cognition_core_v2.facade import (
+from kazusa_ai_chatbot.cognition_core_v3 import run_cognition
+from kazusa_ai_chatbot.cognition_core_v3.facade_helpers import (
     _cognition_elapsed_seconds,
     _episode_updated_at,
     _fact_without_producer,
     _native_relationship_context,
+)
+from kazusa_ai_chatbot.cognition_core_v3.registry import (
+    select_final_branches,
+    select_preliminary_branches,
+)
+from kazusa_ai_chatbot.cognition_core_v3.semantic_source_planner import (
     plan_semantic_questions,
 )
-from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
+    SEMANTIC_QUESTION_KINDS,
+    validate_cognition_core_input,
+    validate_cognition_core_output,
+)
+from kazusa_ai_chatbot.cognition_shared.state_models import (
     validate_cognition_state,
 )
-from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+from kazusa_ai_chatbot.cognition_shared.state_projection import (
     project_state_for_prompt,
 )
-from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
+from kazusa_ai_chatbot.cognition_shared.state_reducers import (
     apply_state_update,
     create_deterministic_goals,
 )
-from kazusa_ai_chatbot.cognition_core_v3 import run_cognition
 from tests.integration.cognition_core_v3.conftest import (
     ScriptedLLMInvoker,
     default_scripted_responses,

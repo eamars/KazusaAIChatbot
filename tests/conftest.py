@@ -9,9 +9,6 @@ import os
 import pytest
 from dotenv import load_dotenv
 
-from tests.stage3_fresh_database import STAGE3_TEST_DATABASE_NAME
-
-
 def pytest_collection_modifyitems(config, items):
     """Require every explicitly selected impact node to be collected."""
 
@@ -74,8 +71,6 @@ if os.environ.get(_IDENTITY_GROWTH_DATABASE_GUARD_ENV) == "1":
             "test database"
         )
     os.environ.pop("STAGE3_DATABASE_GUARD", None)
-elif os.environ.get("MONGODB_DB_NAME") == STAGE3_TEST_DATABASE_NAME:
-    os.environ["STAGE3_DATABASE_GUARD"] = "1"
 else:
     os.environ["MONGODB_DB_NAME"] = "_test_kazusa_live_llm"
     os.environ.pop("STAGE3_DATABASE_GUARD", None)

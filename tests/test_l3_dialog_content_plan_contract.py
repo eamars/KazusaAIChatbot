@@ -6,11 +6,11 @@ from typing import Any
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     validate_text_surface_output,
 )
 from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as surface_module
-from tests.cognition_core_v2_test_helpers import (
+from tests.cognition_test_helpers import (
     canonical_cognition_output,
     canonical_episode,
     canonical_service_character_profile,

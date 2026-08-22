@@ -37,7 +37,7 @@ from kazusa_ai_chatbot.cognition_resolver.telemetry import (
     write_human_readable_resolver_trace,
 )
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
-from tests.cognition_core_v2_test_helpers import canonical_episode
+from tests.cognition_test_helpers import canonical_episode
 
 
 def _resolver_request(

@@ -6,7 +6,7 @@ from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[1]
 _CANONICAL_README = _ROOT / "src/kazusa_ai_chatbot/self_cognition/README.md"
-_COGNITION_README = _ROOT / "src/kazusa_ai_chatbot/cognition_core_v2/README.md"
+_COGNITION_README = _ROOT / "src/kazusa_ai_chatbot/cognition_core_v3/README.md"
 _COGNITION_CONTRACTS_DOC = (
     _ROOT / "docs/architecture/cognition_contracts_design.md"
 )

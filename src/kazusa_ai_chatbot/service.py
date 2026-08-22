@@ -131,23 +131,23 @@ from kazusa_ai_chatbot.character_identity_growth.runtime import (
     snapshot_state_update,
 )
 from kazusa_ai_chatbot.chat_input_queue import ChatInputQueue, QueuedChatItem
-from kazusa_ai_chatbot.cognition_core_v2.character_carryover import (
+from kazusa_ai_chatbot.cognition_shared.character_carryover import (
     CharacterCarryoverServicesV1,
     build_character_carryover_services,
 )
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionContextLimitError,
     CognitionContractError,
     CognitionExecutionError,
     validate_cognition_observability,
 )
-from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
     bind_v2_attempt_ledger,
     create_v2_attempt_ledger,
     reset_v2_attempt_ledger,
     snapshot_v2_guarded_attempt_ledger,
 )
-from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+from kazusa_ai_chatbot.cognition_shared.state_projection import (
     project_character_operational_state,
     project_operational_relationship_context,
     project_relationship_context,
@@ -184,7 +184,6 @@ from kazusa_ai_chatbot.config import (
     CALENDAR_SCHEDULER_POLL_INTERVAL_SECONDS,
     CHARACTER_GLOBAL_USER_ID,
     CHAT_HISTORY_RECENT_LIMIT,
-    COGNITION_CORE_ENGINE,
     COGNITION_V3_APPRAISAL_STAGE_LAYOUT,
     COGNITION_VISUAL_DIRECTIVES_ENABLED,
     CONVERSATION_HISTORY_LIMIT,
@@ -198,7 +197,7 @@ from kazusa_ai_chatbot.config import (
     SELF_COGNITION_MAX_CASES_PER_TICK,
     SELF_COGNITION_WORKER_INTERVAL_SECONDS,
     CognitionV3RouteSettingsV1,
-    get_selected_cognition_route_settings,
+    get_cognition_v3_route_settings,
 )
 from kazusa_ai_chatbot.consolidation.character_operational_state import (
     CharacterOperationalExecutionContext,
@@ -2406,49 +2405,25 @@ async def _handle_calendar_reflection_phase_run(
 def _cognition_engine_descriptor() -> dict[str, object]:
     """Build the safe selected-engine descriptor from loaded config."""
 
-    selected_settings = get_selected_cognition_route_settings()
-    if COGNITION_CORE_ENGINE == "v3":
-        if not isinstance(selected_settings, CognitionV3RouteSettingsV1):
-            raise RuntimeError("selected V3 cognition settings are unavailable")
-        context_window_tokens = selected_settings.chain.context_window_tokens
-        if context_window_tokens is None:
-            raise RuntimeError("selected V3 chain context window is unavailable")
-        sidecar = selected_settings.sidecar
-        descriptor = {
-            "schema_version": "cognition_engine_descriptor.v2",
-            "engine_id": "v3",
-            "chain_model_name": selected_settings.chain.model,
-            "sidecar_model_name": sidecar.model if sidecar else "",
-            "sidecar_enabled": sidecar is not None,
-            "subconscious_enabled": selected_settings.subconscious_enabled,
-            "appraisal_stage_layout": COGNITION_V3_APPRAISAL_STAGE_LAYOUT,
-            "chain_context_window_tokens": context_window_tokens,
-            "normal_budget_tokens": 50_000,
-            "extended_budget_tokens": 65_000,
-            "turn_deadline_seconds": selected_settings.turn_deadline_seconds,
-        }
-        return descriptor
-
-    if COGNITION_CORE_ENGINE != "v2" or not isinstance(
-        selected_settings,
-        Mapping,
-    ):
+    selected_settings = get_cognition_v3_route_settings()
+    if not isinstance(selected_settings, CognitionV3RouteSettingsV1):
         raise RuntimeError("selected cognition engine settings are unavailable")
-    stage_models = sorted({setting.model for setting in selected_settings.values()})
-    if not stage_models:
-        raise RuntimeError("selected V2 cognition stage models are unavailable")
+    context_window_tokens = selected_settings.chain.context_window_tokens
+    if context_window_tokens is None:
+        raise RuntimeError("selected V3 chain context window is unavailable")
+    sidecar = selected_settings.sidecar
     descriptor = {
         "schema_version": "cognition_engine_descriptor.v2",
-        "engine_id": "v2",
-        "chain_model_name": ", ".join(stage_models),
-        "sidecar_model_name": "",
-        "sidecar_enabled": False,
-        "subconscious_enabled": False,
-        "appraisal_stage_layout": "parallel_v2",
-        "chain_context_window_tokens": 0,
-        "normal_budget_tokens": 0,
-        "extended_budget_tokens": 0,
-        "turn_deadline_seconds": 0,
+        "engine_id": "v3",
+        "chain_model_name": selected_settings.chain.model,
+        "sidecar_model_name": sidecar.model if sidecar else "",
+        "sidecar_enabled": sidecar is not None,
+        "subconscious_enabled": selected_settings.subconscious_enabled,
+        "appraisal_stage_layout": COGNITION_V3_APPRAISAL_STAGE_LAYOUT,
+        "chain_context_window_tokens": context_window_tokens,
+        "normal_budget_tokens": 50_000,
+        "extended_budget_tokens": 65_000,
+        "turn_deadline_seconds": selected_settings.turn_deadline_seconds,
     }
     return descriptor
 

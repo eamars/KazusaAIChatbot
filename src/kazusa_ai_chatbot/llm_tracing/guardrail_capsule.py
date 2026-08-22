@@ -11,10 +11,10 @@ from typing import Literal
 from uuid import uuid4
 
 from kazusa_ai_chatbot.config import DEBUG_LOG_TTL_DAYS, LLM_TRACE_CAPTURE_MODE
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionExecutionError,
 )
-from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
     V2_MODEL_OWNER_POLICIES,
 )
 from kazusa_ai_chatbot.db import DatabaseBackendError

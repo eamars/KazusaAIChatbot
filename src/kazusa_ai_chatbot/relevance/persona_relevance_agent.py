@@ -21,7 +21,7 @@ from kazusa_ai_chatbot.config import (
     SETTLED_RELEVANCE_MAX_COMPLETION_TOKENS,
     SETTLED_RELEVANCE_MAX_INPUT_CHARS,
 )
-from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+from kazusa_ai_chatbot.cognition_shared.state_projection import (
     project_operational_relationship_context,
 )
 from kazusa_ai_chatbot.conversation_history_prompt_projection import (

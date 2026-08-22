@@ -4,32 +4,47 @@ from __future__ import annotations
 
 import json
 import re
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2 import (
-    goal_cognition as v2_goal_cognition,
+from kazusa_ai_chatbot.cognition_core_v3 import (
+    anchor,
+    goal_cognition,
+    prompt,
+    workspace,
 )
-from kazusa_ai_chatbot.cognition_core_v2 import workspace as v2_workspace
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
-    SEMANTIC_QUESTION_KINDS,
-)
-from kazusa_ai_chatbot.cognition_core_v2.semantic_source_planner import (
-    question_proposition_kind_semantics,
-    question_proposition_kinds,
-)
-from kazusa_ai_chatbot.cognition_core_v3 import anchor, prompt, workspace
 from kazusa_ai_chatbot.cognition_core_v3.budget import estimate_message_tokens
 from kazusa_ai_chatbot.cognition_core_v3.facade import (
     _appraisal_role_assignment_handles_by_evidence,
     _build_serial_initial_context,
 )
 from kazusa_ai_chatbot.cognition_core_v3.registry import APPRAISAL_STAGE_FAMILIES
-from tests.cognition_core_v3_comparison_harness import (
-    find_case_row,
-    render_case_input,
+from kazusa_ai_chatbot.cognition_core_v3.semantic_source_planner import (
+    question_proposition_kind_semantics,
+    question_proposition_kinds,
 )
+from kazusa_ai_chatbot.cognition_shared.contracts import (
+    GOAL_RESOLUTION_VALUES,
+    SEMANTIC_QUESTION_KINDS,
+    validate_cognition_core_input,
+)
+
+_LIVE_CASE_MANIFEST = Path(
+    "tests/fixtures/cognition_core_v3_live_case_manifest.json"
+)
+
+
+def _manifest_input(case_id: str) -> dict[str, object]:
+    """Load and validate one frozen V3 input without a comparison runner."""
+
+    manifest = json.loads(_LIVE_CASE_MANIFEST.read_text(encoding="utf-8"))
+    rows = manifest["cases"]
+    matches = [row for row in rows if row.get("case_id") == case_id]
+    if len(matches) != 1:
+        raise AssertionError(f"expected one manifest row for {case_id}")
+    return deepcopy(validate_cognition_core_input(matches[0]["canonical_input"]))
 
 
 def _question() -> prompt.ChainQuestion:
@@ -218,9 +233,7 @@ def test_prompt_questions_are_bounded_contract_oriented_and_dynamic() -> None:
 def test_first_a1_packet_uses_compact_static_head_and_local_contract() -> None:
     """The first appraisal request stays below the deterministic size proxy."""
 
-    input_payload = render_case_input(
-        find_case_row("ordinary_neutral_response")
-    )
+    input_payload = _manifest_input("ordinary_neutral_response")
     context = _build_serial_initial_context(input_payload)
     role_domains = _appraisal_role_assignment_handles_by_evidence(
         context["observation_context"],
@@ -940,6 +953,9 @@ def test_goal_payload_distinguishes_current_and_retrieved_evidence() -> None:
     contract = payload["goal_output_contract"]
     assert contract["allowed_evidence_handles"] == ["e1", "e2"]
     assert contract["current_episode_evidence_handles"] == ["e1"]
+    assert contract["relational_willingness_contract"][
+        "minimum_current_episode_evidence_handles"
+    ] == 1
     assert contract["required_evidence_handles"] == []
     assert payload["dialogue_role_bindings"] == dialogue_bindings
     assert "second_person_handle" in (
@@ -966,7 +982,7 @@ def test_goal_payload_distinguishes_current_and_retrieved_evidence() -> None:
         },
     }
     with pytest.raises(ValueError, match="current episode evidence"):
-        v2_goal_cognition.validate_goal_bid_draft(
+        goal_cognition.validate_goal_bid_draft(
             draft,
             evidence_handles={"e1", "e2"},
             role_handles=set(),
@@ -1050,11 +1066,18 @@ def test_action_plan_payload_carries_only_required_self_cognition_context() -> N
     """Targetless group P1 receives an exact response contract carrier."""
 
     context = {
-        "required": True,
-        "target_handles": ["self", "current_group_scene"],
-        "current_episode_evidence_handles": ["e1"],
+        "required_fields": [
+            "decision",
+            "evidence_handles",
+            "semantic_target_handle",
+            "participation_basis",
+            "response_goal",
+            "reason",
+        ],
         "allowed_decisions": ["stay_silent", "propose_visible_reply"],
-        "participation_basis_values": [
+        "allowed_evidence_handles": ["e1"],
+        "allowed_semantic_target_handles": ["self", "current_group_scene"],
+        "allowed_participation_basis_values": [
             "direct_address",
             "explicit_character_reference",
             "grounded_scene_intervention",
@@ -1078,9 +1101,84 @@ def test_action_plan_payload_carries_only_required_self_cognition_context() -> N
         self_cognition_response_context=context,
     )
     assert payload["self_cognition_response_context"] == context
+    output_contract = payload["action_plan_output_contract"]
+    assert output_contract["required_fields"] == [
+        "action_requests",
+        "resolver_requests",
+        "goal_resolution",
+        "resolver_pending_resolution",
+        "resolver_goal_progress",
+        "self_cognition_response",
+    ]
+    assert output_contract["additionalProperties"] is False
+    assert output_contract["properties"]["goal_resolution"] == {
+        "type": "string",
+        "enum": sorted(GOAL_RESOLUTION_VALUES),
+    }
+    assert output_contract["properties"]["self_cognition_response"] == {
+        "type": "object",
+        "required_fields": context["required_fields"],
+        "additionalProperties": False,
+    }
 
     ordinary_payload = prompt.build_action_plan_question_payload(**common)
     assert "self_cognition_response_context" not in ordinary_payload
+    ordinary_contract = ordinary_payload["action_plan_output_contract"]
+    assert ordinary_contract["required_fields"] == [
+        "action_requests",
+        "resolver_requests",
+        "goal_resolution",
+        "resolver_pending_resolution",
+        "resolver_goal_progress",
+    ]
+    assert ordinary_contract["properties"] == {
+        "action_requests": {
+            "type": "array",
+            "items": {"type": "object"},
+        },
+        "resolver_requests": {
+            "type": "array",
+            "items": {"type": "object"},
+        },
+        "goal_resolution": {
+            "type": "string",
+            "enum": sorted(GOAL_RESOLUTION_VALUES),
+        },
+        "resolver_pending_resolution": {
+            "type": ["object", "null"],
+        },
+        "resolver_goal_progress": {
+            "type": ["object", "null"],
+        },
+    }
+    assert "self_cognition_response" not in ordinary_contract["properties"]
+
+
+def test_action_plan_self_cognition_context_rejects_ambiguous_fields() -> None:
+    """The P1 carrier rejects the former target/evidence vocabulary."""
+
+    context = {
+        "required": True,
+        "target_handles": ["self", "current_group_scene"],
+        "current_episode_evidence_handles": ["e1"],
+        "allowed_decisions": ["stay_silent", "propose_visible_reply"],
+        "participation_basis_values": ["direct_address"],
+        "response_goal_max_chars": 300,
+        "reason_max_chars": 300,
+    }
+    with pytest.raises(prompt.PromptContractError):
+        prompt.build_action_plan_question_payload(
+            primary_bid_handle="b1",
+            supporting_bid_handles=[],
+            bid_index={"b1": {"branch_id": "ordinary_response"}},
+            action_index={},
+            resolver_index={},
+            resolver_context="",
+            runtime_capability_limits=[],
+            current_goal_progress=None,
+            required_resolver_evidence_dependency=None,
+            self_cognition_response_context=context,
+        )
 
 
 def test_action_plan_future_speak_contract_projects_canonical_authority_refs() -> None:
@@ -1363,7 +1461,7 @@ def test_workspace_question_uses_stable_handles_for_complete_bids() -> None:
         "suppressed_bid_handles": ["b3"],
     }
     assert payload == partition_request.prompt_payload
-    assert v2_workspace.validate_workspace_partition(
+    assert workspace.validate_workspace_partition(
         partition,
         set(partition_request.handles),
     ) == partition

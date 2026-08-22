@@ -25,7 +25,7 @@ from kazusa_ai_chatbot.config import (
     SURFACE_PREFERENCE_DEFAULT_MAX_COMPLETION_TOKENS,
     SURFACE_VISUAL_DEFAULT_MAX_COMPLETION_TOKENS,
 )
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionExecutionError,
     MAX_RECENT_CHARACTER_DIALOG_CHARS,
     MAX_RECENT_CHARACTER_DIALOG_ROWS,
@@ -37,7 +37,7 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     validate_cognition_core_output,
     validate_text_surface_input,
 )
-from kazusa_ai_chatbot.cognition_core_v2.surface import (
+from kazusa_ai_chatbot.cognition_shared.surface import (
     run_text_surface_planning,
     run_visual_surface_planning,
 )

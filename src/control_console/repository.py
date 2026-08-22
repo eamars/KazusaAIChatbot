@@ -22,7 +22,7 @@ from kazusa_ai_chatbot.character_identity_growth.projection import (
     project_growth_run_for_console,
     project_identity_for_console,
 )
-from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+from kazusa_ai_chatbot.cognition_shared.state_projection import (
     project_character_operational_state,
     project_numeric_band,
     project_operational_relationship_context,

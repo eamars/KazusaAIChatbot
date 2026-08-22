@@ -9,10 +9,10 @@ from typing import Any
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionExecutionError,
 )
-from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_character_production_state,
 )
 from kazusa_ai_chatbot.nodes.dialog_agent import StateContractError
@@ -25,7 +25,7 @@ from kazusa_ai_chatbot.reflection_cycle.activity_windows import (
     build_group_activity_windows,
 )
 from kazusa_ai_chatbot.self_cognition import models, projection, runner, sources
-from tests.cognition_core_v2_test_helpers import (
+from tests.cognition_test_helpers import (
     canonical_service_character_profile,
 )
 

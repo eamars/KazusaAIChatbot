@@ -13,12 +13,12 @@ from kazusa_ai_chatbot.nodes import (
     persona_supervisor2_msg_decontextualizer as decontextualizer_module,
 )
 
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionContractError,
     CognitionExecutionError,
 )
 from kazusa_ai_chatbot.cognition_episode import build_goal_continuation_ref
-from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_acquaintance_user_state,
 )
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as persona_module
@@ -29,7 +29,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_actions import (
 from kazusa_ai_chatbot.cognition_resolver.loop import (
     _terminal_blocker_speak_action_spec,
 )
-from tests.cognition_core_v2_test_helpers import canonical_episode
+from tests.cognition_test_helpers import canonical_episode
 
 
 NOW = "2026-07-14T00:00:00Z"

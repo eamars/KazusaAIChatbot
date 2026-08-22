@@ -1,4 +1,4 @@
-"""Canonical upstream connector for the V2 cognition core."""
+"""Canonical upstream connector for the V3 cognition chain."""
 
 from __future__ import annotations
 
@@ -41,15 +41,13 @@ from kazusa_ai_chatbot.character_identity_growth.runtime import (
     load_latest_identity_for_episode,
     snapshot_state_update,
 )
-from kazusa_ai_chatbot.cognition_core_selector import run_cognition
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     EVIDENCE_SOURCE_QUESTION_IDS,
     PAST_DIALOG_COGNITION_CONTEXT_MAX_CHARS,
     ActionAffordanceV2,
     CognitionContractError,
     CognitionCoreInputV2,
     CognitionCoreOutputV2,
-    CognitionCoreServicesV2,
     CognitionExecutionError,
     GroupEngagementActionContextV2,
     ResolverAffordanceV2,
@@ -57,22 +55,23 @@ from kazusa_ai_chatbot.cognition_core_v2.contracts import (
     _validate_scene_context,
     validate_cognition_core_input,
 )
-from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
     current_v2_attempt_ledger,
 )
-from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
     resolve_state_scope,
     validate_cognition_state,
 )
-from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+from kazusa_ai_chatbot.cognition_shared.state_projection import (
     project_character_operational_state,
     project_character_sleep_phase,
     project_duration,
     project_relationship_context,
     select_character_operational_context,
 )
+from kazusa_ai_chatbot.cognition_core_v3 import run_cognition
 from kazusa_ai_chatbot.cognition_core_v3.contracts import (
     CognitionChainServicesV3,
 )
@@ -118,7 +117,6 @@ from kazusa_ai_chatbot.config import (
     CHARACTER_SLEEP_LOCAL_PERIOD,
     CHARACTER_TIME_ZONE,
     CODING_AGENT_WORKSPACE_ROOT,
-    COGNITION_CORE_ENGINE,
     COGNITION_LLM_API_KEY,
     COGNITION_LLM_BASE_URL,
     COGNITION_LLM_MAX_COMPLETION_TOKENS,
@@ -126,8 +124,7 @@ from kazusa_ai_chatbot.config import (
     COGNITION_LLM_THINKING_ENABLED,
     COGNITION_STAGE_TIMEOUT_SECONDS,
     CognitionRouteSettingV1,
-    load_cognition_v2_route_settings,
-    load_cognition_v3_route_settings,
+    get_cognition_v3_route_settings,
 )
 from kazusa_ai_chatbot.conversation_progress import (
     project_conversation_progress_evidence,
@@ -213,85 +210,10 @@ def _cognition_route_config(
 
 
 def build_cognition_core_services(
-) -> CognitionCoreServicesV2 | CognitionChainServicesV3:
-    """Build only the selected cognition engine's injected model bindings."""
+) -> CognitionChainServicesV3:
+    """Build the injected model bindings for the V3 cognition chain."""
 
-    if COGNITION_CORE_ENGINE == "v2":
-        route_settings = load_cognition_v2_route_settings()
-        services = CognitionCoreServicesV2(
-            llm=_llm_interface,
-            appraisal_event_agency_config=_cognition_route_config(
-                route_settings["appraisal_event_agency"],
-                stage_name="cognition_core_v2.appraisal_event_agency",
-                route_name="COGNITION_LLM_APPRAISAL_EVENT_AGENCY",
-            ),
-            appraisal_relationship_social_config=_cognition_route_config(
-                route_settings["appraisal_relationship_social"],
-                stage_name="cognition_core_v2.appraisal_relationship_social",
-                route_name="COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL",
-            ),
-            appraisal_moral_identity_config=_cognition_route_config(
-                route_settings["appraisal_moral_identity"],
-                stage_name="cognition_core_v2.appraisal_moral_identity",
-                route_name="COGNITION_LLM_APPRAISAL_MORAL_IDENTITY",
-            ),
-            appraisal_goal_threat_outcome_config=_cognition_route_config(
-                route_settings["appraisal_goal_threat_outcome"],
-                stage_name="cognition_core_v2.appraisal_goal_threat_outcome",
-                route_name="COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME",
-            ),
-            appraisal_epistemic_comparison_memory_config=(
-                _cognition_route_config(
-                    route_settings["appraisal_epistemic_comparison_memory"],
-                    stage_name=(
-                        "cognition_core_v2."
-                        "appraisal_epistemic_comparison_memory"
-                    ),
-                    route_name=(
-                        "COGNITION_LLM_"
-                        "APPRAISAL_EPISTEMIC_COMPARISON_MEMORY"
-                    ),
-                )
-            ),
-            appraisal_existential_drive_config=_cognition_route_config(
-                route_settings["appraisal_existential_drive"],
-                stage_name="cognition_core_v2.appraisal_existential_drive",
-                route_name="COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE",
-            ),
-            goal_ordinary_response_config=_cognition_route_config(
-                route_settings["goal_ordinary_response"],
-                stage_name="cognition_core_v2.goal_ordinary_response",
-                route_name="COGNITION_LLM_GOAL_ORDINARY_RESPONSE",
-            ),
-            goal_active_branch_config=_cognition_route_config(
-                route_settings["goal_active_branch"],
-                stage_name="cognition_core_v2.goal_active_branch",
-                route_name="COGNITION_LLM_GOAL_ACTIVE_BRANCH",
-            ),
-            workspace_collapse_config=_cognition_route_config(
-                route_settings["workspace_collapse"],
-                stage_name="cognition_core_v2.workspace_collapse",
-                route_name="COGNITION_LLM_WORKSPACE_COLLAPSE",
-            ),
-            action_planning_config=_cognition_route_config(
-                route_settings["action_planning"],
-                stage_name="cognition_core_v2.action_planning",
-                route_name="COGNITION_LLM_ACTION_PLANNING",
-            ),
-            action_authorization_config=_cognition_route_config(
-                route_settings["action_authorization"],
-                stage_name="cognition_core_v2.action_authorization",
-                route_name="COGNITION_LLM_ACTION_AUTHORIZATION",
-            ),
-            resolver_authorization_config=_cognition_route_config(
-                route_settings["resolver_authorization"],
-                stage_name="cognition_core_v2.resolver_authorization",
-                route_name="COGNITION_LLM_RESOLVER_AUTHORIZATION",
-            ),
-        )
-        return services
-
-    route_settings_v3 = load_cognition_v3_route_settings()
+    route_settings_v3 = get_cognition_v3_route_settings()
     chain_lane = _cognition_route_config(
         route_settings_v3.chain,
         stage_name="cognition_core_v3.chain",
@@ -820,7 +742,7 @@ async def call_cognition_subgraph(
                 retry_coordinator,
             )
         cognition_services = build_cognition_core_services()
-        if COGNITION_CORE_ENGINE == "v3" and current_chain_scope() is None:
+        if current_chain_scope() is None:
             attempt_ledger = current_v2_attempt_ledger()
             invocation_id = (
                 attempt_ledger.cognition_invocation_id

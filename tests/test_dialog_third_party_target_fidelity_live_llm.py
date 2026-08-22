@@ -14,7 +14,7 @@ import httpx
 import pytest
 
 from kazusa_ai_chatbot import service as brain_service
-from kazusa_ai_chatbot.cognition_core_v2.surface import (
+from kazusa_ai_chatbot.cognition_shared.surface import (
     run_text_surface_planning,
 )
 from kazusa_ai_chatbot.db import db_bootstrap
@@ -28,7 +28,7 @@ from kazusa_ai_chatbot.nodes import (
     persona_supervisor2_msg_decontextualizer as decontextualizer_module,
 )
 from tests import test_e2e_live_llm as e2e_module
-from tests.cognition_core_v2_test_helpers import canonical_episode
+from tests.cognition_test_helpers import canonical_episode
 from tests.live_llm_mongo import live_db
 
 

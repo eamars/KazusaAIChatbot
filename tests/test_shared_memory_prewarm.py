@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 from openai import OpenAIError
 
-from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
+from tests.cognition_test_helpers import canonical_user_message_episode
 from kazusa_ai_chatbot.cognition_resolver import capabilities
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
     empty_user_memory_context,

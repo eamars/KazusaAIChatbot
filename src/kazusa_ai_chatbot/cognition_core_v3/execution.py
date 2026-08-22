@@ -16,7 +16,7 @@ import httpx
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from openai import OpenAIError
 
-from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
     V2AttemptBudgetExhausted,
     current_v2_attempt_ledger,
     record_v2_attempt_disposition,

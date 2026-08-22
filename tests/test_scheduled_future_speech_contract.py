@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionContractError,
     build_scheduled_future_speech_authority,
     validate_scheduled_authority_carrier,

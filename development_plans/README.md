@@ -46,7 +46,6 @@ recorded evidence.
 | Document | Type | Status |
 |---|---|---|
 | [coding_agent_assessment_gap_phase_d_plan.md](active/short_term/coding_agent_assessment_gap_phase_d_plan.md) | Coding-agent persistent JSON action-loop and repository-index migration | in_progress |
-| [cognition_v3_hybrid_agentic_loop_reconciliation_plan.md](active/short_term/cognition_v3_hybrid_agentic_loop_reconciliation_plan.md) | Cognition V3 single-lane hybrid agentic-loop reconciliation, resolver continuation, observability, and evidence-gated cutover | in_progress |
 
 ### Superseded Plans
 
@@ -58,6 +57,9 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
+| [cognition_v3_hybrid_agentic_loop_reconciliation_plan.md](archive/completed/cognition_v3_hybrid_agentic_loop_reconciliation_plan.md) | Cognition V3 single-lane hybrid agentic-loop reconciliation and V3-only cutover | completed |
+| [cognition_v3_hybrid_agentic_loop_reconciliation_plan_handover_2026-08-21.md](archive/completed/cognition_v3_hybrid_agentic_loop_reconciliation_plan_handover_2026-08-21.md) | Gate 7/8 execution and closure handover | completed |
+| [cognition_v2_runtime_decommission_after_v3_cutover_plan_2026-08-22.md](archive/completed/cognition_v2_runtime_decommission_after_v3_cutover_plan_2026-08-22.md) | V2 cognition-engine removal and V3-only cutover closure | completed |
 | [cognition_v2_stale_axes_and_validator_policy_plan.md](archive/completed/cognition_v2_stale_axes_and_validator_policy_plan.md) | Stale relationship-axis maintenance and semantic/structural cognition admission policy | completed |
 
 ### Active Bugfix Plans

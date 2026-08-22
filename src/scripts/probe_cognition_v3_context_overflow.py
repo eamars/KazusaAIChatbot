@@ -21,11 +21,9 @@ from kazusa_ai_chatbot.cognition_core_v3.budget import (
     estimate_message_tokens,
 )
 from kazusa_ai_chatbot.config import (
-    COGNITION_CORE_ENGINE,
     COGNITION_STAGE_TIMEOUT_SECONDS,
     CognitionRouteSettingV1,
-    CognitionV3RouteSettingsV1,
-    get_selected_cognition_route_settings,
+    get_cognition_v3_route_settings,
 )
 from kazusa_ai_chatbot.llm_interface import (
     LLInterface,
@@ -380,13 +378,7 @@ def main() -> int:
         print(json.dumps(asdict(dry_run), sort_keys=True))
         return 0
 
-    if COGNITION_CORE_ENGINE != "v3":
-        raise ValueError(
-            "live overflow probe requires COGNITION_CORE_ENGINE=v3",
-        )
-    selected_settings = get_selected_cognition_route_settings()
-    if not isinstance(selected_settings, CognitionV3RouteSettingsV1):
-        raise TypeError("selected cognition route settings are not V3")
+    selected_settings = get_cognition_v3_route_settings()
     evidence = asyncio.run(
         _run_loaded_live_probe(
             route_setting=selected_settings.chain,

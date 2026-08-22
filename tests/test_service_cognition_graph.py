@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionExecutionError,
 )
 

@@ -1,6 +1,6 @@
 """V2 media-evidence routing contract tests."""
 
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     EVIDENCE_SOURCE_QUESTION_IDS,
 )
 

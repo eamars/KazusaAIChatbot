@@ -11,12 +11,12 @@ from datetime import timedelta
 from typing import Any, Literal
 from uuid import uuid4
 
-from kazusa_ai_chatbot.cognition_core_v2.character_carryover import (
+from kazusa_ai_chatbot.cognition_shared.character_carryover import (
     CharacterCarryoverServicesV1,
     _reduce_apply_decision,
     run_character_carryover_cognition,
 )
-from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
+from kazusa_ai_chatbot.cognition_shared.state_reducers import (
     apply_character_elapsed_decay,
 )
 from kazusa_ai_chatbot.consolidation.source_policy import (

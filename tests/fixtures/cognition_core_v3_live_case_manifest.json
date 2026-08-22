@@ -59,12 +59,12 @@
   "cases": [
     {
       "case_id": "event_agency_and_moral_chain",
-      "pytest_node_id": "tests/test_cognition_core_v3_live_llm.py::test_live_event_agency_and_moral_chain",
+      "pytest_node_id": "tests/test_cognition_core_v3_candidate_live_llm.py::test_live_candidate_event_agency_and_moral_chain",
       "fixture_id": "cogv3_live.event_agency_and_moral_chain.v1",
       "input_kind": "synthetic fixed",
       "input_provenance": {
         "source_id": "synthetic:event_agency_and_moral_chain:v1",
-        "builder_symbol": "tests.cognition_core_v3_comparison_harness:render_case_input"
+        "builder_symbol": "tests.cognition_v3_candidate_support:render_case_input"
       },
       "primary_capability_group": "appraisal/state",
       "behavior_contract": "grounded event agency plus moral appraisal with valid state effects",
@@ -137,7 +137,7 @@
           },
           "origin_metadata": {
             "schema_version": "user_message_origin.v1",
-            "owner": "tests.cognition_core_v2",
+            "owner": "tests.cognition_core_v3",
             "platform": "debug",
             "platform_message_id": "message:event_agency_and_moral_chain",
             "active_turn_platform_message_ids": [
@@ -549,12 +549,12 @@
     },
     {
       "case_id": "relationship_reciprocity",
-      "pytest_node_id": "tests/test_cognition_core_v3_live_llm.py::test_live_relationship_reciprocity",
+      "pytest_node_id": "tests/test_cognition_core_v3_candidate_live_llm.py::test_live_candidate_relationship_reciprocity",
       "fixture_id": "cogv3_live.relationship_reciprocity.v1",
       "input_kind": "synthetic fixed",
       "input_provenance": {
         "source_id": "synthetic:relationship_reciprocity:v1",
-        "builder_symbol": "tests.cognition_core_v3_comparison_harness:render_case_input"
+        "builder_symbol": "tests.cognition_v3_candidate_support:render_case_input"
       },
       "primary_capability_group": "relationship",
       "behavior_contract": "current reciprocity grounded in episode and relationship projection",
@@ -629,7 +629,7 @@
           },
           "origin_metadata": {
             "schema_version": "user_message_origin.v1",
-            "owner": "tests.cognition_core_v2",
+            "owner": "tests.cognition_core_v3",
             "platform": "debug",
             "platform_message_id": "message:relationship_reciprocity",
             "active_turn_platform_message_ids": [
@@ -1041,12 +1041,12 @@
     },
     {
       "case_id": "relationship_boundary_high_attachment_abuse",
-      "pytest_node_id": "tests/test_cognition_core_v3_live_llm.py::test_live_relationship_boundary_high_attachment_abuse",
+      "pytest_node_id": "tests/test_cognition_core_v3_candidate_live_llm.py::test_live_candidate_relationship_boundary_high_attachment_abuse",
       "fixture_id": "cogv3_live.relationship_boundary_high_attachment_abuse.v1",
       "input_kind": "captured regression",
       "input_provenance": {
         "source_id": "captured_regression:relationship_boundary_high_attachment_abuse:v1",
-        "builder_symbol": "tests.cognition_core_v3_comparison_harness:render_case_input"
+        "builder_symbol": "tests.cognition_v3_candidate_support:render_case_input"
       },
       "primary_capability_group": "relationship",
       "behavior_contract": "attachment cannot erase character boundary judgment",
@@ -1121,7 +1121,7 @@
           },
           "origin_metadata": {
             "schema_version": "user_message_origin.v1",
-            "owner": "tests.cognition_core_v2",
+            "owner": "tests.cognition_core_v3",
             "platform": "debug",
             "platform_message_id": "message:relationship_boundary_high_attachment_abuse",
             "active_turn_platform_message_ids": [
@@ -1567,12 +1567,12 @@
     },
     {
       "case_id": "relationship_unestablished_intimate_request",
-      "pytest_node_id": "tests/test_cognition_core_v3_live_llm.py::test_live_relationship_unestablished_intimate_request",
+      "pytest_node_id": "tests/test_cognition_core_v3_candidate_live_llm.py::test_live_candidate_relationship_unestablished_intimate_request",
       "fixture_id": "cogv3_live.relationship_unestablished_intimate_request.v1",
       "input_kind": "captured regression",
       "input_provenance": {
         "source_id": "captured_regression:relationship_unestablished_intimate_request:v1",
-        "builder_symbol": "tests.cognition_core_v3_comparison_harness:render_case_input"
+        "builder_symbol": "tests.cognition_v3_candidate_support:render_case_input"
       },
       "primary_capability_group": "relationship",
       "behavior_contract": "unestablished relationship produces believable grounded stance",
@@ -1647,7 +1647,7 @@
           },
           "origin_metadata": {
             "schema_version": "user_message_origin.v1",
-            "owner": "tests.cognition_core_v2",
+            "owner": "tests.cognition_core_v3",
             "platform": "debug",
             "platform_message_id": "message:relationship_unestablished_intimate_request",
             "active_turn_platform_message_ids": [
@@ -2059,12 +2059,12 @@
     },
     {
       "case_id": "goal_completion_terminalization",
-      "pytest_node_id": "tests/test_cognition_core_v3_live_llm.py::test_live_goal_completion_terminalization",
+      "pytest_node_id": "tests/test_cognition_core_v3_candidate_live_llm.py::test_live_candidate_goal_completion_terminalization",
       "fixture_id": "cogv3_live.goal_completion_terminalization.v1",
       "input_kind": "synthetic fixed",
       "input_provenance": {
         "source_id": "synthetic:goal_completion_terminalization:v1",
-        "builder_symbol": "tests.cognition_core_v3_comparison_harness:render_case_input"
+        "builder_symbol": "tests.cognition_v3_candidate_support:render_case_input"
       },
       "primary_capability_group": "goal/selection",
       "behavior_contract": "supported completion terminalizes the exact goal",
@@ -2139,7 +2139,7 @@
           },
           "origin_metadata": {
             "schema_version": "user_message_origin.v1",
-            "owner": "tests.cognition_core_v2",
+            "owner": "tests.cognition_core_v3",
             "platform": "debug",
             "platform_message_id": "message:goal_completion_terminalization",
             "active_turn_platform_message_ids": [
@@ -2577,12 +2577,12 @@
     },
     {
       "case_id": "threat_resolution_and_relief",
-      "pytest_node_id": "tests/test_cognition_core_v3_live_llm.py::test_live_threat_resolution_and_relief",
+      "pytest_node_id": "tests/test_cognition_core_v3_candidate_live_llm.py::test_live_candidate_threat_resolution_and_relief",
       "fixture_id": "cogv3_live.threat_resolution_and_relief.v1",
       "input_kind": "synthetic fixed",
       "input_provenance": {
         "source_id": "synthetic:threat_resolution_and_relief:v1",
-        "builder_symbol": "tests.cognition_core_v3_comparison_harness:render_case_input"
+        "builder_symbol": "tests.cognition_v3_candidate_support:render_case_input"
       },
       "primary_capability_group": "appraisal/state",
       "behavior_contract": "supported threat resolution yields valid relief trajectory",
@@ -2655,7 +2655,7 @@
           },
           "origin_metadata": {
             "schema_version": "user_message_origin.v1",
-            "owner": "tests.cognition_core_v2",
+            "owner": "tests.cognition_core_v3",
             "platform": "debug",
             "platform_message_id": "message:threat_resolution_and_relief",
             "active_turn_platform_message_ids": [
@@ -3091,12 +3091,12 @@
     },
     {
       "case_id": "epistemic_comparison",
-      "pytest_node_id": "tests/test_cognition_core_v3_live_llm.py::test_live_epistemic_comparison",
+      "pytest_node_id": "tests/test_cognition_core_v3_candidate_live_llm.py::test_live_candidate_epistemic_comparison",
       "fixture_id": "cogv3_live.epistemic_comparison.v1",
       "input_kind": "synthetic fixed",
       "input_provenance": {
         "source_id": "synthetic:epistemic_comparison:v1",
-        "builder_symbol": "tests.cognition_core_v3_comparison_harness:render_case_input"
+        "builder_symbol": "tests.cognition_v3_candidate_support:render_case_input"
       },
       "primary_capability_group": "appraisal/state",
       "behavior_contract": "comparison and epistemic meaning remain evidence-bound",
@@ -3169,7 +3169,7 @@
           },
           "origin_metadata": {
             "schema_version": "user_message_origin.v1",
-            "owner": "tests.cognition_core_v2",
+            "owner": "tests.cognition_core_v3",
             "platform": "debug",
             "platform_message_id": "message:epistemic_comparison",
             "active_turn_platform_message_ids": [
@@ -3615,12 +3615,12 @@
     },
     {
       "case_id": "memory_cue_nostalgia",
-      "pytest_node_id": "tests/test_cognition_core_v3_live_llm.py::test_live_memory_cue_nostalgia",
+      "pytest_node_id": "tests/test_cognition_core_v3_candidate_live_llm.py::test_live_candidate_memory_cue_nostalgia",
       "fixture_id": "cogv3_live.memory_cue_nostalgia.v1",
       "input_kind": "synthetic fixed",
       "input_provenance": {
         "source_id": "synthetic:memory_cue_nostalgia:v1",
-        "builder_symbol": "tests.cognition_core_v3_comparison_harness:render_case_input"
+        "builder_symbol": "tests.cognition_v3_candidate_support:render_case_input"
       },
       "primary_capability_group": "appraisal/state",
       "behavior_contract": "memory cue supports nostalgia without becoming current fact",
@@ -3693,7 +3693,7 @@
           },
           "origin_metadata": {
             "schema_version": "user_message_origin.v1",
-            "owner": "tests.cognition_core_v2",
+            "owner": "tests.cognition_core_v3",
             "platform": "debug",
             "platform_message_id": "message:memory_cue_nostalgia",
             "active_turn_platform_message_ids": [
@@ -4125,12 +4125,12 @@
     },
     {
       "case_id": "existential_drive",
-      "pytest_node_id": "tests/test_cognition_core_v3_live_llm.py::test_live_existential_drive",
+      "pytest_node_id": "tests/test_cognition_core_v3_candidate_live_llm.py::test_live_candidate_existential_drive",
       "fixture_id": "cogv3_live.existential_drive.v1",
       "input_kind": "synthetic fixed",
       "input_provenance": {
         "source_id": "synthetic:existential_drive:v1",
-        "builder_symbol": "tests.cognition_core_v3_comparison_harness:render_case_input"
+        "builder_symbol": "tests.cognition_v3_candidate_support:render_case_input"
       },
       "primary_capability_group": "appraisal/state",
       "behavior_contract": "drive appraisal stays within its family authority",
@@ -4203,7 +4203,7 @@
           },
           "origin_metadata": {
             "schema_version": "user_message_origin.v1",
-            "owner": "tests.cognition_core_v2",
+            "owner": "tests.cognition_core_v3",
             "platform": "debug",
             "platform_message_id": "message:existential_drive",
             "active_turn_platform_message_ids": [
@@ -4630,12 +4630,12 @@
     },
     {
       "case_id": "ordinary_neutral_response",
-      "pytest_node_id": "tests/test_cognition_core_v3_live_llm.py::test_live_ordinary_neutral_response",
+      "pytest_node_id": "tests/test_cognition_core_v3_candidate_live_llm.py::test_live_candidate_ordinary_neutral_response",
       "fixture_id": "cogv3_live.ordinary_neutral_response.v1",
       "input_kind": "synthetic fixed",
       "input_provenance": {
         "source_id": "synthetic:ordinary_neutral_response:v1",
-        "builder_symbol": "tests.cognition_core_v3_comparison_harness:render_case_input"
+        "builder_symbol": "tests.cognition_v3_candidate_support:render_case_input"
       },
       "primary_capability_group": "goal/selection",
       "behavior_contract": "ordinary baseline chooses a fitting neutral goal",
@@ -4710,7 +4710,7 @@
           },
           "origin_metadata": {
             "schema_version": "user_message_origin.v1",
-            "owner": "tests.cognition_core_v2",
+            "owner": "tests.cognition_core_v3",
             "platform": "debug",
             "platform_message_id": "message:ordinary_neutral_response",
             "active_turn_platform_message_ids": [
@@ -5122,12 +5122,12 @@
     },
     {
       "case_id": "required_selection_nested_roles",
-      "pytest_node_id": "tests/test_cognition_core_v3_live_llm.py::test_live_required_selection_nested_roles",
+      "pytest_node_id": "tests/test_cognition_core_v3_candidate_live_llm.py::test_live_candidate_required_selection_nested_roles",
       "fixture_id": "cogv3_live.required_selection_nested_roles.v1",
       "input_kind": "captured regression",
       "input_provenance": {
         "source_id": "captured_regression:required_selection_nested_roles:v1",
-        "builder_symbol": "tests.cognition_core_v3_comparison_harness:render_case_input"
+        "builder_symbol": "tests.cognition_v3_candidate_support:render_case_input"
       },
       "primary_capability_group": "goal/selection",
       "behavior_contract": "selected nested action preserves actor/target ownership",
@@ -5212,7 +5212,7 @@
           },
           "origin_metadata": {
             "schema_version": "user_message_origin.v1",
-            "owner": "tests.cognition_core_v2",
+            "owner": "tests.cognition_core_v3",
             "platform": "debug",
             "platform_message_id": "message:required_selection_nested_roles",
             "active_turn_platform_message_ids": [
@@ -5624,12 +5624,12 @@
     },
     {
       "case_id": "required_selection_private_refusal",
-      "pytest_node_id": "tests/test_cognition_core_v3_live_llm.py::test_live_required_selection_private_refusal",
+      "pytest_node_id": "tests/test_cognition_core_v3_candidate_live_llm.py::test_live_candidate_required_selection_private_refusal",
       "fixture_id": "cogv3_live.required_selection_private_refusal.v1",
       "input_kind": "captured regression",
       "input_provenance": {
         "source_id": "captured_regression:required_selection_private_refusal:v1",
-        "builder_symbol": "tests.cognition_core_v3_comparison_harness:render_case_input"
+        "builder_symbol": "tests.cognition_v3_candidate_support:render_case_input"
       },
       "primary_capability_group": "goal/selection",
       "behavior_contract": "private refusal remains character-owned and role-correct",
@@ -5714,7 +5714,7 @@
           },
           "origin_metadata": {
             "schema_version": "user_message_origin.v1",
-            "owner": "tests.cognition_core_v2",
+            "owner": "tests.cognition_core_v3",
             "platform": "debug",
             "platform_message_id": "message:required_selection_private_refusal",
             "active_turn_platform_message_ids": [
@@ -6126,12 +6126,12 @@
     },
     {
       "case_id": "group_third_party_addressee",
-      "pytest_node_id": "tests/test_cognition_core_v3_live_llm.py::test_live_group_third_party_addressee",
+      "pytest_node_id": "tests/test_cognition_core_v3_candidate_live_llm.py::test_live_candidate_group_third_party_addressee",
       "fixture_id": "cogv3_live.group_third_party_addressee.v1",
       "input_kind": "captured regression",
       "input_provenance": {
         "source_id": "captured_regression:group_third_party_addressee:v1",
-        "builder_symbol": "tests.cognition_core_v3_comparison_harness:render_case_input"
+        "builder_symbol": "tests.cognition_v3_candidate_support:render_case_input"
       },
       "primary_capability_group": "group/self-cognition",
       "behavior_contract": "third-party target never becomes current-user second person",
@@ -6206,7 +6206,7 @@
           },
           "origin_metadata": {
             "schema_version": "user_message_origin.v1",
-            "owner": "tests.cognition_core_v2",
+            "owner": "tests.cognition_core_v3",
             "platform": "debug",
             "platform_message_id": "message:group_third_party_addressee",
             "active_turn_platform_message_ids": [
@@ -6618,12 +6618,12 @@
     },
     {
       "case_id": "group_self_cognition_stays_silent",
-      "pytest_node_id": "tests/test_cognition_core_v3_live_llm.py::test_live_group_self_cognition_stays_silent",
+      "pytest_node_id": "tests/test_cognition_core_v3_candidate_live_llm.py::test_live_candidate_group_self_cognition_stays_silent",
       "fixture_id": "cogv3_live.group_self_cognition_stays_silent.v1",
       "input_kind": "synthetic fixed",
       "input_provenance": {
         "source_id": "synthetic:group_self_cognition_stays_silent:v1",
-        "builder_symbol": "tests.cognition_core_v3_comparison_harness:render_case_input"
+        "builder_symbol": "tests.cognition_v3_candidate_support:render_case_input"
       },
       "primary_capability_group": "group/self-cognition",
       "behavior_contract": "weak or self-referential reason produces grounded silence",
@@ -6683,7 +6683,7 @@
           },
           "origin_metadata": {
             "schema_version": "self_cognition_origin.v1",
-            "owner": "tests.cognition_core_v2",
+            "owner": "tests.cognition_core_v3",
             "platform": "debug",
             "platform_message_id": "message:group_self_cognition_stays_silent",
             "active_turn_platform_message_ids": [
@@ -7105,12 +7105,12 @@
     },
     {
       "case_id": "group_self_cognition_proposes_reply",
-      "pytest_node_id": "tests/test_cognition_core_v3_live_llm.py::test_live_group_self_cognition_proposes_reply",
+      "pytest_node_id": "tests/test_cognition_core_v3_candidate_live_llm.py::test_live_candidate_group_self_cognition_proposes_reply",
       "fixture_id": "cogv3_live.group_self_cognition_proposes_reply.v1",
       "input_kind": "synthetic fixed",
       "input_provenance": {
         "source_id": "synthetic:group_self_cognition_proposes_reply:v1",
-        "builder_symbol": "tests.cognition_core_v3_comparison_harness:render_case_input"
+        "builder_symbol": "tests.cognition_v3_candidate_support:render_case_input"
       },
       "primary_capability_group": "group/self-cognition",
       "behavior_contract": "concrete scene intersection supports a targeted proposal",
@@ -7170,7 +7170,7 @@
           },
           "origin_metadata": {
             "schema_version": "self_cognition_origin.v1",
-            "owner": "tests.cognition_core_v2",
+            "owner": "tests.cognition_core_v3",
             "platform": "debug",
             "platform_message_id": "message:group_self_cognition_proposes_reply",
             "active_turn_platform_message_ids": [
@@ -7592,12 +7592,12 @@
     },
     {
       "case_id": "resolver_observation_continuation",
-      "pytest_node_id": "tests/test_cognition_core_v3_live_llm.py::test_live_resolver_observation_continuation",
+      "pytest_node_id": "tests/test_cognition_core_v3_candidate_live_llm.py::test_live_candidate_resolver_observation_continuation",
       "fixture_id": "cogv3_live.resolver_observation_continuation.v1",
       "input_kind": "synthetic fixed",
       "input_provenance": {
         "source_id": "synthetic:resolver_observation_continuation:v1",
-        "builder_symbol": "tests.cognition_core_v3_comparison_harness:render_case_input"
+        "builder_symbol": "tests.cognition_v3_candidate_support:render_case_input"
       },
       "primary_capability_group": "action/resolver",
       "behavior_contract": "new observation re-enters cognition and revises the plan",
@@ -7673,7 +7673,7 @@
           },
           "origin_metadata": {
             "schema_version": "user_message_origin.v1",
-            "owner": "tests.cognition_core_v2",
+            "owner": "tests.cognition_core_v3",
             "platform": "debug",
             "platform_message_id": "message:resolver_observation_continuation",
             "active_turn_platform_message_ids": [
@@ -8119,12 +8119,12 @@
     },
     {
       "case_id": "tool_result_answerability",
-      "pytest_node_id": "tests/test_cognition_core_v3_live_llm.py::test_live_tool_result_answerability",
+      "pytest_node_id": "tests/test_cognition_core_v3_candidate_live_llm.py::test_live_candidate_tool_result_answerability",
       "fixture_id": "cogv3_live.tool_result_answerability.v1",
       "input_kind": "synthetic fixed",
       "input_provenance": {
         "source_id": "synthetic:tool_result_answerability:v1",
-        "builder_symbol": "tests.cognition_core_v3_comparison_harness:render_case_input"
+        "builder_symbol": "tests.cognition_v3_candidate_support:render_case_input"
       },
       "primary_capability_group": "action/resolver",
       "behavior_contract": "complete evidence changes answerability without duplicate work",
@@ -8667,12 +8667,12 @@
     },
     {
       "case_id": "future_speak_authority",
-      "pytest_node_id": "tests/test_cognition_core_v3_live_llm.py::test_live_future_speak_authority",
+      "pytest_node_id": "tests/test_cognition_core_v3_candidate_live_llm.py::test_live_candidate_future_speak_authority",
       "fixture_id": "cogv3_live.future_speak_authority.v1",
       "input_kind": "captured regression",
       "input_provenance": {
         "source_id": "captured_regression:future_speak_authority:v1",
-        "builder_symbol": "tests.cognition_core_v3_comparison_harness:render_case_input"
+        "builder_symbol": "tests.cognition_v3_candidate_support:render_case_input"
       },
       "primary_capability_group": "action/resolver",
       "behavior_contract": "scheduled authority remains explicit and permission-bound",
@@ -8758,7 +8758,7 @@
           },
           "origin_metadata": {
             "schema_version": "user_message_origin.v1",
-            "owner": "tests.cognition_core_v2",
+            "owner": "tests.cognition_core_v3",
             "platform": "debug",
             "platform_message_id": "message:future_speak_authority",
             "active_turn_platform_message_ids": [
@@ -9170,12 +9170,12 @@
     },
     {
       "case_id": "current_message_prompt_injection_is_data",
-      "pytest_node_id": "tests/test_cognition_core_v3_live_llm.py::test_live_current_message_prompt_injection_is_data",
+      "pytest_node_id": "tests/test_cognition_core_v3_candidate_live_llm.py::test_live_candidate_current_message_prompt_injection_is_data",
       "fixture_id": "cogv3_live.current_message_prompt_injection_is_data.v1",
       "input_kind": "adversarial fixed",
       "input_provenance": {
         "source_id": "adversarial:current_message_prompt_injection_is_data:v1",
-        "builder_symbol": "tests.cognition_core_v3_comparison_harness:render_case_input"
+        "builder_symbol": "tests.cognition_v3_candidate_support:render_case_input"
       },
       "primary_capability_group": "robustness",
       "behavior_contract": "current-message injection remains data",
@@ -9247,7 +9247,7 @@
           },
           "origin_metadata": {
             "schema_version": "user_message_origin.v1",
-            "owner": "tests.cognition_core_v2",
+            "owner": "tests.cognition_core_v3",
             "platform": "debug",
             "platform_message_id": "message:current_message_prompt_injection_is_data",
             "active_turn_platform_message_ids": [
@@ -9659,12 +9659,12 @@
     },
     {
       "case_id": "retrieved_evidence_prompt_injection_is_data",
-      "pytest_node_id": "tests/test_cognition_core_v3_live_llm.py::test_live_retrieved_evidence_prompt_injection_is_data",
+      "pytest_node_id": "tests/test_cognition_core_v3_candidate_live_llm.py::test_live_candidate_retrieved_evidence_prompt_injection_is_data",
       "fixture_id": "cogv3_live.retrieved_evidence_prompt_injection_is_data.v1",
       "input_kind": "adversarial fixed",
       "input_provenance": {
         "source_id": "adversarial:retrieved_evidence_prompt_injection_is_data:v1",
-        "builder_symbol": "tests.cognition_core_v3_comparison_harness:render_case_input"
+        "builder_symbol": "tests.cognition_v3_candidate_support:render_case_input"
       },
       "primary_capability_group": "robustness",
       "behavior_contract": "retrieved injection remains evidence text, not instruction",
@@ -9736,7 +9736,7 @@
           },
           "origin_metadata": {
             "schema_version": "user_message_origin.v1",
-            "owner": "tests.cognition_core_v2",
+            "owner": "tests.cognition_core_v3",
             "platform": "debug",
             "platform_message_id": "message:retrieved_evidence_prompt_injection_is_data",
             "active_turn_platform_message_ids": [
@@ -10168,12 +10168,12 @@
     },
     {
       "case_id": "long_context_reanchor",
-      "pytest_node_id": "tests/test_cognition_core_v3_live_llm.py::test_live_long_context_reanchor",
+      "pytest_node_id": "tests/test_cognition_core_v3_candidate_live_llm.py::test_live_candidate_long_context_reanchor",
       "fixture_id": "cogv3_live.long_context_reanchor.v1",
       "input_kind": "synthetic fixed",
       "input_provenance": {
         "source_id": "synthetic:long_context_reanchor:v1",
-        "builder_symbol": "tests.cognition_core_v3_comparison_harness:render_case_input"
+        "builder_symbol": "tests.cognition_v3_candidate_support:render_case_input"
       },
       "primary_capability_group": "robustness",
       "behavior_contract": "depth preserves contract and one bounded re-anchor",
@@ -10245,7 +10245,7 @@
           },
           "origin_metadata": {
             "schema_version": "user_message_origin.v1",
-            "owner": "tests.cognition_core_v2",
+            "owner": "tests.cognition_core_v3",
             "platform": "debug",
             "platform_message_id": "message:long_context_reanchor",
             "active_turn_platform_message_ids": [
@@ -11277,12 +11277,12 @@
     },
     {
       "case_id": "crying_sadness",
-      "pytest_node_id": "tests/test_cognition_core_v3_live_llm.py::test_live_crying_sadness",
+      "pytest_node_id": "tests/test_cognition_core_v3_candidate_live_llm.py::test_live_candidate_crying_sadness",
       "fixture_id": "cogv3_live.crying_sadness.v1",
       "input_kind": "captured regression",
       "input_provenance": {
         "source_id": "captured_regression:crying_sadness:v1",
-        "builder_symbol": "tests.cognition_core_v3_comparison_harness:render_case_input"
+        "builder_symbol": "tests.cognition_v3_candidate_support:render_case_input"
       },
       "primary_capability_group": "appraisal/state",
       "behavior_contract": "sadness remains grounded in the observed cause",
@@ -11355,7 +11355,7 @@
           },
           "origin_metadata": {
             "schema_version": "user_message_origin.v1",
-            "owner": "tests.cognition_core_v2",
+            "owner": "tests.cognition_core_v3",
             "platform": "debug",
             "platform_message_id": "message:crying_sadness",
             "active_turn_platform_message_ids": [
@@ -11801,12 +11801,12 @@
     },
     {
       "case_id": "verbal_abuse_boundary",
-      "pytest_node_id": "tests/test_cognition_core_v3_live_llm.py::test_live_verbal_abuse_boundary",
+      "pytest_node_id": "tests/test_cognition_core_v3_candidate_live_llm.py::test_live_candidate_verbal_abuse_boundary",
       "fixture_id": "cogv3_live.verbal_abuse_boundary.v1",
       "input_kind": "captured regression",
       "input_provenance": {
         "source_id": "captured_regression:verbal_abuse_boundary:v1",
-        "builder_symbol": "tests.cognition_core_v3_comparison_harness:render_case_input"
+        "builder_symbol": "tests.cognition_v3_candidate_support:render_case_input"
       },
       "primary_capability_group": "relationship",
       "behavior_contract": "abuse produces believable boundary judgment without target inversion",
@@ -11881,7 +11881,7 @@
           },
           "origin_metadata": {
             "schema_version": "user_message_origin.v1",
-            "owner": "tests.cognition_core_v2",
+            "owner": "tests.cognition_core_v3",
             "platform": "debug",
             "platform_message_id": "message:verbal_abuse_boundary",
             "active_turn_platform_message_ids": [
@@ -12327,12 +12327,12 @@
     },
     {
       "case_id": "multi_goal_competition",
-      "pytest_node_id": "tests/test_cognition_core_v3_live_llm.py::test_live_multi_goal_competition",
+      "pytest_node_id": "tests/test_cognition_core_v3_candidate_live_llm.py::test_live_candidate_multi_goal_competition",
       "fixture_id": "cogv3_live.multi_goal_competition.v1",
       "input_kind": "synthetic fixed",
       "input_provenance": {
         "source_id": "synthetic:multi_goal_competition:v1",
-        "builder_symbol": "tests.cognition_core_v3_comparison_harness:render_case_input"
+        "builder_symbol": "tests.cognition_v3_candidate_support:render_case_input"
       },
       "primary_capability_group": "goal/selection",
       "behavior_contract": "current-matter arbitration preserves competing valid goals",
@@ -12407,7 +12407,7 @@
           },
           "origin_metadata": {
             "schema_version": "user_message_origin.v1",
-            "owner": "tests.cognition_core_v2",
+            "owner": "tests.cognition_core_v3",
             "platform": "debug",
             "platform_message_id": "message:multi_goal_competition",
             "active_turn_platform_message_ids": [

@@ -19,8 +19,14 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from kazusa_ai_chatbot.cognition_core_v2.branch_activation import branch_order_key
-from kazusa_ai_chatbot.cognition_core_v2.contracts import ROLE_ENTITY_KINDS, ROLE_VALUES
+from kazusa_ai_chatbot.cognition_core_v3.registry import branch_order_key
+from kazusa_ai_chatbot.cognition_shared.contracts import (
+    ROLE_ENTITY_KINDS,
+    ROLE_VALUES,
+    ActionBidV2,
+    CollapsedIntentionV2,
+    RelationalWillingnessV2,
+)
 
 # Complete-bid admission: the exact V2 ``ActionBidV2`` core field set plus its
 # two optional fields. A candidate missing any required field, carrying an
@@ -314,3 +320,101 @@ def fallback_partition_envelope(
         "supporting_bids": [],
         "competing_bids": [dict(bid) for bid in suppressed],
     }
+
+
+def collapse_authoritative_relational_bid(
+    bids: Sequence[ActionBidV2],
+    decision: RelationalWillingnessV2,
+) -> CollapsedIntentionV2:
+    """Preserve the ordinary relational owner without semantic reinterpretation.
+
+    This deterministic collapse runs only when the ordinary goal owner declared
+    the turn relationship-sensitive. It makes that ordinary bid primary,
+    exposes no supporting bid, and places every other bid in ``competing_bids``.
+    It never reads user text, relationship axes, memory, or bid prose.
+
+    Args:
+        bids: Complete branch-owned candidates eligible for partition.
+        decision: Validated ordinary character-owned relational stance.
+
+    Returns:
+        The authoritative collapse envelope with the ordinary bid primary.
+
+    Raises:
+        ValueError: When no relationship-sensitive decision is supplied,
+            exactly one ordinary bid carrying the equal decision is missing, or
+            a competing ordinary bid is present.
+    """
+
+    if (
+        not isinstance(decision, Mapping)
+        or decision["applicability"] != "relationship_sensitive"
+    ):
+        raise ValueError(
+            "authoritative relational collapse requires a sensitive decision"
+        )
+    ordinary_bids = [
+        bid
+        for bid in bids
+        if bid["branch_id"] == "ordinary_response"
+    ]
+    if len(ordinary_bids) != 1:
+        raise ValueError(
+            "authoritative relational collapse requires exactly one ordinary bid"
+        )
+    ordinary_bid = ordinary_bids[0]
+    if ordinary_bid.get("relational_willingness") != dict(decision):
+        raise ValueError(
+            "authoritative relational collapse requires the equal decision"
+        )
+    competing_bids = [
+        bid
+        for bid in bids
+        if bid["branch_id"] != "ordinary_response"
+    ]
+    return_value: CollapsedIntentionV2 = {
+        "primary_branch_id": ordinary_bid["branch_id"],
+        "supporting_branch_ids": [],
+        "suppressed_branch_ids": [
+            bid["branch_id"] for bid in competing_bids
+        ],
+        "primary_bid": ordinary_bid,
+        "supporting_bids": [],
+        "competing_bids": list(competing_bids),
+    }
+    return return_value
+
+def validate_workspace_partition(
+    parsed: object,
+    handles: set[str],
+) -> dict[str, Any]:
+    """Validate exact handle partition output from workspace collapse."""
+
+    if not isinstance(parsed, Mapping):
+        raise ValueError("workspace partition must be an object")
+    required = {
+        "primary_bid_handle",
+        "supporting_bid_handles",
+        "suppressed_bid_handles",
+    }
+    if set(parsed) != required:
+        raise ValueError("workspace partition fields are not exact")
+    primary = parsed["primary_bid_handle"]
+    if primary not in handles:
+        raise ValueError("workspace primary handle is unavailable")
+    partitions = []
+    for field_name in ("supporting_bid_handles", "suppressed_bid_handles"):
+        values = parsed[field_name]
+        if not isinstance(values, list) or any(
+            value not in handles for value in values
+        ):
+            raise ValueError("workspace partition handle is unavailable")
+        if len(values) != len(set(values)):
+            raise ValueError("workspace partition contains duplicate handles")
+        partitions.extend(values)
+    all_handles = [primary] + partitions
+    if len(all_handles) != len(handles) or set(all_handles) != handles:
+        raise ValueError("workspace partition is incomplete")
+    if len(all_handles) != len(set(all_handles)):
+        raise ValueError("workspace partition overlaps")
+    return dict(parsed)

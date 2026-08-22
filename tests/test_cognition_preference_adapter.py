@@ -1,11 +1,11 @@
-"""V2 preference surface ownership tests."""
+"""Preference surface ownership tests."""
 
 import inspect
 
-from kazusa_ai_chatbot.cognition_core_v2 import surface_stages
-from kazusa_ai_chatbot.cognition_core_v2.surface_stages import (
+from kazusa_ai_chatbot.cognition_shared.surface_stages import (
     PREFERENCE_SYSTEM_PROMPT,
 )
+from kazusa_ai_chatbot.cognition_shared import surface_stages
 
 
 def test_preference_stage_owns_visible_boundaries_only() -> None:

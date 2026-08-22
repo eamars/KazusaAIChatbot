@@ -4,7 +4,7 @@ import pytest
 
 import pytest
 
-from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
+from tests.cognition_test_helpers import canonical_user_message_episode
 from kazusa_ai_chatbot.cognition_resolver import capabilities
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as supervisor_module
 from kazusa_ai_chatbot.time_boundary import build_turn_clock

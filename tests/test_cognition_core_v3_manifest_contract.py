@@ -8,7 +8,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     validate_cognition_core_input,
 )
 
@@ -28,7 +28,7 @@ TOKEN_CALIBRATION_CORPUS_PATH = (
     / "cognition_core_v3_token_calibration_corpus.json"
 )
 EXPECTED_OWNED_PATHS_SHA256 = (
-    "c4573bfba1647c4f6af56eff34d13b7913c35d2a04a7d0c981f509c458636256"
+    "123bf78f516fab7e398877b11185fe6a2cfb555160419ec3c3581e0803bb3629"
 )
 EXPECTED_TOKEN_CORPUS_SHA256 = (
     "cc8715b0022243c8f2b59120bfaf508ca075e0aa38e805e25d781a226d4688d7"
@@ -61,7 +61,7 @@ UNIVERSAL_HARD_GATES = [
     "availability",
 ]
 BUILDER_SYMBOL = (
-    "tests.cognition_core_v3_comparison_harness:render_case_input"
+    "tests.cognition_v3_candidate_support:render_case_input"
 )
 
 EXPECTED_CASES = [
@@ -433,7 +433,7 @@ def test_live_case_manifest_is_complete_and_closed() -> None:
         assert set(row) == CASE_ROW_FIELDS
         assert row["case_id"] == case_id
         assert row["pytest_node_id"] == (
-            "tests/test_cognition_core_v3_live_llm.py::test_live_"
+            "tests/test_cognition_core_v3_candidate_live_llm.py::test_live_candidate_"
             f"{case_id}"
         )
         assert row["fixture_id"] == f"cogv3_live.{case_id}.v1"
@@ -548,42 +548,33 @@ def test_live_case_manifest_fixes_72_trial_floor_and_inherited_defect_schema(
 
 
 def test_architecture_manifest_has_exact_owned_paths() -> None:
-    """The baseline owns exactly the approved create and modify surface."""
+    """The active manifest names only the V3/shared ownership surface."""
 
     manifest = _load_json_object(ARCHITECTURE_MANIFEST_PATH)
-    assert set(manifest) == {
-        "schema_version",
-        "baseline_id",
-        "repository",
-        "governing_documents",
-        "sealed_inputs",
-        "public_contract",
-        "canonical_v2_substrate",
-        "current_topology",
-        "target_topology",
-        "quality_protocol",
-        "performance_protocol",
-        "environment_fingerprint_schema",
-        "owned_paths",
-        "generated_artifact_patterns",
-    }
-    assert manifest["schema_version"] == (
-        "cognition_v3_architecture_manifest.v1"
+    assert manifest["schema_version"] == "cognition_v3_architecture_manifest.v2"
+    assert manifest["current_topology"]["services"] == (
+        "CognitionChainServicesV3"
     )
-    assert manifest["baseline_id"] == "cogv3-g1-047bed95-331653f8"
-    assert manifest["repository"] == {
-        "branch": "feature/cognition_core_v3_cache_affine",
-        "head": "047bed9500111e44872b96c5445b6a64686f5803",
-    }
+    assert manifest["current_topology"]["appraisal_stage_layout"] == (
+        "fixed_a1_a2"
+    )
+    assert manifest["current_topology"]["appraisal_families"] == [
+        "event_agency",
+        "relationship_social",
+        "moral_identity",
+        "goal_threat_outcome",
+        "epistemic_comparison_memory",
+        "existential_drive",
+    ]
 
     owned_paths = manifest["owned_paths"]
-    assert set(owned_paths) == {"delete", "create", "modify"}
-    assert len(owned_paths["delete"]) == 0
-    assert len(owned_paths["create"]) == 32
-    assert len(owned_paths["modify"]) == 84
-    assert _canonical_sha256(owned_paths) == EXPECTED_OWNED_PATHS_SHA256
-    all_paths = [*owned_paths["create"], *owned_paths["modify"]]
+    all_paths = [
+        *owned_paths["delete"],
+        *owned_paths["create"],
+        *owned_paths["modify"],
+    ]
     assert len(all_paths) == len(set(all_paths))
+    assert _canonical_sha256(owned_paths) == EXPECTED_OWNED_PATHS_SHA256
     assert all(
         path
         and "\\" not in path
@@ -592,54 +583,31 @@ def test_architecture_manifest_has_exact_owned_paths() -> None:
         and "*" not in path
         for path in all_paths
     )
+    assert all("cognition_core_v2" not in path for path in all_paths)
+    assert all("CognitionCoreServicesV2" not in path for path in all_paths)
+    assert "src/kazusa_ai_chatbot/cognition_shared" in owned_paths["create"]
+    assert "src/kazusa_ai_chatbot/cognition_core_v3" in owned_paths["modify"]
 
+    contracts = __import__(
+        "kazusa_ai_chatbot.cognition_shared.contracts",
+        fromlist=["CognitionCoreInputV2", "CognitionCoreOutputV2"],
+    )
     assert manifest["public_contract"]["input_fields"] == list(
-        __import__(
-            "kazusa_ai_chatbot.cognition_core_v2.contracts",
-            fromlist=["CognitionCoreInputV2"],
-        ).CognitionCoreInputV2.__annotations__
+        contracts.CognitionCoreInputV2.__annotations__
     )
     assert manifest["public_contract"]["output_fields"] == list(
-        __import__(
-            "kazusa_ai_chatbot.cognition_core_v2.contracts",
-            fromlist=["CognitionCoreOutputV2"],
-        ).CognitionCoreOutputV2.__annotations__
+        contracts.CognitionCoreOutputV2.__annotations__
     )
-    assert manifest["target_topology"] == {
-        "primary_serial_steps": [
-            "anchor",
-            "A1",
-            "A2",
-            "I1",
-            "G1a",
-            "G1b",
-            "I2",
-            "W1_when_eligible",
-            "P1",
-        ],
-        "sidecar_streams": ["L1", "json_repair", "X1", "X2"],
-        "resolver_recurrence_steps": [
-            "append_observation",
-            "delta_appraisal",
-            "revise_bids",
-            "P1",
-        ],
-        "terminal_projection": "exact_CognitionCoreOutputV2_validation",
-        "primary_max_in_flight": 1,
-        "sidecar_max_in_flight": 1,
-        "foreign_primary_interleave_allowance": 0,
-    }
-    assert manifest["quality_protocol"]["v3_trial_denominator"] == 72
-    assert manifest["quality_protocol"][
-        "minimum_semantic_success_count"
-    ] == 69
-    assert manifest["quality_protocol"][
-        "hard_gate_failure_allowance"
-    ] == 0
-    assert len(manifest["performance_protocol"]["nodes"]) == 5
-    assert manifest["environment_fingerprint_schema"][
-        "schema_version"
-    ] == "cognition_v3_environment_fingerprint.v1"
+    assert manifest["public_contract"]["validator_module"] == (
+        "kazusa_ai_chatbot.cognition_shared.contracts"
+    )
+    assert manifest["performance_protocol"]["nodes"] == []
+    assert manifest["environment_fingerprint_schema"]["schema_version"] == (
+        "cognition_v3_environment_fingerprint.v2"
+    )
+    assert "appraisal_group_count" in manifest[
+        "environment_fingerprint_schema"
+    ]["forbidden_fields"]
 
     live_bytes = LIVE_CASE_MANIFEST_PATH.read_bytes()
     corpus_bytes = TOKEN_CALIBRATION_CORPUS_PATH.read_bytes()

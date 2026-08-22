@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_character_production_state,
 )
 from kazusa_ai_chatbot.reflection_cycle import affect_settling

@@ -8,21 +8,7 @@ from copy import deepcopy
 import pytest
 
 import kazusa_ai_chatbot.db._client as client_module
-from tests.live_llm_mongo import (
-    TEST_DB_NAME,
-    _document_hash,
-    _seed_content_hash,
-    assert_no_xdist,
-    assert_test_db_name,
-    live_db,
-    seed_shared_documents,
-    unique_owner_id,
-)
-
-
-_CLIENT_CONSTRUCTOR_NAME = "AsyncIO" + "MotorClient"
-
-from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_acquaintance_user_state,
 )
 from kazusa_ai_chatbot.db._client import close_db, get_db
@@ -33,6 +19,18 @@ from kazusa_ai_chatbot.db.users import (
     get_user_cognition_state,
     replace_user_cognition_state,
 )
+from tests.live_llm_mongo import (
+    TEST_DB_NAME,
+    _document_hash,
+    _seed_content_hash,
+    assert_no_xdist,
+    assert_test_db_name,
+    live_db,  # noqa: F401
+    seed_shared_documents,
+    unique_owner_id,
+)
+
+_CLIENT_CONSTRUCTOR_NAME = "AsyncIO" + "MotorClient"
 
 
 class _FakeAdmin:
@@ -203,7 +201,7 @@ def test_seed_hash_rejects_an_unexpected_document_sibling() -> None:
 @pytest.mark.asyncio
 @pytest.mark.live_db
 async def test_seed_is_idempotent_and_owner_rows_are_isolated(
-    live_db,
+    live_db,  # noqa: F811
     request: pytest.FixtureRequest,
 ) -> None:
     """Seed fixed fixtures once and isolate mutable rows by owner."""
@@ -249,7 +247,7 @@ async def test_seed_is_idempotent_and_owner_rows_are_isolated(
 @pytest.mark.asyncio
 @pytest.mark.live_db
 async def test_character_singleton_is_restored_after_a_mutation(
-    live_db,
+    live_db,  # noqa: F811
 ) -> None:
     """Restore the exact singleton snapshot after a calibration mutation."""
 
@@ -274,7 +272,9 @@ async def test_character_singleton_is_restored_after_a_mutation(
 
 @pytest.mark.asyncio
 @pytest.mark.live_db
-async def test_facades_reload_validated_state_after_client_restart(live_db) -> None:
+async def test_facades_reload_validated_state_after_client_restart(
+    live_db,  # noqa: F811
+) -> None:
     """Reload one user state through the facade after closing the client."""
 
     source_id = "seed-s2-acquaintance"
