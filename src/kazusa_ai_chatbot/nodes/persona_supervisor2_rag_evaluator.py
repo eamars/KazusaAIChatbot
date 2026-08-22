@@ -198,6 +198,7 @@ _evaluator_summarizer_llm_config = LLMCallConfig(
     thinking=LLMThinkingConfig(
         enabled=RAG_SUBAGENT_LLM_THINKING_ENABLED,
     ),
+    output_mode="text",
 )
 
 async def _summarize_agent_result(
@@ -638,7 +639,6 @@ _CONTINUATION_ASSESSOR_PROMPT = '''\
 }
 
 # 输出格式
-只返回有效 JSON：
 {
   "promote_candidate": false,
   "promoted_candidate_indexes": [0],
@@ -1180,6 +1180,7 @@ _finalizer_llm_config = LLMCallConfig(
     thinking=LLMThinkingConfig(
         enabled=RAG_SUBAGENT_LLM_THINKING_ENABLED,
     ),
+    output_mode="text",
 )
 _FINALIZER_UNRESOLVED_STATUS_LIMIT = 4
 _FINALIZER_UNRESOLVED_CANDIDATE_LIMIT = 6

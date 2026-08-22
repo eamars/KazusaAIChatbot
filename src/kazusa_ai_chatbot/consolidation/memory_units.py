@@ -623,8 +623,6 @@ _EXTRACTOR_PROMPT = '''\
 4. 对每个候选决定 `unit_type`；如果同一事项已经被 `{character_name}` 接受为后续行为，优先写成一条 `active_commitment`。
 5. 对带时间条件的候选先确定绝对日期或日期时间；无法确定且会影响活跃承诺有效性的候选直接删除。
 6. 写 `fact`、`subjective_appraisal`、`relationship_signal`，保持同一条记忆的三个互补面。
-7. 输出严格 JSON；不要输出解释文字。
-
 # 输入格式
 human payload 是以下 JSON：
 {{
@@ -654,7 +652,7 @@ human payload 是以下 JSON：
 }}
 
 # 输出格式
-请务必返回合法的 JSON 字符串，仅包含以下字段：
+字段如下：
 {{
     "memory_units": [
         {{
@@ -780,7 +778,6 @@ You are the memory-unit merge judge. You only decide create, merge, or evolve.
 }
 
 # Output Format
-Return only valid JSON:
 {
     "candidate_id": "candidate id copied from input",
     "decision": "create | merge | evolve",
@@ -866,8 +863,6 @@ You are the memory-unit rewrite stage. You update only the semantic text fields.
 - 不要把说话人标签、显示名称、泛称或 assistant 等机器标签写成记忆主体；需要命名时只能用 `{character_name}`。
 - 当需要说明某个名称、项目代号或称呼不属于 `{character_name}` 时，写作“不是指向 `{character_name}` 的名称/称呼”，不要使用泛称。
 - 所有“无关/不是/并非”的对象都必须写成 `{character_name}` 或省略，不允许用泛称代替。
-- 只返回有效 JSON。
-
 # Generation Procedure
 1. Read decision.decision first. Treat it as fixed.
 2. If decision is merge, compact repeated information from the existing unit and new candidate into one clearer memory.
@@ -899,7 +894,6 @@ You are the memory-unit rewrite stage. You update only the semantic text fields.
 }}
 
 # Output Format
-Return only valid JSON:
 {{
     "fact": "updated compact fact",
     "subjective_appraisal": "updated third-person subjective appraisal using the exact {character_name} string when naming {character_name}",
@@ -1026,7 +1020,6 @@ You are the memory-unit stability judge. You only choose recent or stable for in
 }
 
 # Output Format
-Return only valid JSON:
 {
     "unit_id": "unit id copied from input",
     "window": "recent | stable",

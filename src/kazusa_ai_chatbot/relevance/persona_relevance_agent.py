@@ -215,7 +215,7 @@ _SETTLED_WAIT_ACTION_CONTRACT = '''
 wait。
 
 # 输出格式
-只返回一个 JSON 对象，前后不添加文字：
+输出对象字段：
 {"response_action":"ignore|proceed|wait",
 "recipient_relation":"character|group|current_author|other_participant|participant_1..participant_8|unknown",
 "admission_basis":"interaction_relevance|character_state_salience|none",
@@ -225,7 +225,7 @@ wait。
 
 _SETTLED_FINAL_ACTION_CONTRACT = '''
 # 输出格式
-只返回一个 JSON 对象，前后不添加文字：
+输出对象字段：
 {"response_action":"ignore|proceed",
 "recipient_relation":"character|group|current_author|other_participant|participant_1..participant_8|unknown",
 "admission_basis":"interaction_relevance|character_state_salience|none",
@@ -239,7 +239,7 @@ _SETTLED_AUTHORITATIVE_ACTION_CONTRACT = '''
 {disposition_guidance}
 
 # 输出格式
-只返回一个 JSON 对象，前后不添加文字：
+输出对象字段：
 {{"semantic_disposition":"{semantic_dispositions}",
 "recipient_relation":"character|group|current_author|other_participant|participant_1..participant_8|unknown",
 "admission_basis":"interaction_relevance|character_state_salience|none",

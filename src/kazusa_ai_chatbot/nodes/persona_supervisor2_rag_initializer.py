@@ -292,7 +292,6 @@ Query: "你家的官方地址是什么？"
 7. 如果不检索也能处理，返回空列表。
 
 ## 输出格式
-只返回有效 JSON：
 {{
     "unknown_slots": [
         "Conversation-evidence: retrieve <exact phrase or topic> speaker=any_speaker",

@@ -69,7 +69,7 @@ _MEMORY_LIFECYCLE_SPECIALIST_PROMPT = '''\
 - `conversation_progress`: 当前短期对话进度。
 
 # 输出格式
-只返回合法 JSON 字符串：
+字段如下：
 {
   "decision": "lifecycle_change | no_lifecycle_change",
   "lifecycle_decisions": [

@@ -121,9 +121,9 @@ STATIC_GOAL_SYSTEM_PROMPT = '''你是一个独立的目标认知分支。请为�
 5. 当本分支拥有 relational_willingness 时先完成完整的关系立场：applicability 只能是 relationship_sensitive 或 not_relationship_sensitive；stance 只能是 reject、deflect、negotiate、conditional_accept、accept 或 not_applicable；current_user_relationship_state 只能是 unestablished、developing_or_uncertain、established 或 not_applicable。not_relationship_sensitive 时 stance 和 current_user_relationship_state 都必须是 not_applicable；relationship_sensitive 时两者都不能是 not_applicable。只有不涉及关系敏感性的请求使用 not_relationship_sensitive/not_applicable，其余请求由当前角色结合全部有依据的事实自主选择立场。
 
 # 输出与最后检查
-goal bid 只返回一个 JSON 对象，字段恰好是 intention、desired_outcome、concrete_detail、reason、private_monologue、target_role_handles、evidence_handles、expected_consequences 和 confidence；当本分支拥有 relational_willingness 时还含该字段。若 payload 含 carried_relational_willingness，它是已验证、由代码保留的本轮关系立场：不得重判或输出 relational_willingness。relational_willingness 的字段恰好是 applicability、stance、current_user_relationship_state、reason 和 evidence_handles，schema_version 由代码绑定。
-selection draft 只返回一个严格 JSON 对象，字段恰好是 selection、selected_response_operation、reason、private_monologue、target_role_handles、evidence_handles、expected_consequences 和 confidence；当 payload 的 goal_output_contract 要求 relational_willingness 时还必须输出完整该字段，否则不得输出。按输入绑定的 writable_fields 输出 selected_response_operation，方向字段保持代码绑定；selection 直接写出当前角色的具体选择。
-叙述字段使用简体中文；用户引文、专有名词、代码、URL、schema 或 enum token 保持原样。内部句柄、结构术语和运行元数据只允许出现在各自的类型化 handle 字段，所有自由文本必须使用语义角色描述或自然指代。target_role_handles 和 evidence_handles 是字符串数组，expected_consequences 是非空字符串数组。每个 handle 逐个等于输入值，只返回 JSON。
+goal bid 的字段恰好是 intention、desired_outcome、concrete_detail、reason、private_monologue、target_role_handles、evidence_handles、expected_consequences 和 confidence；当本分支拥有 relational_willingness 时还含该字段。若 payload 含 carried_relational_willingness，它是已验证、由代码保留的本轮关系立场：不得重判或输出 relational_willingness。relational_willingness 的字段恰好是 applicability、stance、current_user_relationship_state、reason 和 evidence_handles，schema_version 由代码绑定。
+selection draft 的字段恰好是 selection、selected_response_operation、reason、private_monologue、target_role_handles、evidence_handles、expected_consequences 和 confidence；当 payload 的 goal_output_contract 要求 relational_willingness 时还必须输出完整该字段，否则不得输出。按输入绑定的 writable_fields 输出 selected_response_operation，方向字段保持代码绑定；selection 直接写出当前角色的具体选择。
+叙述字段使用简体中文；用户引文、专有名词、代码、URL、schema 或 enum token 保持原样。内部句柄、结构术语和运行元数据只允许出现在各自的类型化 handle 字段，所有自由文本必须使用语义角色描述或自然指代。target_role_handles 和 evidence_handles 是字符串数组，expected_consequences 是非空字符串数组。每个 handle 逐个等于输入值。
 '''
 
 

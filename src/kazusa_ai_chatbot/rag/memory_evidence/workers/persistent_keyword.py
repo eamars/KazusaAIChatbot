@@ -72,7 +72,6 @@ _GENERATOR_PROMPT = Template('''\
 }
 
 # 输出格式
-只返回有效 JSON：
 {
   "keyword": "string",
   "top_k": $default_top_k,
@@ -125,7 +124,6 @@ _JUDGE_PROMPT = '''\
 - 反馈说明使用中文；source text 保持原文。
 
 # 输出格式
-只返回有效 JSON：
 {
   "resolved": true or false,
   "feedback": "string"

@@ -85,7 +85,7 @@ Do not claim that commands, tests, patch application, package installation,
 network calls, or repository mutation happened. Do not emit raw diffs.
 
 # Output Format
-Return strict JSON with these top-level fields:
+Use these top-level fields:
 {
   "status": "request_information | create_programmer_task | repair_child | complete | blocked",
   "reason": "short reason",

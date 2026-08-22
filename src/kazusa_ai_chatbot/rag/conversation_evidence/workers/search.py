@@ -113,7 +113,6 @@ _GENERATOR_PROMPT = (
 }}
 
 # 输出格式
-只返回有效 JSON：
 {{
   "search_query": "string",
   "literal_anchors": ["string, optional; at most 5 anchors"],
@@ -176,7 +175,6 @@ _JUDGE_PROMPT = '''\
 - 反馈说明使用中文；source text 保持原文。
 
 # 输出格式
-只返回有效 JSON：
 {
   "resolved": true or false,
   "feedback": "string"

@@ -67,11 +67,11 @@ goal_resolution 是当前目标可回答性的已确认判断：answerable_now �
 6. relational_willingness 是上游已选择的角色关系立场（含 current_user_relationship_state）；内容字段保持其原样 stance。若权威语境选择立场变化，把新事实、动机、条件或约束写入内容字段。
 7. lexical_avoidances 只记录本轮具体措辞片段，例如 recent_character_dialog 中刚重复的开场、连接词、口头禅、称呼或遮蔽 selected intention 的局部措辞。它只服务表达连续性，不按主题、价值判断或内容许可分类，也不改变、推导或否定角色立场；无具体风险时返回空列表。
 
-只返回规划字段；最终对话由 dialog 渲染器生成。当前用户的即时发言来自 visible percept；角色反思是语境证据；运行元数据留在内部。
+输出规划字段；最终对话由 dialog 渲染器生成。当前用户的即时发言来自 visible percept；角色反思是语境证据；运行元数据留在内部。
 自由文本使用简体中文，用户引文、专有名词、代码、URL、schema 或 enum token 原样保留。
 
 # 输出格式
-只返回一个 JSON 对象，字段恰好是 content_plan、content_requirements、delivery_profile 和 lexical_avoidances。content_plan 非空且最多 1000 字符；
+字段恰好是 content_plan、content_requirements、delivery_profile 和 lexical_avoidances。content_plan 非空且最多 1000 字符；
 content_requirements 为一到八条互不重复的非空语义要求，每条最多 500 字符。delivery_profile 必须恰好包含 lexical_register、sentence_shape、rhythm、hesitation、punctuation，
 每个值非空且最多 200 字符，只描述表达实现。lexical_avoidances 为零到八条互不重复的非空当前措辞片段，每条最多 120 字符，只描述表达连续性。'''
 
@@ -108,7 +108,7 @@ dialog 生成最终对话。
 代码、URL、schema 或 enum token 原样保留；中文自由文本使用当前角色、当前用户或其他参与者。
 
 # 输出格式
-只返回一个 JSON 对象，字段恰好是 visible_boundaries 和 addressee_plan。visible_boundaries 是零到八个非空且唯一的字符串，
+字段恰好是 visible_boundaries 和 addressee_plan。visible_boundaries 是零到八个非空且唯一的字符串，
 每条最多 500 字符；addressee_plan 是零到八个对象，每个对象恰好包含 handle、display_name、semantic_role 和 wording_policy，
 并逐字保留输入的结构化目标行。'''
 
@@ -144,7 +144,7 @@ visual_directives。
 时间戳、传输摘要、schema key 或运行元数据。
 
 # 输出格式
-只返回一个 JSON 对象，字段必须恰好是 visual_directives，其值是一个非空字符串，最多 1000 字符。'''
+字段必须恰好是 visual_directives，其值是一个非空字符串，最多 1000 字符。'''
 
 
 async def run_visual_stage(

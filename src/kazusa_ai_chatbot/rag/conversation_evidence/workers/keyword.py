@@ -86,7 +86,6 @@ _GENERATOR_PROMPT = Template('''\
 }
 
 ## 输出格式
-只返回有效 JSON：
 {
   "keyword": "string",
   "global_user_id": "string or omitted",
@@ -144,7 +143,6 @@ _JUDGE_PROMPT = '''\
 - 命中偏题；改用真正的 anchor term。
 
 # 输出格式
-只返回有效 JSON：
 {
   "resolved": true or false,
   "feedback": "string"

@@ -53,7 +53,7 @@ _EXTRACTOR_PROMPT = '''\
 }
 
 # 输出格式
-只返回有效 JSON，不要 markdown 包裹。只包含以下键：
+只包含以下键：
 {
     "display_name": "名字字符串"
 }
@@ -125,7 +125,7 @@ _PICKER_PROMPT = '''\
 }
 
 # 输出格式
-只返回有效 JSON，不要 markdown 包裹。只包含以下键：
+只包含以下键：
 {
     "global_user_id": "uuid 或 null"
 }

@@ -909,7 +909,6 @@ Return one JSON object with exactly these fields:
 - interaction_subtext: 0..200 character advisory text
 - salience_hints: duplicate-free list of at most four supplied evidence handles
 - risk_flags: duplicate-free list of closed advisory risk labels
-Return JSON only.
 '''
 
 

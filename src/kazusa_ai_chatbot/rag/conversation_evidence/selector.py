@@ -347,7 +347,6 @@ _SELECTOR_PROMPT = '''\
 }
 
 # 输出格式
-只返回有效 JSON：
 {
   "worker": "conversation_search_agent | conversation_filter_agent | conversation_aggregate_agent | incompatible",
   "reason": "简短来源选择说明"

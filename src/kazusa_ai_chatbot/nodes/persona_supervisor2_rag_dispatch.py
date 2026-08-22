@@ -373,7 +373,6 @@ initializer 生成的槽位以可直接映射到 agent 的前缀开头。
 
 ## 输出格式
 
-只返回有效 JSON：
 {{
     "agent_name": "{agent_name_union}",
     "task": "给所选 agent 的任务描述",

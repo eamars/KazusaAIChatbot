@@ -94,7 +94,7 @@ _SCENE_RECORDER_PROMPT = '''\
 - 自由文本使用简体中文；专名、代码和输入原文保持原样。
 
 # 输出格式
-只返回一个严格 JSON 对象，不要代码围栏、解释、注释或额外字段：
+字段如下：
 {
   "scene_relation": "same",
   "episode_change": "none",
@@ -268,7 +268,6 @@ _EVENT_RECORDER_PROMPT = '''\
 # 输出格式
 顶层对象必须完整包含且仅包含 `existing_events` 和 `new_events` 两个字段。
 两个数组即使为空也必须显式输出；没有新事件时必须原样输出 `"new_events": []`。
-只返回一个严格 JSON 对象，不要代码围栏、解释、注释或额外字段。
 既有事件的 `observation` 只能是 `unchanged` 或 `changed`；它不是生命周期值。
 `lifecycle_change` 只能是 `none`、`began`、`concluded`、`declined`、`replaced`
 或 `reopened`，绝不能填写 `changed`。
@@ -326,9 +325,6 @@ _EVENT_RECORDER_PROMPT = '''\
 1. 顶层恰好包含 `existing_events` 和 `new_events`。
 2. `existing_events` 和 `new_events` 每次都输出为数组；没有项目也输出 `[]`。
 3. `observation="unchanged"` 行恰好包含 `event_handle` 和 `observation`。
-4. 两个数组和顶层对象全部闭合后才结束输出。
-5. 直接输出完整对象：首字符为 `{`，末字符为 `}`；数组和对象闭合后
-   立即停止，先写任何代码围栏、备注或解释都不属于输出。
 '''
 
 _event_recorder_llm = LLInterface()

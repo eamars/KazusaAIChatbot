@@ -110,6 +110,7 @@ _writing_programmer_llm_config = LLMCallConfig(
     thinking=LLMThinkingConfig(
         enabled=CODING_AGENT_PROGRAMMER_LLM_THINKING_ENABLED,
     ),
+    output_mode="text",
 )
 
 

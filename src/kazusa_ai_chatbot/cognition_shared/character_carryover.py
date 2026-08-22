@@ -134,7 +134,7 @@ If the input includes replacement_error_code, replace the complete prior
 proposal while preserving the same evidence-grounded semantic context.
 
 # Output Format
-Return exactly one JSON object.
+Output fields:
 - action: "no_change" or "apply".
 - reason_code: one of no_lingering_effect, already_represented,
   transient_scene_only, unsupported, lingering_character_effect.

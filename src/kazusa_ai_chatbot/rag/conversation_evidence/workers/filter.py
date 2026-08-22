@@ -76,7 +76,6 @@ _GENERATOR_PROMPT = Template('''\
 }
 
 # 输出格式
-只返回有效 JSON：
 {
   "platform": "string or omitted",
   "platform_channel_id": "string or omitted",
@@ -133,7 +132,6 @@ _JUDGE_PROMPT = '''\
 - 反馈说明使用中文；source text 保持原文。
 
 # 输出格式
-只返回有效 JSON：
 {
   "resolved": true or false,
   "feedback": "string"

@@ -295,7 +295,6 @@ _SELECTOR_PROMPT = '''\
 }
 
 # 输出格式
-只返回有效 JSON：
 {
   "worker": "user_memory_evidence_agent | persistent_memory_search_agent | incompatible",
   "reason": "简短来源选择说明"

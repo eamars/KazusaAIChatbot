@@ -409,7 +409,6 @@ _REVIEW_PROMPT = '''\
 }
 
 # 输出格式
-只返回有效 JSON：
 {
   "confirmed_unit_ids": ["candidate unit_id"],
   "nearby_unit_ids": ["candidate unit_id"],

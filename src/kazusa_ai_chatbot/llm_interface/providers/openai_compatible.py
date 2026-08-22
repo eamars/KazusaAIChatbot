@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import logging
+import re
+from dataclasses import replace
 from typing import Callable, Sequence
 
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
 from langchain_openai import ChatOpenAI
+from openai import BadRequestError
 
 from kazusa_ai_chatbot.llm_interface.contracts import (
     BackendDescriptor,
@@ -19,6 +23,11 @@ ChatModelFactory = Callable[..., object]
 ChatModelCacheKey = tuple[object, ...]
 GEMMA4_THINKING_TRIGGER = "/think"
 QWEN3_THINKING_PREFILL = "<think>\n"
+_JSON_OBJECT_ALLOWED_MODE_ERROR = re.compile(
+    r"response_format\.type['\"]?\s+must\s+be\s+"
+    r"['\"]?json_schema['\"]?\s+or\s+['\"]?text['\"]?",
+)
+logger = logging.getLogger(__name__)
 
 
 class OpenAICompatibleProvider:
@@ -46,7 +55,21 @@ class OpenAICompatibleProvider:
             messages,
             backend=backend,
         )
-        raw_response = await chat_model.ainvoke(provider_messages)
+        try:
+            raw_response = await chat_model.ainvoke(provider_messages)
+        except BadRequestError as exc:
+            if not _is_unsupported_json_object_error(exc, config=config):
+                raise
+            logger.warning(
+                f"Provider rejected JSON-object output for {config.model}; "
+                f"retrying once in text mode: {exc}"
+            )
+            fallback_config = replace(config, output_mode="text")
+            fallback_model = self._build_chat_model(
+                config=fallback_config,
+                backend=backend,
+            )
+            raw_response = await fallback_model.ainvoke(provider_messages)
         response = LLMResponse.from_raw(raw_response, backend=backend)
         return response
 
@@ -64,7 +87,21 @@ class OpenAICompatibleProvider:
             messages,
             backend=backend,
         )
-        raw_response = chat_model.invoke(provider_messages)
+        try:
+            raw_response = chat_model.invoke(provider_messages)
+        except BadRequestError as exc:
+            if not _is_unsupported_json_object_error(exc, config=config):
+                raise
+            logger.warning(
+                f"Provider rejected JSON-object output for {config.model}; "
+                f"retrying once in text mode: {exc}"
+            )
+            fallback_config = replace(config, output_mode="text")
+            fallback_model = self._build_chat_model(
+                config=fallback_config,
+                backend=backend,
+            )
+            raw_response = fallback_model.invoke(provider_messages)
         response = LLMResponse.from_raw(raw_response, backend=backend)
         return response
 
@@ -101,6 +138,10 @@ class OpenAICompatibleProvider:
             kwargs["presence_penalty"] = config.presence_penalty
         if config.timeout_seconds is not None:
             kwargs["timeout"] = config.timeout_seconds
+        if config.output_mode == "json_object":
+            kwargs["model_kwargs"] = {
+                "response_format": {"type": "json_object"},
+            }
         if backend.thinking_strategy == "gemma4_enabled":
             kwargs["extra_body"] = {
                 "chat_template_kwargs": {"enable_thinking": True},
@@ -225,6 +266,45 @@ def _chat_model_cache_key(
         config.max_completion_tokens,
         config.presence_penalty,
         config.timeout_seconds,
+        config.output_mode,
         backend.thinking_strategy,
     )
     return cache_key
+
+
+def _is_unsupported_json_object_error(
+    exc: BadRequestError,
+    *,
+    config: LLMCallConfig,
+) -> bool:
+    """Identify an endpoint rejection specific to native JSON-object mode."""
+
+    if config.output_mode != "json_object":
+        return False
+
+    error_text = str(exc).lower()
+    if (
+        _JSON_OBJECT_ALLOWED_MODE_ERROR.search(error_text) is not None
+        and "json_object" not in error_text
+    ):
+        return True
+
+    format_terms = (
+        "response_format",
+        "json_object",
+        "json mode",
+        "json-mode",
+    )
+    if not any(term in error_text for term in format_terms):
+        return False
+
+    unsupported_terms = (
+        "unsupported",
+        "not support",
+        "unknown parameter",
+        "unrecognized",
+        "not implemented",
+        "only support",
+        "does not accept",
+    )
+    return any(term in error_text for term in unsupported_terms)

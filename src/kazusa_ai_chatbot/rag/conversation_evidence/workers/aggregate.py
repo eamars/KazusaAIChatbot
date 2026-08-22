@@ -64,7 +64,6 @@ _EXTRACTOR_PROMPT = '''\
 }
 
 # 输出格式
-只返回有效 JSON：
 {
   "aggregate": "message_count_by_user",
   "keyword": "字面字符串或空字符串",

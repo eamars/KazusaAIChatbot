@@ -131,6 +131,7 @@ Config fields:
 | `max_completion_tokens` | caller config | Public completion budget field. |
 | `presence_penalty` | caller config | Provider-neutral presence penalty when a stage uses it. |
 | `thinking` | caller config | Boolean thinking request. Defaults to disabled. |
+| `output_mode` | caller | Provider output transport: `json_object` by default or explicit `text`. |
 | `context_window_tokens` | caller config | Optional served-context declaration for caller-owned admission guards. |
 
 `max_tokens` is not part of this public interface. New route configuration must
@@ -138,6 +139,13 @@ use `max_completion_tokens`.
 
 The caller chooses which config profile to pass. `LLInterface` only maps that
 config into backend-compatible request fields.
+
+`output_mode="json_object"` is the shared default. The OpenAI-compatible
+provider requests native JSON-object output while each semantic stage keeps
+ownership of parsing, field validation, normalization, repair, and bounded
+regeneration. Intentionally free-form stages set `output_mode="text"`; the
+current exceptions are the coding writer, RAG evaluator summarizer, and RAG
+finalizer.
 
 `context_window_tokens` remains local metadata. Provider adapters omit it from
 request/client kwargs; Cognition V3 uses it to reject oversized requests before
@@ -370,6 +378,8 @@ Provider adapters own:
 - request kwargs such as `model`, `base_url`, `api_key`, `temperature`,
   `top_p`, `max_completion_tokens`, `presence_penalty`, and provider-specific
   `extra_body`;
+- native `response_format={"type": "json_object"}` mapping for the default
+  output mode and omission of `response_format` for explicit text mode;
 - conversion from provider-native responses to `LLMResponse`;
 - provider-local chat-model cache identity.
 
@@ -402,6 +412,10 @@ sessions for that interface instance.
 Session cache keys and diagnostic fingerprints are separate. Raw API keys are
 hashed for cache identity and must never appear in repr output, diagnostics,
 route reports, logs, or test failure text.
+
+Provider chat-model cache identity and diagnostic fingerprints include
+`output_mode`, preventing text and JSON-object calls from sharing incompatible
+request configuration.
 
 ## Reload Retry Contract
 
@@ -509,7 +523,13 @@ thinking payload fields and returning a backend descriptor with
 `thinking_strategy="ignored_unsupported_model"`.
 
 Provider failures propagate unless the error matches the LM Studio unload
-retry signature. Parser failures remain owned by the caller after
+retry signature or a recognized unsupported JSON-object feature response. For
+the latter, the provider logs the rejection and retries that call once with
+text transport. Recognition is limited to errors that name
+`response_format`/JSON-object mode and clearly reject the parameter or feature,
+including endpoints whose allowed `response_format.type` list excludes
+`json_object`. Authentication, timeout, rate-limit, server, schema/content, and
+unrelated bad-request errors continue to propagate. Parser failures remain owned by the caller after
 `LLMResponse.content` is returned.
 
 ## Test Contract

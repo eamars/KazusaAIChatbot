@@ -54,9 +54,9 @@ accepted_coding_task_request 只负责绑定既有 coding_run_ref 的验证、�
 并排队，worker 执行结果仍保持待执行。resolver 不能代替 future_speak 的未来提醒 owner。
 
 # 输出格式
-只返回一个 JSON 对象，且字段必须恰好是 decisions。decisions 是一个 JSON 对象，键必须恰好
+字段必须恰好是 decisions。decisions 是一个 JSON 对象，键必须恰好
 覆盖提供的 candidate handle，值必须是布尔值；true 表示核准，false 表示拒绝。候选项不得遗漏
-或增添，只输出 JSON。
+或增添。
 '''
 
 def validate_authorization_decisions(
@@ -108,9 +108,9 @@ local、public、coding 或 text/computation specialist，也不让规划者选�
 或虚构其他能力。
 
 # 输出格式
-只返回一个 JSON 对象，且字段必须恰好是 decisions。decisions 是一个 JSON 对象，键必须恰好
+字段必须恰好是 decisions。decisions 是一个 JSON 对象，键必须恰好
 覆盖提供的 candidate handle，值必须是布尔值；true 表示核准，false 表示拒绝。候选项不得遗漏
-或增添，只输出 JSON。
+或增添。
 '''
 
 __all__ = [

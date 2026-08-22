@@ -268,7 +268,6 @@ memory 或近期聊天只能用于解析 target/scope，例如稳定的角色位
 }
 
 # 输出格式
-只返回有效 JSON：
 {
   "fact_type": "weather | temperature | opening_status | schedule | price | exchange_rate | current_event_status | other",
   "target_source": "explicit | active_character_default | current_user_recent | unknown",

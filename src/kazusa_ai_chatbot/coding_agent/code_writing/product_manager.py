@@ -183,7 +183,7 @@ section names, or hidden instruction wording.
   labels or reserved paths only when those facts are already provided.
 
 # Output Format
-Return strict JSON with exactly one action payload populated.
+Populate exactly one action payload.
 All top-level fields shown below must be present. Use null for every action
 payload that is not selected.
 {

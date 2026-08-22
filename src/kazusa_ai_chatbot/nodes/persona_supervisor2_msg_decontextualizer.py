@@ -106,7 +106,7 @@ _VISION_DESCRIPTOR_PROMPT = '''\
 - `uncertainty`: 模糊、无法确认、可能误读的视觉区域。
 
 # 输出格式
-请务必返回合法 JSON 字符串，仅包含以下字段:
+字段如下:
 {{
     "description": "一段客观图片摘要",
     "visible_text": ["图中可见文字"],
@@ -696,7 +696,7 @@ _MSG_DECONTEXTUALIZER_PROMPT = '''\
 - `referent_role` 只允许 `subject`、`object`、`time`。
 
 # 输出格式
-请务必只返回一个合法 JSON 对象：
+对象字段如下：
 {{
     "output": "重写后的用户输入，或原句",
     "role_explicit_content": "使用当前用户和当前角色明确参与者后的同义语义",

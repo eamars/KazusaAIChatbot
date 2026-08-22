@@ -56,6 +56,15 @@ def test_call_config_uses_explicit_completion_budget_and_redacts_key() -> None:
     assert "secret-api-key" not in repr(_call_config())
 
 
+def test_call_config_defaults_to_json_object_output() -> None:
+    """Structured provider output is the default while text stays explicit."""
+
+    config = _call_config()
+
+    assert config.output_mode == "json_object"
+    assert replace(config, output_mode="text").output_mode == "text"
+
+
 def test_call_config_declares_context_window_without_transporting_it() -> None:
     """The serving-window declaration remains caller-owned metadata."""
 

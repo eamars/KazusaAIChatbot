@@ -156,7 +156,7 @@ interaction_relevance；recipient_relation 按 typed evidence 保持为 characte
 
 _FRONTLINE_OPEN_OUTPUT_CONTRACT = '''
 # 输出格式
-只返回一个 JSON 对象，前后不添加文字：
+输出对象字段：
 {"intake_action":"discard|start|append",
 "append_target":"none|open_1|open_2|open_3","prelude_targets":[],
 "recipient_relation":"character|group|current_author|other_participant|participant_1..participant_8|unknown",
@@ -168,7 +168,7 @@ slot。'''
 
 _FRONTLINE_NO_OPEN_OUTPUT_CONTRACT = '''
 # 输出格式
-当前没有 open slot。只返回一个 JSON 对象，前后不添加文字：
+当前没有 open slot。输出对象字段：
 {"intake_action":"discard|start","append_target":"none","prelude_targets":[],
 "recipient_relation":"character|group|current_author|other_participant|participant_1..participant_8|unknown",
 "admission_basis":"interaction_relevance|character_state_salience|none",
@@ -185,7 +185,7 @@ _FRONTLINE_NO_PRELUDES_CONTRACT = '''
 
 _FRONTLINE_AUTHORITATIVE_OPEN_OUTPUT_CONTRACT = '''
 # 输出格式
-结构化输入已经确认当前角色参与。只返回一个 JSON 对象，前后不添加文字：
+结构化输入已经确认当前角色参与。输出对象字段：
 {"intake_action":"start|append",
 "append_target":"none|open_1|open_2|open_3","prelude_targets":[],
 "recipient_relation":"character|group",
@@ -197,7 +197,7 @@ start 时 append_target 为 none；append 时选择一个所给 open slot。本�
 
 _FRONTLINE_AUTHORITATIVE_START_OUTPUT_CONTRACT = '''
 # 输出格式
-结构化输入已经确认当前角色参与，且没有 open slot。只返回一个 JSON 对象，前后不添加文字：
+结构化输入已经确认当前角色参与，且没有 open slot。输出对象字段：
 {"intake_action":"start","append_target":"none","prelude_targets":[],
 "recipient_relation":"character|group",
 "admission_basis":"interaction_relevance",

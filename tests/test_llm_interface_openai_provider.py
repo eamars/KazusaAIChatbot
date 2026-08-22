@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
+import httpx
 import pytest
+from openai import BadRequestError
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
@@ -111,6 +115,56 @@ def test_provider_maps_config_to_chat_model_constructor() -> None:
     assert response.content == "sync ok"
     assert response.raw_response.content == "sync ok"
     assert response.usage == {"completion_tokens": 2}
+
+
+def test_provider_maps_json_object_text_and_unsupported_fallback() -> None:
+    """Native JSON mode falls back once while text mode stays unformatted."""
+
+    created_models: list[_FakeChatModel] = []
+
+    class _FallbackChatModel(_FakeChatModel):
+        """Reject native JSON mode once to exercise the bounded fallback."""
+
+        def invoke(self, messages: list[object]) -> AIMessage:
+            self.sync_calls.append(messages)
+            if "model_kwargs" in self.constructor_kwargs:
+                response = httpx.Response(
+                    400,
+                    request=httpx.Request("POST", "http://localhost:1234/v1"),
+                )
+                raise BadRequestError(
+                    "response_format is unsupported",
+                    response=response,
+                    body={"error": {"message": "response_format is unsupported"}},
+                )
+            return AIMessage(content="fallback ok")
+
+    def _factory(**kwargs: object) -> _FallbackChatModel:
+        model = _FallbackChatModel(**kwargs)
+        created_models.append(model)
+        return model
+
+    provider = OpenAICompatibleProvider(chat_model_factory=_factory)
+    messages = [HumanMessage(content="hello")]
+
+    response = provider.invoke(
+        messages,
+        config=_config(),
+        backend=_backend(),
+    )
+    provider.invoke(
+        messages,
+        config=replace(_config(), output_mode="text"),
+        backend=_backend(),
+    )
+
+    assert created_models[0].constructor_kwargs["model_kwargs"] == {
+        "response_format": {"type": "json_object"},
+    }
+    assert "model_kwargs" not in created_models[1].constructor_kwargs
+    assert response.content == "fallback ok"
+    assert len(created_models[0].sync_calls) == 1
+    assert len(created_models[1].sync_calls) == 2
 
 
 @pytest.mark.asyncio

@@ -162,6 +162,7 @@ def build_diagnostic_fingerprint(
         config.presence_penalty,
         config.timeout_seconds,
         config.thinking.enabled,
+        config.output_mode,
         descriptor.thinking_strategy,
     )
     return fingerprint

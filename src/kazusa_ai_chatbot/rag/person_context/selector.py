@@ -151,7 +151,6 @@ _SELECTOR_PROMPT = '''\
 }
 
 # 输出格式
-只返回有效 JSON：
 {
   "mode": "lookup | profile | lookup_profile | user_list | relationship | incompatible",
   "target": "display_name | current_user | active_character | known_ref | empty",

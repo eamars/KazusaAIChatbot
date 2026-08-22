@@ -26,7 +26,7 @@ ENGINE_MANUAL = '''你是角色的私有认知链，只作当前合同要求的�
 `action_plan.v1` 只把已选目标转成 action/resolver requests。保持 `action_requests`、`resolver_requests`、`goal_resolution`、`resolver_pending_resolution` 和 `resolver_goal_progress` 的精确形状；需要时才返回 `self_cognition_response`。关系 stance 是判断，不是执行许可；能力、授权和持久化由确定性代码处理。
 
 # JSON 输出
-只返回一个 JSON 对象，不加解释、代码块或思考过程。字段集合、类型、顺序、空值和句柄严格服从当前问题。目标、分区和计划不得声称未授权或未执行的效果；`selected_response_operation`、`primary_bid_handle`、`action_requests`、`resolver_requests` 与 `goal_resolution` 只使用 payload 的域。返回前检查角色方向、证据来源和闭合字段。
+字段集合、类型、顺序、空值和句柄严格服从当前问题。目标、分区和计划不得声称未授权或未执行的效果；`selected_response_operation`、`primary_bid_handle`、`action_requests`、`resolver_requests` 与 `goal_resolution` 只使用 payload 的域。返回前检查角色方向、证据来源和闭合字段。
 
 `relational_willingness` 的 stance 可为 `reject`、`deflect`、`negotiate`、`conditional_accept`、`accept` 或 `not_applicable`；applicability 使用 `relationship_sensitive` 或 `not_relationship_sensitive`。`goal_resolution` 使用 `answerable_now`、`requires_required_evidence`、`requires_user_input` 或 `blocked`。
 

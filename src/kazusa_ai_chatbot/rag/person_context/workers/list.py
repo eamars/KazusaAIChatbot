@@ -67,7 +67,6 @@ _EXTRACTOR_PROMPT = '''\
 }
 
 # 输出格式
-只返回有效 JSON：
 {
   "source": "user_profiles | conversation_participants | both",
   "display_name_operator": "equals | contains | starts_with | ends_with",

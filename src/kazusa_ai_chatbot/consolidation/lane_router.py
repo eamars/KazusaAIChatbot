@@ -171,7 +171,6 @@ the exact object shape above; keep operational fields out of durable lane rows.
 接受或只在当前情境成立的未来行为，均返回空 lane_tasks。
 
 # 输出格式
-只返回有效 JSON：
 {
   "lane_tasks": [],
   "character_operational_state_task": {

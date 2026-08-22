@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Mapping, Protocol, Sequence
+from typing import Literal, Mapping, Protocol, Sequence
 
 from langchain_core.messages import BaseMessage
 
@@ -36,6 +36,7 @@ class LLMCallConfig:
     presence_penalty: float | None
     timeout_seconds: float | None = None
     thinking: LLMThinkingConfig = field(default_factory=LLMThinkingConfig)
+    output_mode: Literal["json_object", "text"] = "json_object"
     context_window_tokens: int | None = None
 
 

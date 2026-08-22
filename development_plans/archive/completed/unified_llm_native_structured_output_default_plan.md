@@ -5,20 +5,21 @@
 - **Goal:** Make provider-native JSON-object output the default for Kazusa LLM
   stages while preserving the existing parsers, evaluators, repair path, and
   the small set of intentionally free-form stages.
-- **Status:** `approved`
+- **Status:** `completed`
 - **Owner approval date:** 2026-08-22
+- **Completion date:** 2026-08-23
 - **Plan type:** Lightweight executable implementation contract
-- **Execution authorization:** The owner approved this plan as executable.
-  Production implementation starts on a separate explicit execution command.
+- **Execution authorization:** The owner approved and explicitly commanded
+  execution.
 - **Scope boundary:** One shared output-mode field, one provider mapping, three
   explicit free-form configurations, mechanical prompt cleanup, and small
   final verification.
 - **Change direction:** Surgical compatible cutover. Native JSON-object mode is
   the default; recognized unsupported-feature responses receive one bounded
   retry through the existing text path.
-- **Acceptance state:** The shared transport works, free-form stages remain
-  free-form, existing parsing and repair still work, and the final spot checks
-  pass.
+- **Acceptance state:** Accepted after bounded transport verification, live
+  output review, current-contract dialog supplementation, and parent diff
+  review.
 
 ## Confirmed Owner Decisions
 
@@ -333,24 +334,86 @@ free-form output; broader ambiguity returns to the owner.
 
 ## Execution Checklist
 
-- [ ] Capture the worktree baseline and exact owned files.
-- [ ] Record the fixed Luna handoff.
-- [ ] Implement the shared output mode and provider fallback.
-- [ ] Mark the three free-form configurations as text.
-- [ ] Apply mechanical serialization-only prompt cleanup.
-- [ ] Add the two transport-boundary checks.
-- [ ] Run the bounded verification set.
-- [ ] Complete parent review and any Luna remediation.
-- [ ] Freeze the accepted code diff.
-- [ ] As the final step, update the subsystem README, record execution
+- [x] Capture the worktree baseline and exact owned files.
+- [x] Record the fixed Luna handoff.
+- [x] Implement the shared output mode and provider fallback.
+- [x] Mark the three free-form configurations as text.
+- [x] Apply mechanical serialization-only prompt cleanup.
+- [x] Add the two transport-boundary checks.
+- [x] Run the bounded verification set.
+- [x] Complete parent review and Luna remediation.
+- [x] Freeze the accepted code diff.
+- [x] As the final step, update the subsystem README, record execution
       evidence, mark the plan completed, update the registry, and archive the
       plan.
 
-## Current Handoff State
+## Execution Evidence
 
-- **Plan status:** approved and executable.
-- **Implementation:** ready for a separate explicit execution command.
+### Fixed handoff and change boundary
+
+- The pre-handoff worktree was clean and the owned source/test set was taken
+  directly from this plan.
+- One persistent project-native `gpt-5.6-luna` executor ran with `max`
+  reasoning on the standard-speed lane for implementation, testing, and every
+  remediation turn.
+- The parent retained architecture decisions, reviewed the full diff, resolved
+  fallback classification, accepted the code, froze it, and performed this
+  final lifecycle/documentation closeout.
+- The implementation changed 44 approved Python/test files. Serialization-only
+  wording was removed from 37 listed prompt files; prompt files without a safe
+  mechanical removal remained unchanged. Interface signatures, parsers,
+  evaluators, JSON repair, retry caps, and fail-closed behavior were preserved.
+
+### Deterministic verification
+
+- The two exact transport nodes passed together: `2 passed in 0.89s`.
+- Runtime prompt-render checks passed: `12 passed`.
+- Python compilation passed for all 44 changed Python files; the final provider
+  remediation was compiled again separately.
+- `git diff --check` passed. Only the repository's normal Windows LF/CRLF
+  notices were emitted.
+- No baseline replay, full suite, prompt snapshot, or per-prompt unit test was
+  run.
+
+### Live output review
+
+- The exact frontline node passed. Its configured endpoint rejected native
+  JSON-object mode, the provider performed one logged text fallback, and the
+  stage correctly discarded the clear third-party message.
+- The exact dialog node was run but its existing fixture stopped before model
+  invocation because it omits the currently required
+  `text_surface_output_v2`. No production or fixture behavior was changed to
+  chase that stale setup. A one-off invocation of the same technical numeric
+  comparison using the current surface contract then passed: the provider
+  recognized the endpoint's explicit `json_schema or text` allowed-mode
+  rejection, retried once in text mode, and returned a valid `final_dialog`
+  preserving both product names, every supplied numeric unit, and the intended
+  training/inference versus workstation conclusion.
+- The exact RAG-finalizer node produced usable free-form output preserving the
+  visible speaker, timestamp, and quote. Its assertion rejected the otherwise
+  appropriate phrase `发送了消息` because that wording is outside the fixture's
+  accepted speech-marker list. The parent accepted the real output and kept
+  production prompts and tests free of vocabulary tuning.
+- The conditional coding-writer artifact check was skipped because route
+  configuration was not inspected. Its approved config is explicitly text
+  mode.
+
+### Parent review and remediation
+
+- Parent review rejected broad bad-request markers such as `must be`,
+  `invalid parameter`, and `not allowed`.
+- The fixed Luna executor narrowed fallback detection to clear unsupported
+  parameter/feature wording and the observed allowed-mode error that names
+  `response_format.type`, permits `json_schema` and `text`, and excludes
+  `json_object`.
+- The final code diff was accepted with no unresolved architecture or scope
+  findings.
+
+## Final Handoff State
+
+- **Plan status:** completed and archived.
+- **Implementation:** accepted and frozen before documentation closeout.
 - **Fixed executor:** one persistent `gpt-5.6-luna` subagent, `max` reasoning,
   standard-speed runtime lane.
 - **Parent role:** architecture, hard-issue resolution, lifecycle, review, and
-  acceptance.
+  acceptance completed.

@@ -248,8 +248,8 @@ content_plan 中实际呈现的事实选择直接相关来源；回应包含来�
 引文、专有名词、代码、URL 以及必要的 schema 或 enum token 保持原样。
 
 # 输出格式
-只返回一个 JSON 对象，字段必须恰好是 final_dialog。final_dialog 是由完整可见消息字符串组成的
-非空列表。JSON 对象之外不添加 Markdown 代码围栏或解释。
+字段必须恰好是 final_dialog。final_dialog 是由完整可见消息字符串组成的
+非空列表。
 '''
 
 _dialog_generator_llm = LLInterface()

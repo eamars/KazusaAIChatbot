@@ -70,7 +70,6 @@ _EXTRACTOR_PROMPT = '''\
 }
 
 # 输出格式
-只返回有效 JSON：
 {
   "mode": "one | n | existence",
   "rank_order": "top | bottom",

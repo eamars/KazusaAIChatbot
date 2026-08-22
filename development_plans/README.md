@@ -46,7 +46,6 @@ recorded evidence.
 | Document | Type | Status |
 |---|---|---|
 | [cognition_v3_handleless_model_contract_bigbang_plan_2026-08-22.md](active/short_term/cognition_v3_handleless_model_contract_bigbang_plan_2026-08-22.md) | Handleless cognition model-contract big-bang proposal | draft |
-| [unified_llm_native_structured_output_default_plan.md](active/short_term/unified_llm_native_structured_output_default_plan.md) | Lightweight native JSON-object default and prompt cleanup | approved |
 
 ### Superseded Plans
 
@@ -58,6 +57,7 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
+| [unified_llm_native_structured_output_default_plan.md](archive/completed/unified_llm_native_structured_output_default_plan.md) | Lightweight native JSON-object default and prompt cleanup | completed |
 | [cognition_v3_hybrid_agentic_loop_reconciliation_plan.md](archive/completed/cognition_v3_hybrid_agentic_loop_reconciliation_plan.md) | Cognition V3 single-lane hybrid agentic-loop reconciliation and V3-only cutover | completed |
 | [cognition_v3_hybrid_agentic_loop_reconciliation_plan_handover_2026-08-21.md](archive/completed/cognition_v3_hybrid_agentic_loop_reconciliation_plan_handover_2026-08-21.md) | Gate 7/8 execution and closure handover | completed |
 | [cognition_v2_runtime_decommission_after_v3_cutover_plan_2026-08-22.md](archive/completed/cognition_v2_runtime_decommission_after_v3_cutover_plan_2026-08-22.md) | V2 cognition-engine removal and V3-only cutover closure | completed |

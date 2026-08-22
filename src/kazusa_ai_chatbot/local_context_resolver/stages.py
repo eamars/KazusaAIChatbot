@@ -370,8 +370,6 @@ prompt-safe local evidence. Do not write final character dialog.
 - Put graph ids, trace details, raw message ids, adapter ids, database ids,
   cache keys, embeddings, raw timestamps, and raw wire syntax outside
   projection_payload.
-- Return valid JSON. If source text contains double quotes, escape them or
-  paraphrase them in JSON string values.
 - Treat chat row local_time values as message timestamps only. Do not infer
   the current time from message timestamps. Only local_time_context supplies
   current date/time; if a current time value is absent, do not judge whether a

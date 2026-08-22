@@ -209,7 +209,6 @@ JSON key 和枚举值必须保持英文。你新生成的自由文本字段必�
 - 不要把用户事实、用户偏好或用户承诺改写成{character_name}的长期规则。
 - 不要把说话人标签、显示名称、泛称或 assistant 等机器标签写成记忆主体；需要命名时只能用 `{character_name}`。
 - 当需要说明某个名称、项目代号或称呼不属于 `{character_name}` 时，写作“不是指向 `{character_name}` 的名称/称呼”，不要使用泛称。
-- 只返回有效 JSON。
 
 # 生成步骤
 1. 检查 channel_daily_syntheses，只把它当作压缩后的反思证据。
@@ -261,7 +260,7 @@ JSON key 和枚举值必须保持英文。你新生成的自由文本字段必�
 }}
 
 # 输出格式
-只输出 JSON：{{"promotion_decisions": [ReflectionPromotionDecision, ...]}}
+promotion_decisions 字段包含以下决策对象：
 
 ReflectionPromotionDecision 字段：
 {{

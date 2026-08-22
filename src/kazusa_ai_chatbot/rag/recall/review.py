@@ -320,7 +320,6 @@ episode-position 槽位。判断是否有候选项直接回答该槽位。不要
 }
 
 # 输出格式
-只返回有效 JSON：
 {
   "confirmed_candidate_indexes": [0],
   "nearby_candidate_indexes": [1],

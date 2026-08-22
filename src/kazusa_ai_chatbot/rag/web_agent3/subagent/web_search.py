@@ -123,7 +123,6 @@ _SEARCH_ATTEMPT_PROMPT = '''\
 6. 查询应像真实搜索词，而不是一句完整说明。
 
 # 输出格式
-只返回合法 JSON：
 {
   "attempts": [
     {
