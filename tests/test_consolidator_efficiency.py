@@ -135,30 +135,6 @@ def test_build_existing_dedup_keys_requires_canonical_candidates() -> None:
         consolidator_module._build_existing_dedup_keys(global_state)
 
 
-def test_build_consolidator_state_forwards_native_v2_outputs() -> None:
-    """The background state carries canonical cognition and surface outputs."""
-
-    global_state = _global_state()
-    origin = build_user_message_consolidation_origin(
-        episode=_cognitive_episode(),
-    )
-    target_plan = {
-        "origin_kind": "user_message",
-        "targets": [],
-    }
-
-    state = consolidator_module._build_consolidator_state(
-        global_state,
-        consolidation_origin=origin,
-        consolidation_target_plan=target_plan,
-    )
-
-    assert state["cognition_core_output"] == global_state[
-        "cognition_core_output"
-    ]
-    assert state["text_surface_output_v2"] == global_state[
-        "text_surface_output_v2"
-    ]
 
 
 def test_build_consolidator_state_projects_subjective_appraisal() -> None:

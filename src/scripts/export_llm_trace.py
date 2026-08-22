@@ -68,7 +68,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--cognition-invocation-id",
         default="",
-        help="Optional Cognition V2 invocation id to select from the trace.",
+        help="Optional cognition invocation id to select from the trace.",
     )
     parser.add_argument("--output", type=Path, help="Destination JSON path.")
     return parser

@@ -1,20 +1,15 @@
 # Cognition Core V3
 
-`cognition_core_v3` is the cache-affine semantic-chain cognition engine. It runs
-over the unchanged V2 substrate: the public contract stays exactly
-`CognitionCoreInputV2` / `CognitionCoreOutputV2`, and the deterministic head
+`cognition_core_v3` is the canonical cache-affine semantic-chain cognition
+engine. The versioned `CognitionCoreInputV2` / `CognitionCoreOutputV2` schema
+names remain active data-contract identifiers; they do not select or load a
+legacy engine. The deterministic head
 (elapsed update, preliminary goals, prompt projection, question planning),
 final reduction, relationship maintenance, workspace collapse, action planning,
-and output assembly reuse the V2 helpers verbatim.
-
-Engine selection happens in `cognition_core_selector`. The closed set is
-`v2` / `v3`, selected by the `COGNITION_CORE_ENGINE` setting (default `v3`).
-Select `v2` explicitly only to roll back to the V2 route bundles.
-The persona supervisor connector imports one module-level binding from that
-selector, so its live, idle, and guarded call sites all share the same engine.
-The selected branch constructs only its own core services. The generic
-`COGNITION_LLM` cognition route remains a shared non-core service for callers
-outside the selected core branch.
+and output assembly preserve the canonical typed cognition contract. The
+persona supervisor imports this engine directly for live, idle, and guarded
+call sites. `COGNITION_LLM` remains a shared non-core service for callers
+outside the agentic chain.
 
 ## Public surface
 
@@ -46,18 +41,18 @@ cold sequence is `A1`, `A2`, `I1`, `G1a`, optional `G1b`, `I2`, conditional
 order and the configured appraisal grouping maps (`1`, `2`, `3`, or `6`); it
 does not launch parallel waves or use checkpoint joins.
 
-`A1` and `A2` are grouped appraisal steps using the canonical V2 micro-item
+`A1` and `A2` are grouped appraisal steps using the canonical micro-item
 domains. `I1` performs one deterministic state reduction and relationship
 maintenance pass. `G1a` emits the ordinary bid, `G1b` revises the frozen active
 branch roster when present, `I2` applies the existing collapse rules, and `P1`
-assembles the unchanged V2 output products. Accepted primary messages remain
+assembles the canonical output products. Accepted primary messages remain
 an append-only transcript; a failed candidate is removed only by the bounded
 tail-rollback repair contract.
 
 An optional sidecar is one single-stream lane for L1 residue, JSON repair, and
 authorization. It is absent or complete, has a distinct endpoint/model
 identity, and cannot interleave with another sidecar request. Sidecar failure
-is advisory or deny-all according to the existing V2 contract and never
+is advisory or deny-all according to the canonical contract and never
 changes the primary semantic owner.
 
 Resolver recurrence reattaches to the episode session rather than rerunning
@@ -74,13 +69,13 @@ cache-domain identity of the primary route and preserves the exact accepted
 message prefix across steps, retries, and session reattachment. Tail rollback
 removes the rejected assistant candidate before a repair request; a cold
 rebuild starts from the accepted typed products and never from raw provider
-history. Attempt arithmetic remains the epoch-aware V2 ledger and is not reset
+history. Attempt arithmetic remains the epoch-aware ledger and is not reset
 by a session miss or recurrence.
 
 ## Terminal outcome stage membership
 
 The terminal producer receives the planned-question map. When no
-`goal_threat_outcome` question is planned — which follows the exact V2 planner
+`goal_threat_outcome` question is planned — which follows the exact planner
 existence rule, since question existence is evidence-visibility driven — the
 producer returns an accepted contentless local state with zero model calls and
 a `None` semantic summary. Model-accepted terminal results always carry a

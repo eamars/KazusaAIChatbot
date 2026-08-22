@@ -354,7 +354,7 @@ def build_cognition_input_from_global_state(
     mutable_state: Mapping[str, Any] | None = None,
     character_state: Mapping[str, Any] | None = None,
 ) -> CognitionCoreInputV2:
-    """Map adapter-neutral graph state into one native V2 cognition scope."""
+    """Map adapter-neutral graph state into one canonical cognition scope."""
 
     episode = state.get("cognitive_episode")
     if not isinstance(episode, dict):
@@ -2403,7 +2403,7 @@ def _dialog_semantic_projection_text(
 
 
 def _v2_timestamp(value: str) -> str:
-    """Project the adapter timestamp into the native V2 UTC-Z contract."""
+    """Project the adapter timestamp into the canonical UTC-Z contract."""
 
     parsed = parse_storage_utc_datetime(value).astimezone(timezone.utc)
     return parsed.strftime("%Y-%m-%dT%H:%M:%SZ")

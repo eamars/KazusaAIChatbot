@@ -99,18 +99,8 @@ Kazusa 围绕 OpenAI 兼容端点设计，而不是绑定某个托管供应商�
 | `WEB_SEARCH_LLM` | `local-model` | `http://localhost:1234/v1` |
 | `COGNITION_LLM` | `local-model` | `http://localhost:1234/v1` |
 | `COGNITION_LLM_CHARACTER_CARRYOVER` | `local-model` | `http://localhost:1234/v1` |
-| `COGNITION_LLM_APPRAISAL_EVENT_AGENCY` | `local-model` | `http://localhost:1234/v1` |
-| `COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL` | `local-model` | `http://localhost:1234/v1` |
-| `COGNITION_LLM_APPRAISAL_MORAL_IDENTITY` | `local-model` | `http://localhost:1234/v1` |
-| `COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME` | `local-model` | `http://localhost:1234/v1` |
-| `COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY` | `local-model` | `http://localhost:1234/v1` |
-| `COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE` | `local-model` | `http://localhost:1234/v1` |
-| `COGNITION_LLM_GOAL_ORDINARY_RESPONSE` | `local-model` | `http://localhost:1234/v1` |
-| `COGNITION_LLM_GOAL_ACTIVE_BRANCH` | `local-model` | `http://localhost:1234/v1` |
-| `COGNITION_LLM_WORKSPACE_COLLAPSE` | `local-model` | `http://localhost:1234/v1` |
-| `COGNITION_LLM_ACTION_PLANNING` | `local-model` | `http://localhost:1234/v1` |
-| `COGNITION_LLM_ACTION_AUTHORIZATION` | `local-model` | `http://localhost:1234/v1` |
-| `COGNITION_LLM_RESOLVER_AUTHORIZATION` | `local-model` | `http://localhost:1234/v1` |
+| `COGNITION_V3_CHAIN_LLM` | `local-model` | `http://localhost:1234/v1` |
+| `COGNITION_V3_SIDECAR_LLM` | `sidecar-model` | `http://localhost:1234/v1` |
 | `BACKGROUND_WORK_LLM` | `local-model` | `http://localhost:1234/v1` |
 | `CODING_AGENT_PM_LLM` | `local-model` | `http://localhost:1234/v1` |
 | `CODING_AGENT_PROGRAMMER_LLM` | `local-model` | `http://localhost:1234/v1` |
@@ -122,14 +112,12 @@ Kazusa 围绕 OpenAI 兼容端点设计，而不是绑定某个托管供应商�
 这张表只是示例，不是固定要求。任何路由都可以指向任意 OpenAI 兼容端点，
 前提是它能满足该阶段的延迟和质量需求。
 
-`COGNITION_LLM` 保留为 Cognition Core V2 边界之外调用方使用的通用认知路由。
-Core V2 使用上面的十三个独立阶段路由；每个路由都拥有完整的端点、凭据、模型、
-生成预算和 thinking 配置，不继承其他路由，也没有回退。
+`COGNITION_LLM` 保留为智能体认知循环之外调用方使用的通用认知路由。
+智能体认知运行时使用一个必选的 `COGNITION_V3_CHAIN_LLM` 完整路由包，以及一个
+可选但必须完整配置的 `COGNITION_V3_SIDECAR_LLM` 路由包。旧的引擎选择器和
+逐阶段认知路由已经从运行时配置中移除。
 `COGNITION_LLM_CHARACTER_CARRYOVER` 是专用的仅状态后台运营延续路由，
 最大生成预算为 8,192 tokens。
-需要类型化必选选择的目标回合会在所有分支上刻意使用
-`COGNITION_LLM_GOAL_ORDINARY_RESPONSE`，因此请为该路由配置更稠密的目标模型；
-没有类型化必选选择的活跃持久目标回合继续使用 `COGNITION_LLM_GOAL_ACTIVE_BRANCH`。
 
 代码阅读使用独立的一等 PM 和 programmer 路由。最终综合有意复用
 `CODING_AGENT_PM_LLM`，不存在独立的综合器路由。每个代码阅读路由都必须定义

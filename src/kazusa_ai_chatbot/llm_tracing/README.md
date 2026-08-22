@@ -50,7 +50,7 @@ sanitized event-log exports.
 - `full`: stores raw prompt messages, raw response text, and parsed output in
   protected trace collections.
 
-While `metadata` or `full` capture is enabled, Cognition Core V2 keeps one
+While `metadata` or `full` capture is enabled, cognition keeps one
 invocation-local exact-input and model-attempt buffer. A clean invocation
 discards that buffer without a capsule write. A terminal, recovered, partial,
 or degraded invocation schedules one protected `llm_trace_steps` row with
@@ -100,7 +100,7 @@ they must not duplicate protected trace bodies.
 
 Failure capsules reuse the trace-step collection, indexes, and
 `DEBUG_LOG_TTL_DAYS` expiry. Their `cognition_invocation_id` distinguishes safe
-retries and concurrent Cognition V2 calls under the same turn trace.
+retries and concurrent cognition calls under the same turn trace.
 
 ### Parent guardrail lineage
 

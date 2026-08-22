@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 import uuid
 from collections.abc import Mapping
@@ -424,8 +425,35 @@ class KazusaClient:
                 response_payload.get("delivery_tracking_id"),
             ),
         )
+        telemetry_chain: object = None
+        try:
+            async with self._client() as client:
+                telemetry_response = await client.get(
+                    "/ops/latest-cognition-graph",
+                )
+            telemetry_response.raise_for_status()
+            telemetry_payload = telemetry_response.json()
+            if isinstance(telemetry_payload, dict):
+                telemetry_graph = project_cognition_graph_snapshot(
+                    source="debug_latest",
+                    payload=telemetry_payload,
+                )
+                if (
+                    telemetry_graph.status != "not_reported"
+                    and debug_graph.run_id
+                    and debug_graph.llm_trace_id
+                    and telemetry_graph.run_id == debug_graph.run_id
+                    and telemetry_graph.llm_trace_id
+                    == debug_graph.llm_trace_id
+                ):
+                    debug_graph = telemetry_graph
+                    telemetry_chain = telemetry_payload.get(
+                        "cognition_chain_run",
+                    )
+        except (httpx.HTTPError, json.JSONDecodeError):
+            telemetry_chain = None
         debug_chain = _project_paired_cognition_chain_run_snapshot(
-            response_payload.get("cognition_chain_run"),
+            telemetry_chain,
             graph=debug_graph,
         )
         result = {
@@ -485,7 +513,7 @@ def _debug_chat_payload(request: ConsoleDebugChatRequest) -> dict[str, Any]:
         "channel_type": "private",
         "platform_message_id": f"debug-{uuid.uuid4().hex}",
         "platform_user_id": request.user_id,
-        "platform_bot_id": "",
+        "platform_bot_id": "debug-bot-001",
         "display_name": request.user_display_name,
         "channel_name": request.channel_id,
         "content_type": "text",
@@ -645,6 +673,12 @@ def project_cognition_chain_run_snapshot(
     if not isinstance(value, dict):
         snapshot = not_reported_cognition_chain_run()
         return snapshot
+    raw_steps = value.get("steps")
+    step_count = (
+        value.get("step_count")
+        if isinstance(value.get("step_count"), int)
+        else min(len(raw_steps), 96) if isinstance(raw_steps, list) else 0
+    )
     normalized = {
         "status": _safe_optional_text(value.get("status")) or "completed",
         "chain_run_id": _safe_optional_text(value.get("chain_run_id")),
@@ -664,11 +698,7 @@ def project_cognition_chain_run_snapshot(
         ) or "",
         "started_at": _safe_optional_text(value.get("started_at")) or "",
         "completed_at": _safe_optional_text(value.get("completed_at")) or "",
-        "step_count": (
-            value.get("step_count")
-            if isinstance(value.get("step_count"), int)
-            else 0
-        ),
+        "step_count": step_count,
         "warning_codes": (
             list(value["warning_codes"])
             if isinstance(value.get("warning_codes"), list)

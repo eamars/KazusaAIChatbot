@@ -110,18 +110,6 @@ HOWTO. One working-style configuration looks like this:
 | `COGNITION_LLM_CHARACTER_CARRYOVER` | `local-model`                     | `http://localhost:1234/v1` |
 | `COGNITION_V3_CHAIN_LLM`   | `local-model`                            | `http://localhost:1234/v1` |
 | `COGNITION_V3_SIDECAR_LLM` | `sidecar-model`                          | `http://localhost:1234/v1` |
-| `COGNITION_LLM_APPRAISAL_EVENT_AGENCY` | `local-model`                | `http://localhost:1234/v1` |
-| `COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL` | `local-model`          | `http://localhost:1234/v1` |
-| `COGNITION_LLM_APPRAISAL_MORAL_IDENTITY` | `local-model`              | `http://localhost:1234/v1` |
-| `COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME` | `local-model`          | `http://localhost:1234/v1` |
-| `COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY` | `local-model` | `http://localhost:1234/v1` |
-| `COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE` | `local-model`            | `http://localhost:1234/v1` |
-| `COGNITION_LLM_GOAL_ORDINARY_RESPONSE` | `local-model`                 | `http://localhost:1234/v1` |
-| `COGNITION_LLM_GOAL_ACTIVE_BRANCH` | `local-model`                      | `http://localhost:1234/v1` |
-| `COGNITION_LLM_WORKSPACE_COLLAPSE` | `local-model`                       | `http://localhost:1234/v1` |
-| `COGNITION_LLM_ACTION_PLANNING` | `local-model`                          | `http://localhost:1234/v1` |
-| `COGNITION_LLM_ACTION_AUTHORIZATION` | `local-model`                     | `http://localhost:1234/v1` |
-| `COGNITION_LLM_RESOLVER_AUTHORIZATION` | `local-model`                   | `http://localhost:1234/v1` |
 | `BACKGROUND_WORK_LLM`      | `local-model`                            | `http://localhost:1234/v1` |
 | `CODING_AGENT_PM_LLM`      | `local-model`                            | `http://localhost:1234/v1` |
 | `CODING_AGENT_PROGRAMMER_LLM` | `local-model`                          | `http://localhost:1234/v1` |
@@ -134,32 +122,21 @@ The table is an example, not a fixed requirement. Any route can point to any
 OpenAI-compatible endpoint that can satisfy that stage's latency and quality
 needs.
 
-`COGNITION_LLM` remains a required shared non-core cognition route under both
-engines. With `COGNITION_CORE_ENGINE=v2`, Core V2 requires the twelve
-independent `COGNITION_LLM_APPRAISAL_*`, goal, workspace, planning, and
-authorization bundles above. With `COGNITION_CORE_ENGINE=v3`, Cognition V3
-requires only `COGNITION_V3_CHAIN_LLM`, accepts one complete optional
-`COGNITION_V3_SIDECAR_LLM` bundle, and leaves the twelve V2 core bundles
-inactive. Each selected route owns a complete endpoint, credential, model,
-completion-budget, and thinking bundle.
+`COGNITION_LLM` remains a required shared non-core cognition route. The
+agentic cognition runtime requires `COGNITION_V3_CHAIN_LLM` and accepts one
+complete optional `COGNITION_V3_SIDECAR_LLM` bundle. Each route owns a
+complete endpoint, credential, model, completion-budget, and thinking bundle.
 `COGNITION_LLM_CHARACTER_CARRYOVER` is the dedicated state-only background
 operational carry-over route and has a maximum completion budget of 8,192
 tokens.
-The selected `v3` branch constructs only its own chain and optional sidecar
-services; the generic `COGNITION_LLM` route remains shared non-core plumbing.
-`COGNITION_CORE_ENGINE` defaults to `v3`; select `v2` explicitly only when
-rolling back to the V2 route bundles.
-V3 runs one serialized primary chain with a single-stream sidecar, not the
-superseded parallel-wave/checkpoint topology. Its appraisal-stage layout is
+The runtime constructs one primary chain and an optional sidecar; the generic
+`COGNITION_LLM` route remains shared non-core plumbing. The agentic loop uses
+a serialized primary chain with a single-stream sidecar. Its appraisal-stage layout is
 fixed as `fixed_a1_a2`; the caller configures
 `COGNITION_V3_TURN_DEADLINE_SECONDS` (`30..600`). The request-window ceiling is
 50,000 tokens normally and conditionally 65,000 when the declared serving
 window supports it. Timing evidence is non-streaming elapsed milliseconds;
 the runtime makes no TTFT claim.
-Typed required-selection goal turns deliberately use
-`COGNITION_LLM_GOAL_ORDINARY_RESPONSE` for every branch, so configure that
-route with the denser goal model. Active persistent-goal turns without a typed
-required selection continue to use `COGNITION_LLM_GOAL_ACTIVE_BRANCH`.
 
 Code-reading uses separate required routes for PM decisions and programmer
 workers. Final synthesis intentionally reuses `CODING_AGENT_PM_LLM`; there is
@@ -759,17 +736,14 @@ Or use Uvicorn directly:
 uvicorn kazusa_ai_chatbot.service:app --host 0.0.0.0 --port 8000
 ```
 
-### Cognition V3 startup and rollback notes
+### Agentic cognition startup
 
-The current selector default is `COGNITION_CORE_ENGINE=v3`. Operators use the
-complete
-`COGNITION_V3_CHAIN_LLM_*` bundle, optionally set the all-or-nothing
+Operators configure the complete `COGNITION_V3_CHAIN_LLM_*` bundle,
+optionally set the all-or-nothing
 `COGNITION_V3_SIDECAR_LLM_*` bundle, and use the fixed `fixed_a1_a2`
 appraisal-stage layout with the configured turn deadline and context window
-described in `docs/HOWTO.md`. This documents the current cutover configuration
-without asserting that Gate 8 observation is complete. Rollback explicitly sets
-`COGNITION_CORE_ENGINE=v2` and restarts the process so the selector binds the
-V2 route bundles; existing V3 diagnostic rows remain available for review.
+described in `docs/HOWTO.md`. The former engine selector and per-stage route
+bundles are removed from the runtime contract.
 
 Useful read-only evidence commands are:
 
@@ -837,7 +811,7 @@ Default test runs exclude live DB and live LLM tests through `pytest.ini`.
 venv\Scripts\python -m pytest -q
 ```
 
-When a production module under the Cognition V2, cognition-resolver, or named
+When a production module under cognition, cognition-resolver, or a named
 direct-node ownership boundary changes, run the exact source-to-test impact
 check from the recorded baseline:
 

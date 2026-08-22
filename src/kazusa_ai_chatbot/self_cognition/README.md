@@ -546,7 +546,7 @@ self_cognition_consolidation_outcome = {
 ## Trace Binding
 
 Each live self-cognition case receives a protected `llm_trace_id` before
-Cognition Core V2 starts. The worker binds that id for the case, ensures the
+Cognition starts. The worker binds that id for the case, ensures the
 trace run with platform/message and user metadata, carries the applicable
 `source_calendar_run_id` and source trace, and finalizes the run after the case
 settles. Trace write failure does not become a delivery prerequisite. Action

@@ -11,6 +11,8 @@ from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
+from kazusa_ai_chatbot.time_boundary import CHARACTER_TIME_ZONE
+
 COGNITION_V3_APPRAISAL_STAGE_LAYOUT: Literal["fixed_a1_a2"] = "fixed_a1_a2"
 
 
@@ -1029,9 +1031,6 @@ CHARACTER_SLEEP_LOCAL_PERIOD = _optional_local_period_from_env(
     "CHARACTER_SLEEP_LOCAL_PERIOD",
     "02:00-12:00",
 )
-
-# Character timezone (IANA name) for converting UTC to character-local time.
-CHARACTER_TIME_ZONE = os.getenv("CHARACTER_TIME_ZONE", "Pacific/Auckland")
 
 # Reflection cycle
 REFLECTION_CYCLE_ENABLED = os.getenv(

@@ -4131,18 +4131,22 @@ def _build_response_cognition_graph(
     cognition_output = state.get("cognition_core_output")
     if not isinstance(cognition_output, Mapping):
         cognition_output = graph_result.get("cognition_core_output")
-    native_nodes, native_edges = _graph_native_v2_nodes(
+    cognition_nodes, cognition_edges = _graph_cognition_nodes(
         cognition_output,
         failure=failure,
     )
-    nodes.extend(native_nodes)
-    edges.extend(native_edges)
+    nodes.extend(cognition_nodes)
+    edges.extend(cognition_edges)
     if (
         graph_status == "completed"
         and any(
             node["status"] in {"failed", "partial"}
-            for node in native_nodes
-            if node["id"] in {"v2.parallel", "v2.appraisal", "v2.failure"}
+            for node in cognition_nodes
+            if node["id"] in {
+                "cognition.parallel",
+                "cognition.appraisal",
+                "cognition.failure",
+            }
         )
     ):
         graph_status = "partial"
@@ -4549,7 +4553,7 @@ _GRAPH_FUTURE_FIELDS = _GRAPH_CONTINUATION_FIELDS | frozenset(
         "objective_summary",
     }
 )
-_GRAPH_V2_EXECUTION_FIELDS = frozenset(
+_GRAPH_COGNITION_EXECUTION_FIELDS = frozenset(
     {
         "selected_question_count",
         "dispatched_question_count",
@@ -4563,7 +4567,7 @@ _GRAPH_V2_EXECUTION_FIELDS = frozenset(
         "total_ms",
     }
 )
-_GRAPH_V2_APPRAISAL_FIELDS = frozenset(
+_GRAPH_COGNITION_APPRAISAL_FIELDS = frozenset(
     {
         "question_kind",
         "semantic_question",
@@ -4578,7 +4582,7 @@ _GRAPH_V2_APPRAISAL_FIELDS = frozenset(
         "failure_code",
     }
 )
-_GRAPH_V2_BRANCH_FIELDS = frozenset(
+_GRAPH_COGNITION_BRANCH_FIELDS = frozenset(
     {
         "phase",
         "branch_index",
@@ -4595,7 +4599,7 @@ _GRAPH_V2_BRANCH_FIELDS = frozenset(
         "failure_code",
     }
 )
-_GRAPH_V2_COLLAPSE_FIELDS = frozenset(
+_GRAPH_COGNITION_COLLAPSE_FIELDS = frozenset(
     {
         "primary_branch_index",
         "supporting_branch_indices",
@@ -4603,14 +4607,14 @@ _GRAPH_V2_COLLAPSE_FIELDS = frozenset(
         "selection_reason",
     }
 )
-_GRAPH_V2_SELECTED_INTENTION_FIELDS = frozenset(
+_GRAPH_COGNITION_SELECTED_INTENTION_FIELDS = frozenset(
     {
         "route",
         "intention",
         "reason",
     }
 )
-_GRAPH_V2_EXPRESSION_FIELDS = frozenset(
+_GRAPH_COGNITION_EXPRESSION_FIELDS = frozenset(
     {
         "visibility",
         "emotional_tone",
@@ -4618,7 +4622,7 @@ _GRAPH_V2_EXPRESSION_FIELDS = frozenset(
         "directness",
     }
 )
-_GRAPH_V2_AFFECT_FIELDS = frozenset(
+_GRAPH_COGNITION_AFFECT_FIELDS = frozenset(
     {
         "emotion",
         "phase",
@@ -4754,21 +4758,21 @@ def _graph_project_text_list(value: Any) -> list[str]:
     return [item for item in value if isinstance(item, str) and item.strip()]
 
 
-def _graph_v2_failure_node(
+def _graph_cognition_failure_node(
     *,
     failure_code: str,
     stage: str,
     attempt_count: int = 1,
     safe_checkpoint: str = "unknown",
     retryable: bool = False,
-    label: str = "Native V2 failure",
+    label: str = "Cognition failure",
 ) -> dict[str, Any]:
-    """Build bounded native failure detail without exception text or IDs."""
+    """Build bounded cognition failure detail without exception text or IDs."""
 
     return {
-        "id": "v2.failure",
+        "id": "cognition.failure",
         "label": label,
-        "stage": "V2",
+        "stage": "Cognition",
         "lane": "cognition",
         "column": 3,
         "branch": "failure",
@@ -4785,12 +4789,12 @@ def _graph_v2_failure_node(
     }
 
 
-def _graph_native_v2_nodes(
+def _graph_cognition_nodes(
     cognition_output: Any,
     *,
     failure: BaseException | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Project native V2 branch results into the operator graph."""
+    """Project canonical cognition branch results into the operator graph."""
 
     failure_nodes: list[dict[str, Any]] = []
     failure_edges: list[dict[str, Any]] = []
@@ -4802,7 +4806,7 @@ def _graph_native_v2_nodes(
             failure_retryable,
             _,
         ) = _operational_failure_metadata(failure)
-        failure_node = _graph_v2_failure_node(
+        failure_node = _graph_cognition_failure_node(
             failure_code=failure_code,
             stage=failure_stage,
             attempt_count=failure_attempt_count,
@@ -4814,9 +4818,9 @@ def _graph_native_v2_nodes(
         failure_nodes.append(failure_node)
         failure_edges.append({
             "source": "l1.relevance",
-            "target": "v2.failure",
+            "target": "cognition.failure",
             "kind": "fork",
-            "label": "native V2 failure",
+            "label": "cognition failure",
         })
     if not isinstance(cognition_output, Mapping):
         return failure_nodes, failure_edges
@@ -4826,17 +4830,17 @@ def _graph_native_v2_nodes(
             if failure_nodes:
                 return failure_nodes, failure_edges
             return [
-                _graph_v2_failure_node(
+                _graph_cognition_failure_node(
                     failure_code="native_observability_missing",
                     stage="cognition_observability",
-                    label="Native V2 telemetry missing",
+                    label="Cognition telemetry missing",
                 ),
             ], [
                 {
                     "source": "l1.relevance",
-                    "target": "v2.failure",
+                    "target": "cognition.failure",
                     "kind": "fork",
-                    "label": "native V2 telemetry",
+                    "label": "cognition telemetry",
                 },
             ]
         return failure_nodes, failure_edges
@@ -4846,35 +4850,35 @@ def _graph_native_v2_nodes(
         if failure_nodes:
             return failure_nodes, failure_edges
         return [
-            _graph_v2_failure_node(
+            _graph_cognition_failure_node(
                 failure_code="native_observability_invalid",
                 stage="cognition_observability",
-                label="Native V2 telemetry invalid",
+                label="Cognition telemetry invalid",
             ),
         ], [
             {
                 "source": "l1.relevance",
-                "target": "v2.failure",
+                "target": "cognition.failure",
                 "kind": "fork",
-                "label": "native V2 telemetry",
+                "label": "cognition telemetry",
             },
         ]
 
     execution = _graph_project_mapping(
         observability.get("execution"),
-        _GRAPH_V2_EXECUTION_FIELDS,
+        _GRAPH_COGNITION_EXECUTION_FIELDS,
     )
     branch_rows = _graph_project_semantic_rows(
         observability.get("branches"),
-        _GRAPH_V2_BRANCH_FIELDS,
+        _GRAPH_COGNITION_BRANCH_FIELDS,
     )
     appraisal_rows = _graph_project_semantic_rows(
         observability.get("appraisals"),
-        _GRAPH_V2_APPRAISAL_FIELDS,
+        _GRAPH_COGNITION_APPRAISAL_FIELDS,
     )
     collapse = _graph_project_mapping(
         observability.get("collapse"),
-        _GRAPH_V2_COLLAPSE_FIELDS,
+        _GRAPH_COGNITION_COLLAPSE_FIELDS,
     )
     nodes: list[dict[str, Any]] = list(failure_nodes)
     edges: list[dict[str, Any]] = list(failure_edges)
@@ -4893,9 +4897,9 @@ def _graph_native_v2_nodes(
     if branch_rows:
         parallel_detail["branch_results"] = branch_rows
     nodes.append({
-        "id": "v2.parallel",
+        "id": "cognition.parallel",
         "label": "Parallel cognition",
-        "stage": "V2",
+        "stage": "Cognition",
         "lane": "cognition",
         "column": 3,
         "branch": "parallel",
@@ -4931,9 +4935,9 @@ def _graph_native_v2_nodes(
             else "skipped"
         )
     nodes.append({
-        "id": "v2.appraisal",
+        "id": "cognition.appraisal",
         "label": "Appraisal results",
-        "stage": "V2",
+        "stage": "Cognition",
         "lane": "cognition",
         "column": 3,
         "branch": "appraisal",
@@ -4945,9 +4949,9 @@ def _graph_native_v2_nodes(
         branch_index = branch_detail.get("branch_index")
         if not isinstance(branch_index, int) or isinstance(branch_index, bool):
             branch_index = index
-        node_id = f"v2.branch.{branch_index}"
+        node_id = f"cognition.branch.{branch_index}"
         if node_id in branch_node_ids:
-            node_id = f"v2.branch.{index}"
+            node_id = f"cognition.branch.{index}"
         branch_node_ids.append(node_id)
         branch_status = branch_detail.get("status")
         if branch_status not in {"completed", "failed", "not_reported"}:
@@ -4955,7 +4959,7 @@ def _graph_native_v2_nodes(
         nodes.append({
             "id": node_id,
             "label": f"Goal branch {branch_index}",
-            "stage": "V2",
+            "stage": "Cognition",
             "lane": "cognition",
             "column": 4,
             "branch": f"branch-{branch_index}",
@@ -4968,7 +4972,7 @@ def _graph_native_v2_nodes(
         collapse_detail["collapse"] = collapse
     selected_intention = _graph_project_mapping(
         cognition_output.get("intention"),
-        _GRAPH_V2_SELECTED_INTENTION_FIELDS,
+        _GRAPH_COGNITION_SELECTED_INTENTION_FIELDS,
     )
     if selected_intention:
         collapse_detail["selected_intention"] = selected_intention
@@ -4987,14 +4991,14 @@ def _graph_native_v2_nodes(
         collapse_detail["goal_resolution"] = goal_resolution
     expression_policy = _graph_project_mapping(
         cognition_output.get("expression_policy"),
-        _GRAPH_V2_EXPRESSION_FIELDS,
+        _GRAPH_COGNITION_EXPRESSION_FIELDS,
     )
     if expression_policy:
         collapse_detail["expression_policy"] = expression_policy
     nodes.append({
-        "id": "v2.collapse",
+        "id": "cognition.collapse",
         "label": "Workspace collapse",
-        "stage": "V2",
+        "stage": "Cognition",
         "lane": "decision",
         "column": 5,
         "branch": "collapse",
@@ -5004,7 +5008,7 @@ def _graph_native_v2_nodes(
 
     affect_rows = _graph_project_semantic_rows(
         cognition_output.get("affect_projection"),
-        _GRAPH_V2_AFFECT_FIELDS,
+        _GRAPH_COGNITION_AFFECT_FIELDS,
     )
     if affect_rows:
         affect_detail = {"affect_projection": affect_rows}
@@ -5013,9 +5017,9 @@ def _graph_native_v2_nodes(
         affect_detail = {"empty_state": "No affect projection was reported."}
         affect_status = "skipped"
     nodes.append({
-        "id": "v2.affect",
+        "id": "cognition.affect",
         "label": "Affect projection",
-        "stage": "V2",
+        "stage": "Cognition",
         "lane": "cognition",
         "column": 5,
         "branch": "affect",
@@ -5026,36 +5030,36 @@ def _graph_native_v2_nodes(
     edges.extend([
         {
             "source": "l1.relevance",
-            "target": "v2.parallel",
+            "target": "cognition.parallel",
             "kind": "fork",
-            "label": "native V2",
+            "label": "cognition",
         },
         {
-            "source": "v2.parallel",
-            "target": "v2.appraisal",
+            "source": "cognition.parallel",
+            "target": "cognition.appraisal",
             "kind": "fork",
             "label": "appraisal",
         },
         {
-            "source": "v2.appraisal",
-            "target": "v2.collapse",
+            "source": "cognition.appraisal",
+            "target": "cognition.collapse",
             "kind": "join",
             "label": "semantic result",
         },
         {
-            "source": "v2.collapse",
-            "target": "v2.affect",
+            "source": "cognition.collapse",
+            "target": "cognition.affect",
             "kind": "sequence",
             "label": "state projection",
         },
         {
-            "source": "v2.affect",
+            "source": "cognition.affect",
             "target": "l3.visual_directives",
             "kind": "join",
             "label": "expression",
         },
         {
-            "source": "v2.affect",
+            "source": "cognition.affect",
             "target": "l3.surface",
             "kind": "join",
             "label": "surface",
@@ -5072,14 +5076,14 @@ def _graph_native_v2_nodes(
             else ""
         )
         edges.append({
-            "source": "v2.parallel",
+            "source": "cognition.parallel",
             "target": node_id,
             "kind": "fork",
             "label": "parallel branch",
         })
         edges.append({
             "source": node_id,
-            "target": "v2.collapse",
+            "target": "cognition.collapse",
             "kind": "join",
             "label": str(selection or "branch result"),
         })
@@ -5457,7 +5461,7 @@ def _graph_public_style_projection(
 
 
 def _graph_public_group_engagement_context(value: Any) -> dict[str, Any]:
-    """Copy the exact group-action selection passed into Core V2."""
+    """Copy the exact group-action selection passed into cognition."""
 
     if not isinstance(value, Mapping):
         return {}

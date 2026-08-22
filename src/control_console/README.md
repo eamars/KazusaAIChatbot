@@ -21,8 +21,8 @@ The console is not mounted by the brain service and must not change `/chat`, cog
 - Browse bounded read-only Character, Users, Groups, calendar, background-work,
   health/cache, event, and audit summaries.
 - Discover known users and active groups before opening their bounded detail.
-- Inspect native Cognition Core V2 character and user state without V1
-  relationship aliases.
+- Inspect canonical character cognition, relationship axes, causal emotion
+  context, and user state.
 - Inspect calendar schedules and recent outcomes, background jobs and
   aggregate worker activity, runtime readiness, and collapsed audit actions.
 
@@ -151,7 +151,7 @@ identifiers, handler metadata, and internal ids stay excluded.
 
 `l2.reasoning.detail.context_consumption` is a strict detail field with schema
 `cognition_context_consumption.v1`. The brain constructs it from the immutable
-turn snapshot and executed V2 cognition/L3 inputs. The console validates,
+turn snapshot and executed cognition/L3 inputs. The console validates,
 redacts, transports, and renders that exact field; it does not reconstruct
 consumed state from a current database read. The payload contains bounded
 `settled_relevance`, `cognition`, `surface`, and `health` sections. It excludes
@@ -210,8 +210,8 @@ worker, cache-agent, or audit-action detail.
 | Live logs | Bounded supervisor/stdout/stderr text and stream connection state | `GET /api/logs/stream` |
 | Debug chat | Request controls, current response/error, cognition graph, browser-session history | `POST /api/debug-chat` |
 | Event monitor | Structured events, filters, dynamic facets, duration/error/correlation detail | `GET /api/events` |
-| Character | Latest profile, native V2 cognition, persisted/effective operational posture, exact graph consumption, current self-image, redacted growth candidates/outcomes, immutable identity lineage and health | `GET /api/entities/character` |
-| Users | Safe directory; profile, native V2 relationship/cognition, causal relationship projection, memory, consumer-labelled style, progress, carry-over | plural user entity routes |
+| Character | Latest profile, canonical cognition, persisted/effective operational posture, exact graph consumption, current self-image, redacted growth candidates/outcomes, immutable identity lineage and health | `GET /api/entities/character` |
+| Users | Safe directory; profile, relationship/cognition, causal relationship projection, memory, consumer-labelled style, progress, carry-over | plural user entity routes |
 | Groups | Activity directory; review, style, carry-over, participant progress | plural group entity routes |
 | Calendar | Counts, schedules, recent run outcomes, scoped cognition visibility | `GET /api/lookups/calendar` |
 | Background work | Queue counts, canonical jobs, worker aggregates, errors, delivery detail | `GET /api/lookups/background-work` |
@@ -223,7 +223,7 @@ Safe-field boundaries are fixed:
 - The user directory returns only platform account labels/ids, display names,
   alias count, and update time. It excludes global ids, alias ids, cognition
   content, relationship evidence ids, and ownership ids.
-- User relationship detail returns all eleven stored V2 axes with the exact
+- User relationship detail returns all eleven stored axes with the exact
   numeric value and canonical semantic band, plus evidence count and update
   time. It does not calculate an affinity replacement.
 - Character operational posture exposes full persisted and elapsed-effective
@@ -294,8 +294,8 @@ The current implementation status is:
 | Live logs | `ready` | Console-owned process streams |
 | Debug chat | `ready` | Existing brain `/chat` contract when brain is running |
 | Event monitor | `ready` | Structured Kazusa application-event telemetry |
-| Character | `ready` | Native V2 owner projection |
-| Users | `ready` | Safe directory and native V2 detail |
+| Character | `ready` | Canonical cognition owner projection |
+| Users | `ready` | Safe directory and canonical detail |
 | Groups | `ready` | Activity directory and sourced detail |
 | Calendar | `ready` | Schedules, recent outcomes, scoped visibility |
 | Background work | `ready` | Jobs, worker aggregates, errors, delivery |
@@ -446,22 +446,11 @@ and these restart-applied identity-growth fields:
 The console does not expose API keys, base URLs, embedding routes, raw dotenv
 values, or a general environment editor.
 
-The `Cognition Core V2` route group contains these ordinary Brain route
-descriptors:
+The agentic cognition route group contains these Brain route descriptors:
 
 ```text
-COGNITION_LLM_APPRAISAL_EVENT_AGENCY
-COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL
-COGNITION_LLM_APPRAISAL_MORAL_IDENTITY
-COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME
-COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY
-COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE
-COGNITION_LLM_GOAL_ORDINARY_RESPONSE
-COGNITION_LLM_GOAL_ACTIVE_BRANCH
-COGNITION_LLM_WORKSPACE_COLLAPSE
-COGNITION_LLM_ACTION_PLANNING
-COGNITION_LLM_ACTION_AUTHORIZATION
-COGNITION_LLM_RESOLVER_AUTHORIZATION
+COGNITION_V3_CHAIN_LLM
+COGNITION_V3_SIDECAR_LLM
 ```
 
 Each descriptor uses the same selected-route editor and model-discovery

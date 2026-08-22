@@ -56,7 +56,7 @@ normalized by adapters and the brain service into `message_envelope`,
 and bounded history fields.
 
 For a required-selection turn, `persona_supervisor2_msg_decontextualizer.py`
-owns the input-level `response_operation`. Cognition V2 owns the concrete
+owns the input-level `response_operation`. Cognition owns the concrete
 `selected_response_operation` emitted by required-selection goal cognition.
 The carrier passes through the complete bid, selected intention, and
 `TextSurfaceInputV2`; the surface model does not rewrite it, and dialog
@@ -77,7 +77,7 @@ stage_0_msg_decontextualizer
   -> stage_1_goal_resolver
        start eligible cycle-zero shared-memory prewarm
        load one mutable user or character V2 state
-       join shared-memory preparation before native V2 input construction
+       join shared-memory preparation before canonical cognition input construction
        reuse the service-owned interaction-style turn snapshot
        build CognitionCoreInputV2
        run V2 cognition without an intermediate commit
@@ -208,45 +208,22 @@ current episode evidence and semantic scene. Goal cognition emits the concrete
 it, and dialog renders the resulting surface without independently interpreting
 nested direct pronouns.
 
-The V2 core performs deterministic preparation, scoped semantic appraisal,
+The cognition core performs deterministic preparation, scoped semantic appraisal,
 state reduction, dependency-ready goal cognition, complete-bid collapse, and
 route validation. Its output contains the replacement state, selected semantic
 intention, admitted/supporting bids, semantic affect and relationship
 projections, action requests, resolver requests, progress, expression policy,
 diagnostics, and bounded residue.
 
-With `COGNITION_CORE_ENGINE=v2`, the connector constructs twelve independent
-required Core V2 route bindings:
-
-```text
-COGNITION_LLM_APPRAISAL_EVENT_AGENCY
-COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL
-COGNITION_LLM_APPRAISAL_MORAL_IDENTITY
-COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME
-COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY
-COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE
-COGNITION_LLM_GOAL_ORDINARY_RESPONSE
-COGNITION_LLM_GOAL_ACTIVE_BRANCH
-COGNITION_LLM_WORKSPACE_COLLAPSE
-COGNITION_LLM_ACTION_PLANNING
-COGNITION_LLM_ACTION_AUTHORIZATION
-COGNITION_LLM_RESOLVER_AUTHORIZATION
-```
-
-Each binding has its own endpoint, credential, model, completion budget, and
-thinking setting. Missing required values stop configuration loading. The
-connector passes the bindings directly to their semantic owners, including
-the same owner config for retries, repairs, and traces.
-
-With `COGNITION_CORE_ENGINE=v3`, the connector constructs one required
+The connector constructs one required
 `COGNITION_V3_CHAIN_LLM` binding and one optional all-or-nothing
 `COGNITION_V3_SIDECAR_LLM` binding. The chain declares a served context window
 of at least 50,000 tokens, both lanes require an 8,192-token completion
-capacity, and thinking stays disabled. Only the selected core family is read.
+capacity, and thinking stays disabled.
 The generic `COGNITION_LLM` route remains a required shared non-core binding
-for carry-over and memory-lifecycle consumers under either engine.
+for carry-over and memory-lifecycle consumers.
 
-For the V3 branch, the connector hands one invocation to the serialized
+The connector hands one invocation to the serialized
 primary chain in the exact cold order `A1 -> A2 -> I1 -> G1a -> optional G1b
 -> I2 -> conditional W1 -> P1 -> off-chain X1/X2 -> O`. The optional sidecar
 is a single-stream lane for advisory L1, repair, and authorization. Resolver
@@ -254,7 +231,7 @@ recurrence reattaches the same episode session and runs only its bounded
 observation -> delta-appraisal -> bid-revision -> fresh-P1 tail before the
 single terminal replacement-state commit. This connector does not launch
 parallel V3 waves or add a second checkpoint/commit authority.
-The V3 connector uses the fixed `fixed_a1_a2` appraisal-stage layout. The
+The connector uses the fixed `fixed_a1_a2` appraisal-stage layout. The
 caller configures `COGNITION_V3_TURN_DEADLINE_SECONDS` (`30..600`, default
 `240`). V3 starts with the 50,000-token total ceiling and can use the
 conditional 65,000-token tier only when the caller-local serving window
@@ -275,7 +252,7 @@ character/world memory can inform what the character knows; current-user
 continuity memory explains history. The character weighs both with the current
 episode and other typed evidence.
 
-The ordinary goal owner in Cognition Core V2 decides current-turn relational
+The ordinary goal owner decides current-turn relational
 willingness. Each goal evidence row receives one transient `provenance_role`
 derived from trusted source-kind and memory-scope metadata; promoted
 reflection and shared character/world context remain branch evidence and do not
@@ -289,7 +266,7 @@ from prose or relationship numbers.
 
 ## Action Ownership
 
-V2 goal branches may bid for speech, silence, private handling, an action, or
+Cognition goal branches may bid for speech, silence, private handling, an action, or
 resolver evidence. Complete bids retain their semantic intention, desired
 outcome, grounded detail, target roles, consequences, route, and declared
 request until deterministic collapse and validation finish.
@@ -476,10 +453,6 @@ actions, deliver messages, schedule work, or reopen cognition.
 - `persona_supervisor2_l3_surface.call_l3_text_surface_handler(...)`
 - `dialog_agent.dialog_agent(...)`
 
-The cognition entrypoint the connector binds resolves through the closed
-process-level selector `kazusa_ai_chatbot.cognition_core_selector`:
-`COGNITION_CORE_ENGINE` accepts exactly `v2` or `v3` (default `v3`) and is
-resolved once at import, so every live/idle/self-cognition call site runs the
-single selected engine. Select `v2` explicitly only to roll back to the V2
-route bundles. The surface planning APIs (`run_text_surface_planning(...)`,
-`run_visual_surface_planning(...)`) remain in `kazusa_ai_chatbot.cognition_core_v2`.
+The connector imports `kazusa_ai_chatbot.cognition_core_v3` directly, so every
+live, idle, and self-cognition call site runs the same agentic engine. Text and
+visual surface planning use the canonical cognition facade and validators.

@@ -50,21 +50,20 @@ WEB_SEARCH_LLM_MODEL=your-chat-model
 COGNITION_LLM_BASE_URL=http://localhost:1234/v1
 COGNITION_LLM_API_KEY=lm-studio
 COGNITION_LLM_MODEL=your-chat-model
-COGNITION_CORE_ENGINE=v3
 COGNITION_STAGE_TIMEOUT_SECONDS=120
 COGNITION_LLM_CHARACTER_CARRYOVER_BASE_URL=http://localhost:1234/v1
 COGNITION_LLM_CHARACTER_CARRYOVER_API_KEY=lm-studio
 COGNITION_LLM_CHARACTER_CARRYOVER_MODEL=your-chat-model
 COGNITION_LLM_CHARACTER_CARRYOVER_MAX_COMPLETION_TOKENS=8192
 COGNITION_LLM_CHARACTER_CARRYOVER_THINKING_ENABLED=false
-# Select these V3 core routes when COGNITION_CORE_ENGINE=v3.
+# Required agentic cognition chain.
 COGNITION_V3_CHAIN_LLM_BASE_URL=http://localhost:1234/v1
 COGNITION_V3_CHAIN_LLM_API_KEY=lm-studio
 COGNITION_V3_CHAIN_LLM_MODEL=your-chat-model
 COGNITION_V3_CHAIN_LLM_MAX_COMPLETION_TOKENS=8192
 COGNITION_V3_CHAIN_LLM_CONTEXT_WINDOW_TOKENS=50176
 COGNITION_V3_CHAIN_LLM_THINKING_ENABLED=false
-# The V3 sidecar is optional; set BASE_URL, API_KEY, and MODEL together.
+# The sidecar is optional; set BASE_URL, API_KEY, and MODEL together.
 COGNITION_V3_SIDECAR_LLM_BASE_URL=http://localhost:1234/v1
 COGNITION_V3_SIDECAR_LLM_API_KEY=lm-studio
 COGNITION_V3_SIDECAR_LLM_MODEL=your-sidecar-model
@@ -72,68 +71,6 @@ COGNITION_V3_SIDECAR_LLM_MAX_COMPLETION_TOKENS=8192
 COGNITION_V3_SIDECAR_LLM_THINKING_ENABLED=false
 COGNITION_V3_SUBCONSCIOUS_ENABLED=false
 COGNITION_V3_TURN_DEADLINE_SECONDS=240
-# Retain these twelve Core V2 route bundles for explicit rollback only:
-# select them when COGNITION_CORE_ENGINE=v2.
-COGNITION_LLM_APPRAISAL_EVENT_AGENCY_BASE_URL=http://localhost:1234/v1
-COGNITION_LLM_APPRAISAL_EVENT_AGENCY_API_KEY=lm-studio
-COGNITION_LLM_APPRAISAL_EVENT_AGENCY_MODEL=your-chat-model
-COGNITION_LLM_APPRAISAL_EVENT_AGENCY_MAX_COMPLETION_TOKENS=2048
-COGNITION_LLM_APPRAISAL_EVENT_AGENCY_THINKING_ENABLED=false
-COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_BASE_URL=http://localhost:1234/v1
-COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_API_KEY=lm-studio
-COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_MODEL=your-chat-model
-COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_MAX_COMPLETION_TOKENS=2048
-COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL_THINKING_ENABLED=false
-COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_BASE_URL=http://localhost:1234/v1
-COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_API_KEY=lm-studio
-COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_MODEL=your-chat-model
-COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_MAX_COMPLETION_TOKENS=2048
-COGNITION_LLM_APPRAISAL_MORAL_IDENTITY_THINKING_ENABLED=false
-COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_BASE_URL=http://localhost:1234/v1
-COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_API_KEY=lm-studio
-COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_MODEL=your-chat-model
-COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_MAX_COMPLETION_TOKENS=2048
-COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME_THINKING_ENABLED=false
-COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_BASE_URL=http://localhost:1234/v1
-COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_API_KEY=lm-studio
-COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_MODEL=your-chat-model
-COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_MAX_COMPLETION_TOKENS=2048
-COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY_THINKING_ENABLED=false
-COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_BASE_URL=http://localhost:1234/v1
-COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_API_KEY=lm-studio
-COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_MODEL=your-chat-model
-COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_MAX_COMPLETION_TOKENS=2048
-COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE_THINKING_ENABLED=false
-COGNITION_LLM_GOAL_ORDINARY_RESPONSE_BASE_URL=http://localhost:1234/v1
-COGNITION_LLM_GOAL_ORDINARY_RESPONSE_API_KEY=lm-studio
-COGNITION_LLM_GOAL_ORDINARY_RESPONSE_MODEL=your-chat-model
-COGNITION_LLM_GOAL_ORDINARY_RESPONSE_MAX_COMPLETION_TOKENS=8192
-COGNITION_LLM_GOAL_ORDINARY_RESPONSE_THINKING_ENABLED=false
-COGNITION_LLM_GOAL_ACTIVE_BRANCH_BASE_URL=http://localhost:1234/v1
-COGNITION_LLM_GOAL_ACTIVE_BRANCH_API_KEY=lm-studio
-COGNITION_LLM_GOAL_ACTIVE_BRANCH_MODEL=your-chat-model
-COGNITION_LLM_GOAL_ACTIVE_BRANCH_MAX_COMPLETION_TOKENS=8192
-COGNITION_LLM_GOAL_ACTIVE_BRANCH_THINKING_ENABLED=false
-COGNITION_LLM_WORKSPACE_COLLAPSE_BASE_URL=http://localhost:1234/v1
-COGNITION_LLM_WORKSPACE_COLLAPSE_API_KEY=lm-studio
-COGNITION_LLM_WORKSPACE_COLLAPSE_MODEL=your-chat-model
-COGNITION_LLM_WORKSPACE_COLLAPSE_MAX_COMPLETION_TOKENS=1024
-COGNITION_LLM_WORKSPACE_COLLAPSE_THINKING_ENABLED=false
-COGNITION_LLM_ACTION_PLANNING_BASE_URL=http://localhost:1234/v1
-COGNITION_LLM_ACTION_PLANNING_API_KEY=lm-studio
-COGNITION_LLM_ACTION_PLANNING_MODEL=your-chat-model
-COGNITION_LLM_ACTION_PLANNING_MAX_COMPLETION_TOKENS=8192
-COGNITION_LLM_ACTION_PLANNING_THINKING_ENABLED=false
-COGNITION_LLM_ACTION_AUTHORIZATION_BASE_URL=http://localhost:1234/v1
-COGNITION_LLM_ACTION_AUTHORIZATION_API_KEY=lm-studio
-COGNITION_LLM_ACTION_AUTHORIZATION_MODEL=your-chat-model
-COGNITION_LLM_ACTION_AUTHORIZATION_MAX_COMPLETION_TOKENS=1024
-COGNITION_LLM_ACTION_AUTHORIZATION_THINKING_ENABLED=false
-COGNITION_LLM_RESOLVER_AUTHORIZATION_BASE_URL=http://localhost:1234/v1
-COGNITION_LLM_RESOLVER_AUTHORIZATION_API_KEY=lm-studio
-COGNITION_LLM_RESOLVER_AUTHORIZATION_MODEL=your-chat-model
-COGNITION_LLM_RESOLVER_AUTHORIZATION_MAX_COMPLETION_TOKENS=1024
-COGNITION_LLM_RESOLVER_AUTHORIZATION_THINKING_ENABLED=false
 BACKGROUND_WORK_LLM_BASE_URL=http://localhost:1234/v1
 BACKGROUND_WORK_LLM_API_KEY=lm-studio
 BACKGROUND_WORK_LLM_MODEL=your-chat-model
@@ -280,39 +217,22 @@ the background artifact route when omitted. Code-reading PM and programmer
 routes are required first-class routes. Final code-reading synthesis reuses the
 PM route and has no separate route identity.
 The generic `COGNITION_LLM` bundle remains required for cognition callers
-outside the selected Cognition Core branch. Cognition V3 is the current
-default and requires the complete V3 chain bundle plus an optional complete
-sidecar bundle. Core V2 requires all thirteen complete
-`COGNITION_LLM_<STAGE>` bundles shown above. Each stage reads its own
-`BASE_URL`, `API_KEY`, `MODEL`, `MAX_COMPLETION_TOKENS`, and
-`THINKING_ENABLED` values directly; stage routes have no inheritance or
-fallback.
-The V2 bundles are loaded only when `COGNITION_CORE_ENGINE=v2` is selected;
-they remain available as the explicit rollback configuration. The fixed V3
-layout is `fixed_a1_a2`, with `COGNITION_V3_TURN_DEADLINE_SECONDS` bounded to
+outside the agentic cognition chain. The runtime requires the complete chain
+bundle plus an optional complete sidecar bundle. The fixed appraisal layout is
+`fixed_a1_a2`, with `COGNITION_V3_TURN_DEADLINE_SECONDS` bounded to
 `30..600` (default `240`) and a declared chain context window of at least
 50,000 tokens. The normal total ceiling is 50,000 tokens, with the
 conditional 65,000-token tier available only when the declared serving window
-supports it. This documents the current route configuration without claiming
-that Gate 8 observation is complete.
+supports it.
 `COGNITION_LLM_CHARACTER_CARRYOVER` is the state-only background operational
 carry-over route; its completion-token setting is capped at 8,192.
-Typed required-selection goal turns use the
-`COGNITION_LLM_GOAL_ORDINARY_RESPONSE` bundle for every cognition branch.
-Configure this route with the denser goal model; for example, a deployment may
-assign its 31B dense model here while retaining a 26B model on
-`COGNITION_LLM_GOAL_ACTIVE_BRANCH` for active branches that do not require a
-character-owned selection.
 Route-specific variables replace the retired generic `LLM_BASE_URL`,
 `LLM_API_KEY`, and `LLM_MODEL` settings. Missing required route variables stop
 config loading. Chat routes also accept route-specific
 `*_MAX_COMPLETION_TOKENS` and `*_THINKING_ENABLED` values, with
-`DEFAULT_LLM_MAX_COMPLETION_TOKENS` retained for non-Cognition-Core-V2
-consumers. Cognition Core V2 uses the stage defaults shown in the environment
-block above and applies `COGNITION_STAGE_TIMEOUT_SECONDS` to every cognition
-and surface stage call; the Cognition route environment overrides are capped at
-their stage ceilings. The timeout default is 120 seconds and its accepted range
-is 10 to 600 seconds.
+`DEFAULT_LLM_MAX_COMPLETION_TOKENS` retained for routes without an explicit
+budget. The cognition timeout default is 120 seconds and its accepted range is
+10 to 600 seconds.
 Thinking is a boolean route toggle and defaults to disabled. For code reading,
 the recommended local-model starting point is PM thinking enabled and
 programmer thinking disabled, because PM planning and synthesis benefit more
@@ -321,37 +241,13 @@ source evidence. When enabled, the LLM interface currently maps
 provider-specific thinking controls for Gemma 4, Qwen3-family model names, and
 Qwen-compatible Qwopus 3.x model names.
 
-Cognition Core V2 prompt budgets count the static system prompt together with
-the serialized dynamic payload. The appraisal initial and repair ceilings are
-20,000 and 24,000 characters; goal cognition uses 36,000; action planning
-uses 32,000; action and resolver authorization use 20,000 and 24,000; and
-each text, preference, repair, and visual surface stage uses 32,000. Appraisal
-packets reduce identity, then constraints, then bounded state rows, and then
-evidence text while preserving authoritative handles. Goal packets reduce
-supplemental context, then scene, constraints, identity, and finally evidence.
-Surface packets reduce supporting bids and then semantic affect. Regeneration
-reuses the initial system prompt and places the contract error, field contract,
-permitted handles, and producer repair instruction in structured feedback.
-
-In addition to aggregate prompt budgets, Cognition Core V2 validates two
-operational-context packet caps using compact canonical JSON character counts:
-relationship context is limited to 900 decoded characters, and character
-context is limited to 1,200 decoded characters including the final
-`context_digest`. Producers fit both packets before publication. The canonical
-input validator repeats the owner-specific fit on a copied packet before
-strict shape validation so legacy rows and direct callers cannot crash the
-turn with recoverable size-only overflow. Fitting may middle-truncate bounded
-summaries or drop optional rows in the documented stable order; it preserves
-identity, axes, handles, timestamps, provenance, and required current-turn
-facts. Structural errors remain contract failures, while irreducible required
-overflow is reported as the typed context-limit invariant.
-
-The reduction order is fixed. Relationship packets retain the longest causal
-summary that fits while keeping an 80-character floor, then drop lowest
-priority causal rows from the end of their stable salience/recency order, and
-then drop affect rows. Character packets drop pressures from the end of their
-stable order before affect rows. A character digest is recomputed when the
-packet body changes and remains unchanged for a valid no-op consumer fit.
+The cognition input preserves typed identity, boundaries, relationship axes,
+affect values with their causes, evidence handles, conversation progress, and
+current scene pressure. The agentic chain receives one canonical bounded
+projection and owns semantic appraisal, response goals, action choice, affect
+projection, and visible-surface planning. Context reduction preserves required
+current-turn facts and causal affect/relationship context before optional
+supporting rows.
 
 `RELEVANCE_AGENT_LLM` serves both compact frontline intake and settled
 relevance. Frontline uses a 256-token completion cap, thinking disabled, and
@@ -366,10 +262,9 @@ ten logical turns. Its history projection keeps the newest whole turns under an
 exact 6,000-character compact-JSON sub-budget before the unchanged
 16,000-character settled-input cap is applied.
 
-## Cognition V3 operator runbook
+## Agentic cognition operator runbook
 
-The current default is `COGNITION_CORE_ENGINE=v3`. A V3 startup requires the
-complete `COGNITION_V3_CHAIN_LLM_*` bundle and uses only the optional
+Startup requires the complete `COGNITION_V3_CHAIN_LLM_*` bundle and uses the optional
 all-or-nothing `COGNITION_V3_SIDECAR_LLM_*` bundle when configured. V3 uses the
 fixed `fixed_a1_a2` appraisal-stage layout, and
 `COGNITION_V3_TURN_DEADLINE_SECONDS` accepts `30..600` (default `240`). The
@@ -381,17 +276,13 @@ context-window declaration remains caller-local and is not sent to the
 provider. Runtime timing evidence is non-streaming elapsed milliseconds, with
 no TTFT claim.
 
-Collect deterministic evidence with the exact commands below; passing local
-tests does not by itself claim that Gate 8 observation is complete:
+Collect deterministic evidence with the exact commands below:
 
 ```powershell
 venv\Scripts\python -m pytest -q tests/integration/cognition_core_v3/test_chain_observability.py::test_protected_and_sanitized_records_share_exact_service_console_correlation
 venv\Scripts\python -m scripts.validate_test_impact --base-ref HEAD
 ```
 
-For rollback, explicitly set `COGNITION_CORE_ENGINE=v2` and restart the brain
-process so the closed selector binds the V2 route bundles. Retain V3 diagnostic
-rows for review and do not rewrite or globally substitute correlation records.
 The brain endpoint and control console pair each graph with its exact chain
 run; missing or mismatched `run_id`/`llm_trace_id` is shown as `not_reported`.
 
@@ -555,21 +446,21 @@ read-path projection concern only: it issues no database write, and the next
 recorded turn persists the pruned form.
 
 Progress evidence rows carry each originating event's own `updated_at` as
-`evidence_ref.occurred_at`, normalized to the V2 UTC-Z second-truncated
+`evidence_ref.occurred_at`, normalized to the canonical UTC-Z second-truncated
 format, and `scene_context.semantic_temporal_context` is derived from the
 newest surviving event age using the `project_duration` vocabulary.
 
 `scene_context.character_sleep_phase` is derived from
 `CHARACTER_SLEEP_LOCAL_PERIOD`, `CHARACTER_TIME_ZONE`, and
 `AFFECT_SETTLING_WAKE_PREP_MINUTES` by the deterministic projector in
-`cognition_core_v2.state_projection`. The frozen vocabulary is `清醒时段`
+`cognition_shared.state_projection`. The frozen vocabulary is `清醒时段`
 outside the window, `睡眠中` inside the window, and `即将醒来` within the final
 `AFFECT_SETTLING_WAKE_PREP_MINUTES` before the window ends; the two in-window
 labels cover exactly the same half-open local window that gates the
 self-cognition lanes. The phase reaches goal cognition only and never the
 appraisal or surface prompts.
 
-Daily affect settling runs through the `cognition_core_v2` public
+Daily affect settling runs through the `cognition_shared.morning_refresh`
 `run_character_morning_refresh(...)` entrypoint, which owns the character
 scope guard, the sleep-recovery reducer call, and output-state validation.
 The reflection cycle keeps scheduling, idempotency, the guarded write, the
@@ -981,7 +872,7 @@ prompt/output hashes, character counts, parse status, and state handoff fields.
 `full` additionally stores raw prompt messages, raw response text, and parsed
 output in protected trace collections. `off` skips trace row writes.
 
-For Cognition Core V2, both `metadata` and `full` also promote failed,
+For the cognition chain, both `metadata` and `full` also promote failed,
 recovered, partial, and degraded invocations into one protected failure
 capsule. Clean invocations create no capsule row. The capsule preserves the
 raw pre-validation entrypoint input and ordered model attempts, excludes API
@@ -1205,7 +1096,7 @@ pytest -m "not live_db and not live_llm" -q
 venv\Scripts\python -m pytest tests\test_cognition_resolver_contracts.py tests\test_cognition_resolver_loop.py tests\test_cognition_resolver_persona_graph.py tests\test_cognition_resolver_l2d_contract.py -q
 ```
 
-For a production change under the Cognition V2, cognition-resolver, or named
+For a production change under cognition, cognition-resolver, or a named
 direct-node ownership boundary, run the manifest-backed exact impact command
 from the captured baseline:
 

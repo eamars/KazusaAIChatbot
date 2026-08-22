@@ -1,6 +1,6 @@
 """Retired consolidation reviewer boundary.
 
-The native V2 cognition state is committed by the cognition owner. Legacy
+The canonical cognition state is committed by the cognition owner. Legacy
 consolidation reviewers cannot author character or relationship state.
 """
 

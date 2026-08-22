@@ -45,7 +45,6 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
-| [coding_agent_assessment_gap_phase_d_plan.md](active/short_term/coding_agent_assessment_gap_phase_d_plan.md) | Coding-agent persistent JSON action-loop and repository-index migration | in_progress |
 
 ### Superseded Plans
 
@@ -66,6 +65,7 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
+| [control_console_v3_cutover_startup_and_config_cleanup_plan_2026-08-22.md](active/bugfix/control_console_v3_cutover_startup_and_config_cleanup_plan_2026-08-22.md) | Control-console startup repair and V3-only environment cleanup | in_progress |
 
 ### Completed Bugfix Plans
 

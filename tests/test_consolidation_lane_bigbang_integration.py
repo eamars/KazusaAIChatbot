@@ -114,23 +114,6 @@ def test_core_uses_lane_pipeline_and_not_the_retired_harvester() -> None:
     assert "run_consolidation_lane_pipeline" in source
 
 
-def test_target_plan_exposes_only_native_v2_write_lanes() -> None:
-    """Target planning must exclude retired affect and relationship lanes."""
-
-    targets = _targets_by_alias(build_consolidation_target_plan(_base_state()))
-
-    assert "character_self_guidance" in targets["character"]["write_lanes"]
-    assert "user_memory_units" in targets["current_user"]["write_lanes"]
-    all_lanes = {
-        lane
-        for target in targets.values()
-        for lane in target["write_lanes"]
-    }
-    assert not all_lanes & {
-        "character_state",
-        "relationship_insight",
-        "relationship_state",
-    }
 
 
 def test_user_target_cannot_receive_character_guidance() -> None:

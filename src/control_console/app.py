@@ -3037,17 +3037,17 @@ def _page_capabilities() -> dict[str, dict[str, Any]]:
         },
         "character": {
             "status": "ready",
-            "label": "native V2",
+            "label": "canonical cognition",
             "reason": (
-                "Character profile, V2 cognition, self-image, semantic growth, "
+                "Character profile, cognition, self-image, semantic growth, "
                 "and carry-over panels are implemented."
             ),
         },
         "users": {
             "status": "ready",
-            "label": "directory + V2",
+            "label": "directory + cognition",
             "reason": (
-                "Known-user discovery and native V2 relationship, cognition, "
+                "Known-user discovery and canonical relationship, cognition, "
                 "memory, style, progress, and carry-over panels are implemented."
             ),
         },

@@ -703,7 +703,7 @@ def _v2_route_for_due_schedule(
     case: models.SelfCognitionCase,
     cognition_output: dict[str, Any],
 ) -> str:
-    """Project native V2 scheduled speech into the delivery owner."""
+    """Project canonical scheduled speech into the delivery owner."""
 
     core_output = cognition_output.get("cognition_core_output")
     if not isinstance(core_output, dict):
@@ -762,7 +762,7 @@ def _route_from_content_plan(cognition_output: dict[str, Any]) -> str:
 
 
 def _content_plan_values(cognition_output: dict[str, Any]) -> list[str]:
-    """Read non-empty content-plan values from the native V2 surface."""
+    """Read non-empty content-plan values from the canonical surface."""
 
     surface_output = cognition_output.get("text_surface_output_v2")
     if not isinstance(surface_output, dict):

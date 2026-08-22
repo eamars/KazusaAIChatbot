@@ -1012,8 +1012,8 @@ function cognitionGraphSourceLabel(source) {
 }
 
 function cognitionGraphParallelSummaryMarkup(model) {
-  const executionNode = model.nodes.find((node) => node.id === "v2.parallel");
-  const branchNodes = model.nodes.filter((node) => node.id.startsWith("v2.branch."));
+  const executionNode = model.nodes.find((node) => node.id === "cognition.parallel");
+  const branchNodes = model.nodes.filter((node) => node.id.startsWith("cognition.branch."));
   if (!executionNode && !branchNodes.length) return "";
   const execution = executionNode?.detail?.parallel_execution || {};
   const metrics = [
@@ -1044,7 +1044,7 @@ function cognitionGraphParallelSummaryMarkup(model) {
     <section class="graph-parallel-summary" aria-label="Parallel cognition results" data-component="Parallel cognition results">
       <div class="graph-parallel-header">
         <div>
-          <span>Native V2</span>
+          <span>Agentic cognition</span>
           <strong>Parallel cognition results</strong>
         </div>
         <div class="graph-parallel-metrics">${metricMarkup}</div>
@@ -1060,9 +1060,9 @@ function cognitionGraphDependencyMarkup(model) {
   if (!model.edges.length) return "";
   const labelById = new Map(model.nodes.map((node) => [node.id, node.label || node.id]));
   const edges = [...model.edges].sort((left, right) => {
-    const leftNative = left.source?.startsWith("v2.") || left.target?.startsWith("v2.");
-    const rightNative = right.source?.startsWith("v2.") || right.target?.startsWith("v2.");
-    return Number(rightNative) - Number(leftNative);
+    const leftCognition = left.source?.startsWith("cognition.") || left.target?.startsWith("cognition.");
+    const rightCognition = right.source?.startsWith("cognition.") || right.target?.startsWith("cognition.");
+    return Number(rightCognition) - Number(leftCognition);
   });
   const edgeMarkup = edges.map((edge) => {
     const source = labelById.get(edge.source) || edge.source;
@@ -3274,7 +3274,7 @@ function renderUserProfilePanel(panel) {
 function renderRelationshipPanel(panel) {
   const items = panelItems(panel);
   if (!items.length) {
-    setHtml("#user-relationship-table", `<tr><td colspan="3">${escapeHtml(panelEmptyText(panel, "No native V2 relationship state is available."))}</td></tr>`);
+    setHtml("#user-relationship-table", `<tr><td colspan="3">${escapeHtml(panelEmptyText(panel, "No relationship state is available."))}</td></tr>`);
     return;
   }
   const axisRows = items.map((item) => `

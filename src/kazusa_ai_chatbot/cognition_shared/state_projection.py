@@ -1,4 +1,4 @@
-"""Semantic projection from native V2 state into bounded model context."""
+"""Semantic projection from canonical state into bounded model context."""
 
 from __future__ import annotations
 

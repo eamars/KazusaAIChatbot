@@ -168,7 +168,7 @@ The runtime facade exports helpers for:
 Callers treat facade helpers as semantic operations. New storage behavior gets a
 named helper.
 
-### Cognition V2 state ownership
+### Cognition state ownership
 
 The public runtime facade exports
 `compare_and_replace_user_cognition_state`. It validates the complete expected

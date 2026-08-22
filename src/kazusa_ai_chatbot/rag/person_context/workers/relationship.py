@@ -38,7 +38,7 @@ _EXTRACTOR_PROMPT = '''\
 你是 `relationship_agent` 的参数抽取器。
 
 # 能力边界
-本代理按活跃角色的 native V2 关系状态对已建档用户排序。适用于：
+本代理按活跃角色的规范关系状态对已建档用户排序。适用于：
 - 角色最喜欢谁、最偏爱谁、最亲近谁
 - 是否存在被喜欢的人
 - 角色最讨厌或最不喜欢谁
@@ -157,7 +157,7 @@ async def _extract_relationship_args(
 
 
 def _public_candidate(doc: dict[str, Any], rank: int) -> dict[str, Any]:
-    """Convert a native V2 relationship row into a prompt-safe candidate.
+    """Convert a canonical relationship row into a prompt-safe candidate.
 
     Args:
         doc: Raw relationship row returned by the DB helper.

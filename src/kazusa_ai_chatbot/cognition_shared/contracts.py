@@ -1080,7 +1080,7 @@ class CognitionExecutionObservationV2(TypedDict):
 
 
 class CognitionObservabilityV2(TypedDict):
-    """Operator-safe semantic observability for one native V2 run."""
+    """Operator-safe semantic observability for one cognition run."""
 
     execution: CognitionExecutionObservationV2
     appraisals: list[CognitionAppraisalObservationV2]
@@ -3511,7 +3511,7 @@ def _validate_cognition_observability(value: Any) -> None:
 
 
 def _validate_cognition_execution_observation(value: Any) -> None:
-    """Validate bounded counts and timing for one native V2 run."""
+    """Validate bounded counts and timing for one cognition run."""
 
     required = {
         "selected_question_count",

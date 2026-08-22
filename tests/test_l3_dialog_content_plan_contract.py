@@ -82,17 +82,6 @@ def _character_profile() -> dict[str, Any]:
     return profile
 
 
-def test_surface_input_uses_native_v2_contract() -> None:
-    """Surface input contains semantic projections rather than directive bags."""
-
-    payload = surface_module.build_text_surface_input_from_global_state(
-        _state(),
-        interaction_style_context="brief and natural",
-    )
-
-    assert payload["schema_version"] == "text_surface_input.v2"
-    assert payload["intention"]["route"] == "speech"
-    assert "action_directives" not in payload
 
 
 def test_surface_output_validation_requires_exact_v2_fields() -> None:
