@@ -149,29 +149,9 @@ V2_MODEL_OWNER_POLICIES: dict[str, V2ModelOwnerPolicy] = {
         "total_attempt_limit": V2_MODEL_TOTAL_ATTEMPTS,
         "exhausted_disposition": "accepted_degraded",
     },
-    "semantic_appraisal": {
-        "total_attempt_limit": V2_APPRAISAL_TOTAL_ATTEMPTS,
-        "exhausted_disposition": "skipped",
-    },
-    "goal_bid_structure": {
-        "total_attempt_limit": V2_MODEL_TOTAL_ATTEMPTS,
-        "exhausted_disposition": "unrecoverable",
-    },
-    "workspace_collapse": {
-        "total_attempt_limit": V2_MODEL_TOTAL_ATTEMPTS,
-        "exhausted_disposition": "accepted_degraded",
-    },
     "action_planning": {
         "total_attempt_limit": V2_MODEL_TOTAL_ATTEMPTS,
         "exhausted_disposition": "empty",
-    },
-    "action_authorization": {
-        "total_attempt_limit": V2_MODEL_TOTAL_ATTEMPTS,
-        "exhausted_disposition": "denied",
-    },
-    "resolver_authorization": {
-        "total_attempt_limit": V2_MODEL_TOTAL_ATTEMPTS,
-        "exhausted_disposition": "denied",
     },
     "surface_content_plan": {
         "total_attempt_limit": V2_MODEL_TOTAL_ATTEMPTS,

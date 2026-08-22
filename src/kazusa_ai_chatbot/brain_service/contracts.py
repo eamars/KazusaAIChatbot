@@ -9,8 +9,6 @@ from pydantic import (
     ConfigDict,
     Field,
     PrivateAttr,
-    StrictInt,
-    model_validator,
 )
 
 from kazusa_ai_chatbot.message_envelope import MentionEntityKind
@@ -128,8 +126,6 @@ class ChatResponse(BaseModel):
 class OpsLatestCognitionGraphResponse(BaseModel):
     cognition_graph: dict[str, Any] | None = None
     self_cognition_graph: dict[str, Any] | None = None
-    cognition_chain_run: dict[str, Any] | None = None
-    self_cognition_chain_run: dict[str, Any] | None = None
 
 
 class DeliveryReceiptRequest(BaseModel):
@@ -206,54 +202,6 @@ class OpsWorkerStatusResponse(BaseModel):
     last_status: str = ""
 
 
-class CognitionEngineDescriptorResponse(BaseModel):
-    """Selected cognition-engine configuration safe for operator status."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    schema_version: Literal["cognition_engine_descriptor.v2"]
-    engine_id: Literal["v3"]
-    chain_model_name: str = Field(min_length=1, max_length=256)
-    sidecar_model_name: str = Field(max_length=256)
-    sidecar_enabled: bool
-    subconscious_enabled: bool
-    appraisal_stage_layout: Literal["fixed_a1_a2"]
-    chain_context_window_tokens: StrictInt = Field(ge=0, le=1_000_000)
-    normal_budget_tokens: StrictInt = Field(ge=0, le=65_000)
-    extended_budget_tokens: StrictInt = Field(ge=0, le=65_000)
-    turn_deadline_seconds: StrictInt = Field(ge=0, le=600)
-
-    @model_validator(mode="after")
-    def validate_policy(self) -> CognitionEngineDescriptorResponse:
-        """Reject descriptor combinations that cannot describe an engine."""
-
-        if self.chain_context_window_tokens < 50_000:
-            raise ValueError(
-                "V3 descriptor context window must be at least 50000",
-            )
-        if self.normal_budget_tokens != 50_000:
-            raise ValueError(
-                "V3 descriptor normal budget must equal 50000",
-            )
-        if self.extended_budget_tokens != 65_000:
-            raise ValueError(
-                "V3 descriptor extended budget must equal 65000",
-            )
-        if not 30 <= self.turn_deadline_seconds <= 600:
-            raise ValueError(
-                "V3 descriptor turn deadline must be between 30 and 600",
-            )
-        if self.sidecar_enabled != bool(self.sidecar_model_name):
-            raise ValueError(
-                "V3 descriptor sidecar must match its model name",
-            )
-        if self.subconscious_enabled and not self.sidecar_enabled:
-            raise ValueError(
-                "V3 descriptor subconscious mode requires a sidecar",
-            )
-        return self
-
-
 class OpsRuntimeStatusResponse(BaseModel):
     status: str
     generated_at: str
@@ -264,7 +212,6 @@ class OpsRuntimeStatusResponse(BaseModel):
     )
     workers: dict[str, OpsWorkerStatusResponse] = Field(default_factory=dict)
     semantic_descriptors: dict[str, str] = Field(default_factory=dict)
-    cognition_engine: CognitionEngineDescriptorResponse | None = None
 
 
 class OpsLatestEventRefResponse(BaseModel):

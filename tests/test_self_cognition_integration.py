@@ -14,17 +14,12 @@ import kazusa_ai_chatbot.dispatcher.handlers as handlers_module
 from kazusa_ai_chatbot import service
 from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
 from kazusa_ai_chatbot.calendar_scheduler import models as calendar_models
+from kazusa_ai_chatbot.cognition_core_v3.diagnostics import current_chain_scope
 from kazusa_ai_chatbot.cognition_shared.contracts import (
     build_scheduled_future_speech_authority,
 )
-from kazusa_ai_chatbot.cognition_shared.state_models import (
-    build_acquaintance_user_state,
-    build_character_production_state,
-)
-from kazusa_ai_chatbot.cognition_core_v3.diagnostics import current_chain_scope
 from kazusa_ai_chatbot.db import user_memory_units as memory_units_module
 from kazusa_ai_chatbot.dispatcher import AdapterRegistry, SendResult
-from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as connector
 from kazusa_ai_chatbot.nodes.dialog_agent import StateContractError
 from kazusa_ai_chatbot.self_cognition import (
     models,
@@ -656,28 +651,6 @@ def _consolidation_result() -> dict[str, Any]:
     return result
 
 
-def test_worker_v2_result_requires_matching_scope_and_completed_commit() -> None:
-    """Worker delivery must follow the committed canonical input scope."""
-
-    payloads = {
-        models.ARTIFACT_COGNITION_INPUT: {
-            "state_scope": "character",
-        },
-        models.ARTIFACT_COGNITION_OUTPUT: {
-            "cognition_core_output": {
-                "state_update": {"state_scope": "user"},
-            },
-            "cognition_state_committed": True,
-        },
-    }
-
-    with pytest.raises(StateContractError, match="does not match cognition input"):
-        worker._validate_worker_v2_cognition_result(
-            payloads,
-            required=True,
-        )
-
-
 def _case_runner_with_candidate(
     case: dict[str, Any],
 ) -> dict[str, Any]:
@@ -874,42 +847,6 @@ async def test_prepared_commitment_state_contains_public_group_scene(
         "self_cognition",
         run_record["run_id"],
     )
-
-
-def test_prepared_commitment_state_reaches_strict_v2_input() -> None:
-    """A due commitment state validates through the strict V2 input boundary."""
-
-    case = _commitment_case_with_delivery_target()
-    case["character_profile"] = canonical_service_character_profile(
-        marker="strict-v2-commitment",
-    )
-    style_snapshot = _test_interaction_style_snapshot()
-    state = runner._build_cognition_state(
-        case,
-        "rendered commitment source packet",
-        public_group_scene="",
-        interaction_style_context=style_snapshot,
-    )
-    state["rag_result"] = {"answer": ""}
-    updated_at = "2026-05-13T00:30:00Z"
-
-    cognition_input = connector.build_cognition_input_from_global_state(
-        state,
-        mutable_state=build_acquaintance_user_state(
-            global_user_id="global-target",
-            updated_at=updated_at,
-        ),
-        character_state=build_character_production_state(
-            updated_at=updated_at,
-        ),
-    )
-
-    assert cognition_input["schema_version"] == "cognition_core_input.v2"
-    assert cognition_input["scene_context"]["public_group_scene"] == ""
-    assert cognition_input["group_engagement_action_context"] == {
-        "engagement_guidelines": [],
-        "confidence": "",
-    }
 
 
 @pytest.mark.asyncio

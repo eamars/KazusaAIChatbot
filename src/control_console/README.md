@@ -108,19 +108,16 @@ graph snapshot contract:
 - `source`: `overview_latest`, `debug_latest`, `self_latest`, or future
   `historical`.
 - `status`: `not_reported`, `running`, `completed`, `failed`, or `partial`.
-- `nodes`: up to 64 stage nodes with lane, column, optional branch, status,
-  and selected semantic detail. Layout metadata remains available for drawing;
-  the selected inspector does not repeat it as detail rows.
-- `edges`: up to 96 directed links with `sequence`, `fork`, `join`, or
-  `reference` kind.
+- `nodes`: up to 64 supplied semantic nodes with an arbitrary stable id,
+  category, status, and selected semantic detail. The renderer does not assume
+  a fixed cognition stage layout or node count.
+- `edges`: up to 96 directed links with a generic kind and source/target ids.
 - `redaction`: an explicit policy summary for excluded prompts, embeddings,
   raw messages, message envelopes, and operational identifiers.
 
-The renderer labels each graph by semantic source. The existing closed `Run
-reference` disclosure carries the mapped identifiers needed to correlate the
-view: conversation and debug cognition show `run_id`, `llm_trace_id`, and
-`cognition_invocation_id`; self-cognition shows `run_id`, the child
-`llm_trace_id`, and `source_calendar_run_id`.
+The renderer labels each graph by semantic source. Correlation metadata remains
+in its dedicated protected telemetry surface; graph detail itself contains no
+provider, prompt, storage, evidence, or root identifiers.
 
 The brain `/chat` response may include a bounded `cognition_graph` snapshot
 derived from the actual graph result and consolidation state. The console
@@ -131,29 +128,21 @@ unavailable or a response does not include graph telemetry, the console returns
 ### Cognition graph selected detail
 
 Overview Latest, Debug cognition, and the latest self-cognition snapshot use
-the same `renderCognitionGraph` inspector. Its selected detail order is:
-
-`input`, `reply_context`; `decision`, `reasoning`; the four L2 reasoning fields;
-retrieval answer and evidence; continuity, progress, public group scene, and
-commitments; selected actions, results, and continuation; the four
-visual-directive lists; and actual visible `messages`. The public group scene
-row is shown only when the bounded group-scene projection is present.
-
-The separate `l3.visual_directives` node carries
-`facial_expression`, `body_language`, `gaze_direction`, and `visual_vibe`.
-When the existing visual gate disables the stage, the node remains present with
-`status: skipped` and uses the existing grey/dashed terminated rendering. An
-enabled empty result remains a completed node with an explicit empty-state
-message. The selected panel preserves approved semantic text and list order in
-a scrollable region; generic console redaction remains in force for all other
+the same `renderCognitionGraph` inspector. Its selected detail order follows
+the supplied semantic fields: meaning/appraisal summaries, the active goal,
+response intent and capability outcomes, affect and concrete causes, bounded
+continuity/evidence summaries, and visible messages. Optional categories may
+add visual or operational summaries without changing the renderer contract.
+The selected panel preserves approved semantic text and list order in a
+scrollable region; generic console redaction remains in force for all other
 payloads. Prompts, raw model output, embeddings, message envelopes, target
 identifiers, handler metadata, and internal ids stay excluded.
 
-`l2.reasoning.detail.context_consumption` is a strict detail field with schema
-`cognition_context_consumption.v1`. The brain constructs it from the immutable
-turn snapshot and executed cognition/L3 inputs. The console validates,
-redacts, transports, and renders that exact field; it does not reconstruct
-consumed state from a current database read. The payload contains bounded
+The semantic reasoning node's `context_consumption` field is a strict detail
+field with schema `cognition_context_consumption.v1`. The brain constructs it
+from the immutable turn snapshot and executed cognition/surface inputs. The
+console validates, redacts, transports, and renders that exact field; it does
+not reconstruct consumed state from a current database read. The payload contains bounded
 `settled_relevance`, `cognition`, `surface`, and `health` sections. It excludes
 episode and relationship ids, user/channel identifiers, entity handles, event
 descriptions, raw messages, evidence references, prompts, and private facts.
@@ -446,16 +435,15 @@ and these restart-applied identity-growth fields:
 The console does not expose API keys, base URLs, embedding routes, raw dotenv
 values, or a general environment editor.
 
-The agentic cognition route group contains these Brain route descriptors:
-
-```text
-COGNITION_V3_CHAIN_LLM
-COGNITION_V3_SIDECAR_LLM
-```
+The Brain route catalog exposes semantic route slugs rather than environment
+variable names or implementation versions. The core cognition route is
+`cognition`; shared supporting cognition services use `cognition_support` when
+they are enabled. These slugs are stable browser capabilities and are mapped
+to private server configuration internally.
 
 Each descriptor uses the same selected-route editor and model-discovery
-workflow as every existing chat route. Adding these rows changes no API
-fields, credential projection, storage behavior, or browser component.
+workflow as every existing chat route. Route implementation, provider, and
+stage details are not part of the browser contract.
 
 Brain route overrides are process-local. If the Brain service is running and
 console-owned, saving a route restarts it through the existing lifecycle path.
@@ -494,15 +482,12 @@ the most recent debug turn; a future historical-run inspector must reuse the
 same graph contract and renderer instead of adding a second diagram widget.
 Nodes expose bounded reasoning detail through hover and keyboard focus.
 
-Overview and Debug chat pair each graph with a read-only V3 chain-run card.
-Live and self-cognition cards consume only their matching
-`cognition_chain_run` or `self_cognition_chain_run` snapshot. The bounded
-fields are status, chain/run/trace/invocation references, chain and sidecar
-model names, terminal disposition, start/completion times, step count, and
-warning codes. Missing or mismatched exact correlation is projected as
-`status=not_reported`; the console never chooses a global or stale row. The
-cards escape every displayed value and never expose prompts, raw answers,
-endpoint data, credentials, or unapproved ids.
+Overview and Debug chat render the latest brain-supplied semantic graph through
+the same generic inspector. Missing telemetry is projected as
+`status=not_reported`; the console never invents nodes or chooses a stale
+implementation-specific snapshot. Displayed values are escaped and the
+browser contract excludes prompts, raw answers, endpoint data, credentials,
+and unapproved identifiers.
 
 No Node.js, npm, pnpm, yarn, React, Vue, Vite, Webpack, Tailwind build tooling, frontend dev server, frontend package manager workflow, or frontend build/runtime stack is required.
 

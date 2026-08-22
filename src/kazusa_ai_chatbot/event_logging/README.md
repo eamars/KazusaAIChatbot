@@ -183,21 +183,16 @@ MongoDB write failures, timeouts, and cancellation are contained inside the
 event logging module. They may emit a sanitized local warning log, but they must
 not propagate into caller control flow.
 
-### Cognition V3 chain event family
+### Cognition semantic event family
 
-`record_cognition_chain_event(...)` is the keyword-only public recorder for
-the bounded `cognition_chain` family. It accepts `run_id`,
-`cognition_invocation_id`, terminal disposition, chain/sidecar model names,
-step and repair counts, context-budget counters, sidecar counters, elapsed
-`duration_ms`, deadline counters, session disposition, and bounded
-`warning_codes`. The sanitizer rejects unknown fields, raw prompt/output,
-evidence, private metadata, credentials, and arbitrary payload mappings.
+Cognition telemetry uses the generic semantic event recorder for bounded stage
+status, disposition, cause summaries, and operational failure codes. It never
+exposes prompts, raw outputs, evidence, private metadata, credentials, model
+lane details, or internal execution topology.
 
-The event is an aggregate companion to protected transcript capture; it does
-not contain a prompt, answer, message, or state document. Sanitization and
-storage are best effort: rejection, timeout, cancellation, or database failure
-returns a failed/rejected telemetry result while cognition-facing completion
-continues unchanged.
+Telemetry is best effort: rejection, timeout, cancellation, or database
+failure returns a failed/rejected telemetry result while cognition-facing
+completion continues unchanged.
 
 ## Public API
 

@@ -1,4 +1,4 @@
-"""Bounded V2 text and terminal visual surface stage handlers."""
+"""Bounded text and terminal visual surface stage handlers."""
 
 from __future__ import annotations
 
@@ -15,8 +15,8 @@ from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionExecutionError,
     TextSurfaceServicesV2,
     VisualSurfaceServicesV2,
-    validate_surface_addressee_plan,
     validate_lexical_avoidances,
+    validate_surface_addressee_plan,
 )
 from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
     V2_MODEL_TOTAL_ATTEMPTS,
@@ -25,13 +25,11 @@ from kazusa_ai_chatbot.llm_interface import LLMCallConfig
 from kazusa_ai_chatbot.llm_tracing import failure_capsule
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
-
 SURFACE_STAGE_ATTEMPT_LIMIT = V2_MODEL_TOTAL_ATTEMPTS
 SURFACE_STAGE_PROMPT_CAP = 32000
 SURFACE_STAGE_REPAIR_OUTPUT_CAP = 8000
 SURFACE_STAGE_REPAIR_PROMPT_CAP = 32000
 SURFACE_STAGE_ERROR_CAP = 500
-MIN_SURFACE_SUPPORTING_BIDS = 2
 DELIVERY_PROFILE_FIELDS = (
     "lexical_register",
     "sentence_shape",
@@ -44,8 +42,8 @@ SURFACE_REPAIR_INSTRUCTION = '保留原始的角色判断、\r\n情绪方向、�
 
 
 
-CONTENT_PLAN_SYSTEM_PROMPT = '''规划当前角色实际会说出或发送的内容，表达已经形成的角色判断。综合 selected intention、primary bid、
-supporting bid、visible episode、semantic affect、semantic relationship、expression policy、interaction style、
+CONTENT_PLAN_SYSTEM_PROMPT = '''规划当前角色实际会说出或发送的内容，表达已经形成的角色判断。综合 active character goal、response plan、
+visible episode、semantic affect、semantic relationship、expression policy、interaction style、
 permitted_action_results、resolver_result、runtime_capability_limits 和 character_expression_context。task_resolution_request
 的 resolver_result 还含 source-owned evidence_state、evidence_excerpts、evidence_handles、prompt_safe_observation_handle
 和 remaining_needs；只据这些来源表达事实。recent_character_dialog 最多两条最近角色可见消息，仅用于本轮措辞连续性，
@@ -64,7 +62,7 @@ goal_resolution 是当前目标可回答性的已确认判断：answerable_now �
 3. 以结构化 visible percept 确定行动者、对象、受益者和主语；当前用户是当前用户，当前角色是说话者和被直接称呼者。
 4. 以 selected intention 及 intention.reason 为语义锚点，分清角色是在回应请求本身，还是在回应提问的时机、突然程度或直接程度；可自由组合惊讶、害羞、防御、调侃、嘴硬、迟疑、温柔、热烈或其他符合角色的情绪与特征，形成表达同一已选决定的角色化弧线。
 5. content_requirements 使用正向目标句式；content_plan 和 content_requirements 承载拒绝、接受、指责、协商、条件、让步和立场变化等语义选择；delivery_profile 只描述词语、句式、节奏、犹豫和标点的实现。
-6. relational_willingness 是上游已选择的角色关系立场（含 current_user_relationship_state）；内容字段保持其原样 stance。若权威语境选择立场变化，把新事实、动机、条件或约束写入内容字段。
+6. relational_willingness 是上游已选择的角色关系立场；内容字段保持其原样 stance，并保留 reason 和 cause_summary。若权威语境选择立场变化，把新事实、动机、条件或约束写入内容字段。
 7. lexical_avoidances 只记录本轮具体措辞片段，例如 recent_character_dialog 中刚重复的开场、连接词、口头禅、称呼或遮蔽 selected intention 的局部措辞。它只服务表达连续性，不按主题、价值判断或内容许可分类，也不改变、推导或否定角色立场；无具体风险时返回空列表。
 
 输出规划字段；最终对话由 dialog 渲染器生成。当前用户的即时发言来自 visible percept；角色反思是语境证据；运行元数据留在内部。
@@ -93,7 +91,7 @@ async def run_content_plan_stage(
     )
 
 
-PREFERENCE_SYSTEM_PROMPT = '''识别当前角色判断和场景中真实存在的表达边界与称呼安排。以 selected intention、visible episode、projected bids、
+PREFERENCE_SYSTEM_PROMPT = '''识别当前角色判断和场景中真实存在的表达边界与称呼安排。以 active character goal、response plan、visible episode、
 expression policy、semantic affect、semantic relationship、interaction style 和 permitted_action_results 为语境；
 relational_willingness、resolver_result 按原义保留。task_resolution_request 的 resolver_result 中 evidence_state、
 evidence_excerpts、evidence_handles 和 remaining_needs 是来源自有的答案边界；complete 只支持 supplied excerpts，
@@ -130,7 +128,7 @@ async def run_preference_stage(
     )
 
 
-VISUAL_SYSTEM_PROMPT = '''根据 selected intention、visible episode、projected bids、
+VISUAL_SYSTEM_PROMPT = '''根据 active character goal、response plan、visible episode、
 expression policy、semantic affect、semantic relationship、permitted action results、
 runtime_capability_limits、interaction style context 和 visual_character_context，为终端图像表面生成
 visual_directives。
@@ -569,16 +567,6 @@ def _surface_prompt_packet(
             <= SURFACE_STAGE_PROMPT_CAP
         ):
             return prompt_text, reduced_payload
-        supporting_bids = reduced_payload.get("supporting_bids")
-        if supporting_bids is not None:
-            if (
-                isinstance(supporting_bids, list)
-                and len(supporting_bids) > MIN_SURFACE_SUPPORTING_BIDS
-            ):
-                reduced_payload["supporting_bids"] = supporting_bids[:-1]
-                continue
-            reduced_payload.pop("supporting_bids", None)
-            continue
         semantic_affect = reduced_payload.get("semantic_affect")
         if semantic_affect is not None:
             if isinstance(semantic_affect, list) and semantic_affect:

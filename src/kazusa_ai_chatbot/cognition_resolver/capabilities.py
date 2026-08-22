@@ -24,10 +24,10 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     validate_resolver_observation,
 )
 from kazusa_ai_chatbot.cognition_shared.contracts import (
+    EVIDENCE_SOURCE_QUESTION_IDS,
     CognitionContractError,
     CognitionEvidenceV2,
     DirectFactV2,
-    EVIDENCE_SOURCE_QUESTION_IDS,
     ResolverCapabilityRequestV2,
     _validate_scene_context,
 )
@@ -957,7 +957,7 @@ def _task_resolution_limitations(
 def _task_continuation_ref(
     request: ResolverCapabilityRequestV1,
 ) -> GoalContinuationRefV1:
-    """Require the exact validated continuation selected by cognition V2."""
+    """Require the exact validated continuation selected by cognition."""
 
     continuation_ref = request["goal_continuation_ref"]
     if continuation_ref is None:

@@ -1,4 +1,4 @@
-"""Public V2 text and terminal visual surface planning facades."""
+"""Canonical text and terminal visual surface planning facades."""
 
 from __future__ import annotations
 
@@ -10,28 +10,28 @@ from kazusa_ai_chatbot import llm_tracing
 from kazusa_ai_chatbot.cognition_episode import project_model_visible_percepts
 from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionExecutionError,
-    TextSurfaceInputV2,
+    TextSurfaceInput,
     TextSurfaceOutputV2,
     TextSurfaceServicesV2,
     VisualSurfaceOutputV2,
     VisualSurfaceServicesV2,
-    validate_text_surface_input,
+    validate_text_surface_input_canonical,
     validate_text_surface_output,
     validate_visual_surface_output,
+)
+from kazusa_ai_chatbot.cognition_shared.state_projection import (
+    validate_prompt_projection,
 )
 from kazusa_ai_chatbot.cognition_shared.surface_stages import (
     run_content_plan_stage,
     run_preference_stage,
     run_visual_stage,
 )
-from kazusa_ai_chatbot.cognition_shared.state_projection import (
-    validate_prompt_projection,
-)
 from kazusa_ai_chatbot.llm_tracing import failure_capsule
 
 
 async def run_text_surface_planning(
-    input_payload: TextSurfaceInputV2,
+    input_payload: TextSurfaceInput,
     services: TextSurfaceServicesV2,
 ) -> TextSurfaceOutputV2:
     """Run text planning with failure-only protected replay capture."""
@@ -66,14 +66,14 @@ async def run_text_surface_planning(
 
 
 async def _run_text_surface_planning(
-    input_payload: TextSurfaceInputV2,
+    input_payload: TextSurfaceInput,
     services: TextSurfaceServicesV2,
     *,
     session: failure_capsule.FailureCapsuleSession | None,
 ) -> TextSurfaceOutputV2:
     """Run two bounded text-surface stages after cognition is committed."""
 
-    payload = validate_text_surface_input(input_payload)
+    payload = validate_text_surface_input_canonical(input_payload)
     stage_payload = _project_surface_payload(payload)
     validate_prompt_projection(stage_payload)
     content_payload = dict(stage_payload)
@@ -128,7 +128,7 @@ async def _run_text_surface_planning(
         "visible_boundaries": visible_boundaries,
         "addressee_plan": addressee_plan,
         "delivery_profile": delivery_profile,
-        "selected_surface_intent": payload["intention"]["intention"],
+        "selected_surface_intent": payload["response_plan"].get("response_goal", ""),
         "permitted_action_results": [
             {
                 **row,
@@ -155,7 +155,7 @@ async def _run_text_surface_planning(
 
 
 def build_degraded_text_surface(
-    input_payload: TextSurfaceInputV2,
+    input_payload: TextSurfaceInput,
 ) -> TextSurfaceOutputV2:
     """Project a valid neutral text surface from canonical cognition truth.
 
@@ -167,8 +167,8 @@ def build_degraded_text_surface(
         runtime capability limits without model-authored additions.
     """
 
-    payload = validate_text_surface_input(input_payload)
-    selected_intention = payload["intention"]["intention"]
+    payload = validate_text_surface_input_canonical(input_payload)
+    selected_intention = payload["response_plan"].get("response_goal", "")
     output: TextSurfaceOutputV2 = {
         "schema_version": "text_surface_output.v2",
         "content_plan": selected_intention,
@@ -214,7 +214,7 @@ def build_degraded_text_surface(
 
 
 async def run_visual_surface_planning(
-    input_payload: TextSurfaceInputV2,
+    input_payload: TextSurfaceInput,
     services: VisualSurfaceServicesV2,
 ) -> VisualSurfaceOutputV2:
     """Run visual planning with failure-only protected replay capture."""
@@ -245,12 +245,12 @@ async def run_visual_surface_planning(
 
 
 async def _run_visual_surface_planning(
-    input_payload: TextSurfaceInputV2,
+    input_payload: TextSurfaceInput,
     services: VisualSurfaceServicesV2,
 ) -> VisualSurfaceOutputV2:
     """Run the independent terminal visual-directive stage."""
 
-    payload = validate_text_surface_input(input_payload)
+    payload = validate_text_surface_input_canonical(input_payload)
     stage_payload = _project_surface_payload(payload)
     stage_payload["visual_character_context"] = payload[
         "visual_character_context"
@@ -260,7 +260,7 @@ async def _run_visual_surface_planning(
     output: VisualSurfaceOutputV2 = {
         "schema_version": "visual_surface_output.v2",
         "visual_directives": visual_directives,
-        "selected_surface_intent": payload["intention"]["intention"],
+        "selected_surface_intent": payload["response_plan"].get("response_goal", ""),
     }
     validated_output = validate_visual_surface_output(output)
     return validated_output
@@ -271,7 +271,12 @@ def _project_surface_payload(
 ) -> dict[str, Any]:
     """Remove persistent/private fields before any surface stage sees input."""
 
-    intention = payload["intention"]
+    plan = payload["response_plan"]
+    intention = {
+        "route": "speech" if plan.get("response_goal") else "silence",
+        "intention": plan.get("response_goal", ""),
+        "reason": payload["active_character_goal"].get("reason", ""),
+    }
     projected_intention = {
         "route": intention["route"],
         "intention": intention["intention"],
@@ -282,8 +287,8 @@ def _project_surface_payload(
     result: dict[str, Any] = {
         "episode": _project_episode(payload["episode"]),
         "intention": projected_intention,
-        "goal_resolution": payload["goal_resolution"],
-        "supporting_bids": payload["supporting_bids"],
+        "active_character_goal": payload["active_character_goal"],
+        "response_plan": payload["response_plan"],
         "expression_policy": payload["expression_policy"],
         "semantic_affect": payload["semantic_affect"],
         "permitted_action_results": _project_action_results_for_prompt(
@@ -308,8 +313,6 @@ def _project_surface_payload(
         result["resolver_result"] = _project_resolver_result_for_surface(
             payload["resolver_result"]
         )
-    if "primary_bid" in payload:
-        result["primary_bid"] = payload["primary_bid"]
     if "semantic_relationship" in payload:
         result["semantic_relationship"] = payload["semantic_relationship"]
     if "relational_willingness" in payload:

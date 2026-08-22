@@ -1,68 +1,38 @@
 # Cognition Nodes
 
 `kazusa_ai_chatbot.nodes` owns the adapter-neutral connector between the brain
-service and the selected Cognition Core engine. It prepares the current
-episode, runs bounded cognition and resolver recurrence, commits the final
-replacement state, routes selected action and surface work, and hands a
-semantic text plan to dialog.
-
-The package is part of the character-brain path:
+service and the canonical cognition, surface, and dialog owners.
 
 ```text
-adapter or debug client
-  -> brain service queue and intake
-  -> relevance, media description, and conversation context
+adapter/debug client -> brain intake and relevance
   -> persona_supervisor2
-       decontextualization
-       selected Cognition Core and bounded resolver recurrence
-       one final cognition-state commit
-       selected action handling
-       optional V2 text-surface planning
-       dialog wording
+       typed episode and semantic context
+       one A1 -> A2 -> G -> P cognition path
+       validated state/goal/response-plan commit
+       action/resolver authorization
+       surface planning and dialog wording
   -> consolidation and persistence
-  -> scheduler and reflection outside live chat
 ```
 
-RAG and resolver capabilities return evidence. The selected Cognition Core
-owns semantic appraisal, causal state changes, present character judgment, and
-bid collapse,
-route selection, and response goals. Prior conversation and private residue
-inform that judgment without commanding one repeated posture. Deterministic
-connectors own validation, persistence, action materialization, permissions,
-limits, and graph routing. The V2 surface planner owns expressive content and
-only real visible boundaries. `dialog_agent.py` owns final visible wording.
+RAG and resolver capabilities return evidence. Cognition owns appraisal,
+character judgment, causal affect, and response intent. Deterministic code owns
+validation, state reduction, permissions, action materialization, persistence,
+and delivery. `dialog_agent.py` owns final visible wording.
 
 ## Module Boundary
 
 | Area | Main files | Ownership |
 | --- | --- | --- |
-| Perception | `persona_supervisor2_msg_decontextualizer.py` | Current media observation, current-message rewrite, referent status, and one role-explicit current-turn meaning after the brain-service relevance settlement boundary. |
-| Persona graph | `persona_supervisor2.py` | Resolver recurrence, final commit ordering, action/surface routing, no-response handling, and episode trace assembly. |
-| V2 connector | `persona_supervisor2_cognition.py`, `persona_supervisor2_cognition_actions.py` | Exact `CognitionCoreInputV2` construction, state loading, V2 service binding, output projection, final state replacement, and semantic action-request materialization. |
-| Text and terminal visual connector | `persona_supervisor2_l3_surface.py` | Prompt-safe interaction-style loading, exact `TextSurfaceInputV2` construction, two-call unified-content/preference planning, and independent one-call visual planning. |
-| Dialog | `dialog_agent.py` | Literal spoken or typed text from the validated `TextSurfaceOutputV2`, structural JSON/source validation, and accepted-surface return. |
-| Specialist action handling | `persona_supervisor2_memory_lifecycle.py`, action-spec packages | Deterministic validation and execution of admitted semantic action requests. |
-| Consolidation handoff | `persona_supervisor2.py` | Completed persona state is handed to `kazusa_ai_chatbot.consolidation`, which owns extraction helpers, origin projection, target validation, and durable write routing. |
+| Perception | `persona_supervisor2_msg_decontextualizer.py` | Current media observation and role-explicit current-turn meaning. |
+| Persona graph | `persona_supervisor2.py` | Commit ordering, action/surface routing, and episode trace assembly. |
+| Cognition connector | `persona_supervisor2_cognition.py`, `persona_supervisor2_cognition_actions.py` | Canonical cognition input, output binding, state projection, and action/resolver materialization. |
+| Text and visual connector | `persona_supervisor2_l3_surface.py` | Prompt-safe surface context and visible-content planning. |
+| Dialog | `dialog_agent.py` | Validated surface output and final visible wording. |
+| Consolidation | `persona_supervisor2.py` and consolidation packages | Extraction, origin projection, target validation, and durable writes. |
 
-Semantic relevance is owned by `kazusa_ai_chatbot.relevance`, whose interface
-document defines the frontline intake and settled character-response agents.
-This package consumes their validated decisions through the brain-service
-settlement boundary; it does not import their prompts, model instances, or
-private projections.
-
-The nodes consume platform-neutral state. Platform wire syntax must already be
-normalized by adapters and the brain service into `message_envelope`,
-`prompt_message_context`, `reply_context`, `CognitiveEpisode`, global user ids,
-and bounded history fields.
-
-For a required-selection turn, `persona_supervisor2_msg_decontextualizer.py`
-owns the input-level `response_operation`. Cognition owns the concrete
-`selected_response_operation` emitted by required-selection goal cognition.
-The carrier passes through the complete bid, selected intention, and
-`TextSurfaceInputV2`; the surface model does not rewrite it, and dialog
-receives only the validated surface projection. Known non-`无` roles are
-preserved deterministically, while missing or conflicting selected operations
-fail closed before surface planning.
+The nodes consume platform-neutral state after adapters and brain intake have
+normalized wire syntax into typed episodes, message context, bounded history,
+and semantic participant descriptions.
 
 ## Canonical Live Flow
 
@@ -70,27 +40,23 @@ The top-level service graph routes into `persona_supervisor2` only after the
 queue, frontline intake, turn settlement, accepted-media description,
 settled-relevance gate, and conversation-progress loader have done their work.
 
-Inside `persona_supervisor2`, the live persona graph is:
+Inside `persona_supervisor2`, the live persona graph is a single bounded
+canonical cognition call followed by the existing surface and delivery
+owners:
 
 ```text
 stage_0_msg_decontextualizer
   -> stage_1_goal_resolver
-       start eligible cycle-zero shared-memory prewarm
-       load one mutable user or character V2 state
-       join shared-memory preparation before canonical cognition input construction
-       reuse the service-owned interaction-style turn snapshot
-       build CognitionCoreInputV2
-       run V2 cognition without an intermediate commit
-       optionally execute one cognition-selected resolver capability
-       project the observation as typed evidence
-       repeat within the resolver cycle cap
-       validate the terminal CognitionCoreOutputV2
+       build one canonical cognition input
+       run one bounded A1 -> A2 -> G -> P cognition path
+       validate and bind one active-character goal and response plan
+       apply permitted action/resolver effects through caller-owned contracts
        commit exactly one final replacement state
   -> stage_2_memory_lifecycle
   -> stage_2a_background_work_enqueue
-  -> route from cognition_core_output.intention.route
+  -> route from the canonical response plan
        speech
-         -> build TextSurfaceInputV2
+         -> build the canonical text-surface input
          -> run three bounded text stages
          -> run one terminal visual stage as a sibling when enabled
          -> retain the validated text input and output for dialog
@@ -101,74 +67,16 @@ stage_0_msg_decontextualizer
          -> action-result trace without visible dialog
 ```
 
-For a live user message, Stage 0 returns semantic surfaces from its existing
-LLM call. `decontextualized_input` remains a natural equivalent used by
-compatibility and retrieval paths. Optional `role_explicit_content` uses the
-Chinese role labels `当前用户` and `当前角色` to preserve nested actor, target,
-beneficiary, modality, and request direction. Optional structured
-`response_operation` records the response owner, whether an unsupplied answer
-or choice is required and who owns it, plus embedded actor and target roles.
-Deterministic code validates exact shape, enums, booleans, and bounds, then
-attaches the model-owned values unchanged to existing dialog-percept metadata.
-The raw percept content remains available beside this projection.
+`decontextualized_input` and role-explicit percept metadata preserve the
+current request, active-character ownership, addressee direction, and named
+participant descriptions. Deterministic code owns validation, state binding,
+permissions, and persistence; cognition owns semantic judgment and response
+intent. A malformed canonical result becomes an operational failure before
+commit.
 
-Group decontextualization also receives a bounded, display-name-only roster of
-episode-local third-party bindings (`p1` through `pN`). When the model resolves
-a third-party referent, it must carry the matching `participant_handle`; an
-unknown handle, mismatched display name, or unresolved referent is a bounded
-contract error. These bindings are transient semantic context, not global
-user identities and not persistence inputs. Cognition, L3, and dialog share
-the same binding and its structured addressee policy. A `pN` target must remain
-named or explicitly third-person in visible wording, while the current user's
-delivery identity remains the existing transport recipient. No deterministic
-post-generation replacement changes the text after dialog rendering.
+## Canonical Cognition Boundary
 
-Provider or invalid decontextualizer output receives up to three total local
-attempts. A structural repair carries only the latest bounded rejected
-candidate and exact nested-field validation error. Exhaustion retains the
-normalized original input, omits uncertain role projection, and continues as
-accepted degraded output before state commit.
-
-The image descriptor likewise uses three total attempts and accepts only the
-exact five-field descriptor contract. Only validated descriptors enter the
-media cache. Exhaustion or a stale malformed cache row produces a typed
-unavailable observation for the current turn while preserving future recovery.
-
-The route decision requires a validated V2 cognition output. The presence of
-an action specification cannot create a text response and cannot substitute
-for `intention.route == "speech"`.
-
-The resolver carries the latest cognition output and observations in memory.
-It does not reload or persist cognition state between cycles. The connector
-commits only the terminal replacement state, before action execution, surface
-planning, dialog, consolidation, or delivery.
-
-### Parent-checkpoint guardrail boundary
-
-`stage_1_goal_resolver` receives the service-owned context-local
-`CognitionRetryCoordinator` and passes it through the non-committing connector
-closure. `call_cognition_subgraph` completes identity resolution, mutable-state
-reads, cycle-zero shared-memory prewarm, and canonical `CognitionCoreInputV2`
-construction before entering the guardrail. The guardrail may rerun only the
-`run_cognition` child from independent copies of that input. `commit=True`
-never enters the guardrail, and the stage commits the final validated output
-exactly once after resolver recurrence.
-
-The parent token is available only for an escaped pre-commit goal-bid
-structure/provider exhaustion. Existing sibling recovery runs first. The
-generic resolver loop and idle self-cognition runner remain outside this live
-persona guardrail.
-
-The live persona capability connector currently executes bounded local-context
-recall. A capability failure returns a fixed semantic failure observation;
-exception type may be logged, while exception text and operational details stay
-outside cognition evidence and prompts.
-
-## Engine-Selected Cognition Boundary
-
-`persona_supervisor2_cognition.py` maps graph state into the exact public
-`CognitionCoreInputV2` contract shared by both cognition engines. Its input
-includes:
+`persona_supervisor2_cognition.py` builds one canonical input containing:
 
 - the validated canonical episode;
 - one validated mutable cognition state and separate character constraints;
@@ -176,109 +84,37 @@ includes:
 - direct facts with trusted provenance;
 - available action and resolver affordances; and
 - a bounded semantic scene description;
-- distinct private past-dialog continuity for goal cognition only; and
-- exact advisory group-engagement guidance for eligible targetless group
-  self-cognition.
+- bounded continuity and relationship context; and
+- semantic action and resolver capabilities available to the caller.
 
-`build_scene_context_from_global_state(...)` is the single producer and
-validator for that `SceneContextV2`. The connector passes the child input's
-scene through independent copies under `cognition_scene_context` for resolver
-task execution, local-context/RAG execution, and accepted-coding context. The
-top-level `scene_context` key remains the relevance-owned string and is not a
-resolver or cognition carrier.
+The connector keeps scene, relationship, continuity, and capability context
+bounded and caller-owned. Retrieved evidence informs judgment but does not
+become persona or final stance merely by being retrieved. Private persistence
+identifiers remain outside model-facing packets.
 
-At resolver cycle zero, `user_message` and `internal_thought` episodes start
-the existing shared-memory prewarm before independent identity and mutable-state
-preparation. Its confirmed shared rows merge only into
-`rag_result.memory_evidence` before V2 evidence mapping. Empty results preserve
-the base RAG payload, and later resolver cycles reuse that state without
-another lookup.
-
-Canonical targetless group self-cognition consumes the group-channel engagement
-projection from the immutable interaction-style snapshot loaded once by the
-service before the graph. Goal cognition and action planning receive the same
-bounded advisory value; appraisal, workspace collapse, surface planning, and
-dialog do not. Ordinary user turns and other ineligible episodes receive the
-exact empty value without a connector-owned group style database read.
-
-When Stage 0 supplied a valid semantic projection, the connector forwards its
-`role_explicit_content` and input-level `response_operation` unchanged as
-current episode evidence and semantic scene. Goal cognition emits the concrete
-`selected_response_operation`; surface planning carries it without rewriting
-it, and dialog renders the resulting surface without independently interpreting
-nested direct pronouns.
-
-The cognition core performs deterministic preparation, scoped semantic appraisal,
-state reduction, dependency-ready goal cognition, complete-bid collapse, and
-route validation. Its output contains the replacement state, selected semantic
-intention, admitted/supporting bids, semantic affect and relationship
-projections, action requests, resolver requests, progress, expression policy,
-diagnostics, and bounded residue.
-
-The connector constructs one required
-`COGNITION_V3_CHAIN_LLM` binding and one optional all-or-nothing
-`COGNITION_V3_SIDECAR_LLM` binding. The chain declares a served context window
-of at least 50,000 tokens, both lanes require an 8,192-token completion
-capacity, and thinking stays disabled.
-The generic `COGNITION_LLM` route remains a required shared non-core binding
-for carry-over and memory-lifecycle consumers.
-
-The connector hands one invocation to the serialized
-primary chain in the exact cold order `A1 -> A2 -> I1 -> G1a -> optional G1b
--> I2 -> conditional W1 -> P1 -> off-chain X1/X2 -> O`. The optional sidecar
-is a single-stream lane for advisory L1, repair, and authorization. Resolver
-recurrence reattaches the same episode session and runs only its bounded
-observation -> delta-appraisal -> bid-revision -> fresh-P1 tail before the
-single terminal replacement-state commit. This connector does not launch
-parallel V3 waves or add a second checkpoint/commit authority.
-The connector uses the fixed `fixed_a1_a2` appraisal-stage layout. The
-caller configures `COGNITION_V3_TURN_DEADLINE_SECONDS` (`30..600`, default
-`240`). V3 starts with the 50,000-token total ceiling and can use the
-conditional 65,000-token tier only when the caller-local serving window
-declaration supports it.
+The cognition core preserves all six appraisal families and their axes, derives
+emotion with concrete causes, binds one active-character goal, and returns a
+canonical response plan. The caller owns private state references and native
+action/resolver materialization. The cognition route uses the configured single
+chain, fixed A1/A2 appraisal layout, bounded context, disabled thinking, and
+the configured turn deadline.
 
 Persistent identifiers and raw numeric state remain behind deterministic
 handle bindings. Model-facing projections use semantic roles and qualitative
 bands. RAG evidence does not become persona, affect, or final stance merely by
 being retrieved.
 
-Promoted-memory evidence keeps its relationship scope after prewarm. The V2
-connector maps each `rag_result.memory_evidence` row to exactly one prompt-safe
-`memory_scope`: rows that already carry `scope_type=user_continuity` become
-`current_user_continuity`, and every other promoted-memory row (including
-cycle-zero shared prewarm rows) becomes `shared_character_or_world`. The raw
-user id and storage provenance stay behind the deterministic boundary. Shared
-character/world memory can inform what the character knows; current-user
-continuity memory explains history. The character weighs both with the current
-episode and other typed evidence.
-
-The ordinary goal owner decides current-turn relational
-willingness. Each goal evidence row receives one transient `provenance_role`
-derived from trusted source-kind and memory-scope metadata; promoted
-reflection and shared character/world context remain branch evidence and do not
-become a second stance owner.
-The connector passes the validated `relational_willingness.v2` decision
-(applicability, `current_user_relationship_state`, stance, reason, and
-evidence handles) through the V2 output and the L3 surface input so workspace,
-action permission, content planning, preference planning, and dialog preserve
-the exact complete decision and relationship state instead of re-deriving them
-from prose or relationship numbers.
+The cognition output preserves all six appraisal families and axes, structured
+emotion causes, one active-character goal, relational willingness, and a
+canonical response plan. Surface and action consumers receive only validated
+semantic projections; they do not re-derive ownership from prose.
 
 ## Action Ownership
 
-Cognition goal branches may bid for speech, silence, private handling, an action, or
-resolver evidence. Complete bids retain their semantic intention, desired
-outcome, grounded detail, target roles, consequences, route, and declared
-request until deterministic collapse and validation finish.
-
-Only admitted `action_requests` are materialized into the existing action-spec
-execution boundary. Deterministic code revalidates capability availability,
-permissions, target bindings, and parameters. Action specs and action results
-remain trace/execution artifacts; they do not own cognition route selection.
-The proposal boundary keeps valid canonical rows and drops malformed rows
-individually. Three unusable planning attempts degrade to an empty plan, and
-three unusable authorization attempts deny all proposed work. Speech remains
-available, while no malformed model output can grant execution.
+Cognition returns one active-character response goal and optional semantic
+capability requests. The caller validates capability availability, permissions,
+target bindings, and parameters before materializing action or resolver work.
+Malformed canonical output fails before execution; it cannot grant work.
 
 Memory-lifecycle requests follow a specialist boundary. Cognition may request
 a semantic lifecycle review, while the specialist chooses prompt-safe aliases
@@ -290,15 +126,15 @@ surface can describe only the actual semantic outcome. A background request
 without a visible acknowledgement route receives a deterministic failure
 result instead of silently promising work.
 
-## V2 Text, Terminal Visual, And Dialog
+## Text, Terminal Visual, And Dialog
 
 `persona_supervisor2_l3_surface.py` runs only after the final cognition state
-commit and only for a speech intention. It builds exact `TextSurfaceInputV2`
+commit and only for a speech response plan. It builds the canonical text surface
+input
 from:
 
 - the canonical episode;
-- the selected intention;
-- bounded primary and supporting bid projections;
+- the active-character goal and response plan;
 - expression policy;
 - semantic affect and optional relationship projections;
 - permitted semantic action results; and
@@ -309,7 +145,7 @@ from:
 The connector loads the existing sanitized user interaction-style overlay and,
 for group turns, the group-channel overlay. It renders only allowlisted speech,
 social, pacing, and engagement guidance in application order into the bounded
-string required by `TextSurfaceInputV2`. Storage identifiers, revisions,
+bounded surface context. Storage identifiers, revisions,
 reflection lineage, and raw channel/user identifiers are excluded.
 
 `run_text_surface_planning(...)` projects visible episode content and runs
@@ -330,14 +166,9 @@ selects a character stance. The dialog generator preserves the selected
 semantics while avoiding those fragments; the check is deterministic and
 bounded.
 
-Surface quality ranking is evidence-gated. `surface_content_plan` remains a
-research candidate, but the current blocked calibration artifact keeps
-production on the existing first-valid and degraded paths. The V2 `confidence` field remains advisory descriptor context,
-not a quality score; it is excluded from workspace quality comparison and
-cannot change cognition truth, action authorization, role direction,
-addressee, persistence, queue, delivery, or state. Future activation requires
-the plan's accepted owner-specific held-out evidence and bounded score
-contract.
+Surface quality fields remain advisory descriptor context. They cannot change
+cognition truth, action authorization, role direction, addressee, persistence,
+queue, delivery, or state.
 
 When visual directives are enabled, `run_visual_surface_planning(...)` runs as
 an independent sibling call. It alone receives the isolated bounded
@@ -355,27 +186,19 @@ interaction without supplying staging forms; dialog carries emotion,
 personality, and interaction posture through wording, sentence shape, and
 cadence. Action narration remains an ungated model variation: the prompts do
 not request it, and generated instances are neither rejected nor rewritten.
-The generator receives the validated `TextSurfaceOutputV2` and emits the
+The generator receives the validated surface output and emits the
 visible `final_dialog`. Canonical JSON parsing, structural message validation,
 and deterministic required-source-URL checks remain in the generator boundary.
 No semantic verifier, score gate, or evaluator-driven repair follows
 generation. Action narration remains an ungated model variation: the prompts
 do not request it, and generated instances are neither rejected nor rewritten.
 
-Before this dialog boundary, a typed character-owned required selection routes
-the selected goal branch to one specialized producer in place of its generic
-goal prompt. The producer emits one authoritative selection and accounts for
-every required-selection handle while retaining complete progress evidence for
-its own relevance judgment. Structural retries reuse that same goal owner; no
-replacement owner is added. The episode-level
-`response_operation` remains input provenance, while the selected operation
-remains cognition-owned semantic context. Dialog receives only the validated
-surface projection and renders its wording. Turns without the structural flag
-use the generic goal producer.
+Before this dialog boundary, typed required-selection context remains semantic
+episode provenance. Dialog receives only the validated surface projection and
+renders its wording.
 
-Dialog does not receive raw V2 mutable state, private branch payloads,
-suppressed bids, persistent handles, relationship scalars, or obsolete
-directive bags.
+Dialog does not receive raw mutable state, private cognition payloads,
+persistent identifiers, relationship scalars, or implementation directives.
 
 ## Cognitive Episodes
 
@@ -400,7 +223,7 @@ controls remain deterministic provenance.
 
 User cognition state and singleton character cognition state are separate
 mutable scopes. The selected scope is resolved from the episode origin and
-caller, validated before cognition, and replaced once after terminal V2 output.
+caller, validated before cognition, and replaced once after canonical output.
 Character drives and meaning constraints can inform a user-scoped turn without
 becoming user-owned mutable state. Standards remain in raw character state and
 are not projected into live model input until a typed source-bound contract
@@ -420,19 +243,12 @@ actions, deliver messages, schedule work, or reopen cognition.
 
 ## Failure And Safety Rules
 
-- Missing or partial V2 cognition output fails before surface routing.
-- Recoverable V2 model failures use their declared total attempt budget. Goal
-  cognition's three calls are cumulative per producing stage and branch across
-  the service graph retry; an orchestration replay cannot reset them.
-- Degradable exhaustion finishes with the owner fallback: normalized original
-  input, omitted optional appraisal or visual output, already-valid bid,
-  empty or denied control work, validated neutral text surface, or retained
-  bounded dialog.
-- Invalid canonical episodes, mutable state, bids, routes, required zero-valid
-  cognition after the complete-sibling policy, commit failures, and
-  zero-candidate total model unavailability remain unrecoverable at their
-  owning boundary. Unsupported goal handles are regenerated or rejected and
-  are never deterministically deleted into acceptance.
+- Missing or partial canonical cognition output fails before surface routing.
+- A structural/provider failure remains a typed operational failure before
+  state commit; deterministic code never invents semantic values or executes
+  unapproved work.
+- Invalid episodes, mutable state, routes, commit failures, and unavailable
+  capabilities remain unrecoverable at their owning boundary.
 - Model stages own semantic judgment; deterministic code owns contract
   validation, persistence, permissions, limits, and delivery eligibility.
 - Resolver observations and RAG rows remain evidence, never final stance.

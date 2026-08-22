@@ -2,8 +2,9 @@
 
 ## Document control
 
-- **Status:** Review finding record (static analysis only; no code executed, no
-  production or test source edited).
+- **Status:** Superseded historical review. Its findings informed the
+  completed handleless cognition cutover; the reviewed hybrid-chain design is
+  no longer the production cognition architecture.
 - **Document type:** Architectural alignment review — input to the Gate 7
   consolidated failure-mode register required by the active plan and the
   2026-08-21 handover.

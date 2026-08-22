@@ -35,8 +35,6 @@ from kazusa_ai_chatbot.event_logging.models import (
 )
 from kazusa_ai_chatbot.event_logging.sanitization import (
     build_scope_record,
-    sanitize_cognition_chain_event_fields,
-    sanitize_cognition_v2_event_fields,
     sanitize_short_text,
     sanitize_string_list,
     sanitized_failure_reason,
@@ -138,8 +136,6 @@ async def _record_event(
     stack_fingerprint: str = "",
     recovered: bool = False,
     occurred_at: datetime | None = None,
-    cognition_v2: Mapping[str, object] | None = None,
-    cognition_chain: Mapping[str, object] | None = None,
 ) -> EventLogWriteResult:
     """Build, sanitize, and persist one event document.
 
@@ -214,14 +210,6 @@ async def _record_event(
         },
         payload=dict(payload),
     )
-    if cognition_v2 is not None:
-        event_doc["cognition_v2"] = sanitize_cognition_v2_event_fields(
-            cognition_v2,
-        )
-    if cognition_chain is not None:
-        event_doc["cognition_chain"] = (
-            sanitize_cognition_chain_event_fields(cognition_chain)
-        )
     unsafe_paths = unsafe_field_paths(event_doc)
     if unsafe_paths:
         reason = sanitized_rejection_reason(unsafe_paths)
@@ -373,137 +361,6 @@ def _valid_continuity_count(value: object, *, maximum: int) -> bool:
         and not isinstance(value, bool)
         and 0 <= value <= maximum
     )
-
-
-async def record_cognition_v2_event(
-    *,
-    component: str,
-    cognition_component: str,
-    status: str,
-    stage_status: Literal["started", "completed", "failed", "skipped"],
-    selected_branch_id: str = "",
-    state_scope: Literal["", "user", "character"] = "",
-    state_commit_status: Literal[
-        "not_started",
-        "committed",
-        "failed",
-        "skipped",
-    ] = "not_started",
-    severity: EventSeverity = "info",
-    warning_codes: Sequence[str] = (),
-    occurred_at: datetime | None = None,
-) -> EventLogWriteResult:
-    """Record one bounded V2 stage or state-commit diagnostic event."""
-
-    fields = {
-        "cognition_component": cognition_component,
-        "selected_branch_id": selected_branch_id,
-        "state_scope": state_scope,
-        "state_commit_status": state_commit_status,
-        "stage_status": stage_status,
-    }
-    result = await _record_event(
-        event_family="cognition_v2",
-        event_type="component_status",
-        component=component,
-        status=status,
-        severity=severity,
-        payload={},
-        warning_codes=warning_codes,
-        occurred_at=occurred_at,
-        cognition_v2=fields,
-    )
-    return result
-
-
-async def record_cognition_chain_event(
-    *,
-    run_id: str,
-    cognition_invocation_id: str,
-    terminal_disposition: str,
-    chain_model_name: str = "",
-    sidecar_model_name: str = "",
-    step_count: int = 0,
-    repair_count: int = 0,
-    cold_start_count: int = 0,
-    prompt_chars_total: int = 0,
-    new_suffix_chars_total: int = 0,
-    prefix_share_ratio: float = 0.0,
-    max_estimated_prompt_tokens: int = 0,
-    max_reserved_completion_tokens: int = 0,
-    max_estimated_total_context_tokens: int = 0,
-    active_total_ceiling_tokens: int = 0,
-    extension_available: bool = False,
-    extension_used: bool = False,
-    reanchor_used: bool = False,
-    session_disposition: str = "",
-    duration_ms: int = 0,
-    deadline_ms: int = 0,
-    deadline_consumption_ratio: float = 0.0,
-    l1_stream_count: int = 0,
-    json_repair_call_count: int = 0,
-    action_auth_attempt_count: int = 0,
-    resolver_auth_attempt_count: int = 0,
-    sidecar_queue_wait_ms_total: int = 0,
-    sidecar_max_in_flight: int = 0,
-    l1_preempted_by_repair: bool = False,
-    sidecar_cancellation_count: int = 0,
-    warning_codes: Sequence[str] = (),
-    occurred_at: datetime | None = None,
-) -> EventLogWriteResult:
-    """Record one bounded Cognition V3 chain-run aggregate event."""
-
-    fields: dict[str, object] = {
-        "run_id": run_id,
-        "cognition_invocation_id": cognition_invocation_id,
-        "terminal_disposition": terminal_disposition,
-        "chain_model_name": chain_model_name,
-        "sidecar_model_name": sidecar_model_name,
-        "step_count": step_count,
-        "repair_count": repair_count,
-        "cold_start_count": cold_start_count,
-        "prompt_chars_total": prompt_chars_total,
-        "new_suffix_chars_total": new_suffix_chars_total,
-        "prefix_share_ratio": prefix_share_ratio,
-        "max_estimated_prompt_tokens": max_estimated_prompt_tokens,
-        "max_reserved_completion_tokens": max_reserved_completion_tokens,
-        "max_estimated_total_context_tokens": (
-            max_estimated_total_context_tokens
-        ),
-        "active_total_ceiling_tokens": active_total_ceiling_tokens,
-        "extension_available": extension_available,
-        "extension_used": extension_used,
-        "reanchor_used": reanchor_used,
-        "session_disposition": session_disposition,
-        "duration_ms": duration_ms,
-        "deadline_ms": deadline_ms,
-        "deadline_consumption_ratio": deadline_consumption_ratio,
-        "l1_stream_count": l1_stream_count,
-        "json_repair_call_count": json_repair_call_count,
-        "action_auth_attempt_count": action_auth_attempt_count,
-        "resolver_auth_attempt_count": resolver_auth_attempt_count,
-        "sidecar_queue_wait_ms_total": sidecar_queue_wait_ms_total,
-        "sidecar_max_in_flight": sidecar_max_in_flight,
-        "l1_preempted_by_repair": l1_preempted_by_repair,
-        "sidecar_cancellation_count": sidecar_cancellation_count,
-        "warning_codes": list(warning_codes),
-    }
-    try:
-        sanitize_cognition_chain_event_fields(fields)
-    except ValueError as exc:
-        return _rejection_result(uuid4().hex, str(exc))
-    result = await _record_event(
-        event_family="cognition_chain",
-        event_type="chain_run_summary",
-        component="cognition_core_v3",
-        status="completed",
-        severity="info",
-        payload={},
-        warning_codes=warning_codes,
-        occurred_at=occurred_at,
-        cognition_chain=fields,
-    )
-    return result
 
 
 async def record_character_identity_growth_event(

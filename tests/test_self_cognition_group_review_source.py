@@ -1314,23 +1314,6 @@ async def test_group_review_case_projects_typed_source_context() -> None:
     assert source_context["conversation_evidence"] == []
 
 
-def test_self_cognition_readme_documents_v2_state_contract() -> None:
-    """The self-cognition ICD names the caller-owned V2 state fields."""
-
-    readme_path = Path(
-        "src/kazusa_ai_chatbot/self_cognition/README.md"
-    )
-    readme = readme_path.read_text(encoding="utf-8")
-
-    for required_text in (
-        "conversation_progress",
-        "source_context",
-        "public_group_scene",
-        "interaction_style_turn_snapshot.v1",
-    ):
-        assert required_text in readme
-
-
 def _test_interaction_style_snapshot() -> dict[str, Any]:
     """Build the smallest immutable style snapshot accepted by self-cognition."""
 
@@ -1362,93 +1345,6 @@ def _test_interaction_style_snapshot() -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
-async def test_prepared_group_review_state_contains_v2_scene_and_style_contract(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The async runner prepares scene and style state before cognition."""
-
-    case = _group_review_case()
-    case["character_profile"] = canonical_service_character_profile(
-        marker="strict-v2-group",
-    )
-    case["visible_context"] = [{
-        "role": "user",
-        "display_name": "speaker",
-        "timestamp": "2026-05-18T04:05:00+00:00",
-        "body_text": "A visible group message.",
-        "platform_message_id": "platform-row-001",
-    }]
-    style_snapshot = _test_interaction_style_snapshot()
-    captured_style_calls: list[dict[str, Any]] = []
-    captured_state: dict[str, Any] = {}
-
-    async def load_style_snapshot(**kwargs: Any) -> dict[str, Any]:
-        captured_style_calls.append(dict(kwargs))
-        return style_snapshot
-
-    async def load_residue(_case: dict[str, Any]) -> str:
-        return ""
-
-    async def cognition_client(state: dict[str, Any]) -> dict[str, Any]:
-        captured_state.update(state)
-        return {
-            "logical_stance": "OBSERVE",
-            "character_intent": "WAIT",
-            "self_cognition_route": models.ROUTE_PROGRESS_MAINTENANCE,
-            "cognition_core_output": {
-                "state_update": {"state_scope": "user"},
-            },
-            "cognition_state_committed": True,
-        }
-
-    monkeypatch.setattr(
-        runner,
-        "build_interaction_style_context",
-        load_style_snapshot,
-    )
-    monkeypatch.setattr(
-        runner,
-        "_load_residue_context_for_case",
-        load_residue,
-    )
-
-    await runner.build_self_cognition_case_artifacts_async(
-        case,
-        cognition_client=cognition_client,
-    )
-
-    assert len(captured_style_calls) == 1
-    assert captured_style_calls[0]["global_user_id"] == ""
-    assert captured_style_calls[0]["channel_type"] == "group"
-    assert captured_state["conversation_progress"] is None
-    assert captured_state["public_group_scene"]
-    assert "A visible group message." in captured_state["public_group_scene"]
-    assert "platform-row-001" not in captured_state["public_group_scene"]
-    assert captured_state["interaction_style_context"] is style_snapshot
-    assert captured_state["global_user_id"] == ""
-    assert captured_state["platform_user_id"] == ""
-
-
-def test_prepared_group_review_state_builds_v2_cognition_input() -> None:
-    """The prepared state exposes every strict V2 caller-owned field."""
-
-    case = _group_review_case()
-    style_snapshot = _test_interaction_style_snapshot()
-    state = runner._build_cognition_state(
-        case,
-        "rendered group source packet",
-        public_group_scene="A bounded public group scene.",
-        interaction_style_context=style_snapshot,
-    )
-
-    assert state["conversation_progress"] is None
-    assert state["public_group_scene"] == (
-        "A bounded public group scene."
-    )
-    assert state["interaction_style_context"] is style_snapshot
-
-
-@pytest.mark.asyncio
 async def test_prepared_group_review_state_rejects_malformed_source_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1474,85 +1370,6 @@ async def test_prepared_group_review_state_rejects_malformed_source_context(
         await runner.build_self_cognition_case_artifacts_async(
             case,
             cognition_client=lambda state: {},
-        )
-
-
-@pytest.mark.asyncio
-async def test_prepared_group_review_state_reaches_strict_v2_connector(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The connector extracts group guidance from the immutable snapshot."""
-
-    case = _group_review_case()
-    case["character_profile"] = canonical_service_character_profile(
-        marker="strict-v2-group",
-    )
-    style_snapshot = _test_interaction_style_snapshot()
-    state = runner._build_cognition_state(
-        case,
-        "rendered group source packet",
-        public_group_scene="A bounded public group scene.",
-        interaction_style_context=style_snapshot,
-    )
-    state["rag_result"] = {"answer": ""}
-    captured_inputs: list[dict[str, Any]] = []
-
-    async def fake_run_cognition(
-        cognition_input: dict[str, Any],
-        services: object,
-    ) -> dict[str, Any]:
-        del services
-        captured_inputs.append(cognition_input)
-        return {"state_update": {"state_scope": "character"}}
-
-    async def load_character_state() -> dict[str, Any]:
-        return build_character_production_state(
-            updated_at="2026-05-18T04:45:00Z",
-        )
-
-    monkeypatch.setattr(connector, "run_cognition", fake_run_cognition)
-    monkeypatch.setattr(
-        connector,
-        "get_character_cognition_state",
-        load_character_state,
-    )
-    monkeypatch.setattr(
-        connector,
-        "_state_has_episode_identity_snapshot",
-        lambda *args, **kwargs: True,
-    )
-    monkeypatch.setattr(
-        connector,
-        "_project_output_to_global_state",
-        lambda output, current_state: {},
-    )
-    monkeypatch.setattr(
-        connector,
-        "_episode_identity_state_update",
-        lambda current_state: {},
-    )
-
-    await connector.call_cognition_subgraph(state, commit=False)
-
-    assert len(captured_inputs) == 1
-    cognition_input = captured_inputs[0]
-    assert cognition_input["schema_version"] == "cognition_core_input.v2"
-    assert cognition_input["scene_context"]["public_group_scene"] == (
-        "A bounded public group scene."
-    )
-    assert cognition_input["group_engagement_action_context"] == (
-        style_snapshot["group_engagement_action_context"]
-    )
-
-    missing_snapshot_state = dict(state)
-    missing_snapshot_state.pop("interaction_style_context")
-    with pytest.raises(
-        CognitionExecutionError,
-        match="interaction style turn snapshot is required",
-    ):
-        await connector.call_cognition_subgraph(
-            missing_snapshot_state,
-            commit=False,
         )
 
 

@@ -1,4 +1,4 @@
-"""V2 L3 surface connector after the cognition state commit."""
+"""Canonical L3 surface connector after the cognition state commit."""
 
 from __future__ import annotations
 
@@ -19,28 +19,6 @@ from kazusa_ai_chatbot.character_identity_growth.models import (
 from kazusa_ai_chatbot.character_identity_growth.projection import (
     project_identity_for_surface,
 )
-from kazusa_ai_chatbot.config import (
-    COGNITION_STAGE_TIMEOUT_SECONDS,
-    SURFACE_CONTENT_DEFAULT_MAX_COMPLETION_TOKENS,
-    SURFACE_PREFERENCE_DEFAULT_MAX_COMPLETION_TOKENS,
-    SURFACE_VISUAL_DEFAULT_MAX_COMPLETION_TOKENS,
-)
-from kazusa_ai_chatbot.cognition_shared.contracts import (
-    CognitionExecutionError,
-    MAX_RECENT_CHARACTER_DIALOG_CHARS,
-    MAX_RECENT_CHARACTER_DIALOG_ROWS,
-    SurfaceAddresseePlanV1,
-    TextSurfaceInputV2,
-    TextSurfaceOutputV2,
-    TextSurfaceServicesV2,
-    VisualSurfaceServicesV2,
-    validate_cognition_core_output,
-    validate_text_surface_input,
-)
-from kazusa_ai_chatbot.cognition_shared.surface import (
-    run_text_surface_planning,
-    run_visual_surface_planning,
-)
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     MAX_RESOLVER_EVIDENCE_EXCERPT_CHARS,
     MAX_RESOLVER_EVIDENCE_EXCERPTS,
@@ -49,6 +27,27 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     resolver_evidence_excerpts_for_cognition,
 )
 from kazusa_ai_chatbot.cognition_resolver.state import validate_resolver_state
+from kazusa_ai_chatbot.cognition_shared.contracts import (
+    MAX_RECENT_CHARACTER_DIALOG_CHARS,
+    MAX_RECENT_CHARACTER_DIALOG_ROWS,
+    CognitionExecutionError,
+    SurfaceAddresseePlanV1,
+    TextSurfaceInput,
+    TextSurfaceOutputV2,
+    TextSurfaceServicesV2,
+    VisualSurfaceServicesV2,
+    validate_text_surface_input_canonical,
+)
+from kazusa_ai_chatbot.cognition_shared.surface import (
+    run_text_surface_planning,
+    run_visual_surface_planning,
+)
+from kazusa_ai_chatbot.config import (
+    COGNITION_STAGE_TIMEOUT_SECONDS,
+    SURFACE_CONTENT_DEFAULT_MAX_COMPLETION_TOKENS,
+    SURFACE_PREFERENCE_DEFAULT_MAX_COMPLETION_TOKENS,
+    SURFACE_VISUAL_DEFAULT_MAX_COMPLETION_TOKENS,
+)
 from kazusa_ai_chatbot.llm_interface import LLMCallConfig
 from kazusa_ai_chatbot.nodes.linguistic_texture import (
     get_abstraction_reframing_description,
@@ -63,13 +62,11 @@ from kazusa_ai_chatbot.nodes.linguistic_texture import (
     get_softener_density_description,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
-    build_runtime_capability_limits,
     _cognition_llm_config,
     _llm_interface,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.utils import build_interaction_history_recent
-
 
 _LINGUISTIC_TEXTURE_DESCRIPTORS = {
     "fragmentation": get_fragmentation_description,
@@ -89,68 +86,43 @@ def build_text_surface_input_from_global_state(
     state: GlobalPersonaState,
     *,
     interaction_style_context: str,
-) -> TextSurfaceInputV2:
-    """Build the exact surface contract from committed V2 cognition output."""
+) -> TextSurfaceInput:
+    """Build the exact surface contract from committed cognition output."""
 
     output = state.get("cognition_core_output")
     if not isinstance(output, Mapping):
-        raise ValueError("V2 cognition output is required before surface planning")
-    validated_output = validate_cognition_core_output(output)
+        raise TypeError("canonical cognition output is required before surface planning")
+    plan = output.get("response_plan")
+    goal = output.get("active_character_goal")
+    if not isinstance(plan, Mapping) or not isinstance(goal, Mapping):
+        raise ValueError("canonical cognition response product is incomplete")
     expression_context, visual_context = _character_surface_contexts(state)
-    payload: TextSurfaceInputV2 = {
-        "schema_version": "text_surface_input.v2",
+    canonical_payload: TextSurfaceInput = {
+        "schema_version": "text_surface_input.v3",
         "episode": _canonical_episode(state),
-        "intention": dict(validated_output["intention"]),
-        "goal_resolution": validated_output["goal_resolution"],
-        "supporting_bids": [
-            _surface_bid_projection(bid, state=state)
-            for bid in validated_output["supporting_bids"]
-        ],
-        "expression_policy": dict(validated_output["expression_policy"]),
-        "semantic_affect": [
-            dict(row) for row in validated_output["affect_projection"]
-        ],
+        "active_character_goal": dict(goal),
+        "response_plan": dict(plan),
+        "expression_policy": {
+            "visibility": "visible" if plan.get("response_goal") else "none",
+            "emotional_tone": "character-consistent",
+            "intensity": "moderate",
+            "directness": "balanced",
+        },
+        "semantic_affect": [dict(row) for row in output.get("affect_projection", [])],
         "permitted_action_results": _action_results(state),
         "interaction_style_context": interaction_style_context,
         "character_expression_context": expression_context,
         "visual_character_context": visual_context,
         "recent_character_dialog": _recent_character_dialog(state),
-        "addressee_plan": _surface_addressee_plan(
-            validated_output["intention"].get("target_roles", []),
-            state=state,
-        ),
     }
-    selected_operation = validated_output["intention"].get(
-        "selected_response_operation"
-    )
-    if selected_operation is not None:
-        payload["selected_response_operation"] = dict(selected_operation)
-    runtime_limits = build_runtime_capability_limits(state)
-    if runtime_limits:
-        payload["runtime_capability_limits"] = runtime_limits
-    resolver_result = _resolver_result(
-        state,
-        continuation_ref=validated_output["intention"]["goal_continuation_ref"],
-    )
-    if resolver_result is not None:
-        payload["resolver_result"] = resolver_result
-    admitted = validated_output.get("admitted_bid")
-    if isinstance(admitted, Mapping):
-        payload["primary_bid"] = _surface_bid_projection(
-            admitted,
-            state=state,
-        )
-    relationship = validated_output.get("relationship_projection")
-    if isinstance(relationship, Mapping):
-        payload["semantic_relationship"] = dict(relationship)
-    relational_decision = validated_output.get("relational_willingness")
-    if isinstance(relational_decision, Mapping):
-        payload["relational_willingness"] = dict(relational_decision)
-    return validate_text_surface_input(payload)
+    willingness = output.get("relational_willingness")
+    if isinstance(willingness, Mapping):
+        canonical_payload["relational_willingness"] = dict(willingness)
+    return validate_text_surface_input_canonical(canonical_payload)
 
 
 async def call_l3_text_surface_handler(state: GlobalPersonaState) -> dict[str, Any]:
-    """Run sibling V2 text and enabled terminal visual surface planning."""
+    """Run text and enabled terminal visual surface planning."""
 
     interaction_style_context = await _load_interaction_style_context(state)
     input_payload = build_text_surface_input_from_global_state(
@@ -165,7 +137,7 @@ async def call_l3_text_surface_handler(state: GlobalPersonaState) -> dict[str, A
         text_output = await text_call
         _assert_relational_willingness_preserved(input_payload, text_output)
         return_value = {
-            "text_surface_input_v2": input_payload,
+            "text_surface_input": input_payload,
             "text_surface_output_v2": text_output,
         }
         return return_value
@@ -182,7 +154,7 @@ async def call_l3_text_surface_handler(state: GlobalPersonaState) -> dict[str, A
     text_output = text_result
     _assert_relational_willingness_preserved(input_payload, text_output)
     return_value = {
-        "text_surface_input_v2": input_payload,
+        "text_surface_input": input_payload,
         "text_surface_output_v2": text_output,
     }
     if (
@@ -197,7 +169,7 @@ async def call_l3_text_surface_handler(state: GlobalPersonaState) -> dict[str, A
 
 
 def _assert_relational_willingness_preserved(
-    surface_input: TextSurfaceInputV2,
+    surface_input: TextSurfaceInput,
     surface_output: TextSurfaceOutputV2,
 ) -> None:
     """Require surface planning to preserve the upstream typed stance exactly."""
@@ -255,7 +227,7 @@ def _recent_character_dialog(state: Mapping[str, Any]) -> list[str]:
 
 
 def _render_interaction_style_context(context: Mapping[str, Any]) -> str:
-    """Project allowlisted style guidance into the bounded V2 text field."""
+    """Project allowlisted style guidance into the bounded text field."""
 
     if context.get("schema_version") != "interaction_style_turn_snapshot.v1":
         raise ValueError("interaction style snapshot schema is invalid")
@@ -411,7 +383,7 @@ def _joined_length(fragments: list[str], candidate: str) -> int:
 
 
 def _build_text_surface_services() -> TextSurfaceServicesV2:
-    """Bind the two V2 text-surface stages to the project LLM interface."""
+    """Bind the text-surface stages to the project LLM interface."""
 
     return TextSurfaceServicesV2(
         llm=_llm_interface,
@@ -431,7 +403,7 @@ def _build_text_surface_services() -> TextSurfaceServicesV2:
 
 
 def _build_visual_surface_services() -> VisualSurfaceServicesV2:
-    """Bind the terminal V2 visual stage to the project LLM interface."""
+    """Bind the terminal visual stage to the project LLM interface."""
 
     return VisualSurfaceServicesV2(
         llm=_llm_interface,
@@ -444,7 +416,7 @@ def _build_visual_surface_services() -> VisualSurfaceServicesV2:
     )
 
 
-def _visual_directives_disabled(payload: TextSurfaceInputV2) -> bool:
+def _visual_directives_disabled(payload: TextSurfaceInput) -> bool:
     """Return whether the canonical episode disables visual directives."""
 
     debug_modes = payload["episode"]["origin_metadata"]["debug_modes"]

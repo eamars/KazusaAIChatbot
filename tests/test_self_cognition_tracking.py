@@ -949,55 +949,6 @@ def test_classify_route_returns_action_candidate_when_cognition_selects_contact(
     assert route == models.ROUTE_ACTION_CANDIDATE
 
 
-def test_classify_route_projects_v2_scheduled_speech_to_action_candidate() -> None:
-    """A due scheduled V2 speech route must enter the existing delivery owner."""
-
-    case = _commitment_case(due_state=models.DUE_STATE_DUE_NOW)
-    case["source_refs"][0]["source_kind"] = "scheduled_tick"
-    route = tracking.classify_route(
-        case,
-        {
-            "cognition_core_output": {
-                "intention": {"route": "speech"},
-            },
-        },
-    )
-
-    assert route == models.ROUTE_ACTION_CANDIDATE
-
-
-def test_v2_scheduled_speech_materializes_speak_action_spec() -> None:
-    """A native due speech route must provide the downstream speak residue."""
-
-    state = {
-        "cognitive_episode": {
-            "episode_id": "scheduled-episode-001",
-            "trigger_source": "scheduled_tick",
-        },
-    }
-    output = {
-        "cognition_core_output": {
-            "intention": {
-                "route": "speech",
-                "intention": "回应当前到期事项",
-            },
-        },
-    }
-
-    materialized = runner._materialize_v2_due_speak_action(
-        state,
-        output,
-        selected_route=models.ROUTE_ACTION_CANDIDATE,
-    )
-
-    assert materialized["action_specs"][0]["kind"] == SPEAK_CAPABILITY
-    assert materialized["action_specs"][0]["params"][
-        "delivery_mode"
-    ] == "visible_reply"
-    assert materialized["action_specs"][0]["surface_role"] == "ordinary"
-    assert materialized["action_specs"][0]["goal_continuation_ref"] is None
-
-
 def test_classify_route_does_not_use_content_plan_without_speak_action() -> None:
     case = _commitment_case()
     route = tracking.classify_route(
@@ -1084,6 +1035,116 @@ def test_classify_route_does_not_force_action_for_past_due_silence() -> None:
     route = tracking.classify_route(case, _silent_cognition_output())
 
     assert route == models.ROUTE_AUDIT_ONLY
+
+
+def test_scheduled_canonical_proposal_reaches_action_candidate() -> None:
+    case = _scheduled_future_cognition_case()
+    output = {
+        "schema_version": "cognition_output.v3",
+        "response_plan": {
+            "self_cognition_response": {
+                "decision": "propose_visible_reply",
+                "response_goal": "send the approved follow-up",
+                "reason": "the due authority permits a grounded reply",
+                "cause_summary": "the scheduled source is due",
+            },
+        },
+    }
+
+    assert tracking.classify_route(case, output) == models.ROUTE_ACTION_CANDIDATE
+
+
+def test_scheduled_canonical_silence_remains_audit_only() -> None:
+    case = _scheduled_future_cognition_case()
+    output = {
+        "schema_version": "cognition_output.v3",
+        "response_plan": {
+            "self_cognition_response": {
+                "decision": "stay_silent",
+                "response_goal": "",
+                "reason": "the due source does not justify contact",
+                "cause_summary": "the scheduled source is due",
+            },
+        },
+    }
+
+    assert tracking.classify_route(case, output) == models.ROUTE_AUDIT_ONLY
+
+
+def test_scheduled_canonical_proposal_materializes_one_speak_spec(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[dict[str, Any]] = []
+
+    def materialize(
+        rows: list[dict[str, Any]],
+        state: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        del state
+        requests.extend(rows)
+        return [{"kind": SPEAK_CAPABILITY}]
+
+    monkeypatch.setattr(
+        runner,
+        "materialize_semantic_action_requests",
+        materialize,
+    )
+    output = {
+        "schema_version": "cognition_output.v3",
+        "active_character_goal": {"reason": "the due source is grounded"},
+        "response_plan": {
+            "self_cognition_response": {
+                "decision": "propose_visible_reply",
+                "response_goal": "send the approved follow-up",
+                "reason": "the due authority permits a grounded reply",
+                "cause_summary": "the scheduled source is due",
+            },
+        },
+    }
+    result = runner._materialize_canonical_self_speak_action(
+        {"cognitive_episode": {"trigger_source": "scheduled_tick"}},
+        output,
+        selected_route=models.ROUTE_ACTION_CANDIDATE,
+    )
+
+    assert result["action_specs"] == [{"kind": SPEAK_CAPABILITY}]
+    assert requests[0]["capability"] == SPEAK_CAPABILITY
+
+
+def test_scheduled_canonical_malformed_action_specs_fail_closed() -> None:
+    output = {
+        "schema_version": "cognition_output.v3",
+        "response_plan": {
+            "self_cognition_response": {
+                "decision": "propose_visible_reply",
+                "response_goal": "send the approved follow-up",
+                "reason": "the due authority permits a grounded reply",
+                "cause_summary": "the scheduled source is due",
+            },
+        },
+        "action_specs": {"kind": SPEAK_CAPABILITY},
+    }
+
+    with pytest.raises(StateContractError, match="action_specs"):
+        runner._materialize_canonical_self_speak_action(
+            {"cognitive_episode": {"trigger_source": "scheduled_tick"}},
+            output,
+            selected_route=models.ROUTE_ACTION_CANDIDATE,
+        )
+
+
+def test_worker_canonical_result_requires_matching_input_scope() -> None:
+    payloads = {
+        models.ARTIFACT_COGNITION_INPUT: {"state_scope": "character"},
+        models.ARTIFACT_COGNITION_OUTPUT: {
+            "schema_version": "cognition_output.v3",
+            "state_projection": {"state_scope": "user"},
+            "cognition_state_committed": True,
+        },
+    }
+
+    with pytest.raises(StateContractError, match="does not match cognition input"):
+        worker._validate_worker_cognition_result(payloads, required=True)
 
 
 def test_classify_route_honors_duplicate_action_attempt_state() -> None:

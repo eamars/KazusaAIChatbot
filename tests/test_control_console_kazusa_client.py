@@ -31,15 +31,17 @@ async def test_kazusa_client_reads_health_and_posts_debug_chat() -> None:
                         "status": "completed",
                         "nodes": [
                             {
-                                "id": "l2.reasoning",
-                                "label": "Reasoning",
-                                "stage": "L2",
+                                "id": "semantic.unexpected",
+                                "label": "Semantic meaning",
+                                "stage": "Future semantic",
                                 "lane": "cognition",
                                 "column": 2,
-                                "branch": "reasoning",
+                                "category": "future_meaning",
                                 "status": "completed",
                                 "detail": {
-                                    "internal_monologue": "bounded reason",
+                                    "schema_version": "private.schema",
+                                    "evidence_refs": ["e1"],
+                                    "root_refs": ["event-1"],
                                 },
                             },
                         ],
@@ -96,12 +98,14 @@ async def test_kazusa_client_reads_health_and_posts_debug_chat() -> None:
     assert health == {"status": "healthy"}
     assert latest_graph.run_id == "turn-1"
     assert latest_graph.source == "overview_latest"
-    assert latest_graph.nodes[0].id == "l2.reasoning"
+    assert latest_graph.nodes[0].id == "semantic.unexpected"
+    assert latest_graph.nodes[0].category == "future_meaning"
+    assert latest_graph.nodes[0].stage == "Future semantic"
+    assert latest_graph.nodes[0].detail == {}
     assert chat["response"]["messages"] == ["hi"]
     assert chat["response"]["content_type"] == "text"
     assert chat["response"]["attachment_count"] == 1
     assert chat["response"]["delivery_mention_count"] == 1
-    assert chat["cognition_chain_run"]["status"] == "not_reported"
     assert "delivery_mentions" not in chat["response"]
     assert "global-user-secret" not in repr(chat)
     assert "platform-user-secret" not in repr(chat)
@@ -111,115 +115,133 @@ async def test_kazusa_client_reads_health_and_posts_debug_chat() -> None:
         ("GET", "/health"),
         ("GET", "/ops/latest-cognition-graph"),
         ("POST", "/chat"),
+        ("GET", "/ops/latest-cognition-graph"),
     ]
 
 
-@pytest.mark.asyncio
-async def test_kazusa_client_projects_correlated_live_and_self_chain_runs() -> None:
-    """The client projects each graph's exact paired chain-run separately."""
+def test_graph_projection_preserves_semantic_cognition_rows() -> None:
+    """Project goal, appraisal, axis, and cause semantics at the API boundary."""
 
-    from control_console.kazusa_client import KazusaClient
+    from control_console.kazusa_client import project_cognition_graph_snapshot
 
-    async def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/ops/latest-cognition-graph":
-            return httpx.Response(
-                200,
-                json={
-                    "cognition_graph": {
-                        "run_id": "live-run",
-                        "llm_trace_id": "live-trace",
+    snapshot = project_cognition_graph_snapshot(
+        source="debug_latest",
+        payload={
+            "cognition_graph": {
+                "run_id": "turn-semantic",
+                "status": "completed",
+                "nodes": [
+                    {
+                        "id": "future.meaning.v7",
+                        "label": "Semantic meaning",
+                        "stage": "Future inference",
+                        "lane": "semantic-review",
+                        "column": 7,
+                        "category": "meaning_appraisal",
                         "status": "completed",
-                        "nodes": [],
-                        "edges": [],
+                        "detail": {
+                            "appraisals": [{
+                                "family": "event_agency",
+                                "applicable": True,
+                                "semantic_summary": "A new observation matters.",
+                                "cause_summary": "The current message introduced it.",
+                                "axis_changes": [{
+                                    "axis": "novelty",
+                                    "shift": "moderate_increase",
+                                    "reason": "The observation is unfamiliar.",
+                                }],
+                            }],
+                        },
                     },
-                    "self_cognition_graph": {
-                        "run_id": "self-run",
-                        "llm_trace_id": "self-trace",
+                    {
+                        "id": "future.goal.v7",
+                        "label": "Active character goal",
+                        "stage": "Goal selection",
+                        "lane": "semantic-review",
+                        "column": 12,
+                        "category": "active_character_goal",
                         "status": "completed",
-                        "nodes": [],
-                        "edges": [],
+                        "detail": {
+                            "goal": {
+                                "goal_kind": "clarify",
+                                "intent": "Clarify the observation.",
+                                "reason": "The evidence is incomplete.",
+                                "cause_summary": "The current message is ambiguous.",
+                            },
+                        },
                     },
-                    "cognition_chain_run": {
-                        "chain_run_id": "cogchain-live",
-                        "run_id": "live-run",
-                        "llm_trace_id": "live-trace",
-                        "terminal_disposition": "complete",
+                    {
+                        "id": "future.plan.v7",
+                        "label": "Response plan",
+                        "stage": "Response planning",
+                        "lane": "semantic-review",
+                        "column": 18,
+                        "category": "response_plan",
+                        "status": "completed",
+                        "detail": {
+                            "response_goal": "Ask a focused question.",
+                            "goal_resolution": "answerable_now",
+                        },
                     },
-                    "self_cognition_chain_run": {
-                        "chain_run_id": "cogchain-self",
-                        "run_id": "self-run",
-                        "llm_trace_id": "self-trace",
-                        "terminal_disposition": "complete",
+                    {
+                        "id": "future.affect.v7",
+                        "label": "Affect and causes",
+                        "stage": "Affect review",
+                        "lane": "semantic-review",
+                        "column": 21,
+                        "category": "affect_causes",
+                        "status": "completed",
+                        "detail": {
+                            "cause_provenance": [{
+                                "family": "event_agency",
+                                "cause_summary": "The observation remains concrete.",
+                                "cause_status": "active",
+                            }],
+                        },
                     },
-                },
-            )
-        return httpx.Response(404)
-
-    client = KazusaClient(
-        base_url="http://brain.local",
-        timeout_seconds=1.0,
-        transport=httpx.MockTransport(handler),
-    )
-    live_graph, live_chain, self_graph, self_chain = (
-        await client.get_latest_cognition_graph_with_chain_runs()
-    )
-
-    assert live_graph.run_id == "live-run"
-    assert self_graph.run_id == "self-run"
-    assert live_chain.run_id == "live-run"
-    assert live_chain.chain_run_id == "cogchain-live"
-    assert self_chain.run_id == "self-run"
-    assert self_chain.chain_run_id == "cogchain-self"
-
-
-@pytest.mark.asyncio
-async def test_kazusa_client_rejects_cross_run_chain_correlation() -> None:
-    """Mismatched chain rows remain explicitly absent instead of stale."""
-
-    from control_console.kazusa_client import KazusaClient
-
-    async def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/ops/latest-cognition-graph"
-        return httpx.Response(
-            200,
-            json={
-                "cognition_graph": {
-                    "run_id": "live-run",
-                    "llm_trace_id": "live-trace",
-                    "status": "completed",
-                    "nodes": [],
-                    "edges": [],
-                },
-                "self_cognition_graph": {
-                    "run_id": "self-run",
-                    "llm_trace_id": "self-trace",
-                    "status": "completed",
-                    "nodes": [],
-                    "edges": [],
-                },
-                "cognition_chain_run": {
-                    "chain_run_id": "wrong-chain",
-                    "run_id": "other-run",
-                    "llm_trace_id": "other-trace",
-                    "terminal_disposition": "complete",
-                },
-                "self_cognition_chain_run": {
-                    "chain_run_id": "wrong-self-chain",
-                    "run_id": "self-run",
-                    "llm_trace_id": "other-trace",
-                    "terminal_disposition": "complete",
-                },
+                ],
+                "edges": [
+                    {
+                        "source": "future.meaning.v7",
+                        "target": "future.goal.v7",
+                        "kind": "sequence",
+                        "label": "meaning informs goal",
+                    },
+                    {
+                        "source": "future.goal.v7",
+                        "target": "future.plan.v7",
+                        "kind": "reference",
+                        "label": "goal informs response",
+                    },
+                ],
             },
-        )
-
-    client = KazusaClient(
-        base_url="http://brain.local",
-        timeout_seconds=1.0,
-        transport=httpx.MockTransport(handler),
-    )
-    _, live_chain, _, self_chain = (
-        await client.get_latest_cognition_graph_with_chain_runs()
+        },
     )
 
-    assert live_chain.status == "not_reported"
-    assert self_chain.status == "not_reported"
+    node_by_category = {node.category: node for node in snapshot.nodes}
+    assert node_by_category["meaning_appraisal"].id == "future.meaning.v7"
+    assert node_by_category["meaning_appraisal"].stage == "Future inference"
+    assert node_by_category["meaning_appraisal"].lane == "semantic-review"
+    assert node_by_category["meaning_appraisal"].column == 7
+    appraisal = node_by_category["meaning_appraisal"].detail["appraisals"][0]
+    assert appraisal["family"] == "event_agency"
+    assert appraisal["axis_changes"][0]["shift"] == "moderate_increase"
+    assert node_by_category["active_character_goal"].detail["goal"]["intent"] == (
+        "Clarify the observation."
+    )
+    assert node_by_category["affect_causes"].detail["cause_provenance"][0][
+        "cause_status"
+    ] == "active"
+    assert {
+        node.id for node in snapshot.nodes
+    } == {
+        "future.meaning.v7",
+        "future.goal.v7",
+        "future.plan.v7",
+        "future.affect.v7",
+    }
+    assert [edge.label for edge in snapshot.edges] == [
+        "meaning informs goal",
+        "goal informs response",
+    ]
+    assert all(edge.kind in {"sequence", "reference"} for edge in snapshot.edges)

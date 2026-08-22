@@ -16,10 +16,11 @@ import time
 from typing import Any, NotRequired, TypedDict
 
 import httpx
+from langchain_core.messages import HumanMessage, SystemMessage
+from langgraph.graph import END, START, StateGraph
 from openai import OpenAIError
 
-from kazusa_ai_chatbot import event_logging
-from kazusa_ai_chatbot import llm_tracing
+from kazusa_ai_chatbot import event_logging, llm_tracing
 from kazusa_ai_chatbot.cognition_episode import (
     CURRENT_CHARACTER_ROLE,
     CURRENT_USER_ROLE,
@@ -27,35 +28,32 @@ from kazusa_ai_chatbot.cognition_episode import (
     project_model_visible_percepts,
 )
 from kazusa_ai_chatbot.cognition_shared.contracts import (
-    TextSurfaceInputV2,
+    TextSurfaceInput,
     TextSurfaceOutputV2,
-    validate_text_surface_input,
+    validate_text_surface_input_canonical,
     validate_text_surface_output,
 )
 from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
     V2_MODEL_TOTAL_ATTEMPTS,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.config import (
     DIALOG_GENERATOR_LLM_API_KEY,
     DIALOG_GENERATOR_LLM_BASE_URL,
-    DIALOG_GENERATOR_LLM_MODEL,
     DIALOG_GENERATOR_LLM_MAX_COMPLETION_TOKENS,
+    DIALOG_GENERATOR_LLM_MODEL,
     DIALOG_GENERATOR_LLM_THINKING_ENABLED,
 )
-from kazusa_ai_chatbot.utils import (
-    parse_llm_json_output,
-    log_list_preview,
-)
-from langchain_core.messages import HumanMessage, SystemMessage
-from langgraph.graph import END, START, StateGraph
-
-
 from kazusa_ai_chatbot.llm_interface import (
     LLInterface,
     LLMCallConfig,
     LLMThinkingConfig,
 )
+from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
+from kazusa_ai_chatbot.utils import (
+    log_list_preview,
+    parse_llm_json_output,
+)
+
 logger = logging.getLogger(__name__)
 
 MILLISECONDS_PER_SECOND = 1000
@@ -138,7 +136,7 @@ def _dialog_usage_mode(global_state: GlobalPersonaState) -> str:
 class DialogAgentState(TypedDict):
     # A: Core instructions
     internal_monologue: str
-    text_surface_input_v2: NotRequired[TextSurfaceInputV2]
+    text_surface_input: NotRequired[TextSurfaceInput]
     text_surface_output_v2: TextSurfaceOutputV2
     cognitive_episode: CognitiveEpisodeV1
 
@@ -212,7 +210,7 @@ blocked 时，表达答案缺口、等待状态或 typed blocker，不把 generi
 # 渲染步骤
 1. selected_surface_intent 是本轮语义锚点；content_plan 和 content_requirements 展开所需事实、
 理由和互动推进。relational_willingness（如果存在）是上游已选择的角色
-关系立场，必须保持其 applicability、stance 和 current_user_relationship_state 的原样极性，不重新选择。
+关系立场，必须保持其 applicable、stance、reason 和 cause_summary 的原样语义，不重新选择。
 以这组权威语义组织对象、事实、行动者、受益者和回应方向。
 2. 先整体阅读 selected_surface_intent、content_plan、content_requirements、
 visible_boundaries、addressee_plan 和 delivery_profile，判断规划中的开场反应指向行动或关系本身，还是指向提问的
@@ -505,10 +503,10 @@ async def dialog_agent(
             f"for usage_mode={usage_mode}"
         )
     validate_text_surface_output(surface_output)
-    surface_input = global_state.get("text_surface_input_v2")
+    surface_input = global_state.get("text_surface_input")
     if surface_input is not None and not isinstance(surface_input, dict):
         raise StateContractError(
-            "persona state text_surface_input_v2 must be an object"
+            "persona state text_surface_input must be an object"
         )
     content_plan_entry_count = 1
     sub_agent_builder = StateGraph(DialogAgentState)
@@ -545,7 +543,7 @@ async def dialog_agent(
         "llm_trace_id": global_state.get("llm_trace_id", ""),
     }
     if isinstance(surface_input, dict):
-        subState["text_surface_input_v2"] = validate_text_surface_input(
+        subState["text_surface_input"] = validate_text_surface_input_canonical(
             surface_input
         )
     result = await sub_graph.ainvoke(subState)

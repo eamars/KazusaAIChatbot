@@ -5,31 +5,27 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal, Mapping, NotRequired, Sequence, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisodeV1,
     CognitiveEpisodeValidationError,
     DialogResponseOperation,
     GoalContinuationRefV1,
-    project_dialog_response_operation,
     validate_cognitive_episode_v1,
     validate_dialog_response_operation,
     validate_goal_continuation_ref,
-    validate_selected_response_operation,
 )
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     MAX_RESOLVER_EVIDENCE_EXCERPT_CHARS,
     MAX_RESOLVER_EVIDENCE_EXCERPTS,
     RESOLVER_EVIDENCE_STATE_VERSION,
-    CurrentTurnRelationalWillingnessV2,
     RequiredResolverEvidenceDependencyV1,
     ResolverValidationError,
-    validate_current_turn_relational_willingness,
-    validate_required_resolver_evidence_dependency,
     validate_resolver_evidence_state,
 )
 from kazusa_ai_chatbot.cognition_shared.prompt_budget import (
@@ -48,13 +44,10 @@ from kazusa_ai_chatbot.cognition_shared.prompt_budget import (
     RELATIONSHIP_AFFECT_PHASES,
     RELATIONSHIP_CAUSAL_ENTITY_KINDS,
     canonical_digest,
-    fit_character_operational_context,
-    fit_relationship_operational_context,
     serialized_character_count,
 )
 from kazusa_ai_chatbot.cognition_shared.state_models import (
     CognitionStateError,
-    RelationshipStateV2,
     validate_cognition_state,
     validate_relationship_state,
 )
@@ -106,41 +99,10 @@ class EmotionDefinition:
     causal_entity_kinds: tuple[str, ...] = ()
 
 
-MAX_BRANCH_INTENT_GUIDANCE_CHARS = 240
-
-
-@dataclass(frozen=True)
-class BranchDefinition:
-    """Describe the state conditions and dependencies for one goal branch."""
-
-    branch_id: str
-    dependencies: tuple[str, ...]
-    action_tendencies: tuple[str, ...]
-    required: bool = False
-    goal_kind: str = "goal"
-    dependency_options: tuple[tuple[str, ...], ...] = ()
-    branch_intent_guidance: str = ""
-
-    def __post_init__(self) -> None:
-        """Validate the bounded static guidance owned by this branch."""
-
-        guidance = self.branch_intent_guidance
-        if not isinstance(guidance, str):
-            raise TypeError(
-                "branch_intent_guidance must be a string"
-            )
-        if guidance and not guidance.strip():
-            raise ValueError(
-                "branch_intent_guidance must not be whitespace-only"
-            )
-        if len(guidance) > MAX_BRANCH_INTENT_GUIDANCE_CHARS:
-            raise ValueError(
-                "branch_intent_guidance exceeds the 240-character limit"
-            )
 
 
 class CognitionContractError(ValueError):
-    """Raised when a V2 public boundary is structurally invalid."""
+    """Raised when a public cognition boundary is structurally invalid."""
 
     def __init__(
         self,
@@ -159,7 +121,7 @@ class CognitionContractError(ValueError):
 
 
 class CognitionExecutionError(CognitionContractError):
-    """Raised when collapse or route execution cannot produce a valid result."""
+    """Raised when cognition execution cannot produce a valid result."""
 
     def __init__(
         self,
@@ -238,27 +200,7 @@ GOAL_RESOLUTION_VALUES = frozenset({
 PAST_DIALOG_COGNITION_CONTEXT_MAX_CHARS = 1800
 GROUP_ENGAGEMENT_GUIDELINE_MAX_CHARS = 120
 GROUP_ENGAGEMENT_CONFIDENCE_MAX_CHARS = 80
-RELATIONAL_WILLINGNESS_SCHEMA_VERSION = "relational_willingness.v2"
-RELATIONAL_APPLICABILITY_VALUES = frozenset({
-    "not_relationship_sensitive",
-    "relationship_sensitive",
-})
-RELATIONAL_STANCE_VALUES = frozenset({
-    "not_applicable",
-    "reject",
-    "deflect",
-    "negotiate",
-    "conditional_accept",
-    "accept",
-})
-RELATIONAL_CURRENT_USER_RELATIONSHIP_STATE_VALUES = frozenset({
-    "not_applicable",
-    "unestablished",
-    "developing_or_uncertain",
-    "established",
-})
-RELATIONAL_WILLINGNESS_MAX_REASON_CHARS = 300
-MAX_RELATIONAL_WILLINGNESS_EVIDENCE_HANDLES = 4
+RELATIONAL_WILLINGNESS_MAX_TEXT_CHARS = 300
 MAX_RECENT_CHARACTER_DIALOG_ROWS = 2
 MAX_RECENT_CHARACTER_DIALOG_CHARS = 600
 MAX_LEXICAL_AVOIDANCES = 8
@@ -546,36 +488,13 @@ class ScheduledAuthorityCarrierV1(TypedDict, total=False):
     delivery_tracking_id: str
 
 
-class RelationalWillingnessV2(TypedDict):
-    """Transient current-turn relational-willingness decision.
+class RelationalWillingness(TypedDict):
+    """Current-turn relational stance selected by cognition."""
 
-    The ordinary goal owner produces one exact decision per relationship-
-    sensitive turn. Deterministic stages validate, preserve, and copy the
-    decision; they never derive or rewrite the stance or relationship state
-    from prose.
-    """
-
-    schema_version: Literal["relational_willingness.v2"]
-    applicability: Literal[
-        "not_relationship_sensitive",
-        "relationship_sensitive",
-    ]
-    stance: Literal[
-        "not_applicable",
-        "reject",
-        "deflect",
-        "negotiate",
-        "conditional_accept",
-        "accept",
-    ]
-    current_user_relationship_state: Literal[
-        "not_applicable",
-        "unestablished",
-        "developing_or_uncertain",
-        "established",
-    ]
+    applicable: bool
+    stance: str
     reason: str
-    evidence_handles: list[str]
+    cause_summary: str
 
 
 def project_evidence_provenance_role(
@@ -848,78 +767,6 @@ class SemanticDeltaApplicationResultV2(TypedDict):
     rejected_delta_receipts: list[SemanticDeltaRejectionReceiptV2]
 
 
-class ActionBidV2(TypedDict):
-    """Complete branch-owned bid copied without model-authored authority.
-
-    ``confidence`` is a bounded semantic descriptor used as advisory context;
-    it is not a score and never ranks, thresholds, authorizes, or gates output.
-    """
-
-    branch_id: str
-    goal_ref: EntityRefV2
-    intention: str
-    desired_outcome: str
-    concrete_detail: str
-    reason: str
-    private_monologue: str
-    target_roles: list[RoleRefV2]
-    evidence_handles: list[str]
-    expected_consequences: list[str]
-    confidence: str
-    selected_response_operation: NotRequired[DialogResponseOperation]
-    relational_willingness: NotRequired[RelationalWillingnessV2]
-
-
-class GoalBidDraftV2(TypedDict):
-    """Model-owned branch draft before deterministic handle mapping.
-
-    ``confidence`` remains a bounded descriptor and not a quality score.
-    """
-
-    intention: str
-    desired_outcome: str
-    concrete_detail: str
-    reason: str
-    private_monologue: str
-    target_role_handles: list[str]
-    evidence_handles: list[str]
-    expected_consequences: list[str]
-    confidence: str
-    selected_response_operation: NotRequired[DialogResponseOperation]
-    relational_willingness: NotRequired[RelationalWillingnessV2]
-
-
-class SelectedIntentionV2(TypedDict):
-    """Deterministic route and intention selected from a complete bid."""
-
-    selected_branch_id: NotRequired[str]
-    route: Literal["speech", "evidence", "action", "deferral", "silence"]
-    intention: str
-    target_roles: list[RoleRefV2]
-    reason: str
-    goal_continuation_ref: GoalContinuationRefV1 | None
-    selected_response_operation: NotRequired[DialogResponseOperation]
-
-
-class CollapsedIntentionV2(TypedDict):
-    """Workspace result copied from complete internal bids."""
-
-    primary_branch_id: str
-    supporting_branch_ids: list[str]
-    suppressed_branch_ids: list[str]
-    primary_bid: ActionBidV2
-    supporting_bids: list[ActionBidV2]
-    competing_bids: list[ActionBidV2]
-
-
-class WorkspaceDecisionV2(TypedDict):
-    """Prompt-local workspace partition emitted by the collapse model."""
-
-    primary_bid_handle: str
-    supporting_bid_handles: list[str]
-    suppressed_bid_handles: list[str]
-
-
 class SemanticActionRequestV2(TypedDict):
     """Planner-selected action request; execution remains action-spec owned."""
 
@@ -1004,167 +851,6 @@ class EventComparisonResultV2(TypedDict):
     evidence_refs: list[EvidenceRefV2]
 
 
-class CognitionDiagnosticsV2(TypedDict):
-    """Protected bounded execution diagnostics."""
-
-    run_id: str
-    stage_status: dict[str, Literal["completed", "failed", "skipped"]]
-    selected_question_count: int
-    dispatched_question_count: int
-    selected_branch_count: int
-    dispatched_branch_count: int
-    completed_branch_count: int
-    failed_branch_count: int
-    overlap_ms: int
-    dependency_wait_ms: int
-    total_ms: int
-    warnings: list[str]
-
-
-class CognitionAppraisalObservationV2(TypedDict):
-    """Safe semantic result from one parallel appraisal question."""
-
-    question_kind: str
-    semantic_question: str
-    status: Literal["completed", "failed", "not_reported"]
-    explanation: NotRequired[str]
-    propositions: NotRequired[list[dict[str, str]]]
-    deltas: NotRequired[list[dict[str, int | str]]]
-    failure_code: NotRequired[str]
-
-
-class CognitionBranchObservationV2(TypedDict):
-    """Safe semantic result from one preliminary or final goal branch.
-
-    The optional ``confidence`` field is advisory descriptor context, never a
-    numeric score used for branch ranking or thresholding.
-    """
-
-    phase: Literal["preliminary", "final"]
-    branch_index: int
-    goal_kind: str
-    status: Literal["completed", "failed", "not_reported"]
-    selection: Literal["primary", "supporting", "suppressed", "unselected"]
-    intention: NotRequired[str]
-    desired_outcome: NotRequired[str]
-    concrete_detail: NotRequired[str]
-    reason: NotRequired[str]
-    private_monologue: NotRequired[str]
-    expected_consequences: NotRequired[list[str]]
-    confidence: NotRequired[str]
-    failure_code: NotRequired[str]
-
-
-class CognitionCollapseObservationV2(TypedDict):
-    """Safe branch partition produced by workspace collapse."""
-
-    primary_branch_index: int | None
-    supporting_branch_indices: list[int]
-    suppressed_branch_indices: list[int]
-    selection_reason: str
-
-
-class CognitionExecutionObservationV2(TypedDict):
-    """Bounded counts and timing for the parallel cognition execution."""
-
-    selected_question_count: int
-    dispatched_question_count: int
-    selected_branch_count: int
-    dispatched_branch_count: int
-    completed_branch_count: int
-    failed_branch_count: int
-    maximum_concurrency: int
-    overlap_ms: int
-    dependency_wait_ms: int
-    total_ms: int
-
-
-class CognitionObservabilityV2(TypedDict):
-    """Operator-safe semantic observability for one cognition run."""
-
-    execution: CognitionExecutionObservationV2
-    appraisals: list[CognitionAppraisalObservationV2]
-    branches: list[CognitionBranchObservationV2]
-    collapse: CognitionCollapseObservationV2
-    relational_willingness: NotRequired[RelationalWillingnessV2]
-
-
-class CognitionCoreInputV2(TypedDict):
-    """Public V2 cognition input contract."""
-
-    schema_version: Literal["cognition_core_input.v2"]
-    episode: CognitiveEpisodeV1
-    state_scope: Literal["user", "character"]
-    mutable_state: dict[str, Any]
-    character_constraints: CharacterConstraintSnapshotV2
-    character_identity_context: dict[str, dict[str, object]]
-    character_operational_context: NotRequired[CharacterOperationalContextV1]
-    relationship_context: NotRequired[
-        RelationshipOperationalContextV1 | RelationshipStateV2
-    ]
-    evidence: list[CognitionEvidenceV2]
-    direct_facts: list[DirectFactV2]
-    available_actions: list[ActionAffordanceV2]
-    available_resolver_capabilities: list[ResolverAffordanceV2]
-    resolver_context: str
-    runtime_capability_limits: NotRequired[list[str]]
-    resolver_goal_progress: NotRequired[dict[str, Any]]
-    required_resolver_evidence_dependency: NotRequired[
-        RequiredResolverEvidenceDependencyV1
-    ]
-    current_turn_relational_willingness: NotRequired[
-        CurrentTurnRelationalWillingnessV2
-    ]
-    resolver_cycle_index: NotRequired[int]
-    pending_resolver_resume: NotRequired[dict[str, Any]]
-    scene_context: SceneContextV2
-    private_continuity_context: str
-    past_dialog_cognition_context: NotRequired[str]
-    group_engagement_action_context: NotRequired[
-        GroupEngagementActionContextV2
-    ]
-
-
-class CognitionCoreOutputV2(TypedDict):
-    """Public V2 cognition output contract."""
-
-    schema_version: Literal["cognition_core_output.v2"]
-    intention: SelectedIntentionV2
-    goal_continuation_ref: GoalContinuationRefV1 | None
-    admitted_bid: NotRequired[ActionBidV2]
-    supporting_bids: list[ActionBidV2]
-    state_update: StateUpdateV2
-    affect_projection: list[SemanticAffectProjectionV2]
-    relationship_projection: NotRequired[SemanticRelationshipProjectionV2]
-    action_requests: list[SemanticActionRequestV2]
-    resolver_requests: list[ResolverCapabilityRequestV2]
-    goal_resolution: GoalResolutionV2
-    resolver_pending_resolution: dict[str, Any] | None
-    resolver_goal_progress: dict[str, Any] | None
-    resolver_progress: ResolverProgressV2
-    selected_bid_reason: str
-    private_monologue: str
-    expression_policy: ExpressionPolicyV2
-    diagnostics: CognitionDiagnosticsV2
-    cognition_observability: NotRequired[CognitionObservabilityV2]
-    relational_willingness: NotRequired[RelationalWillingnessV2]
-    self_cognition_response: NotRequired[SelfCognitionResponseDecisionV1]
-    self_cognition_response_contract_status: NotRequired[
-        Literal["not_required", "valid", "failed"]
-    ]
-
-
-class SurfaceBidProjectionV2(TypedDict):
-    """Bid subset allowed to the V2 text-surface planner."""
-
-    motive: str
-    intention: str
-    desired_outcome: str
-    permitted_detail: str
-    target_summaries: list[str]
-    expected_consequences: list[str]
-
-
 class SemanticActionResultV2(TypedDict):
     """Typed action result allowed into the surface planner."""
 
@@ -1212,33 +898,6 @@ class DeliveryProfileV2(TypedDict):
     punctuation: str
 
 
-class TextSurfaceInputV2(TypedDict):
-    """Public V2 text-surface input contract."""
-
-    schema_version: Literal["text_surface_input.v2"]
-    episode: CognitiveEpisodeV1
-    intention: SelectedIntentionV2
-    selected_response_operation: NotRequired[DialogResponseOperation]
-    goal_resolution: GoalResolutionV2
-    primary_bid: NotRequired[SurfaceBidProjectionV2]
-    supporting_bids: list[SurfaceBidProjectionV2]
-    expression_policy: ExpressionPolicyV2
-    semantic_affect: list[SemanticAffectProjectionV2]
-    semantic_relationship: NotRequired[SemanticRelationshipProjectionV2]
-    permitted_action_results: list[SemanticActionResultV2]
-    resolver_result: NotRequired[SurfaceResolverResultV2]
-    required_resolver_evidence_dependency: NotRequired[
-        RequiredResolverEvidenceDependencyV1
-    ]
-    runtime_capability_limits: NotRequired[list[str]]
-    interaction_style_context: str
-    character_expression_context: CharacterExpressionContextV2
-    visual_character_context: str
-    recent_character_dialog: NotRequired[list[str]]
-    relational_willingness: NotRequired[RelationalWillingnessV2]
-    addressee_plan: NotRequired[list[SurfaceAddresseePlanV1]]
-
-
 class SurfaceAddresseePlanV1(TypedDict):
     """Structured prompt-safe addressee and clause-target projection.
 
@@ -1277,7 +936,7 @@ class TextSurfaceOutputV2(TypedDict):
     selected_surface_intent: str
     permitted_action_results: list[SemanticActionResultV2]
     lexical_avoidances: NotRequired[list[str]]
-    relational_willingness: NotRequired[RelationalWillingnessV2]
+    relational_willingness: NotRequired[RelationalWillingness]
     resolver_result: NotRequired[SurfaceResolverResultV2]
     runtime_capability_limits: NotRequired[list[str]]
 
@@ -1305,217 +964,6 @@ class VisualSurfaceServicesV2:
 
     llm: LLMInvoker
     visual_config: LLMCallConfig
-
-
-def validate_cognition_core_input(
-    payload: Mapping[str, Any],
-) -> CognitionCoreInputV2:
-    """Validate the V2 public input before any model call or state mutation."""
-
-    _require_exact_keys(
-        payload,
-        {
-            "schema_version",
-            "episode",
-            "state_scope",
-            "mutable_state",
-            "character_constraints",
-            "character_identity_context",
-            "evidence",
-            "direct_facts",
-            "available_actions",
-            "available_resolver_capabilities",
-            "resolver_context",
-            "scene_context",
-            "private_continuity_context",
-        }
-        | (
-            {"character_operational_context"}
-            if "character_operational_context" in payload
-            else set()
-        )
-        | ({"relationship_context"} if "relationship_context" in payload else set())
-        | (
-            {"resolver_goal_progress"}
-            if "resolver_goal_progress" in payload
-            else set()
-        )
-        | (
-            {"required_resolver_evidence_dependency"}
-            if "required_resolver_evidence_dependency" in payload
-            else set()
-        )
-        | (
-            {"current_turn_relational_willingness"}
-            if "current_turn_relational_willingness" in payload
-            else set()
-        )
-        | ({"resolver_cycle_index"} if "resolver_cycle_index" in payload else set())
-        | (
-            {"pending_resolver_resume"}
-            if "pending_resolver_resume" in payload
-            else set()
-        )
-        | (
-            {"runtime_capability_limits"}
-            if "runtime_capability_limits" in payload
-            else set()
-        )
-        | (
-            {"past_dialog_cognition_context"}
-            if "past_dialog_cognition_context" in payload
-            else set()
-        )
-        | (
-            {"group_engagement_action_context"}
-            if "group_engagement_action_context" in payload
-            else set()
-        ),
-        "cognition core input",
-    )
-    if payload["schema_version"] != "cognition_core_input.v2":
-        raise CognitionContractError("unsupported cognition core input schema")
-    scope = payload["state_scope"]
-    if scope not in {"user", "character"}:
-        raise CognitionContractError("cognition core state scope is invalid")
-    state = payload["mutable_state"]
-    if not isinstance(state, Mapping) or state.get("state_scope") != scope:
-        raise CognitionContractError("mutable state scope does not match input")
-    _validate_persistent_state(state)
-    episode = _validate_canonical_episode(payload["episode"])
-    fitted_character_context: dict[str, Any] | None = None
-    if "character_operational_context" in payload:
-        character_context = payload["character_operational_context"]
-        if isinstance(character_context, Mapping):
-            character_fit = fit_character_operational_context(
-                character_context
-            )
-            fitted_character_context = character_fit.payload
-            _validate_character_operational_context(fitted_character_context)
-        else:
-            _validate_character_operational_context(character_context)
-    fitted_relationship_context: dict[str, Any] | None = None
-    if "relationship_context" in payload:
-        relationship_context = payload["relationship_context"]
-        if (
-            isinstance(relationship_context, Mapping)
-            and relationship_context.get("schema_version")
-            == "relationship_operational_context.v1"
-        ):
-            relationship_fit = fit_relationship_operational_context(
-                relationship_context
-            )
-            fitted_relationship_context = relationship_fit.payload
-            _validate_relationship_operational_context(
-                fitted_relationship_context
-            )
-        else:
-            fitted_relationship_context = relationship_context
-            _validate_relationship_context(
-                relationship_context,
-                scope=scope,
-                state=state,
-                episode=episode,
-            )
-    _validate_character_constraints(payload["character_constraints"])
-    _validate_character_identity_context(
-        payload["character_identity_context"]
-    )
-    _validate_evidence_rows(payload["evidence"])
-    if not isinstance(payload["direct_facts"], list):
-        raise CognitionContractError("direct_facts must be a list")
-    for row in payload["direct_facts"]:
-        _validate_direct_fact(row)
-    if not isinstance(payload["available_actions"], list):
-        raise CognitionContractError("available_actions must be a list")
-    for row in payload["available_actions"]:
-        _validate_action_affordance(row)
-    if not isinstance(payload["available_resolver_capabilities"], list):
-        raise CognitionContractError(
-            "available_resolver_capabilities must be a list"
-        )
-    for row in payload["available_resolver_capabilities"]:
-        _validate_resolver_affordance(row)
-    _require_bounded_text(
-        payload["resolver_context"],
-        "resolver context",
-        maximum=8000,
-    )
-    _validate_runtime_capability_limits(payload)
-    if "pending_resolver_resume" in payload:
-        _validate_pending_resolver_resume(payload["pending_resolver_resume"])
-    if "resolver_goal_progress" in payload:
-        _validate_resolver_goal_progress_input(
-            payload["resolver_goal_progress"]
-        )
-    if "required_resolver_evidence_dependency" in payload:
-        try:
-            validate_required_resolver_evidence_dependency(
-                payload["required_resolver_evidence_dependency"]
-            )
-        except ResolverValidationError as exc:
-            raise CognitionContractError(
-                f"required resolver evidence dependency is invalid: {exc}"
-            ) from exc
-    if "current_turn_relational_willingness" in payload:
-        try:
-            validate_current_turn_relational_willingness(
-                payload["current_turn_relational_willingness"],
-                episode_id=payload["episode"]["episode_id"],
-            )
-        except ResolverValidationError as exc:
-            raise CognitionContractError(
-                f"current-turn relational carrier is invalid: {exc}"
-            ) from exc
-    if "resolver_cycle_index" in payload:
-        cycle_index = payload["resolver_cycle_index"]
-        if (
-            not isinstance(cycle_index, int)
-            or isinstance(cycle_index, bool)
-            or cycle_index < 0
-        ):
-            raise CognitionContractError(
-                "resolver cycle index must be a non-negative integer"
-            )
-    if not isinstance(payload["scene_context"], Mapping):
-        raise CognitionContractError("scene_context must be a mapping")
-    _validate_scene_context(payload["scene_context"])
-    _require_bounded_text(
-        payload["private_continuity_context"],
-        "private continuity context",
-        maximum=1000,
-    )
-    past_dialog_context = payload.get("past_dialog_cognition_context", "")
-    _require_bounded_text(
-        past_dialog_context,
-        "past dialog cognition context",
-        maximum=PAST_DIALOG_COGNITION_CONTEXT_MAX_CHARS,
-    )
-    group_engagement_context = payload.get(
-        "group_engagement_action_context",
-        {
-            "engagement_guidelines": [],
-            "confidence": "",
-        },
-    )
-    _validate_group_engagement_action_context(group_engagement_context)
-    validated_payload = dict(payload)
-    validated_payload["past_dialog_cognition_context"] = past_dialog_context
-    validated_payload["group_engagement_action_context"] = {
-        "engagement_guidelines": list(
-            group_engagement_context["engagement_guidelines"]
-        ),
-        "confidence": group_engagement_context["confidence"],
-    }
-    if fitted_character_context is not None:
-        validated_payload["character_operational_context"] = (
-            fitted_character_context
-        )
-    if fitted_relationship_context is not None:
-        validated_payload["relationship_context"] = (
-            fitted_relationship_context
-        )
-    return validated_payload  # type: ignore[return-value]
 
 
 def is_targetless_group_self_cognition_episode(
@@ -1658,324 +1106,6 @@ def validate_self_cognition_response_decision(
             "visible self-cognition proposal requires response goal"
         )
     return dict(value)  # type: ignore[return-value]
-
-
-def validate_cognition_core_output(
-    payload: Mapping[str, Any],
-) -> CognitionCoreOutputV2:
-    """Validate the complete V2 result before persistence or downstream work."""
-
-    _require_exact_keys(
-        payload,
-        {
-            "schema_version",
-            "intention",
-            "goal_continuation_ref",
-            "supporting_bids",
-            "state_update",
-            "affect_projection",
-            "action_requests",
-            "resolver_requests",
-            "goal_resolution",
-            "resolver_pending_resolution",
-            "resolver_goal_progress",
-            "resolver_progress",
-            "selected_bid_reason",
-            "private_monologue",
-            "expression_policy",
-            "diagnostics",
-        } | ({"admitted_bid"} if "admitted_bid" in payload else set())
-        | (
-            {"relationship_projection"}
-            if "relationship_projection" in payload
-            else set()
-        )
-        | (
-            {"cognition_observability"}
-            if "cognition_observability" in payload
-            else set()
-        )
-        | (
-            {"relational_willingness"}
-            if "relational_willingness" in payload
-            else set()
-        )
-        | (
-            {"self_cognition_response"}
-            if "self_cognition_response" in payload
-            else set()
-        )
-        | (
-            {"self_cognition_response_contract_status"}
-            if "self_cognition_response_contract_status" in payload
-            else set()
-        ),
-        "cognition core output",
-    )
-    if payload["schema_version"] != "cognition_core_output.v2":
-        raise CognitionContractError("unsupported cognition core output schema")
-    if not isinstance(payload["intention"], Mapping):
-        raise CognitionContractError("output intention must be a mapping")
-    _validate_intention(payload["intention"])
-    _validate_goal_continuation_ref_field(
-        payload["goal_continuation_ref"],
-        "cognition core output.goal_continuation_ref",
-    )
-    if payload["goal_continuation_ref"] != payload["intention"][
-        "goal_continuation_ref"
-    ]:
-        raise CognitionContractError(
-            "cognition core output continuation reference conflicts with intention"
-        )
-    if not isinstance(payload["supporting_bids"], list):
-        raise CognitionContractError("supporting_bids must be a list")
-    for bid in payload["supporting_bids"]:
-        validate_action_bid(bid)
-    if "admitted_bid" in payload:
-        validate_action_bid(payload["admitted_bid"])
-    intention_operation = payload["intention"].get(
-        "selected_response_operation"
-    )
-    admitted_operation = (
-        payload["admitted_bid"].get("selected_response_operation")
-        if "admitted_bid" in payload
-        else None
-    )
-    if (intention_operation is None) != (admitted_operation is None):
-        raise CognitionContractError(
-            "selected response operation must be copied from the admitted bid"
-        )
-    if (
-        intention_operation is not None
-        and intention_operation != admitted_operation
-    ):
-        raise CognitionContractError(
-            "intention selected response operation conflicts with admitted bid"
-        )
-    if not isinstance(payload["state_update"], Mapping):
-        raise CognitionContractError("state_update must be a mapping")
-    _validate_state_update(payload["state_update"])
-    if not isinstance(payload["affect_projection"], list):
-        raise CognitionContractError("affect_projection must be a list")
-    for row in payload["affect_projection"]:
-        _validate_affect_projection(row)
-    if not isinstance(payload["action_requests"], list):
-        raise CognitionContractError("action_requests must be a list")
-    for row in payload["action_requests"]:
-        _validate_action_request(row)
-    if not isinstance(payload["resolver_requests"], list):
-        raise CognitionContractError("resolver_requests must be a list")
-    for row in payload["resolver_requests"]:
-        _validate_resolver_request(row)
-    _validate_goal_resolution(payload["goal_resolution"])
-    _validate_resolver_lifecycle_output(
-        payload["resolver_pending_resolution"],
-        payload["resolver_goal_progress"],
-    )
-    _validate_resolver_progress(payload["resolver_progress"])
-    _validate_expression_policy(payload["expression_policy"])
-    if "relationship_projection" in payload:
-        _validate_relationship_projection(payload["relationship_projection"])
-    if "cognition_observability" in payload:
-        _validate_cognition_observability(payload["cognition_observability"])
-    if "relational_willingness" in payload:
-        validate_relational_willingness(payload["relational_willingness"])
-    if "self_cognition_response_contract_status" in payload:
-        status = payload["self_cognition_response_contract_status"]
-        if status not in SELF_COGNITION_RESPONSE_CONTRACT_STATUS_VALUES:
-            raise CognitionContractError(
-                "self-cognition response contract status is invalid"
-            )
-        if status == "valid" and "self_cognition_response" not in payload:
-            raise CognitionContractError(
-                "valid self-cognition response status requires a decision"
-            )
-        if status == "failed" and "self_cognition_response" in payload:
-            raise CognitionContractError(
-                "failed self-cognition response status cannot carry a decision"
-            )
-    if "self_cognition_response" in payload:
-        validate_self_cognition_response_decision(
-            payload["self_cognition_response"],
-        )
-    _validate_relational_output_consistency(payload)
-    _validate_diagnostics(payload["diagnostics"])
-    _require_text(
-        payload["selected_bid_reason"],
-        "selected bid reason",
-        maximum=1000,
-    )
-    _require_text(payload["private_monologue"], "private monologue", maximum=1000)
-    return dict(payload)  # type: ignore[return-value]
-
-
-def validate_text_surface_input(
-    payload: Mapping[str, Any],
-) -> TextSurfaceInputV2:
-    """Validate the V2 L3 input and its no-raw-state surface boundary."""
-
-    _require_exact_keys(
-        payload,
-        {
-            "schema_version",
-            "episode",
-            "intention",
-            "goal_resolution",
-            "supporting_bids",
-            "expression_policy",
-            "semantic_affect",
-            "permitted_action_results",
-            "interaction_style_context",
-            "character_expression_context",
-            "visual_character_context",
-        }
-        | ({"primary_bid"} if "primary_bid" in payload else set())
-        | (
-            {"selected_response_operation"}
-            if "selected_response_operation" in payload
-            else set()
-        )
-        | ({"semantic_relationship"} if "semantic_relationship" in payload else set())
-        | ({"resolver_result"} if "resolver_result" in payload else set())
-        | (
-            {"required_resolver_evidence_dependency"}
-            if "required_resolver_evidence_dependency" in payload
-            else set()
-        )
-        | (
-            {"runtime_capability_limits"}
-            if "runtime_capability_limits" in payload
-            else set()
-        )
-        | (
-            {"relational_willingness"}
-            if "relational_willingness" in payload
-            else set()
-        )
-        | (
-            {"addressee_plan"}
-            if "addressee_plan" in payload
-            else set()
-        )
-        | (
-            {"recent_character_dialog"}
-            if "recent_character_dialog" in payload
-            else set()
-        ),
-        "text surface input",
-    )
-    if payload["schema_version"] != "text_surface_input.v2":
-        raise CognitionContractError("unsupported text surface input schema")
-    _validate_intention(payload["intention"])
-    _validate_goal_resolution(payload["goal_resolution"])
-    _require_text(payload["interaction_style_context"], "interaction style")
-    expression_context = payload["character_expression_context"]
-    if not isinstance(expression_context, Mapping) or set(
-        expression_context
-    ) != {
-        "tempo",
-        "linguistic_texture",
-    }:
-        raise CognitionContractError(
-            "character expression context fields are not exact"
-        )
-    _require_text(
-        expression_context["tempo"],
-        "character expression tempo",
-        maximum=180,
-    )
-    _require_text(
-        expression_context["linguistic_texture"],
-        "character linguistic texture",
-        maximum=1000,
-    )
-    _require_text(
-        payload["visual_character_context"],
-        "visual character context",
-        maximum=1500,
-    )
-    if "recent_character_dialog" in payload:
-        _validate_recent_character_dialog(payload["recent_character_dialog"])
-    _validate_canonical_episode(payload["episode"])
-    episode_operation = project_dialog_response_operation(payload["episode"])
-    intention_operation = payload["intention"].get(
-        "selected_response_operation"
-    )
-    selected_operation = payload.get("selected_response_operation")
-    if episode_operation is not None and episode_operation["selection_required"]:
-        if intention_operation is None or selected_operation is None:
-            raise CognitionContractError(
-                "required selection needs selected response operation"
-            )
-        try:
-            validated_selected_operation = validate_selected_response_operation(
-                selected_operation,
-                episode_operation,
-            )
-            validated_intention_operation = validate_selected_response_operation(
-                intention_operation,
-                episode_operation,
-            )
-        except CognitiveEpisodeValidationError as exc:
-            raise CognitionContractError(
-                f"selected response operation is invalid: {exc}"
-            ) from exc
-        if validated_selected_operation != validated_intention_operation:
-            raise CognitionContractError(
-                "surface selected response operation conflicts with intention"
-            )
-    elif intention_operation is not None or selected_operation is not None:
-        raise CognitionContractError(
-            "selected response operation requires a required selection"
-        )
-    if "primary_bid" in payload:
-        _validate_surface_bid(payload["primary_bid"])
-    if not isinstance(payload["supporting_bids"], list):
-        raise CognitionContractError("surface supporting_bids must be a list")
-    for bid in payload["supporting_bids"]:
-        _validate_surface_bid(bid)
-    _validate_expression_policy(payload["expression_policy"])
-    if not isinstance(payload["semantic_affect"], list):
-        raise CognitionContractError("surface semantic_affect must be a list")
-    for row in payload["semantic_affect"]:
-        _validate_affect_projection(row)
-    if "semantic_relationship" in payload:
-        _validate_relationship_projection(payload["semantic_relationship"])
-    if not isinstance(payload["permitted_action_results"], list):
-        raise CognitionContractError(
-            "surface permitted_action_results must be a list"
-        )
-    for row in payload["permitted_action_results"]:
-        _validate_action_result(row)
-    required_dependency = None
-    if "required_resolver_evidence_dependency" in payload:
-        try:
-            required_dependency = (
-                validate_required_resolver_evidence_dependency(
-                    payload["required_resolver_evidence_dependency"]
-                )
-            )
-        except ResolverValidationError as exc:
-            raise CognitionContractError(
-                f"surface required resolver dependency is invalid: {exc}"
-            ) from exc
-    if "resolver_result" in payload:
-        _validate_surface_resolver_result(payload["resolver_result"])
-        if required_dependency is not None:
-            _validate_surface_resolver_result_dependency(
-                payload["resolver_result"],
-                required_dependency,
-            )
-    elif required_dependency is not None:
-        raise CognitionContractError(
-            "surface required resolver dependency needs resolver result"
-        )
-    if "relational_willingness" in payload:
-        validate_relational_willingness(payload["relational_willingness"])
-    if "addressee_plan" in payload:
-        validate_surface_addressee_plan(payload["addressee_plan"])
-    _validate_runtime_capability_limits(payload)
-    return dict(payload)  # type: ignore[return-value]
 
 
 def validate_text_surface_output(
@@ -2145,15 +1275,6 @@ def _validate_runtime_capability_limits(
         )
 
 
-def validate_cognition_observability(
-    value: Mapping[str, Any],
-) -> CognitionObservabilityV2:
-    """Validate the native operator observability envelope independently."""
-
-    _validate_cognition_observability(value)
-    return dict(value)  # type: ignore[return-value]
-
-
 def validate_visual_surface_output(
     payload: Mapping[str, Any],
 ) -> VisualSurfaceOutputV2:
@@ -2175,168 +1296,30 @@ def validate_visual_surface_output(
     return dict(payload)  # type: ignore[return-value]
 
 
-def _validate_relational_output_consistency(
-    payload: Mapping[str, Any],
-) -> None:
-    """Require the top-level decision to copy every admitted ordinary bid."""
-
-    ordinary_decisions: list[RelationalWillingnessV2] = []
-    admitted_bid = payload.get("admitted_bid")
-    if (
-        isinstance(admitted_bid, Mapping)
-        and admitted_bid.get("branch_id") == "ordinary_response"
-    ):
-        ordinary_decisions.append(admitted_bid["relational_willingness"])
-    supporting_bids = payload.get("supporting_bids")
-    if isinstance(supporting_bids, list):
-        for bid in supporting_bids:
-            if (
-                isinstance(bid, Mapping)
-                and bid.get("branch_id") == "ordinary_response"
-            ):
-                ordinary_decisions.append(bid["relational_willingness"])
-    if ordinary_decisions:
-        if "relational_willingness" not in payload:
-            raise CognitionContractError(
-                "cognition output is missing the ordinary relational decision"
-            )
-        for decision in ordinary_decisions:
-            if decision != payload["relational_willingness"]:
-                raise CognitionContractError(
-                    "cognition output relational decision is not exact"
-                )
-    elif "relational_willingness" in payload:
-        raise CognitionContractError(
-            "cognition output relational decision has no ordinary owner"
-        )
-
-
 def validate_relational_willingness(
     value: object,
-    *,
-    evidence_handles: set[str] | None = None,
-    episode_handles: set[str] | None = None,
-) -> RelationalWillingnessV2:
-    """Validate one exact transient relational-willingness decision.
-
-    Args:
-        value: Candidate decision produced by the ordinary goal owner.
-        evidence_handles: Optional complete set of prompt-safe evidence handles
-            available to the producing call. Unknown handles are a structural
-            contract error when supplied.
-        episode_handles: Optional subset of evidence handles classified as
-            current-episode evidence, sourced from ``episode`` and
-            ``tool_result`` rows. When supplied, at least one cited handle
-            must come from the current episode.
-
-    Returns:
-        A shallow validated copy of the decision.
-
-    Raises:
-        CognitionContractError: When any exact field, enum, bound, handle, or
-            coverage rule is violated.
-    """
+) -> RelationalWillingness:
+    """Validate the current four-field relational-willingness record."""
 
     if not isinstance(value, Mapping):
         raise CognitionContractError(
             "relational willingness must be an object"
         )
-    required = {
-        "schema_version",
-        "applicability",
-        "stance",
-        "current_user_relationship_state",
-        "reason",
-        "evidence_handles",
-    }
-    _require_exact_keys(value, required, "relational willingness")
-    if value["schema_version"] != RELATIONAL_WILLINGNESS_SCHEMA_VERSION:
-        raise CognitionContractError(
-            "relational willingness schema is invalid"
-        )
-    applicability = value["applicability"]
-    if (
-        not isinstance(applicability, str)
-        or applicability not in RELATIONAL_APPLICABILITY_VALUES
-    ):
-        raise CognitionContractError(
-            "relational willingness applicability is invalid"
-        )
-    stance = value["stance"]
-    if not isinstance(stance, str) or stance not in RELATIONAL_STANCE_VALUES:
-        raise CognitionContractError(
-            "relational willingness stance is invalid"
-        )
-    relationship_state = value["current_user_relationship_state"]
-    if (
-        not isinstance(relationship_state, str)
-        or relationship_state
-        not in RELATIONAL_CURRENT_USER_RELATIONSHIP_STATE_VALUES
-    ):
-        raise CognitionContractError(
-            "relational willingness relationship state is invalid"
-        )
-    if applicability == "not_relationship_sensitive":
-        if (
-            stance != "not_applicable"
-            or relationship_state != "not_applicable"
-        ):
-            raise CognitionContractError(
-                "non-sensitive relational willingness must be "
-                "not_applicable with not_applicable relationship state"
-            )
-    elif (
-        stance == "not_applicable"
-        or relationship_state == "not_applicable"
-    ):
-        raise CognitionContractError(
-            "sensitive relational willingness requires an ordered stance "
-            "and a real relationship state"
-        )
-    _require_simplified_chinese_reason(
-        value["reason"],
-        "relational willingness.reason",
-        maximum=RELATIONAL_WILLINGNESS_MAX_REASON_CHARS,
-        field_path="relational_willingness.reason",
+    _require_exact_keys(
+        value,
+        {"applicable", "stance", "reason", "cause_summary"},
+        "relational willingness",
     )
-    handles = value["evidence_handles"]
-    if (
-        not isinstance(handles, list)
-        or not 1 <= len(handles)
-        <= MAX_RELATIONAL_WILLINGNESS_EVIDENCE_HANDLES
-    ):
+    if not isinstance(value["applicable"], bool):
         raise CognitionContractError(
-            "relational willingness evidence handles must contain 1-4 items",
-            field_path="relational_willingness.evidence_handles",
+            "relational willingness applicable must be a boolean",
+            field_path="relational_willingness.applicable",
         )
-    if any(
-        not isinstance(handle, str) or not handle.strip()
-        for handle in handles
-    ):
-        raise CognitionContractError(
-            "relational willingness evidence handles must be text",
-            field_path="relational_willingness.evidence_handles",
-        )
-    if len(handles) != len(set(handles)):
-        raise CognitionContractError(
-            "relational willingness evidence handles are duplicated",
-            field_path="relational_willingness.evidence_handles",
-        )
-    if evidence_handles is not None:
-        unknown_handles = [
-            handle for handle in handles if handle not in evidence_handles
-        ]
-        if unknown_handles:
-            raise CognitionContractError(
-                "relational willingness cites an unavailable evidence handle",
-                field_path="relational_willingness.evidence_handles",
-            )
-    if episode_handles is not None and not set(handles).intersection(
-        episode_handles
-    ):
-        raise CognitionContractError(
-            "relational willingness must cite current episode evidence",
-            field_path="relational_willingness.evidence_handles",
+    for field_name in ("stance", "reason", "cause_summary"):
+        _require_text(
+            value[field_name],
+            f"relational willingness.{field_name}",
+            maximum=RELATIONAL_WILLINGNESS_MAX_TEXT_CHARS,
         )
     return dict(value)  # type: ignore[return-value]
 
@@ -2674,11 +1657,13 @@ def validate_scheduled_authority_carrier(
         raise CognitionContractError(
             "scheduled authority carrier must be an object"
         )
-    if "schema_version" in value:
-        if value["schema_version"] != SCHEDULED_AUTHORITY_CARRIER_SCHEMA_VERSION:
-            raise CognitionContractError(
-                "scheduled authority carrier schema is invalid"
-            )
+    if (
+        "schema_version" in value
+        and value["schema_version"] != SCHEDULED_AUTHORITY_CARRIER_SCHEMA_VERSION
+    ):
+        raise CognitionContractError(
+            "scheduled authority carrier schema is invalid"
+        )
     if "authority" not in value:
         raise CognitionContractError(
             "scheduled authority carrier requires the authority"
@@ -3212,61 +2197,6 @@ def _validate_intention(value: Any) -> None:
         )
 
 
-def validate_action_bid(value: Any) -> None:
-    """Validate one complete bid and keep confidence descriptor-only."""
-
-    if not isinstance(value, Mapping):
-        raise CognitionContractError("action bid must be a mapping")
-    required = {
-        "branch_id",
-        "goal_ref",
-        "intention",
-        "desired_outcome",
-        "concrete_detail",
-        "reason",
-        "private_monologue",
-        "target_roles",
-        "evidence_handles",
-        "expected_consequences",
-        "confidence",
-    }
-    if value.get("branch_id") == "ordinary_response":
-        required.add("relational_willingness")
-    if "selected_response_operation" in value:
-        required.add("selected_response_operation")
-    if set(value) != required:
-        raise CognitionContractError("action bid fields are not exact")
-    for field_name in (
-        "branch_id",
-        "intention",
-        "desired_outcome",
-        "concrete_detail",
-        "reason",
-        "private_monologue",
-        "confidence",
-    ):
-        field_label = (
-            "action bid.confidence descriptor"
-            if field_name == "confidence"
-            else f"action bid.{field_name}"
-        )
-        _require_text(value[field_name], field_label)
-    _validate_entity_ref(value["goal_ref"], "action bid.goal_ref")
-    _validate_roles(value["target_roles"], "action bid.target_roles")
-    _validate_text_list(value["evidence_handles"], "action bid.evidence_handles")
-    _validate_text_list(
-        value["expected_consequences"],
-        "action bid.expected_consequences",
-    )
-    if "selected_response_operation" in value:
-        _validate_response_operation(
-            value["selected_response_operation"],
-            "action bid.selected_response_operation",
-        )
-    if "relational_willingness" in value:
-        validate_relational_willingness(value["relational_willingness"])
-
-
 def _validate_action_request(value: Any) -> None:
     """Validate one route-approved semantic action request."""
 
@@ -3431,399 +2361,6 @@ def _validate_diagnostics(value: Any) -> None:
         ):
             raise CognitionContractError(f"diagnostics {field_name} is invalid")
     _validate_text_list(value["warnings"], "diagnostics.warnings", allow_empty=True)
-
-
-def _validate_cognition_observability(value: Any) -> None:
-    """Validate the operator-safe semantic execution projection."""
-
-    required = {"execution", "appraisals", "branches", "collapse"}
-    if isinstance(value, Mapping) and "relational_willingness" in value:
-        required.add("relational_willingness")
-    if not isinstance(value, Mapping) or set(value) != required:
-        raise CognitionContractError(
-            "cognition observability fields are not exact"
-        )
-    _validate_cognition_execution_observation(value["execution"])
-    execution = value["execution"]
-    appraisals = value["appraisals"]
-    if not isinstance(appraisals, list):
-        raise CognitionContractError("cognition observability appraisals invalid")
-    for row in appraisals:
-        _validate_cognition_appraisal_observation(row)
-    branches = value["branches"]
-    if not isinstance(branches, list):
-        raise CognitionContractError("cognition observability branches invalid")
-    branch_indices: list[int] = []
-    for row in branches:
-        _validate_cognition_branch_observation(row)
-        branch_indices.append(row["branch_index"])
-    if len(branch_indices) != len(set(branch_indices)):
-        raise CognitionContractError(
-            "cognition observability branch indices are duplicated"
-        )
-    if len(appraisals) != execution["selected_question_count"]:
-        raise CognitionContractError(
-            "cognition observability appraisal count is inconsistent"
-        )
-    if len(branches) != execution["selected_branch_count"]:
-        raise CognitionContractError(
-            "cognition observability branch count is inconsistent"
-        )
-    if (
-        execution["selected_question_count"]
-        != execution["dispatched_question_count"]
-    ):
-        raise CognitionContractError(
-            "cognition observability question counts are inconsistent"
-        )
-    if execution["dispatched_branch_count"] > execution["selected_branch_count"]:
-        raise CognitionContractError(
-            "cognition observability dispatched branch count is inconsistent"
-        )
-    if execution["completed_branch_count"] > execution["dispatched_branch_count"]:
-        raise CognitionContractError(
-            "cognition observability completed branch count is inconsistent"
-        )
-    if (
-        execution["completed_branch_count"]
-        + execution["failed_branch_count"]
-        > execution["selected_branch_count"]
-    ):
-        raise CognitionContractError(
-            "cognition observability terminal branch counts are inconsistent"
-        )
-    if execution["maximum_concurrency"] > execution["dispatched_branch_count"]:
-        raise CognitionContractError(
-            "cognition observability concurrency is inconsistent"
-        )
-    for field_name in ("overlap_ms", "dependency_wait_ms"):
-        if execution[field_name] > execution["total_ms"]:
-            raise CognitionContractError(
-                f"cognition observability {field_name} is inconsistent"
-            )
-    _validate_cognition_collapse_observation(
-        value["collapse"],
-        branch_indices=set(branch_indices),
-        branches=branches,
-    )
-    if "relational_willingness" in value:
-        validate_relational_willingness(value["relational_willingness"])
-
-
-def _validate_cognition_execution_observation(value: Any) -> None:
-    """Validate bounded counts and timing for one cognition run."""
-
-    required = {
-        "selected_question_count",
-        "dispatched_question_count",
-        "selected_branch_count",
-        "dispatched_branch_count",
-        "completed_branch_count",
-        "failed_branch_count",
-        "maximum_concurrency",
-        "overlap_ms",
-        "dependency_wait_ms",
-        "total_ms",
-    }
-    if not isinstance(value, Mapping) or set(value) != required:
-        raise CognitionContractError(
-            "cognition execution observation fields are not exact"
-        )
-    for field_name in required:
-        field_value = value[field_name]
-        if (
-            isinstance(field_value, bool)
-            or not isinstance(field_value, int)
-            or field_value < 0
-        ):
-            raise CognitionContractError(
-                f"cognition execution observation {field_name} is invalid"
-            )
-
-
-def _validate_cognition_appraisal_observation(value: Any) -> None:
-    """Validate one question's semantic result without local handles."""
-
-    required = {"question_kind", "semantic_question", "status"}
-    optional = {"explanation", "propositions", "deltas", "failure_code"}
-    if not isinstance(value, Mapping) or not required.issubset(value):
-        raise CognitionContractError(
-            "cognition appraisal observation fields are invalid"
-        )
-    if set(value).difference(required | optional):
-        raise CognitionContractError(
-            "cognition appraisal observation has unknown fields"
-        )
-    _require_text(value["question_kind"], "cognition appraisal question kind")
-    _require_text(
-        value["semantic_question"],
-        "cognition appraisal semantic question",
-        maximum=2000,
-    )
-    if value["status"] not in {"completed", "failed", "not_reported"}:
-        raise CognitionContractError("cognition appraisal observation status invalid")
-    if value["status"] == "failed" and "failure_code" not in value:
-        raise CognitionContractError(
-            "failed cognition appraisal requires a failure code"
-        )
-    if value["status"] != "failed" and "failure_code" in value:
-        raise CognitionContractError(
-            "non-failed cognition appraisal cannot carry a failure code"
-        )
-    if value["status"] == "completed" and "explanation" not in value:
-        raise CognitionContractError(
-            "completed cognition appraisal requires an explanation"
-        )
-    if "explanation" in value:
-        _require_text(
-            value["explanation"],
-            "cognition appraisal explanation",
-            maximum=2000,
-        )
-    if "propositions" in value:
-        propositions = value["propositions"]
-        if not isinstance(propositions, list):
-            raise CognitionContractError(
-                "cognition appraisal propositions must be a list"
-            )
-        for proposition in propositions:
-            if not isinstance(proposition, Mapping) or set(proposition) != {
-                "proposition_kind",
-                "semantic_value",
-            }:
-                raise CognitionContractError(
-                    "cognition appraisal proposition fields are invalid"
-                )
-            _require_text(
-                proposition["proposition_kind"],
-                "cognition appraisal proposition kind",
-            )
-            _require_text(
-                proposition["semantic_value"],
-                "cognition appraisal proposition value",
-                maximum=1500,
-            )
-    if "deltas" in value:
-        deltas = value["deltas"]
-        if not isinstance(deltas, list):
-            raise CognitionContractError("cognition appraisal deltas must be a list")
-        for delta in deltas:
-            if not isinstance(delta, Mapping) or set(delta) != {
-                "delta",
-                "reason",
-            }:
-                raise CognitionContractError(
-                    "cognition appraisal delta fields are invalid"
-                )
-            if isinstance(delta["delta"], bool) or not isinstance(
-                delta["delta"],
-                int,
-            ):
-                raise CognitionContractError("cognition appraisal delta is invalid")
-            _require_text(delta["reason"], "cognition appraisal delta reason")
-    if "failure_code" in value:
-        _require_text(
-            value["failure_code"],
-            "cognition appraisal failure code",
-            maximum=200,
-        )
-
-
-def _validate_cognition_branch_observation(value: Any) -> None:
-    """Validate one branch result while excluding persistent handles.
-
-    Confidence remains bounded text advisory context rather than a score.
-    """
-
-    required = {
-        "phase",
-        "branch_index",
-        "goal_kind",
-        "status",
-        "selection",
-    }
-    optional = {
-        "intention",
-        "desired_outcome",
-        "concrete_detail",
-        "reason",
-        "private_monologue",
-        "expected_consequences",
-        "confidence",
-        "failure_code",
-    }
-    if not isinstance(value, Mapping) or not required.issubset(value):
-        raise CognitionContractError(
-            "cognition branch observation fields are invalid"
-        )
-    if set(value).difference(required | optional):
-        raise CognitionContractError(
-            "cognition branch observation has unknown fields"
-        )
-    if value["phase"] not in {"preliminary", "final"}:
-        raise CognitionContractError("cognition branch observation phase invalid")
-    branch_index = value["branch_index"]
-    if isinstance(branch_index, bool) or not isinstance(branch_index, int):
-        raise CognitionContractError("cognition branch observation index invalid")
-    if branch_index < 1:
-        raise CognitionContractError("cognition branch observation index is invalid")
-    _require_text(value["goal_kind"], "cognition branch observation goal kind")
-    if value["status"] not in {"completed", "failed", "not_reported"}:
-        raise CognitionContractError("cognition branch observation status invalid")
-    if value["selection"] not in {
-        "primary",
-        "supporting",
-        "suppressed",
-        "unselected",
-    }:
-        raise CognitionContractError("cognition branch observation selection invalid")
-    semantic_fields = (
-        "intention",
-        "desired_outcome",
-        "concrete_detail",
-        "reason",
-        "private_monologue",
-        "confidence",
-    )
-    if value["status"] == "completed" and any(
-        field_name not in value for field_name in semantic_fields
-    ):
-        raise CognitionContractError(
-            "completed cognition branch requires complete semantic fields"
-        )
-    for field_name in semantic_fields:
-        if field_name in value:
-            _require_text(
-                value[field_name],
-                (
-                    "cognition branch observation.confidence descriptor"
-                    if field_name == "confidence"
-                    else f"cognition branch observation.{field_name}"
-                ),
-                maximum=1500,
-            )
-    if "expected_consequences" in value:
-        _validate_text_list(
-            value["expected_consequences"],
-            "cognition branch observation.expected_consequences",
-        )
-    if "failure_code" in value:
-        if value["status"] != "failed":
-            raise CognitionContractError(
-                "non-failed cognition branch cannot carry a failure code"
-            )
-        _require_text(
-            value["failure_code"],
-            "cognition branch observation.failure_code",
-            maximum=200,
-        )
-
-
-def _validate_cognition_collapse_observation(
-    value: Any,
-    *,
-    branch_indices: set[int],
-    branches: Sequence[Mapping[str, Any]],
-) -> None:
-    """Validate the deterministic branch partition shown to operators."""
-
-    required = {
-        "primary_branch_index",
-        "supporting_branch_indices",
-        "suppressed_branch_indices",
-        "selection_reason",
-    }
-    if not isinstance(value, Mapping) or set(value) != required:
-        raise CognitionContractError(
-            "cognition collapse observation fields are not exact"
-        )
-    primary_index = value["primary_branch_index"]
-    if primary_index is not None:
-        if (
-            isinstance(primary_index, bool)
-            or not isinstance(primary_index, int)
-            or primary_index not in branch_indices
-        ):
-            raise CognitionContractError(
-                "cognition collapse primary branch index is invalid"
-            )
-    for field_name in ("supporting_branch_indices", "suppressed_branch_indices"):
-        indices = value[field_name]
-        if not isinstance(indices, list):
-            raise CognitionContractError(
-                f"cognition collapse {field_name} must be a list"
-            )
-        if any(
-            isinstance(index, bool)
-            or not isinstance(index, int)
-            or index not in branch_indices
-            for index in indices
-        ):
-            raise CognitionContractError(
-                f"cognition collapse {field_name} contain an invalid index"
-            )
-        if len(indices) != len(set(indices)):
-            raise CognitionContractError(
-                f"cognition collapse {field_name} are duplicated"
-            )
-    partitions = [
-        primary_index,
-        *value["supporting_branch_indices"],
-        *value["suppressed_branch_indices"],
-    ]
-    partitioned = [index for index in partitions if index is not None]
-    if len(partitioned) != len(set(partitioned)):
-        raise CognitionContractError(
-            "cognition collapse partitions overlap"
-        )
-    selection_by_index = {
-        branch["branch_index"]: branch["selection"]
-        for branch in branches
-    }
-    if primary_index is None:
-        if any(
-            selection == "primary"
-            for selection in selection_by_index.values()
-        ):
-            raise CognitionContractError(
-                "cognition collapse is missing its primary selection"
-            )
-    elif selection_by_index[primary_index] != "primary":
-        raise CognitionContractError(
-            "cognition collapse primary selection does not match branches"
-        )
-    for index in value["supporting_branch_indices"]:
-        if selection_by_index[index] != "supporting":
-            raise CognitionContractError(
-                "cognition collapse supporting selection does not match branches"
-            )
-    for index in value["suppressed_branch_indices"]:
-        if selection_by_index[index] != "suppressed":
-            raise CognitionContractError(
-                "cognition collapse suppressed selection does not match branches"
-            )
-    for index, selection in selection_by_index.items():
-        if selection == "primary" and index != primary_index:
-            raise CognitionContractError(
-                "cognition branch primary selection is not collapsed"
-            )
-        if selection == "supporting" and index not in value[
-            "supporting_branch_indices"
-        ]:
-            raise CognitionContractError(
-                "cognition branch supporting selection is not collapsed"
-            )
-        if selection == "suppressed" and index not in value[
-            "suppressed_branch_indices"
-        ]:
-            raise CognitionContractError(
-                "cognition branch suppressed selection is not collapsed"
-            )
-    _require_text(
-        value["selection_reason"],
-        "cognition collapse selection reason",
-        maximum=1500,
-    )
 
 
 def _validate_action_affordance(value: Any) -> None:
@@ -4718,38 +3255,6 @@ def _validate_relationship_operational_context(value: Mapping[str, Any]) -> None
         )
 
 
-def _validate_surface_bid(value: Any) -> None:
-    """Validate the exact public bid projection allowed into L3."""
-
-    required = {
-        "motive",
-        "intention",
-        "desired_outcome",
-        "permitted_detail",
-        "target_summaries",
-        "expected_consequences",
-    }
-    if not isinstance(value, Mapping) or set(value) != required:
-        raise CognitionContractError("surface bid fields are not exact")
-    for field_name in (
-        "motive",
-        "intention",
-        "desired_outcome",
-        "permitted_detail",
-    ):
-        _require_text(value[field_name], f"surface bid.{field_name}", maximum=1000)
-    _validate_text_list(
-        value["target_summaries"],
-        "surface bid.target_summaries",
-        allow_empty=True,
-    )
-    _validate_text_list(
-        value["expected_consequences"],
-        "surface bid.expected_consequences",
-        allow_empty=True,
-    )
-
-
 def _validate_action_result(value: Any) -> None:
     """Validate one permitted semantic action result for L3."""
 
@@ -5131,3 +3636,65 @@ def _require_bounded_text(value: Any, label: str, maximum: int) -> None:
 
     if not isinstance(value, str) or len(value) > maximum:
         raise CognitionContractError(f"{label} is invalid")
+
+
+class TextSurfaceInput(TypedDict, total=False):
+    """Canonical semantic input passed from cognition to surface planning."""
+
+    schema_version: Literal["text_surface_input.v3"]
+    episode: CognitiveEpisodeV1
+    active_character_goal: dict[str, Any]
+    response_plan: dict[str, Any]
+    expression_policy: ExpressionPolicyV2
+    semantic_affect: list[SemanticAffectProjectionV2]
+    permitted_action_results: list[SemanticActionResultV2]
+    interaction_style_context: str
+    character_expression_context: CharacterExpressionContextV2
+    visual_character_context: str
+    recent_character_dialog: NotRequired[list[str]]
+    relational_willingness: NotRequired[RelationalWillingness]
+
+
+def validate_text_surface_input_canonical(
+    payload: Mapping[str, Any],
+) -> TextSurfaceInput:
+    """Validate the one canonical semantic surface input envelope."""
+
+    required = {
+        "schema_version",
+        "episode",
+        "active_character_goal",
+        "response_plan",
+        "expression_policy",
+        "semantic_affect",
+        "permitted_action_results",
+        "interaction_style_context",
+        "character_expression_context",
+        "visual_character_context",
+    }
+    optional = {"recent_character_dialog", "relational_willingness"}
+    _require_exact_keys(payload, required | (set(payload) & optional), "text surface input")
+    if payload["schema_version"] != "text_surface_input.v3":
+        raise CognitionContractError("unsupported canonical text surface input schema")
+    if not isinstance(payload["episode"], Mapping):
+        raise CognitionContractError("text surface episode is invalid")
+    if not isinstance(payload["active_character_goal"], Mapping):
+        raise CognitionContractError("text surface active goal is invalid")
+    if not isinstance(payload["response_plan"], Mapping):
+        raise CognitionContractError("text surface response plan is invalid")
+    _validate_expression_policy(payload["expression_policy"])
+    if not isinstance(payload["semantic_affect"], list):
+        raise CognitionContractError("text surface affect is invalid")
+    if not isinstance(payload["permitted_action_results"], list):
+        raise CognitionContractError("text surface action results are invalid")
+    for row in payload["permitted_action_results"]:
+        _validate_action_result(row)
+    _require_text(payload["interaction_style_context"], "text surface interaction style")
+    if not isinstance(payload["character_expression_context"], Mapping):
+        raise CognitionContractError("text surface character expression context is invalid")
+    _require_text(payload["visual_character_context"], "text surface visual context")
+    if "recent_character_dialog" in payload:
+        _validate_recent_character_dialog(payload["recent_character_dialog"])
+    if "relational_willingness" in payload:
+        validate_relational_willingness(payload["relational_willingness"])
+    return dict(payload)  # type: ignore[return-value]

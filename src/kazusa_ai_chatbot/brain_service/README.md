@@ -289,9 +289,6 @@ Purpose:
   debug chat in `cognition_graph`.
 - Return the latest bounded self-cognition graph separately in
   `self_cognition_graph`.
-- Return optional `cognition_chain_run` and
-  `self_cognition_chain_run` rows only when each row matches its owning graph's
-  exact `run_id` and `llm_trace_id`.
 - Support the local control-console Overview graph without running cognition.
 - Return either graph field as `null` when that run type has not published
   telemetry since service startup.
@@ -300,12 +297,10 @@ The endpoint is process-local and read-only. It must not expose prompts,
 embeddings, raw messages, message envelopes, raw source packets, secrets, or
 unbounded memory content.
 
-The chain-run fields are sanitized observability projections. Each graph is
-resolved independently through the exact two-key DB lookup; a missing key,
-cross-run or cross-trace mismatch, read failure, or absent row returns `null`
-for that paired field. The service never substitutes another graph's row or a
-process-global/stale latest row, and a diagnostic write/read failure never
-changes cognition-facing completion.
+The graph is a process-local semantic projection. It excludes prompts, raw
+messages, provider configuration, persistence references, and implementation
+topology. Missing graph telemetry is reported as `null` and never changes
+cognition-facing completion.
 
 ### `GET /ops/runtime-status`
 
@@ -457,20 +452,10 @@ Brain service responsibilities:
   has necessarily completed.
 - The brain service generates a non-empty `delivery_tracking_id` only when it
   returns user-visible messages and will persist an assistant conversation row.
-- A typed cognition failure marked retryable at `pre_state_commit` receives at
-  most one clean graph retry from the original prepared turn state. Exhaustion
-  returns a structured operational response with an empty delivery identifier.
-  Goal-cognition calls retain one invocation-wide per-branch ledger across
-  both graph attempts; goal exhaustion is non-retryable after cumulative call
-  three, while a later-stage failure may reuse only the goal budget left.
-- The live persona graph binds one context-local replay coordinator across the
-  whole queued invocation. The first owner to claim its token is either the
-  existing service graph retry or the persona connector's parent-checkpoint
-  guardrail; the other owner cannot stack another retry. Parent recovery is
-  limited to escaped pre-commit `goal_bid_structure_exhausted` and
-  `goal_bid_provider_exhausted` errors and replays only the non-committing
-  cognition child. Preparation, capabilities, actions, surfaces, delivery,
-  and the final commit remain one-shot.
+- A typed cognition/provider failure is reported before state commit and does
+  not execute unapproved actions or delivery. Generic service admission and
+  transport retry policy remains owned by its respective non-cognition
+  boundary.
 - Operational response text is a system notice. It creates no assistant
   conversation row, progress record, consolidation input, or delivery receipt.
 - The brain service may run post-turn consolidation for selected surface

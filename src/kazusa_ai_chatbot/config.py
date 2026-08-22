@@ -6,14 +6,11 @@ import json
 import math
 import os
 from dataclasses import dataclass, field
-from typing import Literal
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
-from kazusa_ai_chatbot.time_boundary import CHARACTER_TIME_ZONE
-
-COGNITION_V3_APPRAISAL_STAGE_LAYOUT: Literal["fixed_a1_a2"] = "fixed_a1_a2"
+from kazusa_ai_chatbot.time_boundary import CHARACTER_TIME_ZONE  # noqa: F401
 
 
 def _positive_int_from_env(name: str, default: str) -> int:
@@ -244,15 +241,10 @@ class CognitionRouteSettingV1:
 
 @dataclass(frozen=True)
 class CognitionV3RouteSettingsV1:
-    """Closed selected-engine settings for the V3 chain and sidecar."""
+    """Closed settings for the single V3 cognition chain route."""
 
     chain: CognitionRouteSettingV1
-    sidecar: CognitionRouteSettingV1 | None
-    subconscious_enabled: bool
     turn_deadline_seconds: int
-    appraisal_stage_layout: Literal["fixed_a1_a2"] = (
-        COGNITION_V3_APPRAISAL_STAGE_LAYOUT
-    )
 
 
 def _load_cognition_v3_route_setting(
@@ -294,7 +286,7 @@ def _load_cognition_v3_route_setting(
 
 
 def load_cognition_v3_route_settings() -> CognitionV3RouteSettingsV1:
-    """Load and validate the selected V3 chain and optional sidecar bundle."""
+    """Load and validate the single V3 chain route."""
 
     context_window_name = "COGNITION_V3_CHAIN_LLM_CONTEXT_WINDOW_TOKENS"
     raw_context_window = os.getenv(context_window_name)
@@ -311,37 +303,6 @@ def load_cognition_v3_route_settings() -> CognitionV3RouteSettingsV1:
         "COGNITION_V3_CHAIN_LLM",
         context_window_tokens=context_window_tokens,
     )
-    sidecar_required_names = (
-        "COGNITION_V3_SIDECAR_LLM_BASE_URL",
-        "COGNITION_V3_SIDECAR_LLM_API_KEY",
-        "COGNITION_V3_SIDECAR_LLM_MODEL",
-    )
-    sidecar_raw_values = {
-        name: os.getenv(name)
-        for name in sidecar_required_names
-    }
-    if any(value is not None for value in sidecar_raw_values.values()):
-        for name, value in sidecar_raw_values.items():
-            if value is None or not value.strip():
-                raise ValueError(
-                    f"{name} must be non-empty when the V3 sidecar is configured"
-                )
-        sidecar = _load_cognition_v3_route_setting(
-            "COGNITION_V3_SIDECAR_LLM",
-            context_window_tokens=None,
-        )
-    else:
-        sidecar = None
-
-    subconscious_enabled = _bool_from_env(
-        "COGNITION_V3_SUBCONSCIOUS_ENABLED",
-        "false",
-    )
-    if subconscious_enabled and sidecar is None:
-        raise ValueError(
-            "COGNITION_V3_SUBCONSCIOUS_ENABLED requires a V3 sidecar route"
-        )
-
     turn_deadline_seconds = _bounded_int_from_env(
         "COGNITION_V3_TURN_DEADLINE_SECONDS",
         "240",
@@ -350,10 +311,7 @@ def load_cognition_v3_route_settings() -> CognitionV3RouteSettingsV1:
     )
     settings = CognitionV3RouteSettingsV1(
         chain=chain,
-        sidecar=sidecar,
-        subconscious_enabled=subconscious_enabled,
         turn_deadline_seconds=turn_deadline_seconds,
-        appraisal_stage_layout=COGNITION_V3_APPRAISAL_STAGE_LAYOUT,
     )
     return settings
 

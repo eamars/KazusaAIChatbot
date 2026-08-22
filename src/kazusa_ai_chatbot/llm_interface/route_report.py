@@ -30,10 +30,7 @@ _ROUTES_AFTER_COGNITION_CORE = (
     "CODING_AGENT_PROGRAMMER_LLM",
     "CODING_AGENT_ACTION_LOOP_LLM",
 )
-_V3_COGNITION_ROUTE_NAMES = frozenset({
-    "COGNITION_V3_CHAIN_LLM",
-    "COGNITION_V3_SIDECAR_LLM",
-})
+_V3_COGNITION_ROUTE_NAMES = frozenset({"COGNITION_V3_CHAIN_LLM"})
 _SHARED_REQUIRED_ROUTES = frozenset({
     *_ROUTES_BEFORE_COGNITION_CORE,
     *_ROUTES_AFTER_COGNITION_CORE[:-1],
@@ -89,23 +86,15 @@ def _setting_route_config(
 
 
 def _selected_cognition_routes() -> tuple[LLMCallConfig, ...]:
-    """Return the configured V3 chain and optional sidecar bindings."""
+    """Return the configured V3 chain binding."""
 
     settings_v3 = cfg.get_cognition_v3_route_settings()
-    route_list = [
+    routes = (
         _setting_route_config(
             "COGNITION_V3_CHAIN_LLM",
             settings_v3.chain,
         ),
-    ]
-    if settings_v3.sidecar is not None:
-        route_list.append(
-            _setting_route_config(
-                "COGNITION_V3_SIDECAR_LLM",
-                settings_v3.sidecar,
-            )
-        )
-    routes = tuple(route_list)
+    )
     return routes
 
 
@@ -176,7 +165,7 @@ def _route_group(route_name: str) -> str:
     """Classify one route for selected-family operator diagnostics."""
 
     if route_name in _V3_COGNITION_ROUTE_NAMES:
-        return_value = "v3_cognition"
+        return_value = "reasoning"
         return return_value
 
     return_value = "shared_non_core"

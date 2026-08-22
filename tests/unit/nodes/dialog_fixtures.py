@@ -12,17 +12,20 @@ def build_dialog_state() -> dict[str, object]:
         content="Infer which option fits my stated preference.",
     )
     surface_input = {
-        "schema_version": "text_surface_input.v2",
+        "schema_version": "text_surface_input.v3",
         "episode": episode,
-        "intention": {
-            "route": "speech",
-            "intention": "answer by inference",
-            "target_roles": [],
+        "active_character_goal": {
+            "goal_kind": "ordinary_response",
+            "intent": "answer by inference",
             "reason": "the current request asks for an inference",
-            "goal_continuation_ref": None,
+            "cause_summary": "current request",
         },
-        "goal_resolution": "answerable_now",
-        "supporting_bids": [],
+        "response_plan": {
+            "response_goal": "answer by inference",
+            "goal_resolution": "answerable_now",
+            "action_requests": [],
+            "resolver_requests": [],
+        },
         "expression_policy": {
             "visibility": "visible",
             "emotional_tone": "warm",
@@ -68,7 +71,7 @@ def build_dialog_state() -> dict[str, object]:
     }
     return {
         "internal_monologue": "I can answer directly.",
-        "text_surface_input_v2": surface_input,
+        "text_surface_input": surface_input,
         "text_surface_output_v2": surface_output,
         "chat_history_wide": [],
         "chat_history_recent": [],

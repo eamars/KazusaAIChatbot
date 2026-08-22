@@ -27,10 +27,6 @@ from kazusa_ai_chatbot.db.character_identity_growth import (
     GROWTH_COLLECTION_NAMES,
     ensure_character_identity_growth_indexes,
 )
-from kazusa_ai_chatbot.db.cognition_chain_runs import (
-    COGNITION_CHAIN_RUNS_COLLECTION,
-    ensure_cognition_chain_run_indexes,
-)
 from kazusa_ai_chatbot.db.conversation import (
     CONVERSATION_VECTOR_FILTER_FIELDS,
     CONVERSATION_VECTOR_INDEX_NAME,
@@ -107,7 +103,6 @@ async def db_bootstrap() -> None:
         EVENT_LOG_SNAPSHOTS_COLLECTION,
         LLM_TRACE_RUNS_COLLECTION,
         LLM_TRACE_STEPS_COLLECTION,
-        COGNITION_CHAIN_RUNS_COLLECTION,
         SELF_COGNITION_ACTION_ATTEMPTS_COLLECTION,
         SELF_COGNITION_GROUP_REVIEW_WINDOWS_COLLECTION,
         ACCEPTED_TASKS_COLLECTION,
@@ -383,7 +378,6 @@ async def db_bootstrap() -> None:
     await ensure_character_identity_growth_indexes()
     await ensure_event_log_indexes()
     await ensure_llm_trace_indexes()
-    await ensure_cognition_chain_run_indexes()
     await ensure_internal_monologue_residue_indexes()
 
     await purge_stale_media_descriptor_entries()

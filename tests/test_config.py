@@ -37,12 +37,6 @@ COGNITION_V3_ROUTE_ENV_VARS = (
     "COGNITION_V3_CHAIN_LLM_MAX_COMPLETION_TOKENS",
     "COGNITION_V3_CHAIN_LLM_CONTEXT_WINDOW_TOKENS",
     "COGNITION_V3_CHAIN_LLM_THINKING_ENABLED",
-    "COGNITION_V3_SIDECAR_LLM_BASE_URL",
-    "COGNITION_V3_SIDECAR_LLM_API_KEY",
-    "COGNITION_V3_SIDECAR_LLM_MODEL",
-    "COGNITION_V3_SIDECAR_LLM_MAX_COMPLETION_TOKENS",
-    "COGNITION_V3_SIDECAR_LLM_THINKING_ENABLED",
-    "COGNITION_V3_SUBCONSCIOUS_ENABLED",
     "COGNITION_V3_TURN_DEADLINE_SECONDS",
 )
 REMOVED_RESOLVER_ENABLE_FLAG = "COGNITION_" + "RESOLVER_ENABLED"
@@ -85,17 +79,13 @@ def _configured_subprocess_env_without_dotenv() -> dict[str, str]:
         "COGNITION_V3_CHAIN_LLM_MAX_COMPLETION_TOKENS": "8192",
         "COGNITION_V3_CHAIN_LLM_CONTEXT_WINDOW_TOKENS": "50176",
         "COGNITION_V3_CHAIN_LLM_THINKING_ENABLED": "false",
-        "COGNITION_V3_SUBCONSCIOUS_ENABLED": "false",
         "COGNITION_V3_TURN_DEADLINE_SECONDS": "240",
     })
     return env
 
 
-def _v3_configured_subprocess_env_without_dotenv(
-    *,
-    include_sidecar: bool = False,
-) -> dict[str, str]:
-    """Return complete shared and V3 settings without any V2 core bundle."""
+def _v3_configured_subprocess_env_without_dotenv() -> dict[str, str]:
+    """Return complete shared and canonical cognition settings."""
 
     env = _configured_subprocess_env_without_dotenv()
     for name in COGNITION_V3_ROUTE_ENV_VARS:
@@ -107,14 +97,6 @@ def _v3_configured_subprocess_env_without_dotenv(
         "COGNITION_V3_CHAIN_LLM_MODEL": "chain-model",
         "COGNITION_V3_CHAIN_LLM_CONTEXT_WINDOW_TOKENS": "50176",
     })
-    if include_sidecar:
-        env.update({
-            "COGNITION_V3_SIDECAR_LLM_BASE_URL": (
-                "http://sidecar.example/v1"
-            ),
-            "COGNITION_V3_SIDECAR_LLM_API_KEY": "sidecar-key",
-            "COGNITION_V3_SIDECAR_LLM_MODEL": "sidecar-model",
-        })
     return env
 
 
@@ -1379,8 +1361,11 @@ def test_cognition_core_engine_default_matches_cutover_state(tmp_path):
             (
                 "from kazusa_ai_chatbot.config import "
                 "get_cognition_v3_route_settings\n"
-                "assert get_cognition_v3_route_settings().appraisal_stage_layout "
-                "== 'fixed_a1_a2'\n"
+                "settings = get_cognition_v3_route_settings()\n"
+                "assert settings.chain.context_window_tokens == 50176\n"
+                "assert settings.chain.max_completion_tokens == 8192\n"
+                "assert settings.chain.thinking_enabled is False\n"
+                "assert settings.turn_deadline_seconds == 240\n"
             ),
         ],
         cwd=tmp_path,
@@ -1448,14 +1433,6 @@ def test_v3_route_settings_reject_invalid_selected_bundle(tmp_path) -> None:
         (
             {"COGNITION_V3_CHAIN_LLM_THINKING_ENABLED": "true"},
             "COGNITION_V3_CHAIN_LLM_THINKING_ENABLED must be false",
-        ),
-        (
-            {"COGNITION_V3_SIDECAR_LLM_BASE_URL": "http://sidecar.example/v1"},
-            "COGNITION_V3_SIDECAR_LLM_API_KEY must be non-empty",
-        ),
-        (
-            {"COGNITION_V3_SUBCONSCIOUS_ENABLED": "true"},
-            "COGNITION_V3_SUBCONSCIOUS_ENABLED requires a V3 sidecar route",
         ),
         (
             {"COGNITION_V3_TURN_DEADLINE_SECONDS": "29"},

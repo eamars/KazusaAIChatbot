@@ -27,6 +27,7 @@ from kazusa_ai_chatbot.cognition_shared.state_models import (
     ROLE_ENTITY_KINDS,
     CognitionStateError,
     prune_terminal_entities,
+    validate_cognition_state,
 )
 from kazusa_ai_chatbot.cognition_shared.transition_guards import (
     apply_direct_fact,
@@ -1255,6 +1256,94 @@ def canonical_event_entity_id(
     )
     digest = hashlib.sha256(material.encode("utf-8")).hexdigest()[:24]
     return f"event:{digest}"
+
+
+def materialize_causal_root(
+    state: Mapping[str, Any],
+    *,
+    kind: str,
+    primary_evidence: Mapping[str, Any],
+    description: str,
+    updated_at: str | None = None,
+) -> tuple[dict[str, Any], str, bool]:
+    """Create or reuse one evidence-scoped native causal root."""
+
+    if kind not in {"event", "threat", "knowledge_gap"}:
+        raise CognitionStateError("causal root kind is not materializable")
+    if not isinstance(primary_evidence, Mapping):
+        raise CognitionStateError("causal root evidence is invalid")
+    if not isinstance(description, str) or not description.strip():
+        raise CognitionStateError("causal root description is invalid")
+    updated = deepcopy(dict(state))
+    eligible = {"active"} if kind in {"event", "threat"} else {"open", "reduced"}
+    collection = ENTITY_LIST_FIELDS[kind]
+    existing = _matching_source_entity(
+        updated.get(collection, []),
+        {"evidence_refs": [primary_evidence]},
+        eligible_statuses=eligible,
+    )
+    if existing is not None:
+        return validate_cognition_state(updated), str(existing["entity_id"]), False
+    material = "|".join(
+        ("cognition_root.v3", kind, str(updated["state_scope"]),
+         str(primary_evidence.get("source_kind")), str(primary_evidence.get("source_id")))
+    )
+    digest = hashlib.sha256(material.encode("utf-8")).hexdigest()[:24]
+    entity_id = f"{kind}:{digest}"
+    timestamp = updated_at or str(updated["updated_at"])
+    common = {
+        "entity_id": entity_id,
+        "description": description.strip()[:500],
+        "salience": 0,
+        "role_refs": [],
+        "evidence_refs": [deepcopy(dict(primary_evidence))],
+        "created_at": timestamp,
+        "updated_at": timestamp,
+    }
+    if kind == "event":
+        entity = {
+            **common,
+            "status": "active",
+            "outcome_impact": 0,
+            "responsibility": 0,
+            "intentionality": 0,
+            "harm": 0,
+            "unfairness": 0,
+            "exposure": 0,
+            "repair_need": 0,
+            "reparability": 100,
+            "expectation_mismatch": 0,
+            "norm_violation": 0,
+            "contamination_risk": 0,
+            "identity_threat": 0,
+            "comparison_gap": 0,
+            "vastness": 0,
+            "memory_warmth": 0,
+            "temporal_loss": 0,
+        }
+    elif kind == "threat":
+        entity = {
+            **common,
+            "status": "active",
+            "likelihood": 0,
+            "expected_harm": 0,
+            "uncertainty": 0,
+            "controllability": 50,
+            "coping_potential": 50,
+            "residual_pressure": 0,
+        }
+    else:
+        entity = {
+            **common,
+            "status": "open",
+            "relevance": 0,
+            "uncertainty": 0,
+            "learnability": 0,
+            "novelty": 0,
+            "model_accommodation": 0,
+        }
+    updated[collection].append(entity)
+    return validate_cognition_state(updated), entity_id, True
 
 
 def reduce_causal_event(

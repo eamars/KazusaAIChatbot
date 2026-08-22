@@ -84,23 +84,6 @@ def test_task_resolution_entrypoint_signatures_are_frozen() -> None:
     assert hints["request"] is cognition_contracts.ResolverCapabilityRequestV2
 
 
-def test_removed_model_facing_handles_are_absent() -> None:
-    """The big-bang contract exposes no legacy task-resolution handles."""
-
-    action_selection = importlib.import_module(
-        "kazusa_ai_chatbot.cognition_core_v3.action_selection"
-    )
-    prompt = action_selection.ACTION_PLANNING_PROMPT.casefold()
-    forbidden_handles = (
-        "local_context_recall",
-        "public_answer_research",
-        "accepted_task_request",
-    )
-
-    assert "task_resolution_request" in prompt
-    assert all(handle not in prompt for handle in forbidden_handles)
-
-
 def test_removed_background_provider_module_is_absent() -> None:
     """The v1 provider dispatcher has no importable compatibility path."""
 

@@ -554,24 +554,13 @@ Stores persistent initializer cache entries for RAG Cache2. The collection is
 owned by cache helpers that build version keys, load entries, record hits, and
 prune stale data.
 
-### `cognition_chain_runs`
+### Cognition semantic telemetry
 
-Stores one sanitized `cognition_chain_run.v2` document for each V3
-invocation. The row carries `chain_run_id`, exact `run_id`, `llm_trace_id`,
-and `cognition_invocation_id` correlation, source/model names, bounded step
-records, ledger and sidecar counters, terminal disposition, warning codes, and
-`expires_at`. Its appraisal topology is the fixed `fixed_a1_a2` layout, not a
-tunable group count. It contains no prompt, answer, private metadata, evidence
-text, credential, or endpoint.
-
-The owner creates a unique `chain_run_id` index, an exact
-`(run_id, llm_trace_id, completed_at)` lookup index, an invocation and engine
-index, and a TTL index on `expires_at` using the configured audit retention.
-`save_cognition_chain_run(...)` validates and idempotently upserts the complete
-document. `get_cognition_chain_run(run_id=..., llm_trace_id=...)` reads only
-the exact two-key intersection; missing or mismatched keys, read failures, and
-global-latest requests return no row. Best-effort persistence failure remains
-outside cognition-facing completion.
+Cognition semantic status is recorded through the generic event and protected
+trace boundaries. The database package does not own a dedicated cognition
+execution-topology collection or document. Persistence failures stay
+outside cognition-facing completion and never become state or delivery
+authority.
 
 ### `event_log_events`
 

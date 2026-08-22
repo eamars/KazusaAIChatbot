@@ -16,6 +16,7 @@ from kazusa_ai_chatbot.action_spec.registry import (
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
 )
 from kazusa_ai_chatbot.brain_service import post_turn as post_turn_module
+from kazusa_ai_chatbot.chat_input_queue import QueuedChatItem
 from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_character_production_state,
 )
@@ -25,14 +26,12 @@ from kazusa_ai_chatbot.consolidation import (
 from kazusa_ai_chatbot.consolidation.character_operational_state import (
     CharacterOperationalExecutionContext,
 )
-from kazusa_ai_chatbot.chat_input_queue import QueuedChatItem
 from kazusa_ai_chatbot.llm_tracing import failure_capsule
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 from tests.cognition_test_helpers import (
     canonical_episode_identity_snapshot,
     canonical_service_character_profile,
 )
-
 
 _CONSOLIDATION_TURN_CLOCK = build_turn_clock("2026-04-25 18:00:58")
 _GRAPH_TURN_CLOCK = build_turn_clock("2026-04-25 18:07:24")
@@ -924,9 +923,9 @@ async def test_chat_response_tracks_deliverable_assistant_row(monkeypatch):
     assert graph["run_id"] == response.delivery_tracking_id
     assert graph["status"] == "completed"
     node_ids = {node["id"] for node in graph["nodes"]}
-    assert {"l2.reasoning", "l2.memory", "l2.actions"} <= node_ids
+    assert {"reasoning.context", "evidence.memory", "action.results"} <= node_ids
     edge_kinds = {edge["kind"] for edge in graph["edges"]}
-    assert {"fork", "join"} <= edge_kinds
+    assert edge_kinds <= {"sequence", "reference"}
     graph_text = repr(graph)
     assert "test" in graph_text
     assert "PROVIDE" in graph_text

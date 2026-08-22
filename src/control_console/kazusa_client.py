@@ -14,7 +14,6 @@ import httpx
 from pydantic import ValidationError
 
 from control_console.contracts import (
-    CognitionChainRunSnapshot,
     CognitionContextConsumption,
     CognitionRunGraphEdge,
     CognitionRunGraphNode,
@@ -52,13 +51,16 @@ COGNITION_GRAPH_DETAIL_KEYS = frozenset(
         "selected_actions",
         "action_results",
         "action_continuation",
-        "parallel_execution",
         "appraisal_results",
-        "branch_results",
-        "collapse",
-        "selected_intention",
-        "selected_bid_reason",
+        "appraisals",
+        "goal",
+        "action_requests",
+        "resolver_requests",
+        "response_goal",
+        "cause_provenance",
         "goal_resolution",
+        "response_goal",
+        "goal",
         "expression_policy",
         "affect_projection",
         "phase",
@@ -78,6 +80,7 @@ COGNITION_GRAPH_DETAIL_KEYS = frozenset(
         "messages",
         "empty_state",
         "failure",
+        "goal",
         "failure_code",
         "context_consumption",
     }
@@ -97,11 +100,8 @@ COGNITION_GRAPH_SCALAR_DETAIL_KEYS = frozenset(
         "empty_state",
         "failure_code",
         "failure_stage",
-        "safe_checkpoint",
-        "attempt_count",
-        "retryable",
-        "selected_bid_reason",
         "goal_resolution",
+        "response_goal",
         "phase",
         "goal_kind",
         "selection",
@@ -128,11 +128,9 @@ COGNITION_GRAPH_MAPPING_DETAIL_KEYS = frozenset(
         "reply_context",
         "user_continuity",
         "conversation_progress",
-        "parallel_execution",
-        "collapse",
-        "selected_intention",
         "expression_policy",
         "failure",
+        "goal",
     }
 )
 COGNITION_GRAPH_ROW_DETAIL_KEYS = frozenset(
@@ -146,14 +144,24 @@ COGNITION_GRAPH_ROW_DETAIL_KEYS = frozenset(
         "selected_actions",
         "action_results",
         "action_continuation",
-        "appraisal_results",
-        "branch_results",
+        "appraisals",
         "affect_projection",
+        "cause_provenance",
+        "action_requests",
+        "resolver_requests",
     }
 )
 COGNITION_GRAPH_NESTED_DETAIL_KEYS = frozenset(
     {
         "summary",
+        "family",
+        "applicable",
+        "semantic_summary",
+        "cause_summary",
+        "cause_status",
+        "axis_changes",
+        "axis",
+        "shift",
         "fact",
         "excerpt",
         "content",
@@ -186,6 +194,7 @@ COGNITION_GRAPH_NESTED_DETAIL_KEYS = frozenset(
         "progress_note",
         "goal",
         "next_step",
+        "intent",
         "participant_context",
         "thread_reference_context",
         "group_scene_digest",
@@ -202,6 +211,14 @@ COGNITION_GRAPH_NESTED_DETAIL_KEYS = frozenset(
         "reason",
         "continuation",
         "action_kind",
+        "decision",
+        "detail",
+        "capability",
+        "emotion",
+        "intensity",
+        "trend",
+        "response_goal",
+        "goal_resolution",
         "status",
         "result_summary",
         "semantic_decision",
@@ -234,7 +251,6 @@ COGNITION_GRAPH_NESTED_DETAIL_KEYS = frozenset(
         "semantic_value",
         "delta",
         "phase",
-        "branch_index",
         "goal_kind",
         "selection",
         "intention",
@@ -245,22 +261,7 @@ COGNITION_GRAPH_NESTED_DETAIL_KEYS = frozenset(
         "failure_code",
         "stage",
         "failure_stage",
-        "safe_checkpoint",
-        "retryable",
-        "primary_branch_index",
-        "supporting_branch_indices",
-        "suppressed_branch_indices",
         "selection_reason",
-        "selected_question_count",
-        "dispatched_question_count",
-        "selected_branch_count",
-        "dispatched_branch_count",
-        "completed_branch_count",
-        "failed_branch_count",
-        "maximum_concurrency",
-        "overlap_ms",
-        "dependency_wait_ms",
-        "total_ms",
         "emotion",
         "intensity",
         "trend",
@@ -370,40 +371,6 @@ class KazusaClient:
         )
         return graph
 
-    async def get_latest_cognition_graph_with_chain_runs(
-        self,
-    ) -> tuple[
-        CognitionRunGraphSnapshot,
-        CognitionChainRunSnapshot,
-        CognitionRunGraphSnapshot,
-        CognitionChainRunSnapshot,
-    ]:
-        """Read paired live/self graph and chain-run projections."""
-
-        async with self._client() as client:
-            response = await client.get("/ops/latest-cognition-graph")
-        response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, dict):
-            payload = {}
-        live_graph = project_cognition_graph_snapshot(
-            source="overview_latest",
-            payload=payload,
-        )
-        self_graph = project_cognition_graph_snapshot(
-            source="self_latest",
-            payload=payload,
-        )
-        live_chain = _project_paired_cognition_chain_run_snapshot(
-            payload.get("cognition_chain_run"),
-            graph=live_graph,
-        )
-        self_chain = _project_paired_cognition_chain_run_snapshot(
-            payload.get("self_cognition_chain_run"),
-            graph=self_graph,
-        )
-        return live_graph, live_chain, self_graph, self_chain
-
     async def send_debug_chat(
         self,
         request: ConsoleDebugChatRequest,
@@ -425,7 +392,6 @@ class KazusaClient:
                 response_payload.get("delivery_tracking_id"),
             ),
         )
-        telemetry_chain: object = None
         try:
             async with self._client() as client:
                 telemetry_response = await client.get(
@@ -447,15 +413,8 @@ class KazusaClient:
                     == debug_graph.llm_trace_id
                 ):
                     debug_graph = telemetry_graph
-                    telemetry_chain = telemetry_payload.get(
-                        "cognition_chain_run",
-                    )
         except (httpx.HTTPError, json.JSONDecodeError):
-            telemetry_chain = None
-        debug_chain = _project_paired_cognition_chain_run_snapshot(
-            telemetry_chain,
-            graph=debug_graph,
-        )
+            pass
         result = {
             "request_id": f"cc-req-{uuid.uuid4().hex[:12]}",
             "brain_available": True,
@@ -473,7 +432,6 @@ class KazusaClient:
             "sent_at": datetime.now(timezone.utc).isoformat(),
             "error": None,
             "cognition_graph": debug_graph.model_dump(mode="json"),
-            "cognition_chain_run": debug_chain.model_dump(mode="json"),
         }
         return result
 
@@ -613,6 +571,7 @@ def project_cognition_graph_snapshot(
         )
         return inferred_graph
 
+    projected_nodes = _project_graph_nodes(raw_graph.get("nodes"))
     normalized = {
         "source": source,
         "status": raw_graph.get("status", "partial"),
@@ -628,7 +587,7 @@ def project_cognition_graph_snapshot(
             raw_graph.get("source_calendar_run_id")
         ),
         "generated_at": datetime.now(timezone.utc),
-        "nodes": _project_graph_nodes(raw_graph.get("nodes")),
+        "nodes": projected_nodes,
         "edges": [],
         "redaction": {
             "detail": (
@@ -658,82 +617,6 @@ def project_cognition_graph_snapshot(
     return snapshot
 
 
-def not_reported_cognition_chain_run() -> CognitionChainRunSnapshot:
-    """Return an explicit absent-safe chain-run snapshot."""
-
-    snapshot = CognitionChainRunSnapshot(status="not_reported")
-    return snapshot
-
-
-def project_cognition_chain_run_snapshot(
-    value: object,
-) -> CognitionChainRunSnapshot:
-    """Project one sanitized chain-run record into a strict console snapshot."""
-
-    if not isinstance(value, dict):
-        snapshot = not_reported_cognition_chain_run()
-        return snapshot
-    raw_steps = value.get("steps")
-    step_count = (
-        value.get("step_count")
-        if isinstance(value.get("step_count"), int)
-        else min(len(raw_steps), 96) if isinstance(raw_steps, list) else 0
-    )
-    normalized = {
-        "status": _safe_optional_text(value.get("status")) or "completed",
-        "chain_run_id": _safe_optional_text(value.get("chain_run_id")),
-        "run_id": _safe_optional_text(value.get("run_id")),
-        "llm_trace_id": _safe_optional_text(value.get("llm_trace_id")),
-        "cognition_invocation_id": _safe_optional_text(
-            value.get("cognition_invocation_id")
-        ),
-        "chain_model_name": _safe_optional_text(
-            value.get("chain_model_name")
-        ) or "",
-        "sidecar_model_name": _safe_optional_text(
-            value.get("sidecar_model_name")
-        ) or "",
-        "terminal_disposition": _safe_optional_text(
-            value.get("terminal_disposition")
-        ) or "",
-        "started_at": _safe_optional_text(value.get("started_at")) or "",
-        "completed_at": _safe_optional_text(value.get("completed_at")) or "",
-        "step_count": step_count,
-        "warning_codes": (
-            list(value["warning_codes"])
-            if isinstance(value.get("warning_codes"), list)
-            else []
-        ),
-    }
-    try:
-        snapshot = CognitionChainRunSnapshot.model_validate(normalized)
-    except ValidationError:
-        snapshot = not_reported_cognition_chain_run()
-    return snapshot
-
-
-def _project_paired_cognition_chain_run_snapshot(
-    value: object,
-    *,
-    graph: CognitionRunGraphSnapshot,
-) -> CognitionChainRunSnapshot:
-    """Keep a chain row only when its graph correlation is exact."""
-
-    chain = project_cognition_chain_run_snapshot(value)
-    if chain.status == "not_reported":
-        return chain
-    if not graph.run_id or not graph.llm_trace_id:
-        absent_chain = not_reported_cognition_chain_run()
-        return absent_chain
-    if (
-        chain.run_id != graph.run_id
-        or chain.llm_trace_id != graph.llm_trace_id
-    ):
-        absent_chain = not_reported_cognition_chain_run()
-        return absent_chain
-    return chain
-
-
 def _first_graph_payload(
     payload: dict[str, Any],
     *,
@@ -753,8 +636,10 @@ def _first_graph_payload(
     return None
 
 
-def _project_graph_nodes(raw_nodes: Any) -> list[dict[str, Any]]:
-    """Project bounded graph nodes from external telemetry."""
+def _project_graph_nodes(
+    raw_nodes: Any,
+) -> list[dict[str, Any]]:
+    """Project bounded graph nodes while preserving safe semantic fields."""
 
     if not isinstance(raw_nodes, list):
         return []
@@ -763,14 +648,15 @@ def _project_graph_nodes(raw_nodes: Any) -> list[dict[str, Any]]:
     for raw_node in raw_nodes[:64]:
         if not isinstance(raw_node, dict):
             continue
+        raw_id = raw_node.get("id", "")
         projected_node = {
-            "id": str(raw_node.get("id", "")),
-            "label": str(raw_node.get("label", "")),
-            "stage": str(raw_node.get("stage", "")),
-            "lane": str(raw_node.get("lane", "")),
+            "id": raw_id,
+            "label": raw_node.get("label", ""),
+            "stage": raw_node.get("stage", ""),
+            "lane": raw_node.get("lane", ""),
             "column": raw_node.get("column", 1),
-            "branch": str(raw_node.get("branch", "")),
-            "status": str(raw_node.get("status", "not_reported")),
+            "category": raw_node.get("category", ""),
+            "status": raw_node.get("status", "not_reported"),
             "detail": _project_node_detail(raw_node.get("detail", {})),
         }
         try:
@@ -796,10 +682,10 @@ def _project_graph_edges(
         if not isinstance(raw_edge, dict):
             continue
         projected_edge = {
-            "source": str(raw_edge.get("source", "")),
-            "target": str(raw_edge.get("target", "")),
-            "kind": str(raw_edge.get("kind", "sequence")),
-            "label": str(raw_edge.get("label", "")),
+            "source": raw_edge.get("source", ""),
+            "target": raw_edge.get("target", ""),
+            "kind": raw_edge.get("kind", "sequence"),
+            "label": raw_edge.get("label", ""),
         }
         if node_ids is not None and (
             projected_edge["source"] not in node_ids
@@ -1006,34 +892,34 @@ def _project_known_cognition_fields(
     edges: list[dict[str, Any]] = []
     if _has_any(payload, ("internal_monologue", "logical_stance", "character_intent")):
         nodes.append({
-            "id": "l2.reasoning",
+            "id": "reasoning.context",
             "label": "Reasoning",
-            "stage": "L2",
+            "stage": "Reasoning",
             "lane": "cognition",
             "column": 1,
-            "branch": "l2",
+            "category": "reasoning",
             "status": "completed",
             "detail": _project_node_detail(payload),
         })
     if _has_any(payload, ("action_specs", "decision", "scheduled_followups")):
         nodes.append({
-            "id": "l2.decision",
+            "id": "decision.response",
             "label": "Decision",
-            "stage": "L2",
+            "stage": "Decision",
             "lane": "decision",
             "column": 2,
-            "branch": "action",
+            "category": "decision",
             "status": "completed",
             "detail": _project_node_detail(payload),
         })
     if _has_any(payload, ("messages", "final_dialog", "visible_response")):
         nodes.append({
-            "id": "l3.surface",
+            "id": "surface.visible",
             "label": "Visible response",
-            "stage": "L3",
+            "stage": "Surface",
             "lane": "surface",
             "column": 3,
-            "branch": "dialog",
+            "category": "visible_response",
             "status": "completed",
             "detail": {
                 "messages": _project_cognition_graph_message_fragments(payload),

@@ -234,9 +234,7 @@ def test_route_report_includes_only_v3_cognition_routes_and_shared_generic_cogni
         "_table_rows, configured_route_diagnostics\n"
         "print(json.dumps(_table_rows(configured_route_diagnostics())))\n"
     )
-    v3_env = _v3_configured_subprocess_env_without_dotenv(
-        include_sidecar=True,
-    )
+    v3_env = _v3_configured_subprocess_env_without_dotenv()
 
     result = subprocess.run(
         [sys.executable, "-c", script],
@@ -253,11 +251,6 @@ def test_route_report_includes_only_v3_cognition_routes_and_shared_generic_cogni
         for row in json.loads(result.stdout)
     }
 
-    assert v3_rows["COGNITION_V3_CHAIN_LLM"]["route_group"] == (
-        "v3_cognition"
-    )
-    assert v3_rows["COGNITION_V3_SIDECAR_LLM"]["route_group"] == (
-        "v3_cognition"
-    )
+    assert v3_rows["COGNITION_V3_CHAIN_LLM"]["route_group"] == "reasoning"
     assert v3_rows["COGNITION_LLM"]["route_group"] == "shared_non_core"
     assert "COGNITION_LLM_CHARACTER_CARRYOVER" in v3_rows

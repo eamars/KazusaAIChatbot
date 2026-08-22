@@ -15,10 +15,7 @@ const state = {
   applicationIdentity: {},
   latestCognitionGraph: null,
   latestSelfCognitionGraph: null,
-  latestCognitionChainRun: null,
-  latestSelfCognitionChainRun: null,
   debugCognitionGraph: null,
-  debugCognitionChainRun: null,
   userDirectory: [],
   groupDirectory: [],
   debugRequestInFlight: false,
@@ -43,20 +40,6 @@ const LEGACY_THEME_NAMES = {
   expo: "dark",
   ollama: "bright",
 };
-const COGNITION_ENGINE_DESCRIPTOR_SCHEMA = "cognition_engine_descriptor.v2";
-const COGNITION_ENGINE_DESCRIPTOR_FIELDS = [
-  "engine_id",
-  "chain_model_name",
-  "sidecar_model_name",
-  "sidecar_enabled",
-  "subconscious_enabled",
-  "appraisal_stage_layout",
-  "chain_context_window_tokens",
-  "normal_budget_tokens",
-  "extended_budget_tokens",
-  "turn_deadline_seconds",
-];
-
 function qs(selector) {
   return document.querySelector(selector);
 }
@@ -422,15 +405,12 @@ async function bootstrap(options = {}) {
   state.applicationIdentity = payload.application_identity || {};
   state.latestCognitionGraph = payload.latest_cognition_graph || null;
   state.latestSelfCognitionGraph = payload.latest_self_cognition_graph || null;
-  state.latestCognitionChainRun = payload.latest_cognition_chain_run || notReportedCognitionChainRun();
-  state.latestSelfCognitionChainRun = payload.latest_self_cognition_chain_run || notReportedCognitionChainRun();
   setAuthState(true);
   setText("#session-state", payload.operator ? payload.operator.operator_id : "signed in");
   renderBrand(payload.application_identity || {});
   renderPageCapabilities();
   renderShellStatus(payload);
   renderDebugAvailability();
-  renderDebugCognitionChain(state.debugCognitionChainRun || notReportedCognitionChainRun());
   renderOverview(payload);
   renderHealth(payload.health || {});
   renderServices();
@@ -455,10 +435,7 @@ function lockSession() {
   state.pageCapabilities = {};
   state.latestCognitionGraph = null;
   state.latestSelfCognitionGraph = null;
-  state.latestCognitionChainRun = null;
-  state.latestSelfCognitionChainRun = null;
   state.debugCognitionGraph = null;
-  state.debugCognitionChainRun = null;
   state.userDirectory = [];
   state.groupDirectory = [];
   if (state.eventSource) state.eventSource.close();
@@ -469,8 +446,6 @@ function lockSession() {
   setText("#session-state", "signed out");
   renderBrand({status: "unavailable", character_name: "not connected"});
   renderDebugAvailability();
-  renderDebugCognitionChain(notReportedCognitionChainRun());
-  renderCognitionEngineDescriptor(null);
   showNotice("Sign in to inspect local services.", "info");
 }
 
@@ -494,15 +469,11 @@ function renderOverview(payload) {
   const panels = overview.panels || {};
   state.latestCognitionGraph = overview.latest_cognition_graph || null;
   state.latestSelfCognitionGraph = overview.latest_self_cognition_graph || null;
-  state.latestCognitionChainRun = overview.latest_cognition_chain_run || notReportedCognitionChainRun();
-  state.latestSelfCognitionChainRun = overview.latest_self_cognition_chain_run || notReportedCognitionChainRun();
   const graphItems = panelItems(panels.cognition_graphs);
   const conversationGraph = graphItems.find((item) => item.graph_kind === "conversation");
   const selfCognitionGraph = graphItems.find((item) => item.graph_kind === "self_cognition");
   if (conversationGraph?.graph) state.latestCognitionGraph = conversationGraph.graph;
   if (selfCognitionGraph?.graph) state.latestSelfCognitionGraph = selfCognitionGraph.graph;
-  if (conversationGraph?.chain_run) state.latestCognitionChainRun = conversationGraph.chain_run;
-  if (selfCognitionGraph?.chain_run) state.latestSelfCognitionChainRun = selfCognitionGraph.chain_run;
   const servicePanel = panels.service_summary || {};
   const serviceSummary = firstObjectItem(panelItems(servicePanel));
   setEntityStatus("#overview-service-status", servicePanel.status || "unavailable");
@@ -522,17 +493,6 @@ function renderOverview(payload) {
   setHtml("#overview-changes-table", overviewChangeRows(changesPanel));
   renderOverviewCognitionGraph(state.latestCognitionGraph);
   renderOverviewSelfCognitionGraph(state.latestSelfCognitionGraph);
-  renderCognitionChainRun({
-    containerSelector: "#overview-cognition-chain",
-    statusSelector: "#overview-cognition-chain-status",
-    snapshot: state.latestCognitionChainRun,
-  });
-  renderCognitionChainRun({
-    containerSelector: "#overview-self-cognition-chain",
-    statusSelector: "#overview-self-cognition-chain-status",
-    snapshot: state.latestSelfCognitionChainRun,
-  });
-  renderCognitionEngineDescriptor(overview.cognition_engine);
 }
 
 async function refreshOverview() {
@@ -620,143 +580,6 @@ function renderDebugCognitionGraph(snapshot) {
   });
 }
 
-function renderDebugCognitionChain(snapshot) {
-  renderCognitionChainRun({
-    containerSelector: "#debug-cognition-chain",
-    statusSelector: "#debug-cognition-chain-status",
-    snapshot,
-  });
-}
-
-function notReportedCognitionChainRun() {
-  return {
-    status: "not_reported",
-    chain_run_id: null,
-    run_id: null,
-    llm_trace_id: null,
-    cognition_invocation_id: null,
-    chain_model_name: "",
-    sidecar_model_name: "",
-    terminal_disposition: "",
-    started_at: "",
-    completed_at: "",
-    step_count: 0,
-    warning_codes: [],
-  };
-}
-
-function renderCognitionChainRun({containerSelector, statusSelector, snapshot}) {
-  const container = qs(containerSelector);
-  const statusElement = qs(statusSelector);
-  if (!container || !statusElement) return;
-
-  const chain = snapshot && typeof snapshot === "object"
-    ? snapshot
-    : notReportedCognitionChainRun();
-  const chainStatus = String(chain.status || "not_reported");
-  statusElement.textContent = formatLookupLabel(chainStatus);
-  statusElement.className = cognitionGraphStatusBadgeClass(chainStatus);
-  const fields = [
-    ["status", chainStatus],
-    ["chain_run_id", chain.chain_run_id],
-    ["run_id", chain.run_id],
-    ["llm_trace_id", chain.llm_trace_id],
-    ["cognition_invocation_id", chain.cognition_invocation_id],
-    ["chain_model_name", chain.chain_model_name],
-    ["sidecar_model_name", chain.sidecar_model_name],
-    ["terminal_disposition", chain.terminal_disposition],
-    ["started_at", chain.started_at],
-    ["completed_at", chain.completed_at],
-    ["step_count", chain.step_count],
-    ["warning_codes", chain.warning_codes],
-  ];
-  const rows = fields.map(([fieldName, fieldValue]) => `
-    <tr>
-      <th scope="row">${escapeHtml(fieldName)}</th>
-      <td>${escapeHtml(cognitionChainFieldValue(fieldName, fieldValue, chainStatus))}</td>
-    </tr>
-  `).join("");
-  setHtml(container, `
-    <div class="cognition-chain-table-wrap table-wrap flush" data-chain-status="${escapeHtml(chainStatus)}">
-      <table class="cognition-chain-table">
-        <tbody>${rows}</tbody>
-      </table>
-    </div>
-  `);
-}
-
-function cognitionChainFieldValue(fieldName, value, chainStatus) {
-  if (chainStatus === "not_reported") return "not_reported";
-  if (fieldName === "warning_codes") {
-    if (!Array.isArray(value) || !value.length) return "not_reported";
-    const warningCodes = value.filter((item) => typeof item === "string" && item.trim());
-    return warningCodes.length ? warningCodes.join(", ") : "not_reported";
-  }
-  if (fieldName === "step_count" && Number.isInteger(value)) return String(value);
-  if (typeof value === "string" && value.trim()) return value;
-  return "not_reported";
-}
-
-function projectCognitionEngineDescriptor(rawDescriptor) {
-  if (!rawDescriptor || typeof rawDescriptor !== "object") {
-    return {status: "not_reported"};
-  }
-  if (rawDescriptor.schema_version !== COGNITION_ENGINE_DESCRIPTOR_SCHEMA) {
-    return {status: "not_reported"};
-  }
-  if (!COGNITION_ENGINE_DESCRIPTOR_FIELDS.every((fieldName) => (
-    Object.prototype.hasOwnProperty.call(rawDescriptor, fieldName)
-  ))) {
-    return {status: "not_reported"};
-  }
-  const descriptor = {
-    status: "available",
-    schema_version: COGNITION_ENGINE_DESCRIPTOR_SCHEMA,
-  };
-  COGNITION_ENGINE_DESCRIPTOR_FIELDS.forEach((fieldName) => {
-    descriptor[fieldName] = rawDescriptor[fieldName];
-  });
-  return descriptor;
-}
-
-function renderCognitionEngineDescriptor(rawDescriptor) {
-  const container = qs("#overview-cognition-engine");
-  const descriptor = projectCognitionEngineDescriptor(rawDescriptor);
-  if (!container) return;
-  const descriptorStatus = descriptor.status || "not_reported";
-  setEntityStatus("#overview-cognition-engine-status", descriptorStatus);
-  const fields = COGNITION_ENGINE_DESCRIPTOR_FIELDS.map((fieldName) => [
-    fieldName,
-    descriptor[fieldName],
-  ]);
-  const rows = fields.map(([fieldName, fieldValue]) => `
-    <tr>
-      <th scope="row">${escapeHtml(fieldName)}</th>
-      <td>${escapeHtml(cognitionEngineFieldValue(fieldValue, descriptorStatus))}</td>
-    </tr>
-  `).join("");
-  setHtml(container, `
-    <div class="cognition-chain-table-wrap table-wrap flush" data-engine-status="${escapeHtml(descriptorStatus)}">
-      <table class="cognition-chain-table cognition-engine-table">
-        <tbody>${rows}</tbody>
-      </table>
-    </div>
-  `);
-}
-
-function cognitionEngineFieldValue(value, descriptorStatus) {
-  if (descriptorStatus !== "available") return "not_reported";
-  if (value === null || value === undefined || value === "") {
-    return "not_reported";
-  }
-  if (typeof value === "boolean") return value ? "yes" : "no";
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? String(value) : "not_reported";
-  }
-  if (typeof value === "string" && value.trim()) return value;
-  return "not_reported";
-}
-
 function renderCognitionGraph({containerSelector, statusSelector, snapshot, emptyMessage}) {
   const container = qs(containerSelector);
   const status = qs(statusSelector);
@@ -780,7 +603,7 @@ function renderCognitionGraph({containerSelector, statusSelector, snapshot, empt
   setHtml(container, `
     <div class="cognition-graph-shell" data-graph-source="${escapeHtml(model.source)}" data-graph-run-id="${escapeHtml(model.runId)}" data-graph-current-node-id="${escapeHtml(model.currentNode?.id || "")}" data-graph-selected-node-id="${escapeHtml(model.selectedNode?.id || "")}">
       ${cognitionGraphSummaryMarkup(model)}
-      ${cognitionGraphParallelSummaryMarkup(model)}
+      ${cognitionGraphSemanticSummaryMarkup(model)}
       ${cognitionGraphDependencyMarkup(model)}
       <div class="graph-body">
         ${cognitionGraphStageMarkup(model)}
@@ -1011,49 +834,16 @@ function cognitionGraphSourceLabel(source) {
   return labels[source] || "Cognition run";
 }
 
-function cognitionGraphParallelSummaryMarkup(model) {
-  const executionNode = model.nodes.find((node) => node.id === "cognition.parallel");
-  const branchNodes = model.nodes.filter((node) => node.id.startsWith("cognition.branch."));
-  if (!executionNode && !branchNodes.length) return "";
-  const execution = executionNode?.detail?.parallel_execution || {};
-  const metrics = [
-    ["max concurrency", execution.maximum_concurrency],
-    ["completed", execution.completed_branch_count],
-    ["failed", execution.failed_branch_count],
-    ["overlap", execution.overlap_ms === undefined ? null : `${execution.overlap_ms} ms`],
-  ].filter(([, value]) => value !== null && value !== undefined && value !== "");
-  const metricMarkup = metrics.map(([label, value]) => (
-    `<span class="graph-parallel-metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></span>`
-  )).join("");
-  const branchMarkup = branchNodes.map((node) => {
-    const detail = node.detail || {};
-    const selection = detail.selection || "unselected";
-    const status = cognitionGraphStatusLabel(node.status || "not_reported");
-    const semantic = detail.intention || detail.desired_outcome || detail.reason || "No branch result reported.";
-    return `
-      <button class="graph-parallel-result status-${escapeHtml(node.status || "not_reported")}" type="button" data-graph-node data-node-id="${escapeHtml(node.id)}" aria-label="${escapeHtml(node.label || node.id)}">
-        <span class="graph-parallel-result-header">
-          <strong>${escapeHtml(node.label || node.id)}</strong>
-          <span class="badge" data-component="Badge">${escapeHtml(selection)} · ${escapeHtml(status)}</span>
-        </span>
-        <span>${escapeHtml(cognitionGraphPreview(cognitionGraphValue(semantic), 180))}</span>
-      </button>
-    `;
-  }).join("");
-  return `
-    <section class="graph-parallel-summary" aria-label="Parallel cognition results" data-component="Parallel cognition results">
-      <div class="graph-parallel-header">
-        <div>
-          <span>Agentic cognition</span>
-          <strong>Parallel cognition results</strong>
-        </div>
-        <div class="graph-parallel-metrics">${metricMarkup}</div>
-      </div>
-      <div class="graph-parallel-results">
-        ${branchMarkup || `<p class="graph-parallel-empty">No branch result was reported.</p>`}
-      </div>
-    </section>
-  `;
+function cognitionGraphSemanticSummaryMarkup(model) {
+  const nodes = model.nodes.filter((node) => String(node.stage || "").toLowerCase().includes("cognition"));
+  if (!nodes.length) return "";
+  const rows = nodes.slice(0, 8).map((node) => `
+    <button class="graph-semantic-result status-${escapeHtml(node.status || "not_reported")}" type="button" data-graph-node data-node-id="${escapeHtml(node.id)}" aria-label="${escapeHtml(node.label || node.id)}">
+      <span class="graph-semantic-result-header"><strong>${escapeHtml(node.label || node.id)}</strong><span class="badge" data-component="Badge">${escapeHtml(cognitionGraphStatusLabel(node.status || "not_reported"))}</span></span>
+      <span>${escapeHtml(cognitionGraphPreview(cognitionGraphNodeSummary(node), 180))}</span>
+    </button>
+  `).join("");
+  return `<section class="graph-semantic-summary" aria-label="Semantic cognition results"><div class="graph-semantic-header"><strong>Semantic cognition</strong></div><div class="graph-semantic-results">${rows}</div></section>`;
 }
 
 function cognitionGraphDependencyMarkup(model) {
@@ -1075,7 +865,7 @@ function cognitionGraphDependencyMarkup(model) {
     <section class="graph-dependency-panel" aria-label="Cognition graph dependencies">
       <div class="graph-dependency-header">
         <span>Recorded relationships</span>
-        <strong>Fork / join dependencies</strong>
+        <strong>Semantic relationships</strong>
       </div>
       <div class="graph-dependency-list">${edgeMarkup}</div>
     </section>
@@ -1155,7 +945,7 @@ function cognitionGraphStageGroupMarkup(group, model, index, groups) {
         </div>
         <span class="${escapeHtml(cognitionGraphStatusBadgeClass(group.status))}" data-component="Badge">${escapeHtml(cognitionGraphStatusLabel(group.status))}</span>
       </div>
-      <div class="graph-branch-stack">
+      <div class="graph-node-stack">
         ${nodes}
       </div>
       <div class="graph-stage-meta">${escapeHtml(lanes || "cognition")}</div>
@@ -1184,7 +974,7 @@ function cognitionGraphNodeMarkup(node, model) {
   const highlighted = model.highlightedIds.has(node.id);
   const current = model.currentNode && model.currentNode.id === node.id;
   const summary = cognitionGraphNodeSummary(node);
-  const branch = node.branch ? `<span>${escapeHtml(node.branch)}</span>` : "";
+  const category = node.category ? `<span>${escapeHtml(node.category)}</span>` : "";
   return `
     <button class="graph-node status-${escapeHtml(status)}${statusLabel === "terminated" ? " is-terminal" : ""}${current ? " is-current" : ""}${selected ? " is-selected" : ""}${highlighted ? " is-highlighted" : ""}" type="button" data-graph-node data-node-id="${escapeHtml(node.id)}" aria-pressed="${selected ? "true" : "false"}" title="${escapeHtml(summary)}">
       <span class="node-header">
@@ -1192,7 +982,7 @@ function cognitionGraphNodeMarkup(node, model) {
         <span class="${escapeHtml(cognitionGraphStatusBadgeClass(status))} node-status" data-component="Badge">${escapeHtml(statusLabel)}</span>
       </span>
       <strong>${escapeHtml(node.label || node.id)}</strong>
-      <span class="node-meta"><span>${escapeHtml(node.lane || "cognition")}</span>${branch}</span>
+      <span class="node-meta"><span>${escapeHtml(node.lane || "cognition")}</span>${category}</span>
       <span class="node-summary">${escapeHtml(summary)}</span>
     </button>
   `;
@@ -1240,25 +1030,19 @@ function cognitionGraphInspectorRows(node) {
     ["reply_context", "Reply context"],
     ["decision", "Decision"],
     ["reasoning", "Reasoning"],
-    ["parallel_execution", "Parallel execution"],
     ["failure_code", "Failure code"],
-    ["appraisal_results", "Appraisal results"],
-    ["branch_results", "Branch results"],
+    ["appraisals", "Semantic appraisals"],
     ["phase", "Phase"],
     ["goal_kind", "Goal kind"],
-    ["selection", "Selection"],
-    ["intention", "Intention"],
-    ["desired_outcome", "Desired outcome"],
-    ["concrete_detail", "Concrete detail"],
+    ["goal", "Goal"],
+    ["response_goal", "Response goal"],
     ["reason", "Reason"],
     ["internal_monologue", "Internal monologue"],
     ["private_monologue", "Private monologue"],
     ["expected_consequences", "Expected consequences"],
     ["confidence", "Confidence"],
-    ["collapse", "Collapse"],
     ["failure", "Failure"],
-    ["selected_intention", "Selected intention"],
-    ["selected_bid_reason", "Selected bid reason"],
+    ["cause_provenance", "Cause provenance"],
     ["affect_projection", "Affect projection"],
     ["expression_policy", "Expression policy"],
     ["goal_resolution", "Goal resolution"],
@@ -1336,23 +1120,17 @@ function cognitionGraphFirstSemanticValue(detail) {
     "summary",
     "decision",
     "reasoning",
-    "parallel_execution",
-    "appraisal_results",
-    "branch_results",
+    "appraisals",
     "phase",
     "goal_kind",
-    "selection",
-    "intention",
-    "desired_outcome",
-    "concrete_detail",
+    "goal",
+    "response_goal",
     "reason",
     "internal_monologue",
     "private_monologue",
     "expected_consequences",
     "confidence",
-    "collapse",
-    "selected_intention",
-    "selected_bid_reason",
+    "cause_provenance",
     "affect_projection",
     "expression_policy",
     "goal_resolution",
@@ -1666,7 +1444,7 @@ function renderBrainRouteEditor(route, service) {
       <div class="brain-route-editor-header">
         <div>
           <strong>${escapeHtml(route.label)}</strong>
-          <span>${escapeHtml(route.group)} · ${escapeHtml(route.env_prefix)}</span>
+          <span>${escapeHtml(route.group)}</span>
         </div>
         <div class="badge-stack">
           <span class="${route.required ? "badge warn" : "badge"}">${route.required ? "required" : "fallback backed"}</span>
@@ -2346,29 +2124,23 @@ async function sendDebug(event) {
   state.debugRequestInFlight = true;
   setDisabled(sendButton, true);
   state.debugCognitionGraph = pendingDebugCognitionGraph(messageText);
-  state.debugCognitionChainRun = notReportedCognitionChainRun();
   appendChatMessage({
     label: "operator",
     body: messageText || "Debug message sent.",
     meta: "awaiting brain response",
   });
   renderDebugCognitionGraph(state.debugCognitionGraph);
-  renderDebugCognitionChain(state.debugCognitionChainRun);
   try {
     const result = await api("/api/debug-chat", {method: "POST", csrf: true, body: JSON.stringify(payload)});
     state.debugCognitionGraph = result.cognition_graph || null;
-    state.debugCognitionChainRun = result.cognition_chain_run || notReportedCognitionChainRun();
     const label = result.brain_available ? "brain" : "unavailable";
     const body = debugResponseBody(result);
     const meta = debugResponseMeta(result);
     appendChatMessage({label, body, meta});
     renderDebugCognitionGraph(state.debugCognitionGraph);
-    renderDebugCognitionChain(state.debugCognitionChainRun);
   } catch (error) {
     state.debugCognitionGraph = failedDebugCognitionGraph(error);
-    state.debugCognitionChainRun = notReportedCognitionChainRun();
     renderDebugCognitionGraph(state.debugCognitionGraph);
-    renderDebugCognitionChain(state.debugCognitionChainRun);
     appendChatMessage({
       label: "error",
       body: error.message,
@@ -2393,7 +2165,7 @@ function pendingDebugCognitionGraph(messageText) {
         stage: "Input",
         lane: "input",
         column: 1,
-        branch: "debug",
+        category: "debug",
         status: "completed",
         detail: {input: messageText || "message submitted"},
       },
@@ -2403,7 +2175,7 @@ function pendingDebugCognitionGraph(messageText) {
         stage: "Brain",
         lane: "cognition",
         column: 2,
-        branch: "live",
+        category: "live",
         status: "running",
         detail: {empty_state: "Waiting for the debug cognition result."},
       },
@@ -2426,7 +2198,7 @@ function failedDebugCognitionGraph(error) {
         stage: "Error",
         lane: "cognition",
         column: 1,
-        branch: "debug",
+        category: "debug",
         status: "failed",
         detail: {empty_state: error.message},
       },

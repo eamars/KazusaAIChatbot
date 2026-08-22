@@ -21,15 +21,6 @@ from kazusa_ai_chatbot.action_spec.results import (
     build_private_surface_output,
     build_text_surface_output,
 )
-from kazusa_ai_chatbot.cognition_shared.contracts import (
-    CognitionContractError,
-    is_targetless_group_self_cognition_episode,
-    validate_scheduled_future_speech_authority,
-    validate_text_surface_output,
-)
-from kazusa_ai_chatbot.cognition_shared.state_models import (
-    resolve_state_scope,
-)
 from kazusa_ai_chatbot.cognition_core_v3.diagnostics import (
     bind_protected_chain_records,
     reset_protected_chain_records,
@@ -51,6 +42,15 @@ from kazusa_ai_chatbot.cognition_resolver.loop import (
 )
 from kazusa_ai_chatbot.cognition_resolver.state import (
     ensure_initial_resolver_inputs,
+)
+from kazusa_ai_chatbot.cognition_shared.contracts import (
+    CognitionContractError,
+    is_targetless_group_self_cognition_episode,
+    validate_scheduled_future_speech_authority,
+    validate_text_surface_output,
+)
+from kazusa_ai_chatbot.cognition_shared.state_models import (
+    resolve_state_scope,
 )
 from kazusa_ai_chatbot.config import (
     CHARACTER_GLOBAL_USER_ID,
@@ -81,6 +81,9 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     build_action_availability_snapshot,
     call_cognition_subgraph,
     commit_cognition_output,
+)
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_actions import (
+    materialize_semantic_action_requests,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_l3_surface import (
     call_l3_text_surface_handler,
@@ -428,7 +431,7 @@ async def build_self_cognition_case_artifacts_async(
             action_attempt["status"]
             == models.ACTION_ATTEMPT_STATUS_CANDIDATE
         ):
-            cognition_output = _materialize_v2_due_speak_action(
+            cognition_output = _materialize_canonical_self_speak_action(
                 cognition_state,
                 cognition_output,
                 selected_route=selected_route,
@@ -562,94 +565,89 @@ async def build_self_cognition_case_artifacts_async(
     return artifact_payloads
 
 
-def _materialize_v2_due_speak_action(
+def _materialize_canonical_self_speak_action(
     cognition_state: dict[str, Any],
     cognition_output: dict[str, Any],
     *,
     selected_route: str,
 ) -> dict[str, Any]:
-    """Materialize the canonical speak residue for a due V2 speech route."""
+    """Materialize a policy-approved canonical self-cognition speak action."""
 
     if selected_route != models.ROUTE_ACTION_CANDIDATE:
+        return cognition_output
+    core_output = cognition_output.get("cognition_core_output")
+    if not isinstance(core_output, dict):
+        core_output = cognition_output
+    if core_output.get("schema_version") != "cognition_output.v3":
         return cognition_output
     episode = cognition_state.get("cognitive_episode")
     if not isinstance(episode, dict):
         return cognition_output
-    core_output = cognition_output.get("cognition_core_output")
-    if not isinstance(core_output, dict):
-        return cognition_output
-    intention = core_output.get("intention")
-    if not isinstance(intention, dict) or intention.get("route") != "speech":
+    plan = core_output.get("response_plan")
+    if not isinstance(plan, Mapping):
         return cognition_output
     scheduled_speech = episode.get("trigger_source") == "scheduled_tick"
+    self_response = plan.get("self_cognition_response")
     group_speech = (
         is_targetless_group_self_cognition_episode(episode)
-        and isinstance(core_output.get("self_cognition_response"), dict)
-        and core_output["self_cognition_response"].get("decision")
+        and isinstance(self_response, Mapping)
+        and self_response.get("decision")
         == "propose_visible_reply"
     )
     if not scheduled_speech and not group_speech:
         return cognition_output
     raw_specs = cognition_output.get("action_specs")
-    if raw_specs is not None and not isinstance(raw_specs, list):
+    if "action_specs" in cognition_output and (
+        not isinstance(raw_specs, list)
+        or any(not isinstance(spec, Mapping) for spec in raw_specs)
+    ):
+        raise StateContractError("canonical self-cognition action_specs are invalid")
+    if scheduled_speech and (
+        not isinstance(self_response, Mapping)
+        or self_response.get("decision") != "propose_visible_reply"
+    ):
         return cognition_output
     if isinstance(raw_specs, list) and any(
         isinstance(spec, dict) and spec.get("kind") == SPEAK_CAPABILITY
         for spec in raw_specs
     ):
         return cognition_output
-    intention_text = intention.get("intention")
-    episode_id = episode.get("episode_id")
-    if not isinstance(intention_text, str) or not intention_text.strip():
+    response_goal = (
+        self_response.get("response_goal")
+        if isinstance(self_response, Mapping)
+        else plan.get("response_goal")
+    )
+    response_reason = (
+        self_response.get("reason")
+        if isinstance(self_response, Mapping)
+        else (
+            core_output.get("active_character_goal", {}).get("reason", "")
+            if isinstance(core_output.get("active_character_goal"), Mapping)
+            else ""
+        )
+    )
+    if not isinstance(response_goal, str) or not response_goal.strip():
         return cognition_output
-    if not isinstance(episode_id, str) or not episode_id.strip():
-        return cognition_output
-    speak_spec = {
-        "schema_version": "action_spec.v1",
-        "kind": SPEAK_CAPABILITY,
-        "cognition_mode": "deliberative",
-        "source_refs": [{
-            "schema_version": "action_source_ref.v1",
-            "ref_kind": "cognitive_episode",
-            "ref_id": episode_id,
-            "owner": "cognition",
-            "relationship": "basis",
-            "evidence_refs": [],
-        }],
-        "target": {
-            "schema_version": "action_target.v1",
-            "target_kind": "current_channel",
-            "target_id": None,
-            "owner": "l3_text",
-            "scope": {"surface": "text"},
-        },
-        "params": {
-            "delivery_mode": "visible_reply",
-            "execute_at": None,
-            "surface_requirements": {"intent": intention_text},
-        },
-        "urgency": "now",
-        "visibility": "user_visible",
-        "deadline": None,
-        "continuation": {
-            "schema_version": "action_continuation.v1",
-            "mode": "none",
-            "episode_type": None,
-            "max_depth": 0,
-            "include_result_as": None,
-        },
+    request = {
+        "capability": SPEAK_CAPABILITY,
+        "decision": "visible_reply",
+        "detail": response_goal.strip(),
+        "reason": str(response_reason or response_goal).strip(),
+        "target_roles": [],
+        "evidence_handles": [],
         "surface_role": "ordinary",
         "goal_continuation_ref": None,
-        "reason": (
-            "当前到期认知已选择可见回应。"
-            if scheduled_speech
-            else "当前群组场景认知已选择可见回应。"
-        ),
     }
+    speak_specs = materialize_semantic_action_requests(
+        [request],
+        cognition_state,
+    )
+    if len(speak_specs) != 1:
+        raise StateContractError("canonical self-cognition speak action was not materialized")
     updated_output = dict(cognition_output)
     updated_output["action_specs"] = [
         *(raw_specs if isinstance(raw_specs, list) else []),
-        speak_spec,
+        dict(speak_specs[0]),
     ]
     return updated_output
 
@@ -752,12 +750,14 @@ async def _default_cognition_client(state: dict[str, Any]) -> dict[str, Any]:
     core_output = resolved_state.get("cognition_core_output")
     if not isinstance(core_output, dict):
         raise StateContractError(
-            "V2 self-cognition completed without cognition_core_output"
+            "canonical self-cognition completed without cognition_core_output"
         )
-    state_update = core_output.get("state_update")
+    if core_output.get("schema_version") != "cognition_output.v3":
+        raise StateContractError("canonical self-cognition output is invalid")
+    state_projection = core_output.get("state_projection")
     if (
-        isinstance(state_update, dict)
-        and state_update.get("state_scope") == "character"
+        isinstance(state_projection, dict)
+        and state_projection.get("state_scope") == "character"
     ):
         expected_character_updated_at = resolved_state.get(
             "character_cognition_base_updated_at"

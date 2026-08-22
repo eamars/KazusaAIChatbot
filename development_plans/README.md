@@ -45,18 +45,20 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
-| [cognition_v3_handleless_model_contract_bigbang_plan_2026-08-22.md](active/short_term/cognition_v3_handleless_model_contract_bigbang_plan_2026-08-22.md) | Handleless cognition model-contract big-bang proposal | draft |
+| _None_ |  |  |
 
 ### Superseded Plans
 
 | Document | Type | Status |
 |---|---|---|
 | [cognition_v3_cache_affine_semantic_chain_bigbang_plan.md](archive/superseded/cognition_v3_cache_affine_semantic_chain_bigbang_plan.md) | Former parallel cache-affine semantic-chain projection and partial execution record | superseded by `cognition_v3_hybrid_agentic_loop_reconciliation_plan.md` |
+| [cognition_v3_hybrid_agentic_loop_static_architecture_review_2026-08-21.md](archive/superseded/cognition_v3_hybrid_agentic_loop_static_architecture_review_2026-08-21.md) | Static findings for the retired hybrid cognition chain | superseded by the handleless cognition cutover |
 
 ### Completed Short-Term Plans
 
 | Document | Type | Status |
 |---|---|---|
+| [cognition_v3_handleless_model_contract_bigbang_plan_2026-08-22.md](archive/completed/cognition_v3_handleless_model_contract_bigbang_plan_2026-08-22.md) | Handleless cognition model-contract big-bang cutover and Gate 7 closure | completed |
 | [unified_llm_native_structured_output_default_plan.md](archive/completed/unified_llm_native_structured_output_default_plan.md) | Lightweight native JSON-object default and prompt cleanup | completed |
 | [cognition_v3_hybrid_agentic_loop_reconciliation_plan.md](archive/completed/cognition_v3_hybrid_agentic_loop_reconciliation_plan.md) | Cognition V3 single-lane hybrid agentic-loop reconciliation and V3-only cutover | completed |
 | [cognition_v3_hybrid_agentic_loop_reconciliation_plan_handover_2026-08-21.md](archive/completed/cognition_v3_hybrid_agentic_loop_reconciliation_plan_handover_2026-08-21.md) | Gate 7/8 execution and closure handover | completed |
@@ -68,6 +70,7 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
+| [unified_llm_json_schema_fallback_no_text_bugfix_plan_2026-08-23.md](active/bugfix/unified_llm_json_schema_fallback_no_text_bugfix_plan_2026-08-23.md) | Unified LLM JSON Schema fallback without text correction | draft |
 
 ### Completed Bugfix Plans
 

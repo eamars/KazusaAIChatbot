@@ -35,7 +35,6 @@ from kazusa_ai_chatbot.conversation_progress import (
 from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionExecutionError,
     SceneParticipantBindingV1,
-    validate_cognition_core_output,
     validate_text_surface_output,
     validate_visual_surface_output,
 )
@@ -48,9 +47,6 @@ from kazusa_ai_chatbot.cognition_resolver.capabilities import (
 )
 from kazusa_ai_chatbot.cognition_resolver.loop import (
     call_cognition_resolver_loop,
-)
-from kazusa_ai_chatbot.cognition_resolver.guardrail import (
-    current_cognition_retry_coordinator,
 )
 from kazusa_ai_chatbot.cognition_resolver.pending import (
     apply_pending_resolution,
@@ -346,7 +342,7 @@ def _selected_action_specs(state: GlobalPersonaState) -> list[dict]:
 
 
 def _cognition_selects_text_surface(state: GlobalPersonaState) -> bool:
-    """Return whether the validated V2 intention selects text speech."""
+    """Return whether the canonical response plan selects visible speech."""
 
     evaluator = ActionSpecEvaluator()
     for action_spec in _selected_action_specs(state):
@@ -359,10 +355,14 @@ def _cognition_selects_text_surface(state: GlobalPersonaState) -> bool:
     cognition_output = state.get("cognition_core_output")
     if not isinstance(cognition_output, Mapping):
         raise CognitionExecutionError(
-            "validated V2 cognition output is required for surface routing"
+            "canonical cognition output is required for surface routing"
         )
-    validated_output = validate_cognition_core_output(cognition_output)
-    return_value = validated_output["intention"]["route"] == "speech"
+    if cognition_output.get("schema_version") != "cognition_output.v3":
+        raise CognitionExecutionError("canonical cognition schema is required")
+    plan = cognition_output.get("response_plan")
+    if not isinstance(plan, Mapping):
+        raise CognitionExecutionError("canonical response plan is required")
+    return_value = bool(plan.get("response_goal"))
     return return_value
 
 
@@ -563,8 +563,8 @@ async def call_action_subgraph(state: GlobalPersonaState) -> dict:
         pre_surface_action_results
     )
     surface_update = await call_l3_text_surface_handler(surface_state)
-    surface_state["text_surface_input_v2"] = surface_update[
-        "text_surface_input_v2"
+    surface_state["text_surface_input"] = surface_update[
+        "text_surface_input"
     ]
     surface_state["text_surface_output_v2"] = surface_update[
         "text_surface_output_v2"
@@ -672,23 +672,15 @@ async def run_rag_evidence_for_persona_state(
 
 
 async def stage_1_goal_resolver(state: GlobalPersonaState) -> dict:
-    """Run full resolver recurrence and commit only its final V2 state."""
+    """Run full resolver recurrence and commit only its final state."""
 
     async def cognition_cycle(
         current_state: GlobalPersonaState,
     ) -> GlobalPersonaState:
-        coordinator = current_cognition_retry_coordinator()
-        if coordinator is None:
-            update = await call_cognition_subgraph(
-                current_state,
-                commit=False,
-            )
-        else:
-            update = await call_cognition_subgraph(
-                current_state,
-                commit=False,
-                retry_coordinator=coordinator,
-            )
+        update = await call_cognition_subgraph(
+            current_state,
+            commit=False,
+        )
         return_value = update
         return return_value
 
@@ -711,7 +703,7 @@ async def stage_1_goal_resolver(state: GlobalPersonaState) -> dict:
     )
     core_output = resolved_state.get("cognition_core_output")
     if not isinstance(core_output, Mapping):
-        raise ValueError("V2 resolver completed without cognition_core_output")
+        raise ValueError("Resolver completed without cognition_core_output")
     state_update = core_output.get("state_update")
     if (
         isinstance(state_update, Mapping)

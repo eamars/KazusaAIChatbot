@@ -1,4 +1,4 @@
-"""Exact persistent state models and validation for cognition core V2."""
+"""Exact persistent state models and validation for cognition state."""
 
 from __future__ import annotations
 

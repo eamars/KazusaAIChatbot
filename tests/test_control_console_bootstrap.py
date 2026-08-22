@@ -111,8 +111,8 @@ def test_bootstrap_returns_initial_state_session_csrf_services_and_stream_url(
         "audit",
     ):
         assert page_capabilities[page_name]["status"] == "ready"
-    assert page_capabilities["character"]["label"] == "native V2"
-    assert page_capabilities["users"]["label"] == "directory + V2"
+    assert page_capabilities["character"]["label"] == "canonical cognition"
+    assert page_capabilities["users"]["label"] == "directory + cognition"
     assert page_capabilities["groups"]["label"] == "activity + review"
 
 

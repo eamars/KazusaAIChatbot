@@ -16,12 +16,11 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     project_goal_progress_for_cognition,
     project_observations_for_cognition,
     project_pending_resume_for_cognition,
+    validate_required_resolver_evidence_dependency,
     validate_resolver_cycle_trace,
-    validate_current_turn_relational_willingness,
     validate_resolver_goal_progress,
     validate_resolver_observation,
     validate_resolver_pending_resume,
-    validate_required_resolver_evidence_dependency,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
@@ -347,17 +346,6 @@ def validate_resolver_state(value: object) -> ResolverCycleStateV1:
         "goal_progress": goal_progress,
         "terminal_reason": terminal_reason,
     }
-    current_turn_carrier = data.get("current_turn_relational_willingness")
-    if current_turn_carrier is not None:
-        carrier_episode_id = (
-            _carrier_episode_id(current_turn_carrier)
-        )
-        normalized["current_turn_relational_willingness"] = (
-            validate_current_turn_relational_willingness(
-                current_turn_carrier,
-                episode_id=carrier_episode_id,
-            )
-        )
     evidence_dependency = data.get(
         "required_resolver_evidence_dependency"
     )
@@ -384,19 +372,6 @@ def _cognitive_episode_id(state: Mapping[str, Any]) -> str:
         raise ResolverValidationError("cognitive_episode: expected object")
     episode_id = episode.get("episode_id")
     _require_non_empty_text(episode_id, "cognitive_episode.episode_id")
-    return_value = episode_id
-    return return_value
-
-
-def _carrier_episode_id(value: object) -> str:
-    """Read the carrier episode identity before validating its exact shape."""
-
-    if not isinstance(value, Mapping):
-        raise ResolverValidationError(
-            "current_turn_relational_willingness: expected object"
-        )
-    episode_id = value.get("episode_id")
-    _require_non_empty_text(episode_id, "current_turn_relational_willingness.episode_id")
     return_value = episode_id
     return return_value
 

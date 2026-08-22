@@ -64,7 +64,6 @@ from control_console.event_monitor import (
 )
 from control_console.kazusa_client import (
     KazusaClient,
-    not_reported_cognition_chain_run,
     not_reported_cognition_graph,
 )
 from control_console.log_store import ProcessLogStore
@@ -124,21 +123,6 @@ SAFE_KAZUSA_EVENT_CORRELATION_FIELDS = (
     "tracking_id",
     "background_work_job_id",
 )
-COGNITION_ENGINE_DESCRIPTOR_SCHEMA = "cognition_engine_descriptor.v2"
-COGNITION_ENGINE_DESCRIPTOR_FIELDS = (
-    "engine_id",
-    "chain_model_name",
-    "sidecar_model_name",
-    "sidecar_enabled",
-    "subconscious_enabled",
-    "appraisal_stage_layout",
-    "chain_context_window_tokens",
-    "normal_budget_tokens",
-    "extended_budget_tokens",
-    "turn_deadline_seconds",
-)
-
-
 class NoCacheStaticFiles(StaticFiles):
     """Static file mount that requests browser cache revalidation."""
 
@@ -366,12 +350,6 @@ def create_app(
         latest_self_cognition_graph = operational_sources[
             "latest_self_cognition_graph"
         ]
-        latest_cognition_chain_run = operational_sources[
-            "latest_cognition_chain_run"
-        ]
-        latest_self_cognition_chain_run = operational_sources[
-            "latest_self_cognition_chain_run"
-        ]
         latest_cognition_graph_state["run_id"] = (
             latest_cognition_graph.run_id
         )
@@ -399,8 +377,6 @@ def create_app(
             runtime_status=operational_sources["runtime_status"],
             latest_cognition_graph=latest_cognition_graph,
             latest_self_cognition_graph=latest_self_cognition_graph,
-            latest_cognition_chain_run=latest_cognition_chain_run,
-            latest_self_cognition_chain_run=latest_self_cognition_chain_run,
         )
         return page
 
@@ -439,12 +415,6 @@ def create_app(
         latest_self_cognition_graph = operational_sources[
             "latest_self_cognition_graph"
         ]
-        latest_cognition_chain_run = operational_sources[
-            "latest_cognition_chain_run"
-        ]
-        latest_self_cognition_chain_run = operational_sources[
-            "latest_self_cognition_chain_run"
-        ]
         latest_cognition_graph_state["run_id"] = latest_cognition_graph.run_id
         latest_cognition_graph_state["self_run_id"] = (
             latest_self_cognition_graph.run_id
@@ -470,8 +440,6 @@ def create_app(
             runtime_status=operational_sources["runtime_status"],
             latest_cognition_graph=latest_cognition_graph,
             latest_self_cognition_graph=latest_self_cognition_graph,
-            latest_cognition_chain_run=latest_cognition_chain_run,
-            latest_self_cognition_chain_run=latest_self_cognition_chain_run,
         )
         application_identity = await repository.application_identity()
         payload = ControlConsoleBootstrapResponse(
@@ -489,8 +457,6 @@ def create_app(
             health=health_page,
             latest_cognition_graph=latest_cognition_graph,
             latest_self_cognition_graph=latest_self_cognition_graph,
-            latest_cognition_chain_run=latest_cognition_chain_run,
-            latest_self_cognition_chain_run=latest_self_cognition_chain_run,
             recent_audit_events=audit_page["actions"],
             event_counters={"audit": len(recent_audit), "services": len(states)},
             ui_capabilities={
@@ -764,14 +730,14 @@ def create_app(
             service_id="brain",
             target={
                 "service_id": "brain",
-                "route_key": route.env_prefix.lower(),
+                "route_key": route.route_key,
                 "status": model_list.get("status", "unavailable"),
                 "count": len(model_list.get("models", [])),
             },
             request_id=f"cc-req-{uuid.uuid4().hex[:12]}",
         )
         return {
-            "route_key": route.env_prefix.lower(),
+            "route_key": route.route_key,
             **model_list,
         }
 
@@ -954,9 +920,6 @@ def create_app(
                     run_id=request_id,
                     reason="debug chat did not start because brain is unavailable",
                 ).model_dump(mode="json"),
-                "cognition_chain_run": not_reported_cognition_chain_run().model_dump(
-                    mode="json",
-                ),
             }
             return payload
 
@@ -997,9 +960,6 @@ def create_app(
                     run_id=request_id,
                     reason="debug chat failed before cognition telemetry was reported",
                 ).model_dump(mode="json"),
-                "cognition_chain_run": not_reported_cognition_chain_run().model_dump(
-                    mode="json",
-                ),
             }
         return payload
 
@@ -2122,7 +2082,7 @@ async def _apply_brain_model_route_change(
         registry=registry,
     )
     selected_route = _route_response_from_projection(
-        route.env_prefix.lower(),
+        route.route_key,
         route_payload,
     )
     applied_event_type = "brain_model_route_applied"
@@ -2364,17 +2324,10 @@ async def _load_operational_sources(
     latest_self_cognition_graph = not_reported_cognition_graph(
         source="self_latest",
     )
-    latest_cognition_chain_run = not_reported_cognition_chain_run()
-    latest_self_cognition_chain_run = not_reported_cognition_chain_run()
     if brain_http_available:
         try:
-            (
-                latest_cognition_graph,
-                latest_cognition_chain_run,
-                latest_self_cognition_graph,
-                latest_self_cognition_chain_run,
-            ) = await (
-                kazusa_client.get_latest_cognition_graph_with_chain_runs()
+            latest_cognition_graph = (
+                await kazusa_client.get_latest_cognition_graph()
             )
         except (AttributeError, httpx.HTTPError) as exc:
             latest_cognition_graph = not_reported_cognition_graph(
@@ -2384,17 +2337,23 @@ async def _load_operational_sources(
                     f"{exc}"
                 ),
             )
-            latest_cognition_chain_run = not_reported_cognition_chain_run()
-            latest_self_cognition_chain_run = (
-                not_reported_cognition_chain_run()
+        try:
+            latest_self_cognition_graph = (
+                await kazusa_client.get_latest_self_cognition_graph()
+            )
+        except (AttributeError, httpx.HTTPError) as exc:
+            latest_self_cognition_graph = not_reported_cognition_graph(
+                source="self_latest",
+                reason=(
+                    "brain latest self-cognition graph unavailable: "
+                    f"{exc}"
+                ),
             )
     sources = {
         "brain_health": brain_health,
         "runtime_status": runtime_status,
         "latest_cognition_graph": latest_cognition_graph,
         "latest_self_cognition_graph": latest_self_cognition_graph,
-        "latest_cognition_chain_run": latest_cognition_chain_run,
-        "latest_self_cognition_chain_run": latest_self_cognition_chain_run,
     }
     return sources
 
@@ -2452,12 +2411,10 @@ def _context_consumption_from_graph(graph: Any) -> dict[str, Any]:
     if not isinstance(raw_nodes, list):
         return {}
     for node in raw_nodes:
-        node_id = getattr(node, "id", None)
         detail = getattr(node, "detail", None)
         if isinstance(node, Mapping):
-            node_id = node.get("id")
             detail = node.get("detail")
-        if node_id != "l2.reasoning" or not isinstance(detail, Mapping):
+        if not isinstance(detail, Mapping):
             continue
         context = detail.get("context_consumption")
         if isinstance(context, Mapping):
@@ -2600,8 +2557,6 @@ def _project_overview_page(
     audit_page: dict[str, Any],
     latest_cognition_graph: Any,
     latest_self_cognition_graph: Any,
-    latest_cognition_chain_run: Any,
-    latest_self_cognition_chain_run: Any,
     runtime_status: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Project only bounded cross-owner aggregates for Overview."""
@@ -2713,26 +2668,22 @@ def _project_overview_page(
     recent_failures = (service_failures + audit_failures)[:5]
 
     graph_items: list[dict[str, Any]] = []
-    for graph_kind, graph, graph_kind_chain_run in (
+    for graph_kind, graph in (
         (
             "conversation",
             latest_cognition_graph,
-            latest_cognition_chain_run,
         ),
         (
             "self_cognition",
             latest_self_cognition_graph,
-            latest_self_cognition_chain_run,
         ),
     ):
         graph_payload = graph.model_dump(mode="json")
         if graph_payload.get("status") == "not_reported":
             continue
-        chain_payload = graph_kind_chain_run.model_dump(mode="json")
         graph_items.append({
             "graph_kind": graph_kind,
             "graph": graph_payload,
-            "chain_run": chain_payload,
         })
 
     cognition_graphs_panel = _console_panel(
@@ -2784,15 +2735,6 @@ def _project_overview_page(
         ),
         "latest_self_cognition_graph": latest_self_cognition_graph.model_dump(
             mode="json",
-        ),
-        "latest_cognition_chain_run": latest_cognition_chain_run.model_dump(
-            mode="json",
-        ),
-        "latest_self_cognition_chain_run": (
-            latest_self_cognition_chain_run.model_dump(mode="json")
-        ),
-        "cognition_engine": _project_cognition_engine_descriptor(
-            runtime_status,
         ),
         "panels": panels,
     }
@@ -2866,37 +2808,6 @@ def _source_failure_reason(*sources: dict[str, Any]) -> str:
     ]
     reason = "; ".join(dict.fromkeys(reasons))
     return reason
-
-
-def _project_cognition_engine_descriptor(
-    runtime_status: Mapping[str, Any] | None,
-) -> dict[str, Any]:
-    """Allowlist the selected cognition-engine descriptor for Overview."""
-
-    raw_descriptor = (
-        runtime_status.get("cognition_engine")
-        if isinstance(runtime_status, Mapping)
-        else None
-    )
-    if not isinstance(raw_descriptor, Mapping):
-        return {"status": "not_reported"}
-    if raw_descriptor.get("schema_version") != COGNITION_ENGINE_DESCRIPTOR_SCHEMA:
-        return {"status": "not_reported"}
-    if any(
-        field_name not in raw_descriptor
-        for field_name in COGNITION_ENGINE_DESCRIPTOR_FIELDS
-    ):
-        return {"status": "not_reported"}
-
-    descriptor = {
-        "status": "available",
-        "schema_version": COGNITION_ENGINE_DESCRIPTOR_SCHEMA,
-    }
-    descriptor.update({
-        field_name: raw_descriptor[field_name]
-        for field_name in COGNITION_ENGINE_DESCRIPTOR_FIELDS
-    })
-    return descriptor
 
 
 def _nonnegative_int(value: Any) -> int:

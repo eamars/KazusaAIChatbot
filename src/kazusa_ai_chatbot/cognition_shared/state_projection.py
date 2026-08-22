@@ -1648,6 +1648,15 @@ def _project_activation(
     }
 
 
+def project_affect(
+    activations: Sequence[Mapping[str, Any]],
+    state: Mapping[str, Any],
+) -> list[dict[str, str]]:
+    """Project all affect rows through the native cause owner."""
+
+    return [_project_activation(activation, state) for activation in activations]
+
+
 def _activation_cause_summary(
     activation: Mapping[str, Any],
     state: Mapping[str, Any],
@@ -1674,9 +1683,27 @@ def _activation_cause_summary(
                 if isinstance(description, str) and description.strip():
                     return description[:500]
     if root.get("kind") == "relationship":
+        relationship = state.get("relationship")
+        if isinstance(relationship, Mapping):
+            for evidence_ref in reversed(relationship.get("evidence_refs", [])):
+                if isinstance(evidence_ref, Mapping):
+                    summary = evidence_ref.get("semantic_summary")
+                    if isinstance(summary, str) and summary.strip():
+                        return summary[:500]
         return "当前关系带来激活情绪的社会压力"
     if root.get("kind") == "meaning":
+        for event in reversed(state.get("active_events", [])):
+            if isinstance(event, Mapping):
+                description = event.get("description")
+                if isinstance(description, str) and description.strip():
+                    return description[:500]
         return "目标感和能动性持续偏低"
+    if root.get("kind") == "drive":
+        for event in reversed(state.get("active_events", [])):
+            if isinstance(event, Mapping):
+                description = event.get("description")
+                if isinstance(description, str) and description.strip():
+                    return description[:500]
     return "有依据的原因仍在当前语境中"
 
 

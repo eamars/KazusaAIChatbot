@@ -22,10 +22,10 @@ from kazusa_ai_chatbot.action_spec.registry import (
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
     is_capability_allowed_for_source,
 )
+from kazusa_ai_chatbot.cognition_episode import GoalContinuationRefV1
 from kazusa_ai_chatbot.config import (
     BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
 )
-from kazusa_ai_chatbot.cognition_episode import GoalContinuationRefV1
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import CognitionState
 
 if TYPE_CHECKING:

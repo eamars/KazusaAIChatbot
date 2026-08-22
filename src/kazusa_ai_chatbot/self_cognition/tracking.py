@@ -11,11 +11,7 @@ from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
 from kazusa_ai_chatbot.brain_service.delivery_mentions import (
     build_inline_delivery_mentions,
 )
-from kazusa_ai_chatbot.cognition_shared.contracts import (
-    CognitionContractError,
-    SCHEDULED_SPEECH_GATE_CODES,
-    validate_self_cognition_response_decision,
-)
+from kazusa_ai_chatbot.cognition_shared.contracts import SCHEDULED_SPEECH_GATE_CODES
 from kazusa_ai_chatbot.self_cognition import models
 from kazusa_ai_chatbot.time_boundary import normalize_storage_utc_iso
 
@@ -336,44 +332,25 @@ def evaluate_group_response_policy(
     core_output = cognition_output.get("cognition_core_output")
     if not isinstance(core_output, dict):
         core_output = cognition_output
-    admitted_bid = core_output.get("admitted_bid")
-    if not isinstance(admitted_bid, Mapping):
+    if core_output.get("schema_version") != "cognition_output.v3":
         return _response_outcome(
-            semantic_disposition=models.SEMANTIC_DISPOSITION_COGNITION_DECLINED,
-            policy_disposition=models.POLICY_DISPOSITION_NOT_EVALUATED,
-            execution_disposition=models.EXECUTION_DISPOSITION_NOT_REQUESTED,
-            policy_reason="",
-            gate_codes=["no_admitted_bid"],
-        )
-
-    response = core_output.get("self_cognition_response")
-    evidence_handles = admitted_bid.get("evidence_handles")
-    try:
-        validate_self_cognition_response_decision(response)
-    except (CognitionContractError, ValueError):
-        return _response_outcome(
-            semantic_disposition=(
-                models.SEMANTIC_DISPOSITION_COGNITION_CONTRACT_FAILED
-            ),
+            semantic_disposition=models.SEMANTIC_DISPOSITION_COGNITION_CONTRACT_FAILED,
             policy_disposition=models.POLICY_DISPOSITION_NOT_EVALUATED,
             execution_disposition=models.EXECUTION_DISPOSITION_NOT_REQUESTED,
             policy_reason="",
             gate_codes=["response_contract"],
         )
-    if not isinstance(evidence_handles, list) or not any(
-        handle in evidence_handles
-        for handle in response["evidence_handles"]
-    ):
+    plan = core_output.get("response_plan")
+    response = plan.get("self_cognition_response") if isinstance(plan, Mapping) else None
+    if not isinstance(response, Mapping):
         return _response_outcome(
-            semantic_disposition=(
-                models.SEMANTIC_DISPOSITION_COGNITION_CONTRACT_FAILED
-            ),
+            semantic_disposition=models.SEMANTIC_DISPOSITION_COGNITION_CONTRACT_FAILED,
             policy_disposition=models.POLICY_DISPOSITION_NOT_EVALUATED,
             execution_disposition=models.EXECUTION_DISPOSITION_NOT_REQUESTED,
             policy_reason="",
             gate_codes=["response_contract"],
         )
-    if response["decision"] == "stay_silent":
+    if response.get("decision") == "stay_silent":
         return _response_outcome(
             semantic_disposition=models.SEMANTIC_DISPOSITION_COGNITION_DECLINED,
             policy_disposition=models.POLICY_DISPOSITION_NOT_EVALUATED,
@@ -381,8 +358,15 @@ def evaluate_group_response_policy(
             policy_reason="",
             gate_codes=["response_contract", "semantic_declined"],
         )
-
-    gate_codes = ["response_contract"]
+    if response.get("decision") != "propose_visible_reply":
+        return _response_outcome(
+            semantic_disposition=models.SEMANTIC_DISPOSITION_COGNITION_CONTRACT_FAILED,
+            policy_disposition=models.POLICY_DISPOSITION_NOT_EVALUATED,
+            execution_disposition=models.EXECUTION_DISPOSITION_NOT_REQUESTED,
+            policy_reason="",
+            gate_codes=["response_contract"],
+        )
+    gate_codes = ["response_contract", "caller_bound_evidence"]
     if not _group_source_provenance_is_valid(case):
         return _response_outcome(
             semantic_disposition=models.SEMANTIC_DISPOSITION_REPLY_PROPOSED,
@@ -474,14 +458,13 @@ def classify_route(
             return models.ROUTE_ACTION_CANDIDATE
         return models.ROUTE_AUDIT_ONLY
 
+    scheduled_route = _scheduled_self_cognition_route(case, cognition_output)
+    if scheduled_route:
+        return _route_with_action_attempt(scheduled_route, action_attempt)
+
     explicit_route = _explicit_route(cognition_output)
     if explicit_route:
         route = _route_with_action_attempt(explicit_route, action_attempt)
-        return route
-
-    v2_route = _v2_route_for_due_schedule(case, cognition_output)
-    if v2_route:
-        route = _route_with_action_attempt(v2_route, action_attempt)
         return route
 
     action_spec_route = _route_from_action_specs(cognition_output)
@@ -503,6 +486,36 @@ def classify_route(
     else:
         return_value = models.ROUTE_AUDIT_ONLY
     return return_value
+
+
+def _scheduled_self_cognition_route(
+    case: models.SelfCognitionCase,
+    cognition_output: dict[str, Any],
+) -> str:
+    """Map a due scheduled self-cognition decision to its canonical route."""
+
+    if (
+        _string_field(case, "case_name")
+        != models.CASE_SCHEDULED_FUTURE_COGNITION
+        or _optional_string_field(case, "semantic_due_state")
+        not in models.CONTACT_DUE_STATES
+    ):
+        return ""
+    core_output = cognition_output.get("cognition_core_output")
+    if not isinstance(core_output, dict):
+        core_output = cognition_output
+    if core_output.get("schema_version") != "cognition_output.v3":
+        return models.ROUTE_AUDIT_ONLY
+    plan = core_output.get("response_plan")
+    response = plan.get("self_cognition_response") if isinstance(plan, Mapping) else None
+    if not isinstance(response, Mapping):
+        return models.ROUTE_AUDIT_ONLY
+    decision = response.get("decision")
+    if decision == "propose_visible_reply":
+        return models.ROUTE_ACTION_CANDIDATE
+    if decision == "stay_silent":
+        return models.ROUTE_AUDIT_ONLY
+    return models.ROUTE_AUDIT_ONLY
 
 
 def build_action_attempt(
@@ -695,32 +708,6 @@ def _explicit_route(cognition_output: dict[str, Any]) -> str:
             return_value = selected_route
             return return_value
 
-    return_value = ""
-    return return_value
-
-
-def _v2_route_for_due_schedule(
-    case: models.SelfCognitionCase,
-    cognition_output: dict[str, Any],
-) -> str:
-    """Project canonical scheduled speech into the delivery owner."""
-
-    core_output = cognition_output.get("cognition_core_output")
-    if not isinstance(core_output, dict):
-        return ""
-    intention = core_output.get("intention")
-    if not isinstance(intention, dict):
-        return ""
-    native_route = intention.get("route")
-    source_kind = _first_source_ref(case).get("source_kind")
-    due_state = _optional_string_field(case, "semantic_due_state")
-    if (
-        source_kind == "scheduled_tick"
-        and due_state in models.CONTACT_DUE_STATES
-        and native_route in {"speech", "action"}
-    ):
-        return_value = models.ROUTE_ACTION_CANDIDATE
-        return return_value
     return_value = ""
     return return_value
 

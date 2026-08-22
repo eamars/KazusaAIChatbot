@@ -18,6 +18,7 @@ import traceback
 from collections.abc import Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from copy import deepcopy
+from itertools import pairwise
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -131,28 +132,6 @@ from kazusa_ai_chatbot.character_identity_growth.runtime import (
     snapshot_state_update,
 )
 from kazusa_ai_chatbot.chat_input_queue import ChatInputQueue, QueuedChatItem
-from kazusa_ai_chatbot.cognition_shared.character_carryover import (
-    CharacterCarryoverServicesV1,
-    build_character_carryover_services,
-)
-from kazusa_ai_chatbot.cognition_shared.contracts import (
-    CognitionContextLimitError,
-    CognitionContractError,
-    CognitionExecutionError,
-    validate_cognition_observability,
-)
-from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
-    bind_v2_attempt_ledger,
-    create_v2_attempt_ledger,
-    reset_v2_attempt_ledger,
-    snapshot_v2_guarded_attempt_ledger,
-)
-from kazusa_ai_chatbot.cognition_shared.state_projection import (
-    project_character_operational_state,
-    project_operational_relationship_context,
-    project_relationship_context,
-    select_character_operational_context,
-)
 from kazusa_ai_chatbot.cognition_episode import (
     CURRENT_CHARACTER_ROLE,
     CURRENT_USER_ROLE,
@@ -164,10 +143,25 @@ from kazusa_ai_chatbot.cognition_episode import (
     build_text_chat_media_description_rows,
     build_user_message_episode,
 )
-from kazusa_ai_chatbot.cognition_resolver.guardrail import (
-    bind_cognition_retry_coordinator,
-    create_cognition_retry_coordinator,
-    reset_cognition_retry_coordinator,
+from kazusa_ai_chatbot.cognition_shared.character_carryover import (
+    CharacterCarryoverServicesV1,
+    build_character_carryover_services,
+)
+from kazusa_ai_chatbot.cognition_shared.contracts import (
+    CognitionContextLimitError,
+    CognitionContractError,
+    CognitionExecutionError,
+)
+from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
+    bind_v2_attempt_ledger,
+    create_v2_attempt_ledger,
+    reset_v2_attempt_ledger,
+)
+from kazusa_ai_chatbot.cognition_shared.state_projection import (
+    project_character_operational_state,
+    project_operational_relationship_context,
+    project_relationship_context,
+    select_character_operational_context,
 )
 from kazusa_ai_chatbot.config import (
     BACKGROUND_WORK_INPUT_CHAR_LIMIT,
@@ -184,7 +178,6 @@ from kazusa_ai_chatbot.config import (
     CALENDAR_SCHEDULER_POLL_INTERVAL_SECONDS,
     CHARACTER_GLOBAL_USER_ID,
     CHAT_HISTORY_RECENT_LIMIT,
-    COGNITION_V3_APPRAISAL_STAGE_LAYOUT,
     COGNITION_VISUAL_DIRECTIVES_ENABLED,
     CONVERSATION_HISTORY_LIMIT,
     KAZUSA_CONTROL_BRAIN_SHARED_SECRET,
@@ -196,8 +189,6 @@ from kazusa_ai_chatbot.config import (
     SELF_COGNITION_ENABLED,
     SELF_COGNITION_MAX_CASES_PER_TICK,
     SELF_COGNITION_WORKER_INTERVAL_SECONDS,
-    CognitionV3RouteSettingsV1,
-    get_cognition_v3_route_settings,
 )
 from kazusa_ai_chatbot.consolidation.character_operational_state import (
     CharacterOperationalExecutionContext,
@@ -230,7 +221,6 @@ from kazusa_ai_chatbot.db import (
     get_ambient_conversation_history,
     get_character_profile,
     get_character_runtime_state,
-    get_cognition_chain_run,
     get_conversation_by_platform_message_id,
     get_conversation_history,
     get_current_identity,
@@ -259,10 +249,7 @@ from kazusa_ai_chatbot.internal_monologue_residue import (
     record_completed_episode_residue,
 )
 from kazusa_ai_chatbot.llm_interface.route_report import render_llm_route_table
-from kazusa_ai_chatbot.llm_tracing import (
-    failure_capsule,
-    guardrail_capsule,
-)
+from kazusa_ai_chatbot.llm_tracing import failure_capsule
 from kazusa_ai_chatbot.mcp_client import mcp_manager
 from kazusa_ai_chatbot.media_inspection.session_cache import (
     begin_session_turn,
@@ -2326,41 +2313,12 @@ def _record_latest_self_cognition_graph(
     _latest_self_cognition_graph = deepcopy(cognition_graph)
 
 
-async def _resolve_chain_run_for_graph(
-    graph: dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    """Resolve one graph's paired chain-run row by exact correlation."""
-
-    if not isinstance(graph, Mapping):
-        return None
-    run_id = graph.get("run_id")
-    llm_trace_id = graph.get("llm_trace_id")
-    if not isinstance(run_id, str) or not isinstance(
-        llm_trace_id,
-        str,
-    ):
-        return None
-    if not run_id.strip() or not llm_trace_id.strip():
-        return None
-    chain_run = await get_cognition_chain_run(
-        run_id=run_id,
-        llm_trace_id=llm_trace_id,
-    )
-    return chain_run
-
-
 async def _latest_cognition_graph_response() -> OpsLatestCognitionGraphResponse:
     """Build the read-only latest cognition graph API response."""
 
     response = OpsLatestCognitionGraphResponse(
         cognition_graph=deepcopy(_latest_cognition_graph),
         self_cognition_graph=deepcopy(_latest_self_cognition_graph),
-        cognition_chain_run=await _resolve_chain_run_for_graph(
-            _latest_cognition_graph
-        ),
-        self_cognition_chain_run=await _resolve_chain_run_for_graph(
-            _latest_self_cognition_graph
-        ),
     )
     return response
 
@@ -2400,32 +2358,6 @@ async def _handle_calendar_reflection_phase_run(
         pipeline_coordinator=_pipeline_coordinator,
     )
     return result
-
-
-def _cognition_engine_descriptor() -> dict[str, object]:
-    """Build the safe selected-engine descriptor from loaded config."""
-
-    selected_settings = get_cognition_v3_route_settings()
-    if not isinstance(selected_settings, CognitionV3RouteSettingsV1):
-        raise RuntimeError("selected cognition engine settings are unavailable")
-    context_window_tokens = selected_settings.chain.context_window_tokens
-    if context_window_tokens is None:
-        raise RuntimeError("selected V3 chain context window is unavailable")
-    sidecar = selected_settings.sidecar
-    descriptor = {
-        "schema_version": "cognition_engine_descriptor.v2",
-        "engine_id": "v3",
-        "chain_model_name": selected_settings.chain.model,
-        "sidecar_model_name": sidecar.model if sidecar else "",
-        "sidecar_enabled": sidecar is not None,
-        "subconscious_enabled": selected_settings.subconscious_enabled,
-        "appraisal_stage_layout": COGNITION_V3_APPRAISAL_STAGE_LAYOUT,
-        "chain_context_window_tokens": context_window_tokens,
-        "normal_budget_tokens": 50_000,
-        "extended_budget_tokens": 65_000,
-        "turn_deadline_seconds": selected_settings.turn_deadline_seconds,
-    }
-    return descriptor
 
 
 def _ops_runtime_status_payload(
@@ -2511,7 +2443,6 @@ def _ops_runtime_status_payload(
         "semantic_descriptors": dict(
             base_status.get("semantic_descriptors", {}),
         ),
-        "cognition_engine": _cognition_engine_descriptor(),
     }
     return payload
 
@@ -4041,22 +3972,22 @@ def _build_response_cognition_graph(
 
     nodes = [
         {
-            "id": "intake",
+            "id": "input.turn",
             "label": "Queued turn",
-            "stage": "L1",
+            "stage": "Input",
             "lane": "input",
             "column": 1,
-            "branch": "input",
+            "category": "input",
             "status": "completed",
             "detail": intake_detail,
         },
         {
-            "id": "l1.relevance",
+            "id": "decision.response",
             "label": "Response decision",
-            "stage": "L1",
+            "stage": "Decision",
             "lane": "gate",
             "column": 2,
-            "branch": "decision",
+            "category": "decision",
             "status": "completed",
             "detail": {
                 "decision": _safe_graph_text(should_respond),
@@ -4066,67 +3997,67 @@ def _build_response_cognition_graph(
             },
         },
         {
-            "id": "l2.reasoning",
+            "id": "reasoning.context",
             "label": "Reasoning",
-            "stage": "L2",
+            "stage": "Reasoning",
             "lane": "cognition",
             "column": 3,
-            "branch": "reasoning",
+            "category": "reasoning",
             "status": reasoning_status,
             "detail": reasoning_detail,
         },
         {
-            "id": "l2.memory",
+            "id": "evidence.memory",
             "label": "Memory and evidence",
-            "stage": "L2",
+            "stage": "Evidence",
             "lane": "memory",
             "column": 3,
-            "branch": "memory",
+            "category": "memory",
             "status": memory_status,
             "detail": memory_detail,
         },
         {
-            "id": "l2.actions",
+            "id": "action.results",
             "label": "Actions",
-            "stage": "L2",
+            "stage": "Actions",
             "lane": "action",
             "column": 3,
-            "branch": "action",
+            "category": "action",
             "status": action_status,
             "detail": action_detail,
         },
         {
-            "id": "l3.visual_directives",
+            "id": "surface.visual",
             "label": "Visual directive",
-            "stage": "L3",
+            "stage": "Surface",
             "lane": "surface",
             "column": 4,
-            "branch": "visual",
+            "category": "visual",
             "status": visual_node["status"],
             "detail": visual_node["detail"],
         },
         {
-            "id": "l3.surface",
+            "id": "surface.visible",
             "label": "Visible surface",
-            "stage": "L3",
+            "stage": "Surface",
             "lane": "surface",
             "column": 4,
-            "branch": "dialog",
+            "category": "dialog",
             "status": "completed" if messages else "skipped",
             "detail": {"messages": messages} if messages else {},
         },
     ]
     edges = [
-        {"source": "intake", "target": "l1.relevance", "kind": "sequence"},
-        {"source": "l1.relevance", "target": "l2.reasoning", "kind": "fork"},
-        {"source": "l1.relevance", "target": "l2.memory", "kind": "fork"},
-        {"source": "l1.relevance", "target": "l2.actions", "kind": "fork"},
-        {"source": "l2.reasoning", "target": "l3.visual_directives", "kind": "join"},
-        {"source": "l2.memory", "target": "l3.visual_directives", "kind": "join"},
-        {"source": "l2.actions", "target": "l3.visual_directives", "kind": "join"},
-        {"source": "l2.reasoning", "target": "l3.surface", "kind": "join"},
-        {"source": "l2.memory", "target": "l3.surface", "kind": "join"},
-        {"source": "l2.actions", "target": "l3.surface", "kind": "join"},
+        {"source": "input.turn", "target": "decision.response", "kind": "sequence"},
+        {"source": "decision.response", "target": "reasoning.context", "kind": "reference"},
+        {"source": "decision.response", "target": "evidence.memory", "kind": "reference"},
+        {"source": "decision.response", "target": "action.results", "kind": "reference"},
+        {"source": "reasoning.context", "target": "surface.visual", "kind": "reference"},
+        {"source": "evidence.memory", "target": "surface.visual", "kind": "reference"},
+        {"source": "action.results", "target": "surface.visual", "kind": "reference"},
+        {"source": "reasoning.context", "target": "surface.visible", "kind": "reference"},
+        {"source": "evidence.memory", "target": "surface.visible", "kind": "reference"},
+        {"source": "action.results", "target": "surface.visible", "kind": "reference"},
     ]
     cognition_output = state.get("cognition_core_output")
     if not isinstance(cognition_output, Mapping):
@@ -4142,11 +4073,6 @@ def _build_response_cognition_graph(
         and any(
             node["status"] in {"failed", "partial"}
             for node in cognition_nodes
-            if node["id"] in {
-                "cognition.parallel",
-                "cognition.appraisal",
-                "cognition.failure",
-            }
         )
     ):
         graph_status = "partial"
@@ -4298,95 +4224,95 @@ def _build_self_cognition_cognition_graph(
         {
             "id": "self.source",
             "label": "Source case",
-            "stage": "L1",
+            "stage": "Input",
             "lane": "input",
             "column": 1,
-            "branch": "source",
+            "category": "source",
             "status": "completed",
             "detail": source_detail,
         },
         {
             "id": "self.reasoning",
             "label": "Reasoning",
-            "stage": "L2",
+            "stage": "Reasoning",
             "lane": "cognition",
             "column": 2,
-            "branch": "reasoning",
+            "category": "reasoning",
             "status": run_status,
             "detail": reasoning_detail,
         },
         {
-            "id": "l2.memory",
+            "id": "evidence.memory",
             "label": "Memory and evidence",
-            "stage": "L2",
+            "stage": "Evidence",
             "lane": "memory",
             "column": 2,
-            "branch": "memory",
+            "category": "memory",
             "status": memory_status,
             "detail": memory_detail,
         },
         {
             "id": "self.route",
             "label": "Route decision",
-            "stage": "L2",
+            "stage": "Decision",
             "lane": "decision",
             "column": 3,
-            "branch": "route",
+            "category": "route",
             "status": run_status,
             "detail": route_detail,
         },
         {
             "id": "self.action",
             "label": "Action output",
-            "stage": "L3",
+            "stage": "Actions",
             "lane": "action",
             "column": 4,
-            "branch": "action",
+            "category": "action",
             "status": "completed" if has_action else "skipped",
             "detail": action_detail,
         },
         {
-            "id": "l3.visual_directives",
+            "id": "surface.visual",
             "label": "Visual directive",
-            "stage": "L3",
+            "stage": "Surface",
             "lane": "surface",
             "column": 4,
-            "branch": "visual",
+            "category": "visual",
             "status": visual_node["status"],
             "detail": visual_node["detail"],
         },
         {
             "id": "self.surface",
             "label": "Visible surface",
-            "stage": "L3",
+            "stage": "Surface",
             "lane": "surface",
             "column": 4,
-            "branch": "dialog",
+            "category": "dialog",
             "status": "completed" if has_dialog else "skipped",
             "detail": {"messages": surface_messages} if has_dialog else {},
         },
         {
             "id": "self.consolidation",
             "label": "Consolidation",
-            "stage": "L4",
+            "stage": "Continuity",
             "lane": "memory",
             "column": 5,
-            "branch": "memory",
+            "category": "memory",
             "status": "completed" if has_consolidation else "skipped",
             "detail": consolidation_detail,
         },
     ]
     edges = [
         {"source": "self.source", "target": "self.reasoning", "kind": "sequence"},
-        {"source": "self.source", "target": "l2.memory", "kind": "fork"},
+        {"source": "self.source", "target": "evidence.memory", "kind": "reference"},
         {"source": "self.reasoning", "target": "self.route", "kind": "sequence"},
-        {"source": "l2.memory", "target": "self.route", "kind": "join"},
-        {"source": "self.route", "target": "self.action", "kind": "fork"},
-        {"source": "self.route", "target": "l3.visual_directives", "kind": "fork"},
-        {"source": "self.route", "target": "self.surface", "kind": "fork"},
-        {"source": "self.action", "target": "self.consolidation", "kind": "join"},
-        {"source": "l3.visual_directives", "target": "self.consolidation", "kind": "join"},
-        {"source": "self.surface", "target": "self.consolidation", "kind": "join"},
+        {"source": "evidence.memory", "target": "self.route", "kind": "reference"},
+        {"source": "self.route", "target": "self.action", "kind": "reference"},
+        {"source": "self.route", "target": "surface.visual", "kind": "reference"},
+        {"source": "self.route", "target": "self.surface", "kind": "reference"},
+        {"source": "self.action", "target": "self.consolidation", "kind": "reference"},
+        {"source": "surface.visual", "target": "self.consolidation", "kind": "reference"},
+        {"source": "self.surface", "target": "self.consolidation", "kind": "reference"},
     ]
     snapshot = {
         "run_id": _safe_graph_text(run_record.get("run_id"), max_chars=120),
@@ -4553,84 +4479,6 @@ _GRAPH_FUTURE_FIELDS = _GRAPH_CONTINUATION_FIELDS | frozenset(
         "objective_summary",
     }
 )
-_GRAPH_COGNITION_EXECUTION_FIELDS = frozenset(
-    {
-        "selected_question_count",
-        "dispatched_question_count",
-        "selected_branch_count",
-        "dispatched_branch_count",
-        "completed_branch_count",
-        "failed_branch_count",
-        "maximum_concurrency",
-        "overlap_ms",
-        "dependency_wait_ms",
-        "total_ms",
-    }
-)
-_GRAPH_COGNITION_APPRAISAL_FIELDS = frozenset(
-    {
-        "question_kind",
-        "semantic_question",
-        "status",
-        "explanation",
-        "propositions",
-        "deltas",
-        "proposition_kind",
-        "semantic_value",
-        "delta",
-        "reason",
-        "failure_code",
-    }
-)
-_GRAPH_COGNITION_BRANCH_FIELDS = frozenset(
-    {
-        "phase",
-        "branch_index",
-        "goal_kind",
-        "status",
-        "selection",
-        "intention",
-        "desired_outcome",
-        "concrete_detail",
-        "reason",
-        "private_monologue",
-        "expected_consequences",
-        "confidence",
-        "failure_code",
-    }
-)
-_GRAPH_COGNITION_COLLAPSE_FIELDS = frozenset(
-    {
-        "primary_branch_index",
-        "supporting_branch_indices",
-        "suppressed_branch_indices",
-        "selection_reason",
-    }
-)
-_GRAPH_COGNITION_SELECTED_INTENTION_FIELDS = frozenset(
-    {
-        "route",
-        "intention",
-        "reason",
-    }
-)
-_GRAPH_COGNITION_EXPRESSION_FIELDS = frozenset(
-    {
-        "visibility",
-        "emotional_tone",
-        "intensity",
-        "directness",
-    }
-)
-_GRAPH_COGNITION_AFFECT_FIELDS = frozenset(
-    {
-        "emotion",
-        "phase",
-        "intensity",
-        "trend",
-        "cause_summary",
-    }
-)
 _GRAPH_CONSOLIDATION_FIELDS = frozenset(
     {
         "consolidation_called",
@@ -4769,24 +4617,218 @@ def _graph_cognition_failure_node(
 ) -> dict[str, Any]:
     """Build bounded cognition failure detail without exception text or IDs."""
 
+    safe_code = _graph_public_code(failure_code) or "internal_invariant"
+    safe_stage = _graph_public_text(stage, maximum=80) or "cognition"
     return {
         "id": "cognition.failure",
         "label": label,
         "stage": "Cognition",
         "lane": "cognition",
         "column": 3,
-        "branch": "failure",
+        "category": "failure",
         "status": "failed",
         "detail": {
             "failure": {
-                "failure_code": failure_code,
-                "stage": stage,
-                "attempt_count": max(1, attempt_count),
-                "safe_checkpoint": safe_checkpoint,
-                "retryable": retryable,
+                "failure_code": safe_code,
+                "stage": safe_stage,
             },
         },
     }
+
+
+def _graph_canonical_cognition_nodes(
+    cognition_output: Mapping[str, Any],
+    failure_nodes: list[dict[str, Any]],
+    failure_edges: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Publish semantic cognition nodes without exposing stage topology."""
+
+    def text(value: Any, maximum: int = 400) -> str:
+        return _graph_public_text(value, maximum=maximum)
+
+    def appraisal_rows(value: Any) -> list[dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+        rows: list[dict[str, Any]] = []
+        for raw_row in value:
+            if not isinstance(raw_row, Mapping):
+                continue
+            row: dict[str, Any] = {}
+            family = text(raw_row.get("family"), 80)
+            if family:
+                row["family"] = family
+            if isinstance(raw_row.get("applicable"), bool):
+                row["applicable"] = raw_row["applicable"]
+            for field_name in ("semantic_summary", "cause_summary"):
+                field_value = text(raw_row.get(field_name))
+                if field_value:
+                    row[field_name] = field_value
+            axis_rows = raw_row.get("axis_changes")
+            if isinstance(axis_rows, list):
+                row["axis_changes"] = [
+                    projected
+                    for axis in axis_rows
+                    if isinstance(axis, Mapping)
+                    for projected in [{
+                        key: text(axis.get(key), 120)
+                        for key in ("axis", "shift", "reason")
+                        if text(axis.get(key), 120)
+                    }]
+                    if projected
+                ]
+            if row:
+                rows.append(row)
+        return rows
+
+    def goal_detail(value: Any) -> dict[str, str]:
+        if not isinstance(value, Mapping):
+            return {}
+        return {
+            key: text(value.get(key))
+            for key in ("goal_kind", "intent", "reason", "cause_summary")
+            if text(value.get(key))
+        }
+
+    def semantic_action_rows(value: Any) -> list[dict[str, str]]:
+        if not isinstance(value, list):
+            return []
+        rows: list[dict[str, str]] = []
+        for raw_row in value:
+            if not isinstance(raw_row, Mapping):
+                continue
+            row = {
+                key: text(raw_row.get(key))
+                for key in ("action_kind", "decision", "detail", "reason")
+                if text(raw_row.get(key))
+            }
+            if row:
+                rows.append(row)
+        return rows
+
+    def semantic_resolver_rows(value: Any) -> list[dict[str, str]]:
+        if not isinstance(value, list):
+            return []
+        rows: list[dict[str, str]] = []
+        for raw_row in value:
+            if not isinstance(raw_row, Mapping):
+                continue
+            row = {
+                key: text(raw_row.get(key))
+                for key in ("capability", "goal", "reason")
+                if text(raw_row.get(key))
+            }
+            if row:
+                rows.append(row)
+        return rows
+
+    def affect_rows(value: Any) -> list[dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+        rows: list[dict[str, Any]] = []
+        for raw_row in value:
+            if not isinstance(raw_row, Mapping):
+                continue
+            row: dict[str, Any] = {}
+            for key in ("emotion", "phase", "intensity", "trend", "cause_summary"):
+                field_value = raw_row.get(key)
+                if isinstance(field_value, (int, float)) and not isinstance(field_value, bool):
+                    row[key] = field_value
+                else:
+                    field_text = text(field_value)
+                    if field_text:
+                        row[key] = field_text
+            if row:
+                rows.append(row)
+        return rows
+
+    def cause_rows(value: Any) -> list[dict[str, str]]:
+        if not isinstance(value, list):
+            return []
+        rows: list[dict[str, str]] = []
+        for raw_row in value:
+            if not isinstance(raw_row, Mapping):
+                continue
+            row = {
+                key: text(raw_row.get(key))
+                for key in ("family", "cause_summary", "cause_status")
+                if text(raw_row.get(key))
+            }
+            if row:
+                rows.append(row)
+        return rows
+
+    nodes = [*failure_nodes]
+    edges = [*failure_edges]
+    appraisals = appraisal_rows(cognition_output.get("appraisals"))
+    if appraisals:
+        nodes.append({
+            "id": "cognition.meaning",
+            "label": "Semantic meaning",
+            "stage": "Cognition",
+            "lane": "cognition",
+            "column": 3,
+            "category": "meaning_appraisal",
+            "status": "completed",
+            "detail": {"appraisals": appraisals},
+        })
+    goal = cognition_output.get("active_character_goal")
+    projected_goal = goal_detail(goal)
+    if projected_goal:
+        nodes.append({
+            "id": "cognition.goal",
+            "label": "Active character goal",
+            "stage": "Cognition",
+            "lane": "decision",
+            "column": 4,
+            "category": "active_character_goal",
+            "status": "completed",
+            "detail": {"goal": projected_goal},
+        })
+    plan = cognition_output.get("response_plan")
+    if isinstance(plan, Mapping):
+        projected_plan: dict[str, Any] = {}
+        for key in ("response_goal", "goal_resolution"):
+            field_value = text(plan.get(key))
+            if field_value:
+                projected_plan[key] = field_value
+        actions = semantic_action_rows(plan.get("action_requests"))
+        resolvers = semantic_resolver_rows(plan.get("resolver_requests"))
+        if actions:
+            projected_plan["action_requests"] = actions
+        if resolvers:
+            projected_plan["resolver_requests"] = resolvers
+        nodes.append({
+            "id": "cognition.response",
+            "label": "Response plan",
+            "stage": "Cognition",
+            "lane": "decision",
+            "column": 5,
+            "category": "response_plan",
+            "status": "completed",
+            "detail": projected_plan,
+        })
+    affect = affect_rows(cognition_output.get("affect_projection"))
+    causes = cause_rows(cognition_output.get("cause_provenance"))
+    if affect or causes:
+        affect_detail: dict[str, Any] = {}
+        if affect:
+            affect_detail["affect_projection"] = affect
+        if causes:
+            affect_detail["cause_provenance"] = causes
+        nodes.append({
+            "id": "cognition.affect",
+            "label": "Affect and causes",
+            "stage": "Cognition",
+            "lane": "cognition",
+            "column": 5,
+            "category": "affect_causes",
+            "status": "completed",
+            "detail": affect_detail,
+        })
+    node_ids = [node["id"] for node in nodes]
+    for source, target in pairwise(node_ids):
+        edges.append({"source": source, "target": target, "kind": "sequence", "label": "semantic context"})
+    return nodes, edges
 
 
 def _graph_cognition_nodes(
@@ -4794,7 +4836,7 @@ def _graph_cognition_nodes(
     *,
     failure: BaseException | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Project canonical cognition branch results into the operator graph."""
+    """Project canonical cognition semantics into the operator graph."""
 
     failure_nodes: list[dict[str, Any]] = []
     failure_edges: list[dict[str, Any]] = []
@@ -4817,277 +4859,20 @@ def _graph_cognition_nodes(
         )
         failure_nodes.append(failure_node)
         failure_edges.append({
-            "source": "l1.relevance",
+            "source": "decision.response",
             "target": "cognition.failure",
-            "kind": "fork",
+            "kind": "reference",
             "label": "cognition failure",
         })
     if not isinstance(cognition_output, Mapping):
         return failure_nodes, failure_edges
-    observability = cognition_output.get("cognition_observability")
-    if not isinstance(observability, Mapping):
-        if cognition_output.get("schema_version") == "cognition_core_output.v2":
-            if failure_nodes:
-                return failure_nodes, failure_edges
-            return [
-                _graph_cognition_failure_node(
-                    failure_code="native_observability_missing",
-                    stage="cognition_observability",
-                    label="Cognition telemetry missing",
-                ),
-            ], [
-                {
-                    "source": "l1.relevance",
-                    "target": "cognition.failure",
-                    "kind": "fork",
-                    "label": "cognition telemetry",
-                },
-            ]
+    if cognition_output.get("schema_version") != "cognition_output.v3":
         return failure_nodes, failure_edges
-    try:
-        validate_cognition_observability(observability)
-    except CognitionContractError:
-        if failure_nodes:
-            return failure_nodes, failure_edges
-        return [
-            _graph_cognition_failure_node(
-                failure_code="native_observability_invalid",
-                stage="cognition_observability",
-                label="Cognition telemetry invalid",
-            ),
-        ], [
-            {
-                "source": "l1.relevance",
-                "target": "cognition.failure",
-                "kind": "fork",
-                "label": "cognition telemetry",
-            },
-        ]
-
-    execution = _graph_project_mapping(
-        observability.get("execution"),
-        _GRAPH_COGNITION_EXECUTION_FIELDS,
+    return _graph_canonical_cognition_nodes(
+        cognition_output,
+        failure_nodes,
+        failure_edges,
     )
-    branch_rows = _graph_project_semantic_rows(
-        observability.get("branches"),
-        _GRAPH_COGNITION_BRANCH_FIELDS,
-    )
-    appraisal_rows = _graph_project_semantic_rows(
-        observability.get("appraisals"),
-        _GRAPH_COGNITION_APPRAISAL_FIELDS,
-    )
-    collapse = _graph_project_mapping(
-        observability.get("collapse"),
-        _GRAPH_COGNITION_COLLAPSE_FIELDS,
-    )
-    nodes: list[dict[str, Any]] = list(failure_nodes)
-    edges: list[dict[str, Any]] = list(failure_edges)
-    failed_branch_count = execution.get("failed_branch_count", 0)
-    completed_branch_count = execution.get("completed_branch_count", 0)
-    parallel_status = (
-        "failed"
-        if failed_branch_count and not completed_branch_count
-        else "partial"
-        if failed_branch_count and completed_branch_count
-        else "completed"
-    )
-    parallel_detail: dict[str, Any] = {}
-    if execution:
-        parallel_detail["parallel_execution"] = execution
-    if branch_rows:
-        parallel_detail["branch_results"] = branch_rows
-    nodes.append({
-        "id": "cognition.parallel",
-        "label": "Parallel cognition",
-        "stage": "Cognition",
-        "lane": "cognition",
-        "column": 3,
-        "branch": "parallel",
-        "status": parallel_status,
-        "detail": parallel_detail,
-    })
-
-    appraisal_detail: dict[str, Any] = {}
-    failed_appraisal_count = sum(
-        1
-        for row in appraisal_rows
-        if isinstance(row, Mapping) and row.get("status") == "failed"
-    )
-    completed_appraisal_count = sum(
-        1
-        for row in appraisal_rows
-        if isinstance(row, Mapping) and row.get("status") == "completed"
-    )
-    if appraisal_rows:
-        appraisal_detail["appraisal_results"] = appraisal_rows
-        appraisal_status = (
-            "failed"
-            if failed_appraisal_count and not completed_appraisal_count
-            else "partial"
-            if failed_appraisal_count
-            else "completed"
-        )
-    else:
-        appraisal_detail["empty_state"] = "No semantic appraisal was reported."
-        appraisal_status = (
-            "not_reported"
-            if execution.get("selected_question_count", 0)
-            else "skipped"
-        )
-    nodes.append({
-        "id": "cognition.appraisal",
-        "label": "Appraisal results",
-        "stage": "Cognition",
-        "lane": "cognition",
-        "column": 3,
-        "branch": "appraisal",
-        "status": appraisal_status,
-        "detail": appraisal_detail,
-    })
-    branch_node_ids: list[str] = []
-    for index, branch_detail in enumerate(branch_rows, start=1):
-        branch_index = branch_detail.get("branch_index")
-        if not isinstance(branch_index, int) or isinstance(branch_index, bool):
-            branch_index = index
-        node_id = f"cognition.branch.{branch_index}"
-        if node_id in branch_node_ids:
-            node_id = f"cognition.branch.{index}"
-        branch_node_ids.append(node_id)
-        branch_status = branch_detail.get("status")
-        if branch_status not in {"completed", "failed", "not_reported"}:
-            branch_status = "not_reported"
-        nodes.append({
-            "id": node_id,
-            "label": f"Goal branch {branch_index}",
-            "stage": "Cognition",
-            "lane": "cognition",
-            "column": 4,
-            "branch": f"branch-{branch_index}",
-            "status": branch_status,
-            "detail": branch_detail,
-        })
-
-    collapse_detail: dict[str, Any] = {}
-    if collapse:
-        collapse_detail["collapse"] = collapse
-    selected_intention = _graph_project_mapping(
-        cognition_output.get("intention"),
-        _GRAPH_COGNITION_SELECTED_INTENTION_FIELDS,
-    )
-    if selected_intention:
-        collapse_detail["selected_intention"] = selected_intention
-    selected_bid_reason = _graph_full_text(
-        cognition_output.get("selected_bid_reason")
-    )
-    if selected_bid_reason:
-        collapse_detail["selected_bid_reason"] = selected_bid_reason
-    private_monologue = _graph_full_text(
-        cognition_output.get("private_monologue")
-    )
-    if private_monologue:
-        collapse_detail["private_monologue"] = private_monologue
-    goal_resolution = _safe_graph_text(cognition_output.get("goal_resolution"))
-    if goal_resolution:
-        collapse_detail["goal_resolution"] = goal_resolution
-    expression_policy = _graph_project_mapping(
-        cognition_output.get("expression_policy"),
-        _GRAPH_COGNITION_EXPRESSION_FIELDS,
-    )
-    if expression_policy:
-        collapse_detail["expression_policy"] = expression_policy
-    nodes.append({
-        "id": "cognition.collapse",
-        "label": "Workspace collapse",
-        "stage": "Cognition",
-        "lane": "decision",
-        "column": 5,
-        "branch": "collapse",
-        "status": "completed" if collapse_detail else "not_reported",
-        "detail": collapse_detail,
-    })
-
-    affect_rows = _graph_project_semantic_rows(
-        cognition_output.get("affect_projection"),
-        _GRAPH_COGNITION_AFFECT_FIELDS,
-    )
-    if affect_rows:
-        affect_detail = {"affect_projection": affect_rows}
-        affect_status = "completed"
-    else:
-        affect_detail = {"empty_state": "No affect projection was reported."}
-        affect_status = "skipped"
-    nodes.append({
-        "id": "cognition.affect",
-        "label": "Affect projection",
-        "stage": "Cognition",
-        "lane": "cognition",
-        "column": 5,
-        "branch": "affect",
-        "status": affect_status,
-        "detail": affect_detail,
-    })
-
-    edges.extend([
-        {
-            "source": "l1.relevance",
-            "target": "cognition.parallel",
-            "kind": "fork",
-            "label": "cognition",
-        },
-        {
-            "source": "cognition.parallel",
-            "target": "cognition.appraisal",
-            "kind": "fork",
-            "label": "appraisal",
-        },
-        {
-            "source": "cognition.appraisal",
-            "target": "cognition.collapse",
-            "kind": "join",
-            "label": "semantic result",
-        },
-        {
-            "source": "cognition.collapse",
-            "target": "cognition.affect",
-            "kind": "sequence",
-            "label": "state projection",
-        },
-        {
-            "source": "cognition.affect",
-            "target": "l3.visual_directives",
-            "kind": "join",
-            "label": "expression",
-        },
-        {
-            "source": "cognition.affect",
-            "target": "l3.surface",
-            "kind": "join",
-            "label": "surface",
-        },
-    ])
-    for node_id in branch_node_ids:
-        branch_node = next(
-            node for node in nodes if node["id"] == node_id
-        )
-        branch_detail = branch_node["detail"]
-        selection = (
-            branch_detail.get("selection")
-            if isinstance(branch_detail, Mapping)
-            else ""
-        )
-        edges.append({
-            "source": "cognition.parallel",
-            "target": node_id,
-            "kind": "fork",
-            "label": "parallel branch",
-        })
-        edges.append({
-            "source": node_id,
-            "target": "cognition.collapse",
-            "kind": "join",
-            "label": str(selection or "branch result"),
-        })
-    return nodes, edges
 
 
 def _graph_messages(value: Any) -> list[str]:
@@ -5147,7 +4932,7 @@ def _graph_context_consumption(
         state.get("cognition_input"),
     )
     surface = _graph_surface_context_consumption(
-        state.get("text_surface_input_v2"),
+        state.get("text_surface_input"),
         state.get("interaction_style_context"),
     )
     health = _graph_context_consumption_health(
@@ -5205,7 +4990,7 @@ def _graph_settled_relevance_consumption(
 
 
 def _graph_cognition_context_consumption(value: Any) -> dict[str, Any]:
-    """Project only the context present in the executed V2 cognition input."""
+    """Project only the context present in the executed cognition input."""
 
     if not isinstance(value, Mapping):
         return {}
@@ -5232,7 +5017,7 @@ def _graph_surface_context_consumption(
     surface_input: Any,
     style_snapshot: Any,
 ) -> dict[str, Any]:
-    """Record the source-labelled style projection accepted by L3."""
+    """Record the source-labelled style projection accepted by the surface."""
 
     if not isinstance(surface_input, Mapping):
         return {}
@@ -5257,17 +5042,6 @@ def _graph_context_consumption_health(
     health: dict[str, Any] = {}
     if predecessor:
         health["predecessor"] = dict(predecessor)
-    cognition_output = state.get("cognition_core_output")
-    if not isinstance(cognition_output, Mapping):
-        cognition_output = graph_result.get("cognition_core_output")
-    if isinstance(cognition_output, Mapping):
-        diagnostics = cognition_output.get("diagnostics")
-        if isinstance(diagnostics, Mapping):
-            stage_status = diagnostics.get("stage_status")
-            projected_status = _graph_public_stage_status(stage_status)
-            if projected_status:
-                health["stage_status"] = projected_status
-
     trace = state.get("episode_trace")
     if not isinstance(trace, Mapping):
         trace = graph_result.get("episode_trace")
@@ -5489,27 +5263,6 @@ def _graph_public_predecessor(value: Mapping[str, Any]) -> dict[str, Any]:
         field_value = value.get(field_name)
         if isinstance(field_value, int) and not isinstance(field_value, bool) and field_value >= 0:
             result[field_name] = field_value
-    return result
-
-
-def _graph_public_stage_status(value: Any) -> dict[str, str]:
-    """Allowlist the stable V2 stage health labels."""
-
-    if not isinstance(value, Mapping):
-        return {}
-    result: dict[str, str] = {}
-    for field_name in (
-        "input_validation",
-        "deterministic_preliminary",
-        "semantic_appraisal",
-        "final_reduction",
-        "branch_cognition",
-        "workspace_collapse",
-        "action_planning",
-    ):
-        status = _graph_public_text(value.get(field_name), maximum=40)
-        if status in {"completed", "failed", "skipped"}:
-            result[field_name] = status
     return result
 
 
@@ -6032,8 +5785,6 @@ async def _process_queued_chat_item(
     scheduled_followup_count = 0
     debug_mode_names: list[str] = []
     settled_trace: dict[str, object] | None = None
-    cognition_retry_coordinator = None
-    cognition_retry_coordinator_token = None
     settlement_items = [item]
     if settlement_fragments:
         settlement_items = [
@@ -6490,12 +6241,6 @@ async def _process_queued_chat_item(
         original_initial_state = deepcopy(initial_state)
         cognition_attempt_count = 0
         cognition_attempt_ledger = create_v2_attempt_ledger(correlation_id)
-        cognition_retry_coordinator = create_cognition_retry_coordinator(
-            cognition_attempt_ledger.cognition_invocation_id,
-        )
-        cognition_retry_coordinator_token = bind_cognition_retry_coordinator(
-            cognition_retry_coordinator,
-        )
         while True:
             cognition_attempt_count += 1
             attempt_ledger_token = bind_v2_attempt_ledger(
@@ -6511,23 +6256,6 @@ async def _process_queued_chat_item(
                     reset_v2_attempt_ledger(attempt_ledger_token)
                 break
             except Exception as exc:
-                if (
-                    cognition_retry_coordinator is not None
-                    and _can_retry_cognition_failure(
-                        exc,
-                        cognition_attempt_count,
-                    )
-                    and cognition_retry_coordinator.claim_replay(
-                        "service_graph",
-                    )
-                ):
-                    stages_reached.append("cognition_safe_retry")
-                    logger.warning(
-                        "Retrying pure cognition after a typed pre-commit "
-                        f"failure: code={getattr(exc, 'error_code', '')} "
-                        f"attempt={cognition_attempt_count}"
-                    )
-                    continue
                 logger.exception(f"Graph invocation failed: {exc}")
                 response = _operational_error_response(
                     correlation_id=correlation_id,
@@ -7021,42 +6749,6 @@ async def _process_queued_chat_item(
             delivery_tracking_id="",
         )
     finally:
-        guardrail_session = guardrail_capsule.current_guardrail_capsule()
-        if (
-            guardrail_session is not None
-            and cognition_retry_coordinator is not None
-            and cognition_retry_coordinator.parent_recovery_attempted
-        ):
-            guardrail_disposition = (
-                cognition_retry_coordinator.parent_recovery_disposition
-            )
-            if guardrail_disposition in {"recovered", "exhausted"}:
-                snapshot_token = bind_v2_attempt_ledger(
-                    cognition_attempt_ledger,
-                    graph_attempt=cognition_attempt_count,
-                )
-                try:
-                    guarded_attempt_ledger = (
-                        snapshot_v2_guarded_attempt_ledger()
-                    )
-                finally:
-                    reset_v2_attempt_ledger(snapshot_token)
-                guardrail_capsule.finish_guardrail_capsule(
-                    guardrail_session,
-                    coordinator_snapshot=(
-                        cognition_retry_coordinator.snapshot()
-                    ),
-                    attempt_ledger=guarded_attempt_ledger,
-                    disposition=guardrail_disposition,
-                )
-            else:
-                guardrail_capsule.discard_guardrail_capsule(
-                    guardrail_session,
-                )
-        if cognition_retry_coordinator_token is not None:
-            reset_cognition_retry_coordinator(
-                cognition_retry_coordinator_token,
-            )
         await _release_queued_pipeline_handle(item)
 
 

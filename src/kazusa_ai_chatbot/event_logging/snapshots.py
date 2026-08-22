@@ -8,52 +8,22 @@ from datetime import timedelta
 from typing import Literal
 from uuid import uuid4
 
-from kazusa_ai_chatbot.event_logging import repository
 from kazusa_ai_chatbot.config import AUDIT_LOG_TTL_DAYS
-from kazusa_ai_chatbot.event_logging.models import (
-    CognitionV2SnapshotSummary,
-    EventLogWriteResult,
-)
+from kazusa_ai_chatbot.event_logging import repository
+from kazusa_ai_chatbot.event_logging.models import EventLogWriteResult
 from kazusa_ai_chatbot.event_logging.recording import (
     EVENT_LOG_WRITE_TIMEOUT_SECONDS,
 )
 from kazusa_ai_chatbot.event_logging.sanitization import sanitized_failure_reason
 from kazusa_ai_chatbot.event_logging.schemas import EventLogSnapshotDoc
-from kazusa_ai_chatbot.logging_retention import expiry_from_datetime
 from kazusa_ai_chatbot.event_logging.status import (
     build_semantic_descriptors,
     build_snapshot_source_counts,
 )
+from kazusa_ai_chatbot.logging_retention import expiry_from_datetime
 from kazusa_ai_chatbot.time_boundary import storage_utc_now
 
 logger = logging.getLogger(__name__)
-
-
-def build_cognition_v2_snapshot_summary(
-    source_counts: dict[str, int],
-) -> CognitionV2SnapshotSummary:
-    """Build an aggregate V2 diagnostic without raw state or identifiers."""
-
-    summary = CognitionV2SnapshotSummary(
-        event_count=max(0, int(source_counts.get("cognition_v2_events", 0))),
-        component_counts={},
-        branch_counts={},
-        commit_status_counts={
-            "committed": max(
-                0,
-                int(source_counts.get("cognition_v2_committed", 0)),
-            ),
-            "failed": max(
-                0,
-                int(source_counts.get("cognition_v2_commit_failed", 0)),
-            ),
-        },
-        failed_stage_count=max(
-            0,
-            int(source_counts.get("cognition_v2_stage_failed", 0)),
-        ),
-    )
-    return summary
 
 
 def _snapshot_result(
@@ -101,9 +71,6 @@ async def write_analysis_snapshot(
         semantic_descriptors=descriptors,
         findings=[],
         source_event_refs=[],
-        cognition_v2_summary=build_cognition_v2_snapshot_summary(
-            source_counts,
-        ),
     )
     try:
         await asyncio.wait_for(

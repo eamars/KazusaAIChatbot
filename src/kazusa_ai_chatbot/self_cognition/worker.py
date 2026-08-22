@@ -415,7 +415,7 @@ async def run_self_cognition_worker_tick(
                     case_for_run,
                     pipeline_run_handle=active_pipeline_handle,
                 )
-            _validate_worker_v2_cognition_result(
+            _validate_worker_cognition_result(
                 artifact_payloads,
                 required=run_case_func is None,
             )
@@ -582,49 +582,48 @@ async def run_self_cognition_worker_tick(
     return result
 
 
-def _validate_worker_v2_cognition_result(
+def _validate_worker_cognition_result(
     artifact_payloads: dict[str, Any],
     *,
     required: bool,
 ) -> None:
     """Enforce the cognition-selected scope before worker delivery."""
 
-    cognition_input = artifact_payloads.get(models.ARTIFACT_COGNITION_INPUT)
     output = artifact_payloads.get(models.ARTIFACT_COGNITION_OUTPUT)
     if not isinstance(output, dict):
         if required and models.ARTIFACT_COGNITION_INPUT in artifact_payloads:
-            raise StateContractError("self-cognition V2 output is missing")
+            raise StateContractError("self-cognition output is missing")
         return
     core_output = output.get("cognition_core_output")
     if not isinstance(core_output, dict):
+        core_output = output
+    if not isinstance(core_output, dict):
         if required:
-            raise StateContractError("self-cognition core output is missing")
+            raise StateContractError("self-cognition canonical output is missing")
         return
-    state_update = core_output.get("state_update")
-    if not isinstance(state_update, dict):
-        raise StateContractError("self-cognition V2 state update is missing")
-    actual_scope = state_update.get("state_scope")
+    if core_output.get("schema_version") != "cognition_output.v3":
+        raise StateContractError("self-cognition output schema is invalid")
+    state_projection = core_output.get("state_projection")
+    if not isinstance(state_projection, dict):
+        raise StateContractError("self-cognition state projection is missing")
+    input_payload = artifact_payloads.get(models.ARTIFACT_COGNITION_INPUT)
+    if not isinstance(input_payload, dict):
+        raise StateContractError("self-cognition cognition input is missing")
+    expected_scope = input_payload.get("state_scope")
+    if expected_scope not in {"character", "user"}:
+        raise StateContractError("self-cognition cognition input scope is invalid")
+    actual_scope = state_projection.get("state_scope")
     if actual_scope not in {"character", "user"}:
         raise StateContractError(
-            "self-cognition V2 state update has an invalid scope"
+            "self-cognition state projection has an invalid scope"
         )
-    expected_scope = (
-        cognition_input.get("state_scope")
-        if isinstance(cognition_input, dict)
-        else None
-    )
-    if expected_scope not in {"character", "user"}:
-        if required:
-            raise StateContractError(
-                "self-cognition V2 cognition input scope is missing"
-            )
-    elif actual_scope != expected_scope:
+    if actual_scope != expected_scope:
         raise StateContractError(
-            "self-cognition V2 state scope does not match cognition input"
+            "self-cognition state projection scope does not match cognition input"
         )
     if output.get("cognition_state_committed") is not True:
         raise StateContractError(
-            "self-cognition V2 state was not committed before delivery"
+            "self-cognition state was not committed before delivery"
         )
 
 

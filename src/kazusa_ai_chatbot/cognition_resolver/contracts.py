@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-
 from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict
 
 from kazusa_ai_chatbot.cognition_episode import (
@@ -29,31 +28,6 @@ RESOLVER_EVIDENCE_STATE_VERSION = "resolver_evidence_state.v1"
 REQUIRED_RESOLVER_EVIDENCE_DEPENDENCY_VERSION = (
     "required_resolver_evidence_dependency.v1"
 )
-CURRENT_TURN_RELATIONAL_WILLINGNESS_VERSION = (
-    "current_turn_relational_willingness.v2"
-)
-RELATIONAL_WILLINGNESS_SCHEMA_VERSION = "relational_willingness.v2"
-RELATIONAL_WILLINGNESS_APPLICABILITY_VALUES = frozenset({
-    "not_relationship_sensitive",
-    "relationship_sensitive",
-})
-RELATIONAL_WILLINGNESS_STANCE_VALUES = frozenset({
-    "not_applicable",
-    "reject",
-    "deflect",
-    "negotiate",
-    "conditional_accept",
-    "accept",
-})
-RELATIONAL_WILLINGNESS_RELATIONSHIP_STATE_VALUES = frozenset({
-    "not_applicable",
-    "unestablished",
-    "developing_or_uncertain",
-    "established",
-})
-RELATIONAL_WILLINGNESS_MAX_REASON_CHARS = 300
-MAX_RELATIONAL_WILLINGNESS_EVIDENCE_HANDLES = 4
-
 MAX_RESOLVER_SUMMARY_CHARS = 600
 MAX_RESOLVER_OBJECTIVE_CHARS = 400
 MAX_RESOLVER_REASON_CHARS = 400
@@ -189,15 +163,6 @@ class ResolverEvidenceStateV1(TypedDict):
     remaining_needs: list[str]
 
 
-class CurrentTurnRelationalWillingnessV2(TypedDict):
-    """Immutable complete relational decision carried through recurrence."""
-
-    schema_version: Literal["current_turn_relational_willingness.v2"]
-    episode_id: str
-    branch_id: Literal["ordinary_response"]
-    decision: dict[str, object]
-
-
 class RequiredResolverEvidenceDependencyV1(TypedDict):
     """Exact resolver dependency bound to one accepted answer-evidence request."""
 
@@ -310,9 +275,6 @@ class ResolverCycleStateV1(TypedDict):
     held_action_specs: list[ActionSpecV1]
     pending_resume: NotRequired[ResolverPendingResumeV1]
     goal_progress: NotRequired[ResolverGoalProgressV1]
-    current_turn_relational_willingness: NotRequired[
-        CurrentTurnRelationalWillingnessV2
-    ]
     required_resolver_evidence_dependency: NotRequired[
         RequiredResolverEvidenceDependencyV1
     ]
@@ -339,114 +301,6 @@ def validate_resolver_evidence_state(
         "remaining_needs": remaining_needs,
     }
     return return_value
-
-
-def validate_current_turn_relational_willingness(
-    value: object,
-    *,
-    episode_id: str,
-) -> CurrentTurnRelationalWillingnessV2:
-    """Validate the complete recurrence carrier without semantic rewriting."""
-
-    data = _require_mapping(value, "current_turn_relational_willingness")
-    _require_exact_keys(
-        data,
-        {"schema_version", "episode_id", "branch_id", "decision"},
-        "current_turn_relational_willingness",
-    )
-    _require_version(data, CURRENT_TURN_RELATIONAL_WILLINGNESS_VERSION)
-    carrier_episode_id = _require_non_empty_string(data, "episode_id")
-    if carrier_episode_id != episode_id:
-        raise ResolverValidationError(
-            "current_turn_relational_willingness: episode_id mismatch"
-        )
-    if data.get("branch_id") != "ordinary_response":
-        raise ResolverValidationError(
-            "current_turn_relational_willingness: branch_id is invalid"
-        )
-    decision = data.get("decision")
-    if not isinstance(decision, dict):
-        raise ResolverValidationError(
-            "current_turn_relational_willingness: decision must be an object"
-        )
-    _require_exact_keys(
-        decision,
-        {
-            "schema_version",
-            "applicability",
-            "stance",
-            "current_user_relationship_state",
-            "reason",
-            "evidence_handles",
-        },
-        "current_turn_relational_willingness.decision",
-    )
-    if decision.get("schema_version") != RELATIONAL_WILLINGNESS_SCHEMA_VERSION:
-        raise ResolverValidationError(
-            "current_turn_relational_willingness.decision: schema version is invalid"
-        )
-    applicability = decision.get("applicability")
-    if applicability not in RELATIONAL_WILLINGNESS_APPLICABILITY_VALUES:
-        raise ResolverValidationError(
-            "current_turn_relational_willingness.decision: applicability is invalid"
-        )
-    stance = decision.get("stance")
-    if stance not in RELATIONAL_WILLINGNESS_STANCE_VALUES:
-        raise ResolverValidationError(
-            "current_turn_relational_willingness.decision: stance is invalid"
-        )
-    relationship_state = decision.get("current_user_relationship_state")
-    if relationship_state not in RELATIONAL_WILLINGNESS_RELATIONSHIP_STATE_VALUES:
-        raise ResolverValidationError(
-            "current_turn_relational_willingness.decision: relationship state is invalid"
-        )
-    if applicability == "not_relationship_sensitive":
-        if stance != "not_applicable" or relationship_state != "not_applicable":
-            raise ResolverValidationError(
-                "current_turn_relational_willingness.decision: non-sensitive values are invalid"
-            )
-    elif stance == "not_applicable" or relationship_state == "not_applicable":
-        raise ResolverValidationError(
-            "current_turn_relational_willingness.decision: sensitive values are incomplete"
-        )
-    reason = decision.get("reason")
-    if (
-        not isinstance(reason, str)
-        or not reason.strip()
-        or len(reason) > RELATIONAL_WILLINGNESS_MAX_REASON_CHARS
-    ):
-        raise ResolverValidationError(
-            "current_turn_relational_willingness.decision: reason is invalid"
-        )
-    evidence_handles = decision.get("evidence_handles")
-    if not isinstance(evidence_handles, list):
-        raise ResolverValidationError(
-            "current_turn_relational_willingness.decision: evidence handles are invalid"
-        )
-    if not 1 <= len(evidence_handles) <= (
-        MAX_RELATIONAL_WILLINGNESS_EVIDENCE_HANDLES
-    ):
-        raise ResolverValidationError(
-            "current_turn_relational_willingness.decision: evidence handles are invalid"
-        )
-    if any(
-        not isinstance(handle, str) or not handle.strip()
-        for handle in evidence_handles
-    ):
-        raise ResolverValidationError(
-            "current_turn_relational_willingness.decision: evidence handles are invalid"
-        )
-    if len(evidence_handles) != len(set(evidence_handles)):
-        raise ResolverValidationError(
-            "current_turn_relational_willingness.decision: evidence handles are invalid"
-        )
-    normalized: CurrentTurnRelationalWillingnessV2 = {
-        "schema_version": CURRENT_TURN_RELATIONAL_WILLINGNESS_VERSION,
-        "episode_id": carrier_episode_id,
-        "branch_id": "ordinary_response",
-        "decision": dict(decision),
-    }
-    return normalized
 
 
 def validate_required_resolver_evidence_dependency(

@@ -68,24 +68,25 @@ class _StaticStoppedSupervisor:
         return 0
 
 
-def test_model_routes_keep_v3_active_and_generic_cognition_shared() -> None:
-    """Keep both V3 routes active and generic cognition shared."""
+def test_model_routes_use_semantic_slugs_without_private_route_metadata() -> None:
+    """Expose semantic route slugs while keeping env mapping server-private."""
 
     from control_console import brain_model_routes
 
     snapshot = SimpleNamespace(fields=[])
     rows = brain_model_routes.project_brain_model_routes(snapshot, {})
-    by_prefix = {row["env_prefix"]: row for row in rows}
+    by_key = {row["route_key"]: row for row in rows}
 
-    assert by_prefix["COGNITION_V3_CHAIN_LLM"]["active"] is True
-    assert by_prefix["COGNITION_V3_CHAIN_LLM"]["required"] is True
-    assert by_prefix["COGNITION_V3_SIDECAR_LLM"]["active"] is True
-    assert by_prefix["COGNITION_V3_SIDECAR_LLM"]["required"] is False
-    assert by_prefix["COGNITION_LLM"]["family"] == "shared_non_core"
-    assert by_prefix["COGNITION_LLM"]["active"] is False
-    assert by_prefix["COGNITION_LLM"]["required"] is True
-    assert all(row["family"] != "v2" for row in rows)
-    assert all(row["active"] for row in rows if row["family"] == "v3")
+    assert by_key["cognition"]["label"] == "Cognition"
+    assert by_key["cognition"]["required"] is True
+    assert by_key["cognition_support"]["label"] == "Cognition support"
+    assert all("env_prefix" not in row for row in rows)
+    serialized = repr(rows).lower()
+    assert "cognition_v3_chain_llm" not in serialized
+    assert "shared_non_core" not in serialized
+    assert "sidecar" not in serialized
+    assert "engine" not in serialized
+    assert all(row["route_key"] not in {"v2", "v3"} for row in rows)
 
 
 def _client_with_login(tmp_path, *, supervisor=None):
@@ -533,7 +534,7 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert capabilities["health"]["label"] == "live readiness"
     assert "memory" not in capabilities
     assert "style" not in capabilities
-    assert capabilities["users"]["label"] == "directory + V2"
+    assert capabilities["users"]["label"] == "directory + cognition"
     assert capabilities["groups"]["label"] == "activity + review"
 
     favicon = client.get("/favicon.ico")
@@ -545,275 +546,6 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     payload = lookup.json()
     assert payload["status"] in {"available", "empty", "unavailable"}
     assert "items" in payload
-
-
-def test_cognition_chain_panels_render_correlated_sanitized_runs(
-    monkeypatch,
-    tmp_path,
-) -> None:
-    """Bootstrap and static panels keep live/self chain rows paired and bounded."""
-
-    from control_console import app as app_module
-    from control_console.contracts import (
-        CognitionChainRunSnapshot,
-        CognitionRunGraphSnapshot,
-    )
-
-    class RunningSupervisor(_StaticStoppedSupervisor):
-        """Expose a running Brain state while retaining static service rows."""
-
-        def all_service_states(self):
-            """Return static service rows with the Brain endpoint running."""
-
-            states = super().all_service_states()
-            states[0].actual_state = "running"
-            return states
-
-    class FakeKazusaClient:
-        """Return paired strict snapshots without raw service payloads."""
-
-        def __init__(
-            self,
-            *,
-            base_url: str,
-            timeout_seconds: float,
-            control_shared_secret: str = "",
-        ) -> None:
-            _ = base_url
-            _ = timeout_seconds
-            _ = control_shared_secret
-
-        async def get_health(self):
-            """Return the bounded health source used by Overview."""
-
-            return {"status": "healthy"}
-
-        async def get_runtime_status(self):
-            """Return the bounded runtime source used by Overview."""
-
-            return {
-                "status": "running",
-                "workers": {},
-                "cognition_engine": {
-                    "schema_version": "cognition_engine_descriptor.v2",
-                    "engine_id": "v3",
-                    "chain_model_name": "chain-model",
-                    "sidecar_model_name": "sidecar-model",
-                    "sidecar_enabled": True,
-                    "subconscious_enabled": True,
-                    "appraisal_stage_layout": "fixed_a1_a2",
-                    "chain_context_window_tokens": 50176,
-                    "normal_budget_tokens": 50000,
-                    "extended_budget_tokens": 65000,
-                    "turn_deadline_seconds": 333,
-                    "endpoint": "https://private.example/v1",
-                    "api_key": "private-key",
-                },
-            }
-
-        async def get_latest_cognition_graph_with_chain_runs(self):
-            """Return exact live/self graph and chain correlations."""
-
-            generated_at = datetime.now(timezone.utc)
-            live_graph = CognitionRunGraphSnapshot(
-                source="overview_latest",
-                status="completed",
-                run_id="live-run",
-                llm_trace_id="live-trace",
-                cognition_invocation_id="live-invocation",
-                generated_at=generated_at,
-            )
-            live_chain = CognitionChainRunSnapshot(
-                status="completed",
-                chain_run_id="live-chain",
-                run_id="live-run",
-                llm_trace_id="live-trace",
-                cognition_invocation_id="live-invocation",
-                chain_model_name="chain-model",
-                sidecar_model_name="sidecar-model",
-                terminal_disposition="complete",
-                started_at="2026-08-20T00:00:00Z",
-                completed_at="2026-08-20T00:00:01Z",
-                step_count=8,
-                warning_codes=["bounded_warning"],
-            )
-            self_graph = CognitionRunGraphSnapshot(
-                source="self_latest",
-                status="completed",
-                run_id="self-run",
-                llm_trace_id="self-trace",
-                cognition_invocation_id="self-invocation",
-                generated_at=generated_at,
-            )
-            self_chain = CognitionChainRunSnapshot(
-                status="completed",
-                chain_run_id="self-chain",
-                run_id="self-run",
-                llm_trace_id="self-trace",
-                cognition_invocation_id="self-invocation",
-                chain_model_name="self-chain-model",
-                sidecar_model_name="self-sidecar-model",
-                terminal_disposition="complete",
-                started_at="2026-08-20T00:01:00Z",
-                completed_at="2026-08-20T00:01:01Z",
-                step_count=4,
-                warning_codes=[],
-            )
-            return live_graph, live_chain, self_graph, self_chain
-
-    monkeypatch.setattr(app_module, "KazusaClient", FakeKazusaClient)
-    client, _ = _client_with_login(
-        tmp_path,
-        supervisor=RunningSupervisor(),
-    )
-
-    bootstrap = client.get("/api/bootstrap")
-    assert bootstrap.status_code == 200
-    payload = bootstrap.json()
-    assert payload["latest_cognition_chain_run"]["run_id"] == "live-run"
-    assert payload["latest_self_cognition_chain_run"]["run_id"] == "self-run"
-    assert payload["overview"]["cognition_engine"] == {
-        "status": "available",
-        "schema_version": "cognition_engine_descriptor.v2",
-        "engine_id": "v3",
-        "chain_model_name": "chain-model",
-        "sidecar_model_name": "sidecar-model",
-        "sidecar_enabled": True,
-        "subconscious_enabled": True,
-        "appraisal_stage_layout": "fixed_a1_a2",
-        "chain_context_window_tokens": 50176,
-        "normal_budget_tokens": 50000,
-        "extended_budget_tokens": 65000,
-        "turn_deadline_seconds": 333,
-    }
-    graph_items = payload["overview"]["panels"]["cognition_graphs"]["items"]
-    graph_by_kind = {item["graph_kind"]: item for item in graph_items}
-    assert graph_by_kind["conversation"]["chain_run"]["llm_trace_id"] == (
-        "live-trace"
-    )
-    assert graph_by_kind["self_cognition"]["chain_run"]["llm_trace_id"] == (
-        "self-trace"
-    )
-    serialized_payload = repr(payload)
-    assert "raw_prompt" not in serialized_payload
-    assert "raw_output" not in serialized_payload
-    assert "endpoint" not in serialized_payload
-
-    index = client.get("/")
-    assert index.status_code == 200
-    for element_id in (
-        "overview-cognition-chain-card",
-        "overview-cognition-chain",
-        "overview-self-cognition-chain-card",
-        "overview-self-cognition-chain",
-        "overview-cognition-engine-card",
-        "overview-cognition-engine",
-        "debug-cognition-chain-card",
-        "debug-cognition-chain",
-    ):
-        assert f'id="{element_id}"' in index.text
-
-    script = client.get("/static/console.js")
-    assert script.status_code == 200
-    for field_name in (
-        "status",
-        "chain_run_id",
-        "run_id",
-        "llm_trace_id",
-        "cognition_invocation_id",
-        "chain_model_name",
-        "sidecar_model_name",
-        "terminal_disposition",
-        "started_at",
-        "completed_at",
-        "step_count",
-        "warning_codes",
-        "engine_id",
-        "chain_model_name",
-        "sidecar_model_name",
-        "sidecar_enabled",
-        "subconscious_enabled",
-        "appraisal_stage_layout",
-        "chain_context_window_tokens",
-        "normal_budget_tokens",
-        "extended_budget_tokens",
-        "turn_deadline_seconds",
-    ):
-        assert field_name in script.text
-    assert "function renderCognitionChainRun" in script.text
-    assert "function projectCognitionEngineDescriptor" in script.text
-    assert "function renderCognitionEngineDescriptor" in script.text
-    assert "cognition_engine_descriptor.v2" in script.text
-    assert (
-        "cognitionChainFieldValue(fieldName, fieldValue, chainStatus)"
-        in script.text
-    )
-    assert (
-        'if (chainStatus === "not_reported") return "not_reported";'
-        in script.text
-    )
-    assert "raw_prompt" not in script.text
-
-    stylesheet = client.get("/static/console.css")
-    assert stylesheet.status_code == 200
-    assert ".cognition-chain-panel" in stylesheet.text
-
-
-def test_cognition_engine_projection_fails_closed_for_unknown_or_incomplete_data(
-    tmp_path,
-) -> None:
-    """Overview descriptor projection ignores additive and unsafe fields."""
-
-    from control_console import app as app_module
-
-    base_descriptor = {
-        "schema_version": "cognition_engine_descriptor.v2",
-        "engine_id": "v3",
-        "chain_model_name": "chain-model",
-        "sidecar_model_name": "sidecar-model",
-        "sidecar_enabled": True,
-        "subconscious_enabled": False,
-        "appraisal_stage_layout": "fixed_a1_a2",
-        "chain_context_window_tokens": 50176,
-        "normal_budget_tokens": 50000,
-        "extended_budget_tokens": 65000,
-        "turn_deadline_seconds": 240,
-        "endpoint": "https://private.example",
-        "api_key": "private-key",
-    }
-    projected = app_module._project_cognition_engine_descriptor({
-        "cognition_engine": base_descriptor,
-    })
-
-    assert projected["status"] == "available"
-    assert "endpoint" not in projected
-    assert "api_key" not in projected
-
-    unknown_schema = app_module._project_cognition_engine_descriptor({
-        "cognition_engine": {
-            **base_descriptor,
-            "schema_version": "cognition_engine_descriptor.v9",
-        },
-    })
-    incomplete = app_module._project_cognition_engine_descriptor({
-        "cognition_engine": {
-            key: value
-            for key, value in base_descriptor.items()
-            if key != "turn_deadline_seconds"
-        },
-    })
-    assert unknown_schema == {"status": "not_reported"}
-    assert incomplete == {"status": "not_reported"}
-
-    client, _ = _client_with_login(
-        tmp_path,
-        supervisor=_StaticStoppedSupervisor(),
-    )
-    index = client.get("/")
-    assert index.status_code == 200
-    assert "Cognition engine configuration" in index.text
-    assert "endpoint" not in index.text
-    assert "api_key" not in index.text
 
 
 def test_event_stream_refresh_does_not_reconnect_stream(tmp_path) -> None:
@@ -1125,7 +857,6 @@ def test_web_api_outputs_for_logs_events_audit_character_and_debug_error(
     payload = failing_debug.json()
     assert payload["brain_available"] is False
     assert payload["error"]["code"] == "brain_unavailable"
-    assert payload["cognition_chain_run"]["status"] == "not_reported"
 
 
 def test_audit_api_collapses_actions_and_summarizes_views(tmp_path) -> None:

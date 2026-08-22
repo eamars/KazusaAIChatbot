@@ -10,11 +10,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 import kazusa_ai_chatbot.llm_tracing as tracing
 from kazusa_ai_chatbot import utils as utils_module
-from kazusa_ai_chatbot.cognition_shared.contracts import (
-    CognitionExecutionError,
-)
-from kazusa_ai_chatbot.llm_tracing import failure_capsule, guardrail_capsule
-
+from kazusa_ai_chatbot.llm_tracing import failure_capsule
 from llm_test_helpers import make_llm_call_config
 
 
@@ -130,7 +126,7 @@ async def test_failure_capsule_promotes_exact_input_and_attempt(monkeypatch):
     monkeypatch.setattr(tracing.db_llm_tracing, "insert_trace_step", insert_step)
 
     input_payload = {
-        "schema_version": "cognition_core_input.v2",
+        "schema_version": "cognition_input.v3",
         "nested": {"value": "before"},
     }
     session = failure_capsule.begin_failure_capsule(
@@ -143,7 +139,7 @@ async def test_failure_capsule_promotes_exact_input_and_attempt(monkeypatch):
         "cognition_invocation_id": "ledger-invocation-1",
         "graph_attempt": 1,
         "branch_id": "autonomy_boundary",
-        "producing_stage": "goal_bid_structure",
+        "producing_stage": "cognition_appraisal",
         "local_attempt": 1,
         "cumulative_producer_attempt": 1,
         "configured_limit": 3,
@@ -189,7 +185,7 @@ async def test_failure_capsule_promotes_exact_input_and_attempt(monkeypatch):
             "branch_dispositions": [{
                 "branch_id": "autonomy_boundary",
                 "disposition": "exhausted",
-                "error_code": "goal_bid_structure_exhausted",
+                "error_code": "cognition_contract_exhausted",
             }],
         },
     )
@@ -232,86 +228,11 @@ async def test_failure_capsule_promotes_exact_input_and_attempt(monkeypatch):
     assert capsule["attempt_ledger"]["branch_dispositions"] == [{
         "branch_id": "autonomy_boundary",
         "disposition": "exhausted",
-        "error_code": "goal_bid_structure_exhausted",
+                "error_code": "cognition_contract_exhausted",
     }]
     assert capsule["attempts"][0]["config"]["base_url"] == config.base_url
     assert "api_key" not in capsule["attempts"][0]["config"]
     assert "test-api-key" not in repr(capsule_rows[0])
-
-
-@pytest.mark.asyncio
-async def test_guarded_failure_capsule_contains_outer_parent_metadata(
-    monkeypatch,
-) -> None:
-    """The outer row stores bounded parent lineage beside inner capsules."""
-
-    written: list[dict] = []
-    persisted = asyncio.Event()
-
-    async def insert_step(document: dict) -> str:
-        written.append(document)
-        persisted.set()
-        return document["step_id"]
-
-    monkeypatch.setattr(
-        guardrail_capsule,
-        "LLM_TRACE_CAPTURE_MODE",
-        "metadata",
-    )
-    monkeypatch.setattr(
-        guardrail_capsule.db_llm_tracing,
-        "insert_trace_step",
-        insert_step,
-    )
-    trigger = CognitionExecutionError(
-        "goal bid exhausted",
-        error_code="goal_bid_structure_exhausted",
-        branch_id="ordinary_response",
-        stage="goal_cognition",
-        attempt_count=3,
-        safe_checkpoint="pre_state_commit",
-        retryable=False,
-    )
-    digest = "b" * 64
-    session = guardrail_capsule.begin_guardrail_capsule(
-        trace_id="trace-parent",
-        scope="persona_stage_1",
-        cycle_index=0,
-        checkpoint_sha256=digest,
-    )
-    guardrail_capsule.record_guardrail_trigger(session, error=trigger)
-    guardrail_capsule.finish_guardrail_capsule(
-        session,
-        coordinator_snapshot={
-            "checkpoint_sha256": digest,
-        },
-        attempt_ledger={
-            "schema_version": "cognition_attempt_ledger.v2",
-            "epochs": [],
-            "parent_recovery": {},
-        },
-        disposition="exhausted",
-    )
-    await asyncio.wait_for(persisted.wait(), timeout=1)
-
-    capsule = written[0]["capsule"]
-    assert written[0]["capture_reason"] == "cognition_parent_guardrail"
-    assert capsule["schema_version"] == (
-        "cognition_parent_guardrail_capsule.v1"
-    )
-    assert capsule["trace_id"] == "trace-parent"
-    assert capsule["checkpoint_sha256"] == digest
-    assert capsule["trigger"]["error_code"] == (
-        "goal_bid_structure_exhausted"
-    )
-    assert capsule["parent_recovery"] == {
-        "disposition": "exhausted",
-        "claimed_by": "parent_checkpoint",
-        "epoch": 1,
-        "max_replays": 1,
-    }
-    assert "input_payload" not in repr(capsule)
-    assert "raw_response_text" not in repr(capsule)
 
 
 def test_failure_cause_chain_is_truncated_to_four_entries() -> None:

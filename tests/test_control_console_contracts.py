@@ -60,36 +60,3 @@ def test_service_contracts_reject_extra_fields_and_unbounded_strings() -> None:
     with pytest.raises(ValidationError):
         ConsoleDebugChatRequest.model_validate(huge_debug_body)
 
-
-def test_chain_run_projection_is_strict_bounded_and_optional() -> None:
-    """Chain-run snapshots reject raw fields and default to not_reported."""
-
-    from control_console.contracts import CognitionChainRunSnapshot
-
-    missing = CognitionChainRunSnapshot()
-    assert missing.status == "not_reported"
-    assert missing.warning_codes == []
-
-    valid = CognitionChainRunSnapshot.model_validate({
-        "status": "completed",
-        "chain_run_id": "cogchain_1",
-        "run_id": "run-1",
-        "llm_trace_id": "trace-1",
-        "cognition_invocation_id": "invocation-1",
-        "chain_model_name": "chain-model",
-        "sidecar_model_name": "sidecar-model",
-        "terminal_disposition": "complete",
-        "started_at": "2026-08-20T00:00:00Z",
-        "completed_at": "2026-08-20T00:00:01Z",
-        "step_count": 8,
-        "warning_codes": ["bounded_warning"],
-    })
-    assert valid.run_id == "run-1"
-    assert valid.step_count == 8
-
-    with pytest.raises(ValidationError):
-        CognitionChainRunSnapshot.model_validate({
-            "status": "completed",
-            "raw_prompt": "forbidden",
-        })
-

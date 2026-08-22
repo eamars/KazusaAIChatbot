@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
 import re
+from collections.abc import Mapping, Sequence
 from typing import Any
-
 
 REDACTED = "[redacted]"
 MAX_SAFE_TEXT_CHARS = 800
@@ -102,7 +101,6 @@ _STAGE_HEALTH_FIELDS = (
     "semantic_appraisal",
     "final_reduction",
     "branch_cognition",
-    "workspace_collapse",
     "action_planning",
 )
 

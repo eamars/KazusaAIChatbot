@@ -11,16 +11,16 @@ from datetime import datetime, timezone
 from typing import Any, cast
 
 from kazusa_ai_chatbot import llm_tracing
-from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
 from kazusa_ai_chatbot.action_spec.models import (
     ActionAvailabilityContextV1,
     RuntimeCapabilitySnapshotV1,
-    SurfaceRoleV1,
 )
 from kazusa_ai_chatbot.action_spec.registry import (
     ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
+    FUTURE_SPEAK_CAPABILITY,
     SPEAK_CAPABILITY,
+    TRIGGER_FUTURE_COGNITION_CAPABILITY,
     build_episode_affordances,
     build_initial_action_capabilities,
     build_runtime_capability_snapshot,
@@ -41,22 +41,49 @@ from kazusa_ai_chatbot.character_identity_growth.runtime import (
     load_latest_identity_for_episode,
     snapshot_state_update,
 )
+from kazusa_ai_chatbot.cognition_core_v3 import run_cognition
+from kazusa_ai_chatbot.cognition_core_v3.contracts import (
+    CognitionChainServicesV3,
+)
+from kazusa_ai_chatbot.cognition_core_v3.diagnostics import (
+    bind_protected_chain_records,
+    current_chain_scope,
+    reset_protected_chain_records,
+)
+from kazusa_ai_chatbot.cognition_episode import (
+    CognitiveEpisodeValidationError,
+    GoalContinuationRefV1,
+    build_goal_continuation_ref,
+    project_dialog_response_operation,
+    project_dialog_role_explicit_content,
+    validate_cognitive_episode_v1,
+)
+from kazusa_ai_chatbot.cognition_resolver.capabilities import (
+    _task_resolution_execution_context_from_state,
+    merge_shared_memory_prewarm_result,
+    project_resolver_observation_for_cognition,
+    run_first_cycle_shared_memory_prewarm,
+    validate_task_resolution_execution_readiness,
+)
+from kazusa_ai_chatbot.cognition_resolver.contracts import (
+    ALLOWED_RESOLVER_CAPABILITIES,
+    RESOLVER_CAPABILITY_REQUEST_VERSION,
+    RESOLVER_CAPABILITY_SEMANTICS,
+    ResolverValidationError,
+    validate_resolver_capability_request,
+)
 from kazusa_ai_chatbot.cognition_shared.contracts import (
     EVIDENCE_SOURCE_QUESTION_IDS,
     PAST_DIALOG_COGNITION_CONTEXT_MAX_CHARS,
+    SCHEDULED_AUTHORITY_PROPOSAL_SCHEMA_VERSION,
     ActionAffordanceV2,
     CognitionContractError,
-    CognitionCoreInputV2,
-    CognitionCoreOutputV2,
     CognitionExecutionError,
     GroupEngagementActionContextV2,
     ResolverAffordanceV2,
     SceneContextV2,
     _validate_scene_context,
-    validate_cognition_core_input,
-)
-from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
-    current_v2_attempt_ledger,
+    validate_scheduled_authority_proposal,
 )
 from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_acquaintance_user_state,
@@ -71,57 +98,12 @@ from kazusa_ai_chatbot.cognition_shared.state_projection import (
     project_relationship_context,
     select_character_operational_context,
 )
-from kazusa_ai_chatbot.cognition_core_v3 import run_cognition
-from kazusa_ai_chatbot.cognition_core_v3.contracts import (
-    CognitionChainServicesV3,
-)
-from kazusa_ai_chatbot.cognition_core_v3.diagnostics import (
-    bind_protected_chain_records,
-    current_chain_scope,
-    reset_protected_chain_records,
-)
-from kazusa_ai_chatbot.cognition_episode import (
-    CognitiveEpisodeValidationError,
-    GoalContinuationRefV1,
-    project_dialog_response_operation,
-    project_dialog_role_explicit_content,
-    validate_cognitive_episode_v1,
-    validate_goal_continuation_ref,
-)
-from kazusa_ai_chatbot.cognition_resolver.capabilities import (
-    merge_shared_memory_prewarm_result,
-    project_resolver_observation_for_cognition,
-    run_first_cycle_shared_memory_prewarm,
-    validate_task_resolution_execution_readiness,
-)
-from kazusa_ai_chatbot.cognition_resolver.contracts import (
-    ALLOWED_RESOLVER_CAPABILITIES,
-    CURRENT_TURN_RELATIONAL_WILLINGNESS_VERSION,
-    RESOLVER_CAPABILITY_REQUEST_VERSION,
-    RESOLVER_CAPABILITY_SEMANTICS,
-    ResolverValidationError,
-    validate_current_turn_relational_willingness,
-)
-from kazusa_ai_chatbot.cognition_resolver.guardrail import (
-    CognitionRetryCoordinator,
-    bind_cognition_retry_coordinator,
-    reset_cognition_retry_coordinator,
-    run_guarded_cognition,
-)
-from kazusa_ai_chatbot.cognition_resolver.state import validate_resolver_state
 from kazusa_ai_chatbot.config import (
     AFFECT_SETTLING_WAKE_PREP_MINUTES,
-    BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
     BACKGROUND_WORK_WORKER_ENABLED,
     CALENDAR_SCHEDULER_ENABLED,
     CHARACTER_SLEEP_LOCAL_PERIOD,
     CHARACTER_TIME_ZONE,
-    CODING_AGENT_WORKSPACE_ROOT,
-    COGNITION_LLM_API_KEY,
-    COGNITION_LLM_BASE_URL,
-    COGNITION_LLM_MAX_COMPLETION_TOKENS,
-    COGNITION_LLM_MODEL,
-    COGNITION_LLM_THINKING_ENABLED,
     COGNITION_STAGE_TIMEOUT_SECONDS,
     CognitionRouteSettingV1,
     get_cognition_v3_route_settings,
@@ -137,7 +119,6 @@ from kazusa_ai_chatbot.db import (
     get_user_cognition_state,
 )
 from kazusa_ai_chatbot.event_logging import (
-    record_cognition_v2_event,
     record_continuity_boundary_event,
 )
 from kazusa_ai_chatbot.llm_interface import (
@@ -145,43 +126,22 @@ from kazusa_ai_chatbot.llm_interface import (
     LLMCallConfig,
     LLMThinkingConfig,
 )
-from kazusa_ai_chatbot.media_inspection.session_cache import (
-    list_session_media_refs,
-)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_actions import (
+    ACTION_SPEC_CAP,
     materialize_semantic_action_requests,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_memory_lifecycle import (
     has_trusted_active_commitments,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
-from kazusa_ai_chatbot.task_resolution.contracts import (
-    MAX_TASK_RESOLUTION_TEXT_CHARS,
-    MAX_TASK_RESOLUTION_TEXT_ITEMS,
-    TASK_RESOLUTION_EXECUTION_CONTEXT_VERSION,
-    TaskResolutionExecutionContextV1,
-    validate_task_resolution_execution_context,
+from kazusa_ai_chatbot.time_boundary import (
+    local_llm_datetime_to_storage_utc_iso,
+    parse_storage_utc_datetime,
 )
-from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
 
 logger = logging.getLogger(__name__)
 _llm_interface = LLInterface()
 PERSONALITY_JUDGMENT_MAX_CHARS = 180
-
-_cognition_llm_config = LLMCallConfig(
-    stage_name="persona_supervisor2_cognition",
-    route_name="COGNITION_LLM",
-    base_url=COGNITION_LLM_BASE_URL,
-    api_key=COGNITION_LLM_API_KEY,
-    model=COGNITION_LLM_MODEL,
-    temperature=0.1,
-    top_p=0.7,
-    top_k=None,
-    max_completion_tokens=COGNITION_LLM_MAX_COMPLETION_TOKENS,
-    presence_penalty=None,
-    thinking=LLMThinkingConfig(enabled=COGNITION_LLM_THINKING_ENABLED),
-)
-
 
 def _cognition_route_config(
     setting: CognitionRouteSettingV1,
@@ -209,6 +169,14 @@ def _cognition_route_config(
     return config
 
 
+# L3 currently imports this shared route binding for its text-surface call.
+_cognition_llm_config = _cognition_route_config(
+    get_cognition_v3_route_settings().chain,
+    stage_name="cognition_core_v3.l3_surface",
+    route_name="COGNITION_V3_CHAIN_LLM",
+)
+
+
 def build_cognition_core_services(
 ) -> CognitionChainServicesV3:
     """Build the injected model bindings for the V3 cognition chain."""
@@ -219,19 +187,9 @@ def build_cognition_core_services(
         stage_name="cognition_core_v3.chain",
         route_name="COGNITION_V3_CHAIN_LLM",
     )
-    if route_settings_v3.sidecar is None:
-        sidecar_lane = None
-    else:
-        sidecar_lane = _cognition_route_config(
-            route_settings_v3.sidecar,
-            stage_name="cognition_core_v3.sidecar",
-            route_name="COGNITION_V3_SIDECAR_LLM",
-        )
     services = CognitionChainServicesV3(
         llm=_llm_interface,
         chain_lane=chain_lane,
-        sidecar_lane=sidecar_lane,
-        subconscious_enabled=route_settings_v3.subconscious_enabled,
         turn_deadline_seconds=route_settings_v3.turn_deadline_seconds,
     )
     return services
@@ -243,7 +201,7 @@ def build_scene_context_from_global_state(
     """Build and validate the one prompt-safe scene for a cognition episode.
 
     The returned scene is the canonical bounded representation shared by the
-    V2 cognition input, resolver capabilities, and accepted coding context.
+    canonical cognition input, resolver capabilities, and accepted coding context.
     It contains semantic roles, current scene text, temporal continuity,
     sleep phase, and the episode-local participant bindings without transport
     or persistent identifiers.
@@ -271,7 +229,7 @@ def build_scene_context_from_global_state(
         conversation_continuity = ""
     elif not isinstance(conversation_progress, Mapping):
         raise CognitionExecutionError(
-            "conversation progress must be a V2 prompt mapping"
+            "conversation progress must be a canonical prompt mapping"
         )
     else:
         conversation_continuity = project_conversation_progress_scene(
@@ -353,7 +311,7 @@ def build_cognition_input_from_global_state(
     *,
     mutable_state: Mapping[str, Any] | None = None,
     character_state: Mapping[str, Any] | None = None,
-) -> CognitionCoreInputV2:
+) -> dict[str, Any]:
     """Map adapter-neutral graph state into one canonical cognition scope."""
 
     episode = state.get("cognitive_episode")
@@ -397,7 +355,7 @@ def build_cognition_input_from_global_state(
     character_profile = state.get("character_profile")
     if not isinstance(character_profile, Mapping):
         raise CognitionExecutionError(
-            "character profile is required for V2 cognition"
+            "character profile is required for cognition"
         )
     personality_brief = character_profile["personality_brief"]
     if not isinstance(personality_brief, Mapping):
@@ -455,7 +413,7 @@ def build_cognition_input_from_global_state(
     if conversation_progress is not None:
         if not isinstance(conversation_progress, dict):
             raise CognitionExecutionError(
-                "conversation progress must be a V2 prompt mapping"
+                "conversation progress must be a canonical prompt mapping"
             )
         evidence.extend(project_conversation_progress_evidence(
             conversation_progress,
@@ -478,11 +436,9 @@ def build_cognition_input_from_global_state(
         state.get("action_results"),
         timestamp,
     ))
-    for index, row in enumerate(evidence, start=1):
-        row["evidence_handle"] = f"e{index}"
     scope = selected_mutable_state["state_scope"]
-    payload: CognitionCoreInputV2 = {
-        "schema_version": "cognition_core_input.v2",
+    payload: dict[str, Any] = {
+        "schema_version": "cognition_input.v3",
         "episode": dict(episode),
         "state_scope": scope,
         "mutable_state": dict(selected_mutable_state),
@@ -537,23 +493,15 @@ def build_cognition_input_from_global_state(
             payload["required_resolver_evidence_dependency"] = dict(
                 evidence_dependency
             )
-        relational_carrier = resolver_state.get(
-            "current_turn_relational_willingness"
-        )
-        if isinstance(relational_carrier, Mapping):
-            payload["current_turn_relational_willingness"] = dict(
-                relational_carrier
-            )
-    return validate_cognition_core_input(payload)
+    return payload
 
 
 async def call_cognition_subgraph(
     state: GlobalPersonaState,
     *,
     commit: bool = True,
-    retry_coordinator: CognitionRetryCoordinator | None = None,
 ) -> GlobalPersonaState:
-    """Run V2 cognition, commit its one replacement state, then expose projections."""
+    """Run one canonical cognition pass and expose its projections."""
 
     episode = state.get("cognitive_episode")
     if not isinstance(episode, Mapping):
@@ -734,21 +682,11 @@ async def call_cognition_subgraph(
     trace_token = llm_tracing.bind_trace_id(
         str(state.get("llm_trace_id") or ""),
     )
-    coordinator_token = None
     diagnostics_token = None
     try:
-        if retry_coordinator is not None:
-            coordinator_token = bind_cognition_retry_coordinator(
-                retry_coordinator,
-            )
         cognition_services = build_cognition_core_services()
         if current_chain_scope() is None:
-            attempt_ledger = current_v2_attempt_ledger()
-            invocation_id = (
-                attempt_ledger.cognition_invocation_id
-                if attempt_ledger is not None
-                else ""
-            )
+            invocation_id = ""
             input_episode = cognition_input.get("episode")
             target_scope = (
                 input_episode.get("target_scope")
@@ -769,22 +707,14 @@ async def call_cognition_subgraph(
                 llm_trace_id=trace_id,
                 cognition_invocation_id=(invocation_id or run_id),
             )
-        if commit or retry_coordinator is None:
-            output = await run_cognition(
-                cognition_input,
-                cognition_services,
-            )
-        else:
-            output = await run_guarded_cognition(
-                cognition_input,
-                cognition_services,
-                run_child=run_cognition,
-            )
+        # The canonical engine owns one direct A1/A2/G/P pass.
+        output = await run_cognition(
+            cognition_input,
+            cognition_services,
+        )
     finally:
         if diagnostics_token is not None:
             reset_protected_chain_records(diagnostics_token)
-        if coordinator_token is not None:
-            reset_cognition_retry_coordinator(coordinator_token)
         llm_tracing.reset_trace_id(trace_token)
     if commit:
         await _commit_cognition_state(
@@ -795,7 +725,14 @@ async def call_cognition_subgraph(
         cognition_input["scene_context"]
     )
     state = resolved_state  # type: ignore[assignment]
-    update = _project_output_to_global_state(output, state)
+    update = _project_output_to_global_state(
+        output,
+        state,
+        available_actions=cognition_input["available_actions"],
+        available_resolver_capabilities=(
+            cognition_input["available_resolver_capabilities"]
+        ),
+    )
     update["cognition_scene_context"] = deepcopy(
         cognition_input["scene_context"]
     )
@@ -805,10 +742,11 @@ async def call_cognition_subgraph(
         )
     update["cognition_input"] = cognition_input
     update["cognition_core_output"] = output
-    update["cognition_scope"] = output["state_update"]["state_scope"]
-    update["group_engagement_action_context"] = dict(
-        cognition_input["group_engagement_action_context"]
-    )
+    update["cognition_scope"] = output["state_projection"]["state_scope"]
+    if "group_engagement_action_context" in cognition_input:
+        update["group_engagement_action_context"] = dict(
+            cognition_input["group_engagement_action_context"]
+        )
     update.update(_episode_identity_state_update(state))
     return update  # type: ignore[return-value]
 
@@ -893,11 +831,11 @@ def _character_state_base_updated_at(state: Mapping[str, Any]) -> str:
 
 
 async def commit_cognition_output(
-    output: CognitionCoreOutputV2,
+    output: Mapping[str, Any],
     *,
     expected_character_updated_at: str | None = None,
 ) -> None:
-    """Commit one already-validated V2 result at the final episode boundary."""
+    """Commit one already-validated canonical result at the episode boundary."""
 
     await _commit_cognition_state(
         output,
@@ -906,536 +844,429 @@ async def commit_cognition_output(
 
 
 async def _commit_cognition_state(
-    output: CognitionCoreOutputV2,
+    output: Mapping[str, Any],
     *,
     expected_character_updated_at: str | None = None,
 ) -> None:
     """Commit the validated replacement before any downstream surface/action work."""
 
-    state_update = output["state_update"]
-    replacement = state_update["replacement_state"]
-    try:
-        if state_update["state_scope"] == "user":
-            committed = await compare_and_replace_user_cognition_state(
-                state_update["owner_key"],
-                state_update["expected_previous_state"],
-                replacement,
+    if output.get("schema_version") == "cognition_output.v3":
+        projection = output.get("state_projection")
+        if not isinstance(projection, Mapping):
+            raise CognitionExecutionError(
+                "canonical cognition state projection is missing"
             )
-            if not committed:
-                raise CognitionExecutionError(
-                    "user state commit encountered a version conflict"
-                )
-        else:
+        replacement = projection.get("replacement_state")
+        expected = projection.get("expected_previous_state")
+        scope = projection.get("state_scope")
+        owner_key = projection.get("owner_key")
+        if not isinstance(replacement, Mapping) or not isinstance(expected, Mapping):
+            raise CognitionExecutionError(
+                "canonical cognition state projection is invalid"
+            )
+        if scope == "user":
+            committed = await compare_and_replace_user_cognition_state(
+                str(owner_key), dict(expected), dict(replacement)
+            )
+        elif scope == "character":
             if not expected_character_updated_at:
                 raise CognitionExecutionError(
-                    "character state commit requires its base version"
+                    "canonical character commit requires its base version"
                 )
             committed = await compare_and_replace_character_cognition_state(
                 expected_updated_at=expected_character_updated_at,
-                replacement=replacement,
+                replacement=dict(replacement),
             )
-            if not committed:
-                raise CognitionExecutionError(
-                    "character state commit encountered a version conflict"
-                )
-    except Exception:
-        await _record_state_commit_event(output, succeeded=False)
-        raise
-    await _record_state_commit_event(output, succeeded=True)
-
-
-async def _record_state_commit_event(
-    output: CognitionCoreOutputV2,
-    *,
-    succeeded: bool,
-) -> None:
-    """Emit best-effort bounded telemetry for one terminal state commit."""
-
-    intention = output["intention"]
-    try:
-        await record_cognition_v2_event(
-            component="nodes.persona_supervisor2_cognition",
-            cognition_component="state_commit",
-            status="completed" if succeeded else "failed",
-            stage_status="completed" if succeeded else "failed",
-            selected_branch_id=intention.get("selected_branch_id", ""),
-            state_scope=output["state_update"]["state_scope"],
-            state_commit_status="committed" if succeeded else "failed",
-            severity="info" if succeeded else "error",
-        )
-    except Exception as exc:
-        logger.warning("V2 state-commit event write failed: %s", type(exc).__name__)
-
+        else:
+            raise CognitionExecutionError("canonical state scope is invalid")
+        if not committed:
+            raise CognitionExecutionError(
+                "canonical cognition state commit encountered a version conflict"
+            )
+        return
 
 def _project_output_to_global_state(
-    output: CognitionCoreOutputV2,
+    output: Mapping[str, Any],
     state: GlobalPersonaState,
+    *,
+    available_actions: object,
+    available_resolver_capabilities: object,
 ) -> dict[str, Any]:
     """Expose semantic outputs while preserving deterministic action ownership."""
 
-    affect = output["affect_projection"]
-    dominant = affect[0] if affect else None
-    route = output["intention"]["route"]
-    update: dict[str, Any] = {
-        "cognition_state_update": output["state_update"],
-        "cognition_intention": output["intention"],
-        "semantic_affect_projection": affect,
-        "semantic_relationship_projection": output.get("relationship_projection"),
-        "goal_resolution": output["goal_resolution"],
-        "resolver_capability_requests": [
-            {
-                "schema_version": RESOLVER_CAPABILITY_REQUEST_VERSION,
-                "capability_kind": request["capability"],
-                "objective": request["semantic_goal"],
-                "reason": request["reason"],
-                "priority": _resolver_request_priority(request),
-                "goal_continuation_ref": request["goal_continuation_ref"],
-            }
-            for request in output["resolver_requests"]
-        ],
-        "resolver_pending_resolution": output["resolver_pending_resolution"],
-        "resolver_goal_progress": output["resolver_goal_progress"],
-        "cognition_resolver_progress": output["resolver_progress"],
-        "action_specs": _materialize_v2_action_requests(output, state),
-        "internal_monologue": output["private_monologue"],
-        "interaction_subtext": output["selected_bid_reason"],
-        "emotional_appraisal": dominant["emotion"] if dominant else "平静",
-        "character_intent": output["intention"]["intention"],
-        "logical_stance": output["intention"]["reason"],
-        "judgment_note": output["intention"]["reason"],
-        "social_distance": "受语义关系背景约束",
-        "emotional_intensity": dominant["intensity"] if dominant else "无",
-        "vibe_check": dominant["phase"] if dominant else "平静",
-        "relational_dynamic": (
-            output.get("relationship_projection", {}).get(
-                "relationship_summary",
-                "没有关系投影",
-            )
-            if isinstance(output.get("relationship_projection"), Mapping)
-            else "没有关系投影"
+    if output.get("schema_version") != "cognition_output.v3":
+        raise CognitionExecutionError("canonical cognition output is required")
+    goal = output["active_character_goal"]
+    plan = output["response_plan"]
+    if not isinstance(goal, Mapping) or not isinstance(plan, Mapping):
+        raise CognitionExecutionError(
+            "canonical cognition goal or response plan is invalid"
+        )
+    replacement_state = output.get("state_projection", {}).get(
+        "replacement_state",
+    )
+    if not isinstance(replacement_state, Mapping):
+        raise CognitionExecutionError("canonical replacement state is required")
+    action_specs = _materialize_canonical_action_requests(
+        output,
+        state,
+        replacement_state,
+        available_actions=available_actions,
+    )
+    resolver_requests = _materialize_canonical_resolver_requests(
+        output,
+        state,
+        replacement_state,
+        available_resolver_capabilities=available_resolver_capabilities,
+    )
+    update = {
+        "cognition_state_update": output.get("state_projection"),
+        "cognition_intention": {
+            "route": "speech" if plan.get("response_goal") else "silence",
+            "intention": plan.get("response_goal", ""),
+            "reason": goal.get("reason", ""),
+        },
+        "semantic_affect_projection": output.get("affect_projection", []),
+        "semantic_relationship_projection": output.get(
+            "relationship_projection"
         ),
-        "should_respond": route != "silence",
-        "rag_result": state.get("rag_result", {}),
+        "active_character_goal": dict(goal),
+        "goal_resolution": plan.get("goal_resolution", "answerable_now"),
+        "resolver_capability_requests": resolver_requests,
+        "action_specs": action_specs,
+        "internal_monologue": goal.get("reason", ""),
+        "character_intent": goal.get("intent", ""),
+        "logical_stance": output.get("relational_willingness", {}).get(
+            "stance", ""
+        ),
+        "judgment_note": goal.get("cause_summary", ""),
+        "emotional_appraisal": (
+            output.get("affect_projection", [{}])[0].get("emotion", "平静")
+            if output.get("affect_projection")
+            else "平静"
+        ),
+        "should_respond": bool(plan.get("response_goal")),
+        "cognition_cause_provenance": output.get("cause_provenance", []),
     }
-    if "self_cognition_response" in output:
-        update["self_cognition_response"] = dict(
-            output["self_cognition_response"]
-        )
-    if "self_cognition_response_contract_status" in output:
-        update["self_cognition_response_contract_status"] = output[
-            "self_cognition_response_contract_status"
-        ]
-    resolver_state = state.get("resolver_state")
-    relational_decision = output.get("relational_willingness")
-    if (
-        isinstance(resolver_state, Mapping)
-        and resolver_state.get("cycle_index") == 0
-        and isinstance(relational_decision, Mapping)
-    ):
-        episode = state.get("cognitive_episode")
-        episode_id = (
-            episode.get("episode_id")
-            if isinstance(episode, Mapping)
-            else None
-        )
-        if not isinstance(episode_id, str) or not episode_id.strip():
-            raise CognitionExecutionError(
-                "current-turn relational carrier requires episode identity"
-            )
-        carrier = {
-            "schema_version": CURRENT_TURN_RELATIONAL_WILLINGNESS_VERSION,
-            "episode_id": episode_id,
-            "branch_id": "ordinary_response",
-            "decision": dict(relational_decision),
-        }
-        validated_carrier = validate_current_turn_relational_willingness(
-            carrier,
-            episode_id=episode_id,
-        )
-        updated_resolver_state = dict(resolver_state)
-        updated_resolver_state["current_turn_relational_willingness"] = (
-            validated_carrier
-        )
-        update["resolver_state"] = validate_resolver_state(
-            updated_resolver_state
-        )
+    self_response = plan.get("self_cognition_response")
+    if isinstance(self_response, Mapping):
+        update["self_cognition_response"] = dict(self_response)
     return update
 
 
-def _resolver_request_priority(request: Mapping[str, Any]) -> str:
-    """Project the validated task-resolution boolean to the V1 priority."""
+def _canonical_goal_continuation_ref(
+    output: Mapping[str, Any],
+    state: Mapping[str, Any],
+    replacement_state: Mapping[str, Any],
+) -> GoalContinuationRefV1:
+    """Bind one continuation to the caller-owned ordinary-response goal."""
 
-    if request["capability"] == "task_resolution_request":
-        if request["start_in_background"] is True:
-            return "background"
-        return "now"
-    return "now"
-
-
-def _materialize_v2_action_requests(
-    output: CognitionCoreOutputV2,
-    state: GlobalPersonaState,
-) -> list[dict[str, Any]]:
-    """Materialize private requests and the selected V2 surface action."""
-
-    requests = []
-    evaluator = ActionSpecEvaluator()
-    available_action_kinds = set(build_initial_action_capabilities())
-    for request in output["action_requests"]:
-        evaluation = evaluator.evaluate_v2_request(
-            request,
-            available_action_kinds=available_action_kinds,
-        )
-        if not evaluation["ok"]:
-            raise CognitionExecutionError(
-                "V2 action request failed deterministic validation"
-            )
-        validated_request = dict(evaluation["request"])
-        if (
-            validated_request["action_kind"]
-            == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY
-        ):
-            continuation_ref = _coding_continuation_ref(output)
-            requests.append({
-                "capability": validated_request["action_kind"],
-                "decision": validated_request["decision"],
-                "context_ref": validated_request["context_ref"],
-                "detail": validated_request["semantic_goal"],
-                "reason": validated_request["reason"],
-                "target_roles": list(validated_request["target_roles"]),
-                "evidence_handles": list(
-                    validated_request["evidence_handles"]
-                ),
-                "surface_role": "task_acknowledgement",
-                "goal_continuation_ref": continuation_ref,
-                "task_execution_context": (
-                    _coding_execution_context_from_state(
-                        state,
-                        goal_continuation_ref=continuation_ref,
-                    )
-                ),
-            })
-            continue
-        materialized_request = {
-            "capability": validated_request["action_kind"],
-            "decision": validated_request["decision"],
-            "context_ref": validated_request["context_ref"],
-            "detail": validated_request["semantic_goal"],
-            "reason": validated_request["reason"],
-            "target_roles": list(validated_request["target_roles"]),
-            "evidence_handles": list(
-                validated_request["evidence_handles"]
-            ),
-            "surface_role": "ordinary",
-            "goal_continuation_ref": None,
-        }
-        proposal = validated_request.get("scheduled_authority_proposal")
-        if isinstance(proposal, dict):
-            materialized_request["scheduled_authority_proposal"] = dict(
-                proposal
-            )
-        requests.append(materialized_request)
-    materialization_state = dict(state)
-    action_specs = materialize_semantic_action_requests(
-        requests,
-        materialization_state,
+    episode = state.get("cognitive_episode")
+    if not isinstance(episode, Mapping):
+        raise CognitionExecutionError("cognitive episode is required for continuation")
+    episode_id = str(episode.get("episode_id") or "").strip()
+    if not episode_id:
+        raise CognitionExecutionError("episode identity is required for continuation")
+    origin_metadata = episode.get("origin_metadata")
+    source_message_id = ""
+    if isinstance(origin_metadata, Mapping):
+        source_message_id = str(
+            origin_metadata.get("platform_message_id") or ""
+        ).strip()
+    if not source_message_id:
+        source_message_id = str(
+            episode.get("source_message_id")
+            or episode.get("message_id")
+            or ""
+        ).strip()
+    goal_row = next(
+        (
+            row for row in replacement_state.get("goals", [])
+            if isinstance(row, Mapping)
+            and row.get("goal_kind") == "ordinary_response"
+        ),
+        None,
     )
-    if output["intention"]["route"] != "speech":
-        return action_specs
-
-    admitted_bid = output.get("admitted_bid")
-    evidence_handles = (
-        list(admitted_bid["evidence_handles"])
-        if isinstance(admitted_bid, Mapping)
-        else []
+    if not isinstance(goal_row, Mapping):
+        raise CognitionExecutionError("ordinary-response goal is required for continuation")
+    scope = str(replacement_state.get("state_scope") or "")
+    if scope not in {"user", "character"}:
+        raise CognitionExecutionError("continuation goal scope is invalid")
+    return build_goal_continuation_ref(
+        source_episode_id=episode_id,
+        source_message_id=source_message_id,
+        branch_id="ordinary_response",
+        goal_ref={
+            "scope": scope,
+            "kind": "goal",
+            "entity_id": str(goal_row["entity_id"]),
+        },
     )
-    surface_role, goal_continuation_ref = _continuation_surface_metadata(
-        output,
-        state,
-    )
-    speak_specs = materialize_semantic_action_requests(
-        [{
-            "capability": SPEAK_CAPABILITY,
-            "decision": "visible_reply",
-            "detail": output["intention"]["intention"],
-            "reason": output["intention"]["reason"],
-            "target_roles": list(output["intention"]["target_roles"]),
-            "evidence_handles": evidence_handles,
-            "surface_role": surface_role,
-            "goal_continuation_ref": goal_continuation_ref,
-        }],
-        materialization_state,
-    )
-    if len(speak_specs) != 1:
-        raise CognitionExecutionError(
-            "V2 speech intention failed action-spec materialization"
-        )
-    return [*action_specs, speak_specs[0]]
 
 
-def _continuation_surface_metadata(
-    output: CognitionCoreOutputV2,
-    state: GlobalPersonaState,
-) -> tuple[SurfaceRoleV1, GoalContinuationRefV1 | None]:
-    """Bind a visible surface to its continuation lifecycle state."""
+def _canonical_speak_surface_metadata(
+    state: Mapping[str, Any],
+) -> tuple[str, GoalContinuationRefV1 | None]:
+    """Preserve typed tool-result lineage for the visible speak action."""
 
     episode = state.get("cognitive_episode")
     if (
         isinstance(episode, Mapping)
         and episode.get("trigger_source") == "tool_result"
     ):
-        typed_source = _tool_result_episode_cognition_source(episode)
-        result_ref = typed_source["goal_continuation_ref"]
-        if typed_source["task_status"] in {"resolved", "partial"}:
-            return "task_result", result_ref
-        return "task_status", result_ref
-
-    raw_continuation_ref = output["intention"].get(
-        "goal_continuation_ref"
-    )
-    if not isinstance(raw_continuation_ref, Mapping):
-        return "ordinary", None
-    continuation_ref = cast(GoalContinuationRefV1, raw_continuation_ref)
-    has_same_goal_task_resolution = False
-    for request in output.get("resolver_requests", []):
-        if (
-            request["capability"] == "task_resolution_request"
-            and request.get("goal_continuation_ref") == continuation_ref
-        ):
-            has_same_goal_task_resolution = True
-            if request.get("start_in_background") is True:
-                return "task_acknowledgement", continuation_ref
-    if has_same_goal_task_resolution:
-        return "task_status", continuation_ref
-
-    resolver_state = state.get("resolver_state")
-    if isinstance(resolver_state, Mapping):
-        dependency = resolver_state.get(
-            "required_resolver_evidence_dependency"
+        source = _tool_result_episode_cognition_source(episode)
+        surface_role = (
+            "task_result"
+            if source["task_status"] in {"resolved", "partial"}
+            else "task_status"
         )
-        if (
-            isinstance(dependency, Mapping)
-            and dependency.get("goal_continuation_ref") == continuation_ref
-        ):
-            dependency_state = dependency.get("state")
-            if dependency_state == "pending":
-                return "task_acknowledgement", continuation_ref
-            if dependency_state in {"missing", "blocked"}:
-                return "task_status", continuation_ref
-
-    if output.get("goal_resolution") != "answerable_now":
-        return "task_status", continuation_ref
-    return "factual_answer", continuation_ref
+        return surface_role, source["goal_continuation_ref"]
+    return "ordinary", None
 
 
-def _coding_continuation_ref(
-    output: CognitionCoreOutputV2,
-) -> GoalContinuationRefV1:
-    """Require the canonical bound continuation for a coding action."""
-
-    raw_ref = output["intention"]["goal_continuation_ref"]
-    try:
-        continuation_ref = validate_goal_continuation_ref(raw_ref)
-    except CognitiveEpisodeValidationError as exc:
-        raise CognitionExecutionError(
-            f"accepted coding continuation goal_continuation_ref is invalid: "
-            f"{exc}"
-        ) from exc
-    return continuation_ref
-
-
-def _coding_execution_context_from_state(
-    state: GlobalPersonaState,
+def _materialize_canonical_action_requests(
+    output: Mapping[str, Any],
+    state: Mapping[str, Any],
+    replacement_state: Mapping[str, Any],
     *,
-    goal_continuation_ref: GoalContinuationRefV1,
-) -> TaskResolutionExecutionContextV1:
-    """Project trusted persona state into the coding continuation context."""
+    available_actions: object,
+) -> list[dict[str, Any]]:
+    """Validate caller-bound action affordances and materialize action specs."""
 
-    character_profile = state.get("character_profile")
-    if not isinstance(character_profile, Mapping):
+    plan = output["response_plan"]
+    if "self_cognition_response" in plan:
+        return []
+    rows = plan.get("action_requests", [])
+    if not isinstance(rows, list):
+        raise CognitionExecutionError("canonical action requests are invalid")
+    if not isinstance(available_actions, list):
+        raise CognitionExecutionError("caller action affordances are invalid")
+    action_affordances = available_actions
+    action_kinds = [
+        row.get("action_kind")
+        for row in action_affordances
+        if isinstance(row, Mapping)
+    ]
+    if (
+        len(action_kinds) != len(action_affordances)
+        or any(not isinstance(kind, str) or not kind for kind in action_kinds)
+        or len(set(action_kinds)) != len(action_kinds)
+    ):
+        raise CognitionExecutionError("caller action affordances are not unique")
+    affordances = {
+        str(row["action_kind"]): row
+        for row in action_affordances
+        if isinstance(row, Mapping)
+    }
+    requests: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            raise CognitionExecutionError("canonical action request is invalid")
+        action_kind = str(row["action_kind"])
+        affordance = affordances.get(action_kind)
+        if affordance is None:
+            raise CognitionExecutionError("canonical action capability is unavailable")
+        request: dict[str, Any] = {
+            "capability": action_kind,
+            "decision": str(row["decision"]),
+            "detail": str(row["detail"]),
+            "reason": str(row["reason"]),
+            "context_ref": str(affordance["context_ref"]),
+            "target_roles": deepcopy(list(affordance["target_roles"])),
+            "evidence_handles": [],
+            "surface_role": "ordinary",
+            "goal_continuation_ref": (
+                _canonical_goal_continuation_ref(output, state, replacement_state)
+                if action_kind == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY
+                else None
+            ),
+        }
+        if action_kind == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY:
+            request["surface_role"] = "task_acknowledgement"
+            request["task_execution_context"] = (
+                _task_resolution_execution_context_from_state(
+                    state,
+                    goal_continuation_ref=request["goal_continuation_ref"],
+                )
+            )
+        if action_kind == FUTURE_SPEAK_CAPABILITY:
+            request["scheduled_authority_proposal"] = (
+                _build_scheduled_authority_proposal(state, request)
+            )
+        requests.append(request)
+    if str(plan.get("response_goal") or "").strip():
+        surface_role, continuation_ref = _canonical_speak_surface_metadata(state)
+        requests.append({
+            "capability": SPEAK_CAPABILITY,
+            "decision": "visible_reply",
+            "detail": str(plan["response_goal"]),
+            "reason": str(output["active_character_goal"]["reason"]),
+            "target_roles": [_action_target_role(state)],
+            "evidence_handles": [],
+            "surface_role": surface_role,
+            "goal_continuation_ref": continuation_ref,
+        })
+    if len(requests) > ACTION_SPEC_CAP:
+        raise CognitionExecutionError("materialized action capacity is exceeded")
+    materialized = materialize_semantic_action_requests(
+        requests,
+        state,
+    )
+    expected_count = len(requests)
+    if len(materialized) != expected_count:
         raise CognitionExecutionError(
-            "character_profile: expected trusted mapping"
+            "caller-owned action materialization dropped a requested capability"
         )
-    character_name = _text(character_profile.get("name"))
-    if not character_name:
-        raise CognitionExecutionError(
-            "character_profile.name: expected non-empty text"
+    return [dict(row) for row in materialized]
+
+
+def _materialize_canonical_resolver_requests(
+    output: Mapping[str, Any],
+    state: Mapping[str, Any],
+    replacement_state: Mapping[str, Any],
+    *,
+    available_resolver_capabilities: object,
+) -> list[dict[str, Any]]:
+    """Validate semantic resolver rows after caller-owned lineage binding."""
+
+    plan = output["response_plan"]
+    if "self_cognition_response" in plan:
+        return []
+    rows = plan.get("resolver_requests", [])
+    if not isinstance(rows, list):
+        raise CognitionExecutionError("canonical resolver requests are invalid")
+    if not rows:
+        return []
+    if not isinstance(available_resolver_capabilities, list):
+        raise CognitionExecutionError("caller resolver affordances are invalid")
+    resolver_affordances = available_resolver_capabilities
+    resolver_capabilities = [
+        row.get("capability")
+        for row in resolver_affordances
+        if isinstance(row, Mapping)
+    ]
+    if (
+        len(resolver_capabilities) != len(resolver_affordances)
+        or any(
+            not isinstance(capability, str) or not capability
+            for capability in resolver_capabilities
         )
-    timestamp = _required_context_state_text(
-        state,
-        "storage_timestamp_utc",
-    )
-    platform = _required_context_state_text(state, "platform")
-    channel_id = _required_context_state_text(state, "platform_channel_id")
-    channel_type = _required_context_state_text(state, "channel_type")
-    requester_global_user_id = _required_context_state_text(
-        state,
-        "global_user_id",
-    )
-    requester_platform_user_id = _required_context_state_text(
-        state,
-        "platform_user_id",
-    )
-    source_message_id = _context_source_message_id(state)
-    local_time_context = state.get("local_time_context")
-    prompt_message_context = state.get("prompt_message_context")
-    if not isinstance(local_time_context, Mapping) or not isinstance(
-        prompt_message_context,
-        Mapping,
+        or len(set(resolver_capabilities)) != len(resolver_capabilities)
     ):
         raise CognitionExecutionError(
-            "local_time_context and prompt_message_context are required"
+            "caller resolver affordances are not unique"
         )
-    conversation_progress = state.get("conversation_progress")
-    if conversation_progress is None:
-        progress_context: dict[str, object] = {}
-    elif not isinstance(conversation_progress, Mapping):
-        raise CognitionExecutionError(
-            "conversation progress must be a V2 prompt mapping"
-        )
-    else:
-        progress_context = dict(conversation_progress)
-    raw_scene_context = state.get("cognition_scene_context")
-    if not isinstance(raw_scene_context, Mapping):
-        raise CognitionExecutionError(
-            "cognition_scene_context: expected canonical object"
-        )
-    try:
-        _validate_scene_context(raw_scene_context)
-    except CognitionContractError as exc:
-        raise CognitionExecutionError(
-            "cognition_scene_context: invalid canonical object: "
-            f"{exc}"
-        ) from exc
-    scene_context = deepcopy(dict(raw_scene_context))
-    context: TaskResolutionExecutionContextV1 = {
-        "schema_version": TASK_RESOLUTION_EXECUTION_CONTEXT_VERSION,
-        "character_name": character_name,
-        "platform": platform,
-        "channel_id": channel_id,
-        "channel_type": channel_type,
-        "requester_global_user_id": requester_global_user_id,
-        "requester_platform_user_id": requester_platform_user_id,
-        "source_message_id": source_message_id,
-        "scene_context": scene_context,
-        "goal_continuation_ref": goal_continuation_ref,
-        "local_time_context": dict(local_time_context),
-        "prompt_message_context": dict(prompt_message_context),
-        "chat_history_recent": _context_history_rows(
-            state.get("chat_history_recent")
-        )[-MAX_TASK_RESOLUTION_TEXT_ITEMS:],
-        "chat_history_wide": _context_history_rows(
-            state.get("chat_history_wide")
-        )[-MAX_TASK_RESOLUTION_TEXT_ITEMS:],
-        "conversation_progress": progress_context,
-        "persona_summary": _coding_persona_summary(
-            character_name=character_name,
-            channel_type=channel_type,
-            user_name=_text(state.get("user_name")),
-        ),
-        "conversation_summary": _text(
-            state.get("decontextualized_input")
-        )[:MAX_TASK_RESOLUTION_TEXT_CHARS],
-        "current_timestamp_utc": timestamp,
-        "active_turn_platform_message_ids": _context_string_list(
-            state.get("active_turn_platform_message_ids")
-        ),
-        "active_turn_conversation_row_ids": _context_string_list(
-            state.get("active_turn_conversation_row_ids")
-        ),
-        "session_media_refs": list_session_media_refs(
-            (platform, channel_id, requester_global_user_id)
-        ),
-        "coding_workspace_root": _text(CODING_AGENT_WORKSPACE_ROOT),
-        "max_output_chars": BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
+    allowed = {
+        str(row["capability"])
+        for row in resolver_affordances
+        if isinstance(row, Mapping)
     }
-    validated_context = validate_task_resolution_execution_context(context)
-    return validated_context
-
-
-def _required_context_state_text(
-    state: Mapping[str, Any],
-    field_name: str,
-) -> str:
-    """Require one trusted non-empty persona-state text field."""
-
-    value = state.get(field_name)
-    if not isinstance(value, str) or not value.strip():
-        raise CognitionExecutionError(
-            f"{field_name}: expected non-empty trusted state text"
+    continuation = None
+    if any(
+        isinstance(row, Mapping)
+        and row.get("capability") == "task_resolution_request"
+        for row in rows
+    ):
+        continuation = _canonical_goal_continuation_ref(
+            output,
+            state,
+            replacement_state,
         )
-    text = value.strip()
-    return text
-
-
-def _context_source_message_id(state: Mapping[str, Any]) -> str:
-    """Require the trusted source message id for a coding continuation."""
-
-    value = state.get("platform_message_id")
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    episode = state.get("cognitive_episode")
-    if isinstance(episode, Mapping):
-        origin_metadata = episode.get("origin_metadata")
-        if isinstance(origin_metadata, Mapping):
-            value = origin_metadata.get("platform_message_id")
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-    raise CognitionExecutionError(
-        "platform_message_id: expected non-empty trusted state text"
-    )
-
-
-def _context_history_rows(value: object) -> list[dict[str, object]]:
-    """Copy trusted prompt-safe conversation rows for the coding context."""
-
-    if not isinstance(value, list):
-        raise CognitionExecutionError("chat history: expected list")
-    copied_rows: list[dict[str, object]] = []
-    for row in value:
+    result: list[dict[str, Any]] = []
+    for row in rows:
         if not isinstance(row, Mapping):
+            raise CognitionExecutionError("canonical resolver request is invalid")
+        capability = str(row["capability"])
+        if capability not in allowed:
+            raise CognitionExecutionError("canonical resolver capability is unavailable")
+        validated = validate_resolver_capability_request({
+            "schema_version": RESOLVER_CAPABILITY_REQUEST_VERSION,
+            "capability_kind": capability,
+            "objective": str(row["goal"]),
+            "reason": str(row["reason"]),
+            "priority": "now",
+            "goal_continuation_ref": continuation
+            if capability == "task_resolution_request"
+            else None,
+        })
+        result.append(dict(validated))
+    return result
+
+
+def _build_scheduled_authority_proposal(
+    state: Mapping[str, Any],
+    request: Mapping[str, Any],
+) -> dict[str, object]:
+    """Bind one future-speak proposal to the trusted current episode."""
+
+    episode = state.get("cognitive_episode")
+    if not isinstance(episode, Mapping):
+        raise CognitionExecutionError("future-speak episode is required")
+    if episode.get("trigger_source") != "user_message":
+        raise CognitionExecutionError(
+            "future-speak requires a current user-message episode"
+        )
+    trigger_local = str(request["decision"])
+    try:
+        trigger_utc = local_llm_datetime_to_storage_utc_iso(trigger_local)
+        accepted_at = parse_storage_utc_datetime(
+            str(state.get("storage_timestamp_utc") or episode.get("created_at"))
+        )
+        if parse_storage_utc_datetime(trigger_utc) <= accepted_at:
             raise CognitionExecutionError(
-                "chat history: expected mapping rows"
+                "future-speak trigger must be later than accepted time"
             )
-        copied_rows.append(dict(row))
-    return copied_rows
+    except ValueError as exc:
+        raise CognitionExecutionError(
+            f"future-speak trigger is invalid: {exc}"
+        ) from exc
+    semantic_summary = _trusted_user_message_summary(episode)
+    if not semantic_summary:
+        raise CognitionExecutionError(
+            "future-speak requires trusted current user-message content"
+        )
+    proposal = {
+        "schema_version": SCHEDULED_AUTHORITY_PROPOSAL_SCHEMA_VERSION,
+        "temporal_alignment": "aligned",
+        "authorized_content_summary": semantic_summary,
+        "authorized_detail_refs": [{
+            "evidence_handle": "current_episode",
+            "semantic_summary": semantic_summary,
+            "provenance_role": "current_event",
+        }],
+    }
+    return dict(validate_scheduled_authority_proposal(proposal))
 
 
-def _context_string_list(value: object) -> list[str]:
-    """Return stripped strings from an optional trusted id-list field."""
+def _trusted_user_message_summary(episode: Mapping[str, Any]) -> str:
+    """Read the current user-message percept as the authority summary."""
 
-    if not isinstance(value, list):
-        items: list[str] = []
-        return items
-    items = [
-        item.strip()
-        for item in value
-        if isinstance(item, str) and item.strip()
-    ]
-    return items
-
-
-def _coding_persona_summary(
-    *,
-    character_name: str,
-    channel_type: str,
-    user_name: str,
-) -> str:
-    """Build compact character context without raw identifiers."""
-
-    segments = [f"active_character={character_name}"]
-    if channel_type:
-        segments.append(f"channel_type={channel_type}")
-    if user_name:
-        segments.append(f"current_user_display_name={user_name}")
-    summary = "; ".join(segments)
-    return summary
-
+    if episode.get("trigger_source") != "user_message":
+        return ""
+    percepts = episode.get("percepts")
+    if not isinstance(percepts, list):
+        return ""
+    for percept in percepts:
+        if not isinstance(percept, Mapping):
+            continue
+        if percept.get("source_kind") not in {"dialog", "user_message"}:
+            continue
+        content = percept.get("content")
+        if isinstance(content, Mapping):
+            content = (
+                content.get("semantic_summary")
+                or content.get("semantic_text")
+                or content.get("text")
+            )
+        summary = str(content or "").strip()
+        if summary:
+            return summary[:1000]
+    return ""
 
 def _available_action_affordances(
     state: GlobalPersonaState,
 ) -> list[ActionAffordanceV2]:
-    """Project the deterministic capability registry into V2 affordances."""
+    """Project the deterministic capability registry into typed affordances."""
 
     current_user = _action_target_role(state)
     capabilities = build_initial_action_capabilities()
@@ -1458,6 +1289,13 @@ def _available_action_affordances(
             SPEAK_CAPABILITY,
             APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
         }:
+            continue
+        episode = state.get("cognitive_episode")
+        if (
+            capability_kind == TRIGGER_FUTURE_COGNITION_CAPABILITY
+            and isinstance(episode, Mapping)
+            and episode.get("trigger_source") == "scheduled_tick"
+        ):
             continue
         if capability_kind not in availability_rows:
             continue
@@ -1740,7 +1578,7 @@ def _coding_run_action_affordances(
         "respond_to_blocker",
         "cancel",
     }
-    affordances: list[ActionAffordanceV2] = []
+    eligible_contexts: list[Mapping[str, Any]] = []
     for context in raw_contexts:
         if not isinstance(context, Mapping):
             continue
@@ -1758,6 +1596,26 @@ def _coding_run_action_affordances(
             )
         ]
         allowed_decisions = list(dict.fromkeys(allowed_decisions))
+        if not allowed_decisions:
+            continue
+        eligible_contexts.append(context)
+    if len(eligible_contexts) != 1:
+        return []
+    affordances: list[ActionAffordanceV2] = []
+    for context in eligible_contexts:
+        context_ref = _text(context.get("coding_run_ref"))[:200]
+        raw_decisions = context.get("allowed_next_actions")
+        if not context_ref or not isinstance(raw_decisions, list):
+            continue
+        allowed_decisions = list(dict.fromkeys(
+            decision
+            for decision in raw_decisions
+            if isinstance(decision, str) and decision in registry_decisions
+            and not (
+                decision == "status"
+                and coding_worker_unavailable
+            )
+        ))
         if not allowed_decisions:
             continue
         status = _text(context.get("status"))[:80]
@@ -1873,7 +1731,7 @@ def _episode_evidence(
     occurred_at: str,
     fallback_text: str,
 ) -> list[dict[str, Any]]:
-    """Project the current source through its canonical V2 evidence kind."""
+    """Project the current source through its canonical evidence kind."""
 
     trigger_source = str(episode.get("trigger_source", "user_message"))
     source_kind = {
@@ -1947,7 +1805,6 @@ def _episode_evidence(
     semantic_text = semantic_text[:1000]
     semantic_summary = semantic_text[:500]
     return [{
-        "evidence_handle": "e1",
         "evidence_ref": {
             "source_kind": source_kind,
             "source_id": source_id,
@@ -2102,7 +1959,7 @@ def _promoted_reflection_evidence(
     value: object,
     occurred_at: str,
 ) -> list[dict[str, Any]]:
-    """Convert bounded promoted reflection memory into typed V2 evidence."""
+    """Convert bounded promoted reflection memory into typed cognition evidence."""
 
     if not isinstance(value, Mapping):
         return []
@@ -2183,7 +2040,6 @@ def _build_rag_evidence_row(
 
     semantic_text = text[:1000]
     row: dict[str, Any] = {
-        "evidence_handle": "ev0",
         "evidence_ref": {
             "source_kind": source_kind,
             "source_id": source_id,
@@ -2216,7 +2072,6 @@ def _media_evidence(
         if not description:
             continue
         evidence.append({
-            "evidence_handle": "e0",
             "evidence_ref": {
                 "source_kind": "media_observation",
                 "source_id": f"episode:{episode_id}:media:{index}",
@@ -2254,7 +2109,6 @@ def _resolver_observation_evidence(
             )
         except (ValueError, TypeError):
             continue
-        projected["evidence_handle"] = f"e{index}"
         projected["authority"] = "contextual_fact_only"
         evidence.append(projected)
     return evidence
@@ -2282,7 +2136,6 @@ def _action_result_evidence(
         if not action_kind or not action_status or not summary:
             continue
         evidence.append({
-            "evidence_handle": f"e{index}",
             "evidence_ref": {
                 "source_kind": "action_result",
                 "source_id": action_attempt_id or f"action-result:{index}",

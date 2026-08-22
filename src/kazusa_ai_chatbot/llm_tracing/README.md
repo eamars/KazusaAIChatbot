@@ -52,40 +52,19 @@ sanitized event-log exports.
 
 While `metadata` or `full` capture is enabled, cognition keeps one
 invocation-local exact-input and model-attempt buffer. A clean invocation
-discards that buffer without a capsule write. A terminal, recovered, partial,
-or degraded invocation schedules one protected `llm_trace_steps` row with
-`capture_reason="cognition_failure_capsule"`. The row contains the raw public
-entrypoint input, ordered attempts, concrete validation errors, and the final
-failure disposition. `cognition_failure_capsule.v3` adds an optional bounded
-attempt ledger. Goal-attempt rows identify the cognition invocation, service
-graph attempt, branch, producing stage, local attempt, cumulative producer
-attempt, configured limit, and attempt disposition; the ledger also records
-final branch dispositions. Failure events may include an outermost-first
-exception cause chain capped at four entries. Every cause message passes
-through the protected session's secret redaction before persistence. Model
-configuration excludes API keys. Historical V2 capsule rows remain immutable
-and exportable as recorded evidence.
+discards that buffer without a capsule write. A terminal or partial invocation
+schedules one protected `llm_trace_steps` row with
+`capture_reason="cognition_failure_capsule"`. The row contains the bounded
+public input, ordered attempts, typed validation status, and final failure
+disposition. Failure events may include an outermost-first exception cause
+chain capped at four entries. Every cause message passes through protected
+secret redaction before persistence. Model configuration excludes API keys.
 
 Past-dialog cognition residual can only use selected `parsed_output` fields
 from protected full-capture trace steps. Metadata-mode trace steps
 intentionally store empty parsed output for this purpose, so a past dialog with
 only metadata trace rows contributes no residual context and is treated as
 forgotten.
-
-### V3 protected chain transcript
-
-The scoped `record_cognition_chain_transcript(...)` API writes one protected
-`cognition_chain_transcript.v1` row for a V3 invocation when capture is
-enabled. `off` writes no row; `metadata` keeps hashes, lengths, step metadata,
-and dispositions; `full` may keep the exact system/user/assistant messages and
-accepted step records. The row carries the V3 `run_id` and `llm_trace_id` but
-stays behind the protected trace-store boundary. It is never copied into
-sanitized event, service, or console payloads.
-
-The protected chain writer is best effort and uses the existing debug-trace
-retention and write timeout. A capture failure returns a bounded failed/skipped
-result and does not change cognition-facing completion. Runtime timing remains
-non-streaming elapsed duration; no TTFT field is part of this trace contract.
 
 ## Storage Contract
 
@@ -101,25 +80,6 @@ they must not duplicate protected trace bodies.
 Failure capsules reuse the trace-step collection, indexes, and
 `DEBUG_LOG_TTL_DAYS` expiry. Their `cognition_invocation_id` distinguishes safe
 retries and concurrent cognition calls under the same turn trace.
-
-### Parent guardrail lineage
-
-The live persona path has a separate protected outer writer named
-`cognition_parent_guardrail_capsule.v1`. It is created only after the
-canonical connector checkpoint has produced an eligible parent-recovery
-trigger. The outer row stores the trace reference, scope, cycle index,
-checkpoint SHA-256, bounded trigger coordinates, parent disposition, and the
-epoch-aware `cognition_attempt_ledger.v2` aggregate. It stores no checkpoint
-state, user content, prompts, model responses, credentials, or raw exception
-messages.
-
-The existing `cognition_failure_capsule.v3` rows remain the owners of exact
-inner model attempts and retain the unchanged `cognition_attempt_ledger.v1`
-shape when used without the guardrail. Clean guarded invocations discard the
-outer session; a recovered or exhausted parent child schedules one additional
-bounded outer row without delaying the chat response. Direct and idle
-self-cognition calls do not create this outer lineage unless they explicitly
-bind the live persona coordinator.
 
 ## Failure Behavior
 

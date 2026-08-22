@@ -42,7 +42,7 @@ class BrainModelRouteDescriptor:
 
 _ROUTES: tuple[BrainModelRouteDescriptor, ...] = (
     BrainModelRouteDescriptor(
-        route_key="RELEVANCE_AGENT_LLM",
+        route_key="relevance",
         env_prefix="RELEVANCE_AGENT_LLM",
         label="Relevance agent",
         group="Intake",
@@ -50,7 +50,7 @@ _ROUTES: tuple[BrainModelRouteDescriptor, ...] = (
         fallback_backed=False,
     ),
     BrainModelRouteDescriptor(
-        route_key="VISION_DESCRIPTOR_LLM",
+        route_key="vision",
         env_prefix="VISION_DESCRIPTOR_LLM",
         label="Vision descriptor",
         group="Intake",
@@ -58,7 +58,7 @@ _ROUTES: tuple[BrainModelRouteDescriptor, ...] = (
         fallback_backed=False,
     ),
     BrainModelRouteDescriptor(
-        route_key="MSG_DECONTEXTUALIZER_LLM",
+        route_key="decontextualization",
         env_prefix="MSG_DECONTEXTUALIZER_LLM",
         label="Message decontextualizer",
         group="Intake",
@@ -66,7 +66,7 @@ _ROUTES: tuple[BrainModelRouteDescriptor, ...] = (
         fallback_backed=False,
     ),
     BrainModelRouteDescriptor(
-        route_key="RAG_PLANNER_LLM",
+        route_key="rag_planner",
         env_prefix="RAG_PLANNER_LLM",
         label="RAG planner",
         group="Retrieval",
@@ -74,7 +74,7 @@ _ROUTES: tuple[BrainModelRouteDescriptor, ...] = (
         fallback_backed=False,
     ),
     BrainModelRouteDescriptor(
-        route_key="RAG_SUBAGENT_LLM",
+        route_key="rag_subagent",
         env_prefix="RAG_SUBAGENT_LLM",
         label="RAG subagent",
         group="Retrieval",
@@ -82,7 +82,7 @@ _ROUTES: tuple[BrainModelRouteDescriptor, ...] = (
         fallback_backed=False,
     ),
     BrainModelRouteDescriptor(
-        route_key="WEB_SEARCH_LLM",
+        route_key="web_search",
         env_prefix="WEB_SEARCH_LLM",
         label="Web search",
         group="Retrieval",
@@ -90,15 +90,15 @@ _ROUTES: tuple[BrainModelRouteDescriptor, ...] = (
         fallback_backed=False,
     ),
     BrainModelRouteDescriptor(
-        route_key="COGNITION_LLM",
+        route_key="cognition_support",
         env_prefix="COGNITION_LLM",
-        label="Cognition",
+        label="Cognition support",
         group="Reasoning",
         required=True,
         fallback_backed=False,
     ),
     BrainModelRouteDescriptor(
-        route_key="COGNITION_LLM_CHARACTER_CARRYOVER",
+        route_key="character_carryover",
         env_prefix="COGNITION_LLM_CHARACTER_CARRYOVER",
         label="Character carry-over",
         group="Cognition Shared",
@@ -106,7 +106,7 @@ _ROUTES: tuple[BrainModelRouteDescriptor, ...] = (
         fallback_backed=False,
     ),
     BrainModelRouteDescriptor(
-        route_key="DIALOG_GENERATOR_LLM",
+        route_key="dialog",
         env_prefix="DIALOG_GENERATOR_LLM",
         label="Dialog generator",
         group="Surface",
@@ -114,7 +114,7 @@ _ROUTES: tuple[BrainModelRouteDescriptor, ...] = (
         fallback_backed=False,
     ),
     BrainModelRouteDescriptor(
-        route_key="CONSOLIDATION_LLM",
+        route_key="consolidation",
         env_prefix="CONSOLIDATION_LLM",
         label="Consolidation",
         group="Memory",
@@ -122,7 +122,7 @@ _ROUTES: tuple[BrainModelRouteDescriptor, ...] = (
         fallback_backed=False,
     ),
     BrainModelRouteDescriptor(
-        route_key="JSON_REPAIR_LLM",
+        route_key="json_repair",
         env_prefix="JSON_REPAIR_LLM",
         label="JSON repair",
         group="Utility",
@@ -130,7 +130,7 @@ _ROUTES: tuple[BrainModelRouteDescriptor, ...] = (
         fallback_backed=False,
     ),
     BrainModelRouteDescriptor(
-        route_key="BACKGROUND_WORK_LLM",
+        route_key="background_work",
         env_prefix="BACKGROUND_WORK_LLM",
         label="Background work",
         group="Background",
@@ -138,7 +138,7 @@ _ROUTES: tuple[BrainModelRouteDescriptor, ...] = (
         fallback_backed=False,
     ),
     BrainModelRouteDescriptor(
-        route_key="CODING_AGENT_PM_LLM",
+        route_key="coding_pm",
         env_prefix="CODING_AGENT_PM_LLM",
         label="Coding agent PM",
         group="Coding agent",
@@ -146,7 +146,7 @@ _ROUTES: tuple[BrainModelRouteDescriptor, ...] = (
         fallback_backed=False,
     ),
     BrainModelRouteDescriptor(
-        route_key="CODING_AGENT_PROGRAMMER_LLM",
+        route_key="coding_programmer",
         env_prefix="CODING_AGENT_PROGRAMMER_LLM",
         label="Coding agent programmer",
         group="Coding agent",
@@ -154,24 +154,15 @@ _ROUTES: tuple[BrainModelRouteDescriptor, ...] = (
         fallback_backed=False,
     ),
     BrainModelRouteDescriptor(
-        route_key="COGNITION_V3_CHAIN_LLM",
+        route_key="cognition",
         env_prefix="COGNITION_V3_CHAIN_LLM",
-        label="Cognition V3 chain",
-        group="Cognition Core V3",
+        label="Cognition",
+        group="Reasoning",
         required=True,
-        fallback_backed=False,
-    ),
-    BrainModelRouteDescriptor(
-        route_key="COGNITION_V3_SIDECAR_LLM",
-        env_prefix="COGNITION_V3_SIDECAR_LLM",
-        label="Cognition V3 sidecar",
-        group="Cognition Core V3",
-        required=False,
         fallback_backed=False,
     ),
 )
 _ROUTE_BY_KEY = {route.route_key: route for route in _ROUTES}
-_ROUTE_BY_UI_KEY = {route.env_prefix.lower(): route for route in _ROUTES}
 _MODEL_ID_RE = re.compile(MODEL_ID_PATTERN)
 
 
@@ -190,8 +181,7 @@ def route_is_required_for_config_read(route: BrainModelRouteDescriptor) -> bool:
 def descriptor_for_route(route_key: str) -> BrainModelRouteDescriptor:
     """Return a route descriptor or raise ``KeyError``."""
 
-    route = _ROUTE_BY_KEY.get(route_key) or _ROUTE_BY_UI_KEY[route_key]
-    return route
+    return _ROUTE_BY_KEY[route_key]
 
 
 def route_field_key(
@@ -286,12 +276,6 @@ def project_brain_model_routes(
     }
     rows: list[dict[str, Any]] = []
     for route in _ROUTES:
-        family = (
-            "v3"
-            if route.group == "Cognition Core V3"
-            else "shared_non_core"
-        )
-        active = family == "v3"
         default_values: dict[str, Any] = {}
         override_values: dict[str, Any] = {}
         effective_values: dict[str, Any] = {}
@@ -319,12 +303,9 @@ def project_brain_model_routes(
         model = str(effective_values.get("model") or "")
         thinking_enabled = bool(effective_values.get("thinking_enabled"))
         rows.append({
-            "route_key": route.env_prefix.lower(),
-            "env_prefix": route.env_prefix,
+            "route_key": route.route_key,
             "label": route.label,
             "group": route.group,
-            "family": family,
-            "active": active,
             "required": route_is_required_for_config_read(route),
             "fallback_backed": route.fallback_backed,
             "editable_fields": list(route.editable_fields),
@@ -334,11 +315,12 @@ def project_brain_model_routes(
                 **effective_values,
                 "source": _route_source(sources),
             },
-            "sources": sources,
             "diagnostics": {
                 "backend_kind": "openai_compatible",
                 "base_url_label": _base_url_label(base_url),
-                "base_url_source": base_url_source,
+                "base_url_source": (
+                    "configured" if base_url_source else "unconfigured"
+                ),
                 "model_family": _model_family(model),
                 "thinking_strategy": (
                     "enabled" if thinking_enabled else "disabled"

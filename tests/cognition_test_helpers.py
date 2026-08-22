@@ -13,7 +13,6 @@ from kazusa_ai_chatbot.cognition_episode import (
     MAX_COGNITIVE_EPISODE_MEDIA_PERCEPTS,
     CognitiveEpisodeV1,
     TriggerSource,
-    build_goal_continuation_ref,
     build_text_chat_media_description_rows,
     build_user_message_episode,
     validate_cognitive_episode_v1,
@@ -393,105 +392,45 @@ def canonical_cognition_output(
     route: str = "speech",
     owner_user_id: str = "v2-test-user",
 ) -> dict[str, Any]:
-    """Build one exact committed V2 cognition output for connector tests."""
+    """Build one minimal current cognition output for adjacent tests."""
 
-    continuation_ref = None
-    if route == "speech":
-        continuation_ref = build_goal_continuation_ref(
-            source_episode_id="v2-test-episode",
-            source_message_id="message-test",
-            branch_id="ordinary_response",
-            goal_ref={
-                "scope": "user",
-                "kind": "goal",
-                "entity_id": "goal:ordinary-response",
-            },
-        )
+    state = build_acquaintance_user_state(
+        global_user_id=owner_user_id,
+        updated_at=NOW,
+    )
+    response_goal = "acknowledge the grounded episode" if route == "speech" else ""
     output: dict[str, Any] = {
-        "schema_version": "cognition_core_output.v2",
-        "intention": {
-            "selected_branch_id": "ordinary_response",
-            "route": route,
-            "intention": "acknowledge the grounded episode",
-            "target_roles": [],
-            "reason": "the current episode establishes the selected route",
-            "goal_continuation_ref": continuation_ref,
+        "schema_version": "cognition_output.v3",
+        "appraisals": [],
+        "active_character_goal": {
+            "goal_kind": "ordinary_response",
+            "intent": response_goal or "preserve uncertainty",
+            "reason": "the current episode establishes the active goal",
+            "cause_summary": "the current episode is the grounded cause",
         },
-        "goal_continuation_ref": continuation_ref,
-        "supporting_bids": [],
-        "state_update": {
-            "state_scope": "user",
-            "owner_key": owner_user_id,
-            "replacement_state": build_acquaintance_user_state(
-                global_user_id=owner_user_id,
-                updated_at=NOW,
-            ),
-            "expected_previous_state": build_acquaintance_user_state(
-                global_user_id=owner_user_id,
-                updated_at=NOW,
-            ),
-            "comparison_results": [],
-            "changed_paths": [],
+        "relational_willingness": {
+            "applicable": False,
+            "stance": "not_applicable",
+            "reason": "当前回合证据不涉及关系立场判断",
+            "cause_summary": "当前回合证据不涉及关系立场判断",
+        },
+        "response_plan": {
+            "goal_resolution": "answerable_now" if route == "speech" else "defer",
+            "response_goal": response_goal,
+            "action_requests": [],
+            "resolver_requests": [],
         },
         "affect_projection": [],
-        "action_requests": [],
-        "resolver_requests": [],
-        "goal_resolution": "answerable_now",
-        "resolver_pending_resolution": None,
-        "resolver_goal_progress": None,
-        "resolver_progress": {
-            "status": "not_requested",
-            "semantic_summary": "no resolver was selected",
-        },
-        "selected_bid_reason": "the current episode is grounded",
-        "private_monologue": "I want to acknowledge this clearly.",
-        "expression_policy": {
-            "visibility": "visible" if route == "speech" else "none",
-            "emotional_tone": "平静",
-            "intensity": "restrained",
-            "directness": "balanced",
-        },
-        "diagnostics": {
-            "run_id": "canonical-cognition-output",
-            "stage_status": {},
-            "selected_question_count": 0,
-            "dispatched_question_count": 0,
-            "selected_branch_count": 1,
-            "dispatched_branch_count": 1,
-            "completed_branch_count": 1,
-            "failed_branch_count": 0,
-            "overlap_ms": 0,
-            "dependency_wait_ms": 0,
-            "total_ms": 0,
-            "warnings": [],
+        "relationship_projection": {"relationship_summary": "stable", "axis_summaries": {}},
+        "cause_provenance": [],
+        "diagnostics": {"status": "complete"},
+        "state_projection": {
+            "state_scope": "user",
+            "owner_key": owner_user_id,
+            "expected_previous_state": state,
+            "replacement_state": state,
+            "transition_contexts": [],
+            "binding_receipts": [],
         },
     }
-    if route == "speech":
-        relational_willingness = {
-            "schema_version": "relational_willingness.v2",
-            "applicability": "not_relationship_sensitive",
-            "stance": "not_applicable",
-            "current_user_relationship_state": "not_applicable",
-            "reason": "当前回合证据不涉及关系立场判断",
-            "evidence_handles": ["e1"],
-        }
-        output["relational_willingness"] = relational_willingness
-        output["admitted_bid"] = {
-            "branch_id": "ordinary_response",
-            "goal_ref": {
-                "scope": "user",
-                "kind": "goal",
-                "entity_id": "goal:ordinary-response",
-            },
-            "intention": "acknowledge the grounded episode",
-            "desired_outcome": "maintain continuity",
-            "concrete_detail": "use only the current grounded episode",
-            "reason": "the current episode establishes the selected route",
-            "private_monologue": "I want to acknowledge this clearly.",
-            "target_roles": [],
-            "evidence_handles": ["e1"],
-            "expected_consequences": ["preserve continuity"],
-            "confidence": "high",
-            "relational_willingness": relational_willingness,
-        }
     return output

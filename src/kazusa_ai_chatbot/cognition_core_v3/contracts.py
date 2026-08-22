@@ -1,336 +1,192 @@
-"""Internal execution contracts for the V3 semantic-chain engine.
-
-These frozen types carry stage outcomes, typed failures, chain checkpoints, and
-cache-domain identity between deterministic boundaries inside one cognition run.
-They are V3-internal; the public entrypoint still speaks
-``CognitionCoreInputV2``/``CognitionCoreOutputV2`` from the reused V2 substrate.
-"""
+"""Canonical contracts for the single-pass Cognition V3 boundary."""
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass
 
 from kazusa_ai_chatbot.llm_interface import LLMCallConfig, LLMInvoker
 
-BOUNDARY_REJECTED_ERROR_CODE = "cognition_boundary_rejected"
-APPRASAL_CONTRACT_EXHAUSTED_ERROR_CODE = "semantic_appraisal_contract_exhausted"
-GOAL_BID_STRUCTURE_EXHAUSTED_ERROR_CODE = "goal_bid_structure_exhausted"
-GOAL_BID_PROVIDER_EXHAUSTED_ERROR_CODE = "goal_bid_provider_exhausted"
-
-EXHAUSTION_ERROR_CODES: frozenset[str] = frozenset({
-    APPRASAL_CONTRACT_EXHAUSTED_ERROR_CODE,
-    GOAL_BID_STRUCTURE_EXHAUSTED_ERROR_CODE,
-    GOAL_BID_PROVIDER_EXHAUSTED_ERROR_CODE,
+CANONICAL_COGNITION_INPUT_SCHEMA = "cognition_input.v3"
+CANONICAL_COGNITION_OUTPUT_SCHEMA = "cognition_output.v3"
+CANONICAL_SHIFT_VALUES = frozenset({
+    "slight_increase", "moderate_increase", "strong_increase",
+    "slight_decrease", "moderate_decrease", "strong_decrease",
+    "stable", "uncertain",
 })
-
-CANDIDATE_ORIGIN_MISSING = "candidate_origin_missing"
-PRODUCER_HANDLE_DOMAIN_INVALID = "producer_handle_domain_invalid"
-SEMANTIC_BOUNDARY_TERMINAL = "semantic_boundary_terminal"
-
-TERMINAL_BOUNDARY_CLASSES: frozenset[str] = frozenset(
-    {
-        CANDIDATE_ORIGIN_MISSING,
-        PRODUCER_HANDLE_DOMAIN_INVALID,
-        SEMANTIC_BOUNDARY_TERMINAL,
-    }
+CANONICAL_APPRAISAL_FAMILIES = (
+    "event_agency", "goal_threat_outcome", "epistemic_comparison_memory",
+    "relationship_social", "moral_identity", "existential_drive",
 )
-
-STRUCTURAL_FAILURE_CLASS = "structural_contract"
-PROVIDER_FAILURE_CLASS = "provider_error"
-EXHAUSTION_FAILURE_CLASS = "contract_exhausted"
-
-FAILURE_CLASSES: frozenset[str] = frozenset(
-    {STRUCTURAL_FAILURE_CLASS, PROVIDER_FAILURE_CLASS, EXHAUSTION_FAILURE_CLASS}
-) | TERMINAL_BOUNDARY_CLASSES
-
-
-@dataclass(frozen=True)
-class StageFailure:
-    """Typed bounded-failure record for one semantic stage attempt.
-
-    Boundary-class failures are terminal rejections with zero repair calls; a
-    structural failure carries ``repair_attempted`` only when a bounded complete
-    replacement was actually issued within the owner's attempt cap.
-    """
-
-    chain_name: str
-    stage_name: str
-    failure_class: str
-    error_code: str
-    repair_attempted: bool = False
-
-
-@dataclass(frozen=True)
-class StageResult:
-    """Outcome of one bounded appraisal-stage execution."""
-
-    chain_name: str
-    stage_name: str
-    accepted: bool
-    local_state: dict[str, object] | None
-    semantic_summary: str | None
-    failure: StageFailure | None = None
-
+CANONICAL_A1_FAMILIES = CANONICAL_APPRAISAL_FAMILIES[:3]
+CANONICAL_A2_FAMILIES = CANONICAL_APPRAISAL_FAMILIES[3:]
+CANONICAL_FAMILY_AXES: dict[str, tuple[str, ...]] = {
+    "event_agency": ("responsibility", "intentionality"),
+    "goal_threat_outcome": (
+        "obstruction", "expected_success", "controllability", "recoverability",
+        "urgency", "likelihood", "expected_harm", "uncertainty",
+        "coping_potential", "residual_pressure", "outcome_impact",
+        "expectation_mismatch",
+    ),
+    "epistemic_comparison_memory": (
+        "comparison_gap", "vastness", "memory_warmth", "temporal_loss",
+        "relevance", "uncertainty", "learnability", "novelty",
+        "model_accommodation",
+    ),
+    "relationship_social": (
+        "positive_regard", "trust", "attachment", "desired_closeness",
+        "perceived_closeness", "care", "boundary_safety", "exclusivity",
+        "unresolved_injury",
+    ),
+    "moral_identity": (
+        "harm", "unfairness", "exposure", "repair_need", "reparability",
+        "norm_violation", "contamination_risk", "identity_threat",
+    ),
+    "existential_drive": (
+        "autonomy_pressure", "connection_pressure", "safety_pressure",
+        "competence_pressure", "care_pressure", "integrity_pressure",
+        "exploration_pressure", "meaning_pressure", "purpose_coherence",
+        "agency", "identity_continuity",
+    ),
+}
 
 @dataclass(frozen=True)
-class ChainCheckpoint:
-    """Canonical accepted checkpoint that starts a fresh same-owner transcript.
-
-    Contents are limited to accepted typed propositions, deltas, semantic
-    summaries, and the prompt-safe state projection required by the next owner.
-    Rejected candidates, validator prose from a previous stage, sibling output,
-    raw model traces, provider metadata, permissions, adapter fields, and hidden
-    state have no slot in this type.
-    """
-
-    chain_name: str
-    accepted_local_state: Mapping[str, object]
-    semantic_summaries: tuple[str, ...]
-    next_owner_projection: Mapping[str, object]
-
+class CanonicalTurnWorkspace:
+    observation: Mapping[str, object]
+    state: Mapping[str, object]
+    continuity: Mapping[str, object]
+    capabilities: Mapping[str, object]
+    orientation: Mapping[str, str]
 
 @dataclass(frozen=True)
-class CacheDomainIdentity:
-    """Normalized cache-domain key for one backend/model/prompt combination.
+class CanonicalAppraisal:
+    family: str
+    applicable: bool
+    semantic_summary: str
+    cause_summary: str
+    axis_changes: tuple[Mapping[str, object], ...]
 
-    Components are the normalized backend URL, a SHA-256 hash of the raw
-    credential (never the raw value), backend kind, model, thinking or chat
-    template strategy label, and the SHA-256 hash of the exact static system
-    prompt bytes.
-    """
+@dataclass(frozen=True)
+class CanonicalGoal:
+    goal_kind: str
+    intent: str
+    reason: str
+    cause_summary: str
 
-    normalized_backend_url: str
-    credential_identity_hash: str
-    backend_kind: str
-    model: str
-    template_strategy: str
-    static_system_prompt_hash: str
+@dataclass(frozen=True)
+class CanonicalResponsePlan:
+    goal_resolution: str
+    response_goal: str
+    action_requests: tuple[Mapping[str, object], ...]
+    resolver_requests: tuple[Mapping[str, object], ...]
+    self_cognition_response: Mapping[str, object] | None = None
 
-    def domain_key(self) -> str:
-        """Compute the single stable cache-domain key for this identity.
+@dataclass(frozen=True)
+class CanonicalCognitionOutput:
+    schema_version: str
+    appraisals: tuple[CanonicalAppraisal, ...]
+    active_character_goal: CanonicalGoal
+    relational_willingness: Mapping[str, object]
+    response_plan: CanonicalResponsePlan
+    affect_projection: tuple[Mapping[str, object], ...]
+    relationship_projection: Mapping[str, object]
+    cause_provenance: tuple[Mapping[str, object], ...]
+    diagnostics: Mapping[str, object]
 
-        Returns:
-            The SHA-256 hex digest over all six normalized components joined by
-            an ASCII unit-separator byte, so no component boundary can collide.
-        """
-        payload = (
-            f"{self.normalized_backend_url}\x1f"
-            f"{self.credential_identity_hash}\x1f"
-            f"{self.backend_kind}\x1f"
-            f"{self.model}\x1f"
-            f"{self.template_strategy}\x1f"
-            f"{self.static_system_prompt_hash}"
-        )
-        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-def hash_credential_identity(raw_credential: str) -> str:
-    """Hash a raw credential into its stable identity component.
-
-    Args:
-        raw_credential: The raw backend credential value from configuration.
-
-    Returns:
-        The SHA-256 hex digest used as the cache-domain credential component;
-        the raw value is never stored in any contract type.
-    """
-    return hashlib.sha256(raw_credential.encode("utf-8")).hexdigest()
-
-
-def hash_static_prompt(prompt_text: str) -> str:
-    """Hash the exact static system prompt text into its domain component.
-
-    Args:
-        prompt_text: The byte-exact static chain or goal system prompt.
-
-    Returns:
-        The SHA-256 hex digest identifying that exact prompt bytes.
-    """
-    return hashlib.sha256(prompt_text.encode("utf-8")).hexdigest()
-
-
-def validate_stage_result(result: StageResult) -> StageResult:
-    """Validate one stage result against the closed failure contract.
-
-    Args:
-        result: The stage outcome produced by an execution boundary.
-
-    Returns:
-        The same validated result object.
-
-    Raises:
-        ValueError: Unknown owner identity, a missing or extra failure record,
-            an unknown failure class, or a boundary-class violation of the
-            terminal-no-repair invariants fail fast.
-    """
-    if bool(result.accepted) == (result.failure is not None):
-        raise ValueError(
-            "A stage outcome carries a failure record exactly when it was not accepted"
-        )
-
-    if result.accepted:
-        if result.local_state is None or result.semantic_summary is None:
-            raise ValueError("Accepted stage outcomes carry typed local state and a bounded summary")
+    def as_dict(self) -> dict[str, object]:
+        result: dict[str, object] = {
+            "schema_version": self.schema_version,
+            "appraisals": [
+                {
+                    "family": item.family,
+                    "applicable": item.applicable,
+                    "semantic_summary": item.semantic_summary,
+                    "cause_summary": item.cause_summary,
+                    "axis_changes": [dict(row) for row in item.axis_changes],
+                }
+                for item in self.appraisals
+            ],
+            "active_character_goal": {
+                "goal_kind": self.active_character_goal.goal_kind,
+                "intent": self.active_character_goal.intent,
+                "reason": self.active_character_goal.reason,
+                "cause_summary": self.active_character_goal.cause_summary,
+            },
+            "relational_willingness": dict(self.relational_willingness),
+            "response_plan": {
+                "goal_resolution": self.response_plan.goal_resolution,
+                "response_goal": self.response_plan.response_goal,
+                "action_requests": [dict(row) for row in self.response_plan.action_requests],
+                "resolver_requests": [dict(row) for row in self.response_plan.resolver_requests],
+            },
+            "affect_projection": [dict(row) for row in self.affect_projection],
+            "relationship_projection": dict(self.relationship_projection),
+            "cause_provenance": [dict(row) for row in self.cause_provenance],
+            "diagnostics": dict(self.diagnostics),
+        }
+        if self.response_plan.self_cognition_response is not None:
+            result["response_plan"]["self_cognition_response"] = dict(
+                self.response_plan.self_cognition_response
+            )
         return result
 
-    failure = result.failure
-    if failure.chain_name != result.chain_name or failure.stage_name != result.stage_name:
-        raise ValueError("Failure records must name the exact failing owner")
-    if failure.failure_class not in FAILURE_CLASSES:
-        raise ValueError(f"Unknown stage failure class {failure.failure_class!r}")
-
-    if failure.failure_class in TERMINAL_BOUNDARY_CLASSES:
-        _validate_boundary_failure(failure)
-    elif (
-        failure.failure_class == EXHAUSTION_FAILURE_CLASS
-        and failure.error_code not in EXHAUSTION_ERROR_CODES
-    ):
-        raise ValueError(
-            "Exhaustion reuses an owner-specific exhaustion error code"
-        )
-
-    return result
-
-
-def _validate_boundary_failure(failure: StageFailure) -> None:
-    """Validate a boundary-class failure's terminal disposition.
-
-    Args:
-        failure: The boundary-class stage failure record.
-
-    Raises:
-        ValueError: Boundary-class failures are terminal rejections with zero
-            repair calls and the exact boundary-rejected error code; any other
-            combination fails fast.
-    """
-    if failure.repair_attempted:
-        raise ValueError("Boundary-class failures are terminal rejections with zero repair calls")
-    if failure.error_code != BOUNDARY_REJECTED_ERROR_CODE:
-        raise ValueError(
-            f"Boundary-class failures record {BOUNDARY_REJECTED_ERROR_CODE!r}, not {failure.error_code!r}"
-        )
-
-
-def validate_chain_checkpoint(checkpoint: ChainCheckpoint) -> ChainCheckpoint:
-    """Validate one chain checkpoint against the registry and content contract.
-
-    Args:
-        checkpoint: The canonical accepted checkpoint for a fresh transcript.
-
-    Returns:
-        The same validated checkpoint object.
-
-    Raises:
-        ValueError or TypeError: Unknown chain identity, non-mapping state slots,
-            or non-string summaries fail fast before transcript assembly.
-    """
-    if not isinstance(checkpoint.accepted_local_state, Mapping):
-        raise TypeError("Checkpoint local state must be a mapping of accepted typed values")
-    if not isinstance(checkpoint.next_owner_projection, Mapping):
-        raise TypeError("Checkpoint next-owner projection must be a prompt-safe mapping")
-    for summary in checkpoint.semantic_summaries:
-        if not isinstance(summary, str) or not summary:
-            raise ValueError("Checkpoint summaries are bounded non-empty strings")
-
-    return checkpoint
-
-
-def validate_cache_domain_identity(identity: CacheDomainIdentity) -> CacheDomainIdentity:
-    """Validate one cache-domain identity.
-
-    Args:
-        identity: The normalized cache-domain components for one backend/model/
-            prompt combination.
-
-    Returns:
-        The same validated identity object.
-
-    Raises:
-        ValueError: Empty components or non-SHA-256 hash fields fail fast; the
-            raw credential has no slot in this type, so it cannot leak into a
-            domain key.
-    """
-    for field_name in ("normalized_backend_url", "backend_kind", "model", "template_strategy"):
-        if not getattr(identity, field_name):
-            raise ValueError(f"Cache-domain {field_name} must be non-empty")
-    _validate_sha256_hex(identity.credential_identity_hash, "credential identity hash")
-    _validate_sha256_hex(identity.static_system_prompt_hash, "static system prompt hash")
-
-    return identity
-
-
-def _validate_sha256_hex(value: str, label: str) -> None:
-    """Validate that a component is an exact SHA-256 hex digest.
-
-    Args:
-        value: The component under validation.
-        label: Human-readable field name for the failure message.
-
-    Raises:
-        ValueError: Components shorter or longer than 64 hex characters, or with
-            non-hex characters, fail fast.
-    """
-    if len(value) != 64:
-        raise ValueError(f"Cache-domain {label} must be a SHA-256 hex digest")
-    try:
-        int(value, 16)
-    except ValueError as exc:
-        raise ValueError(f"Cache-domain {label} must be a SHA-256 hex digest") from exc
+def validate_canonical_cognition_output(
+    payload: Mapping[str, object],
+) -> Mapping[str, object]:
+    required = {
+        "schema_version", "appraisals", "active_character_goal",
+        "relational_willingness", "response_plan", "affect_projection",
+        "relationship_projection", "cause_provenance", "diagnostics",
+    }
+    if not isinstance(payload, Mapping) or payload.get("schema_version") != CANONICAL_COGNITION_OUTPUT_SCHEMA:
+        raise ValueError("canonical cognition output schema is invalid")
+    if set(payload) != required | {"state_projection"}:
+        raise ValueError("canonical cognition output fields are not exact")
+    if not isinstance(payload["active_character_goal"], Mapping):
+        raise ValueError("canonical goal is invalid")
+    if not isinstance(payload["response_plan"], Mapping):
+        raise ValueError("canonical response plan is invalid")
+    return payload
 
 _MINIMUM_CHAIN_CONTEXT_WINDOW_TOKENS = 50_000
 _MINIMUM_LANE_COMPLETION_TOKENS = 8_192
 
-
-def _validate_v3_lane_config(config, *, lane_label: str, require_context_window: bool) -> None:
+def _validate_lane(config: object, *, label: str, context_required: bool) -> None:
     if not isinstance(config, LLMCallConfig):
-        raise TypeError(f"V3 {lane_label} lane must be an LLMCallConfig")
-    for field_name in ("route_name", "base_url", "api_key", "model"):
-        value = getattr(config, field_name)
-        if not isinstance(value, str) or not value.strip():
-            raise ValueError(f"V3 {lane_label} route {field_name} must be non-empty")
+        raise TypeError(f"V3 {label} lane must be an LLMCallConfig")
+    for name in ("route_name", "base_url", "api_key", "model"):
+        if not isinstance(getattr(config, name), str) or not getattr(config, name).strip():
+            raise ValueError(f"V3 {label} route {name} must be non-empty")
     if config.thinking.enabled:
-        raise ValueError(f"V3 {lane_label} lane thinking must be disabled")
-    completion_cap = config.max_completion_tokens
-    if not isinstance(completion_cap, int) or isinstance(completion_cap, bool) or completion_cap < _MINIMUM_LANE_COMPLETION_TOKENS:
-        raise ValueError(f"V3 {lane_label} lane completion cap must be at least {_MINIMUM_LANE_COMPLETION_TOKENS}")
-    if not require_context_window:
-        return
-    context_window = config.context_window_tokens
-    if not isinstance(context_window, int) or isinstance(context_window, bool) or context_window < _MINIMUM_CHAIN_CONTEXT_WINDOW_TOKENS:
-        raise ValueError("V3 chain context window must be at least 50000")
-
+        raise ValueError(f"V3 {label} thinking must be disabled")
+    if not isinstance(config.max_completion_tokens, int) or config.max_completion_tokens < _MINIMUM_LANE_COMPLETION_TOKENS:
+        raise ValueError("V3 lane completion cap is too small")
+    if context_required and (
+        not isinstance(config.context_window_tokens, int)
+        or config.context_window_tokens < _MINIMUM_CHAIN_CONTEXT_WINDOW_TOKENS
+    ):
+        raise ValueError("V3 chain context window is too small")
 
 @dataclass(frozen=True)
 class CognitionChainServicesV3:
-    """Injected primary and optional sidecar bindings for Cognition V3."""
-
     llm: LLMInvoker
     chain_lane: LLMCallConfig
-    sidecar_lane: LLMCallConfig | None
-    subconscious_enabled: bool = False
     turn_deadline_seconds: int = 240
 
     def __post_init__(self) -> None:
         if self.llm is None:
             raise TypeError("V3 services require an LLM invoker")
-        if not isinstance(self.subconscious_enabled, bool):
-            raise TypeError("subconscious_enabled must be a bool")
-        if not isinstance(self.turn_deadline_seconds, int) or isinstance(
-            self.turn_deadline_seconds,
-            bool,
-        ):
+        if not isinstance(self.turn_deadline_seconds, int) or isinstance(self.turn_deadline_seconds, bool):
             raise TypeError("turn_deadline_seconds must be an integer")
         if not 30 <= self.turn_deadline_seconds <= 600:
-            raise ValueError("turn_deadline_seconds must be between 30 and 600")
-        _validate_v3_lane_config(self.chain_lane, lane_label="chain", require_context_window=True)
-        if self.sidecar_lane is None:
-            if self.subconscious_enabled:
-                raise ValueError("V3 subconscious execution requires a sidecar lane")
-            return
-        _validate_v3_lane_config(self.sidecar_lane, lane_label="sidecar", require_context_window=False)
-        chain_identity = (self.chain_lane.base_url.strip().rstrip('/').lower(), self.chain_lane.model.strip().lower())
-        sidecar_identity = (self.sidecar_lane.base_url.strip().rstrip('/').lower(), self.sidecar_lane.model.strip().lower())
-        if sidecar_identity == chain_identity:
-            raise ValueError("V3 chain and sidecar lanes must have distinct endpoint/model identities")
+            raise ValueError("turn deadline is outside the bounded range")
+        _validate_lane(self.chain_lane, label="chain", context_required=True)
+
+__all__ = [
+    "CANONICAL_A1_FAMILIES", "CANONICAL_A2_FAMILIES",
+    "CANONICAL_APPRAISAL_FAMILIES", "CANONICAL_COGNITION_INPUT_SCHEMA",
+    "CANONICAL_COGNITION_OUTPUT_SCHEMA", "CANONICAL_FAMILY_AXES",
+    "CANONICAL_SHIFT_VALUES", "CanonicalAppraisal", "CanonicalCognitionOutput",
+    "CanonicalGoal", "CanonicalResponsePlan", "CanonicalTurnWorkspace",
+    "CognitionChainServicesV3", "validate_canonical_cognition_output",
+]

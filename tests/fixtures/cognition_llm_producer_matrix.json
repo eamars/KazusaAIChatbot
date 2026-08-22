@@ -145,7 +145,6 @@
     "semantic_appraisal",
     "goal_generation",
     "goal_selection",
-    "workspace_collapse",
     "action_authorization",
     "resolver_authorization",
     "dialog_surface",

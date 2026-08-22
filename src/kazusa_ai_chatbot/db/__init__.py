@@ -69,11 +69,6 @@ from kazusa_ai_chatbot.db.character_identity_growth import (
     reject_growth_candidates,
     update_growth_candidate,
 )
-from kazusa_ai_chatbot.db.cognition_chain_runs import (
-    ensure_cognition_chain_run_indexes,
-    get_cognition_chain_run,
-    save_cognition_chain_run,
-)
 
 # ── Conversation history ──────────────────────────────────────────
 from kazusa_ai_chatbot.db.conversation import (
@@ -379,9 +374,6 @@ __all__ = [
     "update_conversation_row_llm_trace_id",
     "update_conversation_attachment_descriptions",
     "list_llm_trace_steps_for_trace_ids",
-    "ensure_cognition_chain_run_indexes",
-    "get_cognition_chain_run",
-    "save_cognition_chain_run",
     "explain_monitored_channel_query",
     "list_recent_character_message_channels",
     "list_reflection_scope_messages",

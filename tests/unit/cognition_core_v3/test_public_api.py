@@ -6,28 +6,36 @@ import inspect
 
 import kazusa_ai_chatbot.cognition_core_v3 as v3
 from kazusa_ai_chatbot.cognition_core_v3 import (
-    APPRASAL_CONTRACT_EXHAUSTED_ERROR_CODE,
-    BOUNDARY_REJECTED_ERROR_CODE,
-    EXHAUSTION_FAILURE_CLASS,
-    PROVIDER_FAILURE_CLASS,
-    StageFailure,
-    StageResult,
-    STRUCTURAL_FAILURE_CLASS,
+    CANONICAL_A1_FAMILIES,
+    CANONICAL_A2_FAMILIES,
+    CANONICAL_APPRAISAL_FAMILIES,
+    CANONICAL_COGNITION_INPUT_SCHEMA,
+    CANONICAL_COGNITION_OUTPUT_SCHEMA,
+    CANONICAL_FAMILY_AXES,
+    CanonicalAppraisal,
+    CanonicalCognitionOutput,
+    CanonicalGoal,
+    CanonicalResponsePlan,
+    CanonicalTurnWorkspace,
     bind_protected_chain_records,
+    contracts,
+    facade,
     reset_protected_chain_records,
-    run_cognition,
     snapshot_protected_chain_records,
 )
-from kazusa_ai_chatbot.cognition_core_v3 import contracts, facade
 
 EXPECTED_EXPORTS = [
-    "APPRASAL_CONTRACT_EXHAUSTED_ERROR_CODE",
-    "BOUNDARY_REJECTED_ERROR_CODE",
-    "EXHAUSTION_FAILURE_CLASS",
-    "PROVIDER_FAILURE_CLASS",
-    "StageFailure",
-    "StageResult",
-    "STRUCTURAL_FAILURE_CLASS",
+    "CANONICAL_A1_FAMILIES",
+    "CANONICAL_A2_FAMILIES",
+    "CANONICAL_APPRAISAL_FAMILIES",
+    "CANONICAL_COGNITION_INPUT_SCHEMA",
+    "CANONICAL_COGNITION_OUTPUT_SCHEMA",
+    "CANONICAL_FAMILY_AXES",
+    "CanonicalAppraisal",
+    "CanonicalCognitionOutput",
+    "CanonicalGoal",
+    "CanonicalResponsePlan",
+    "CanonicalTurnWorkspace",
     "bind_protected_chain_records",
     "reset_protected_chain_records",
     "run_cognition",
@@ -47,15 +55,17 @@ def test_v3_exports_exact_engine_entrypoint() -> None:
 def test_public_exports_resolve_to_their_owning_module_objects() -> None:
     """Every public export re-exports the owning object, not a shadow copy."""
 
-    assert APPRASAL_CONTRACT_EXHAUSTED_ERROR_CODE is (
-        contracts.APPRASAL_CONTRACT_EXHAUSTED_ERROR_CODE
-    )
-    assert BOUNDARY_REJECTED_ERROR_CODE is contracts.BOUNDARY_REJECTED_ERROR_CODE
-    assert EXHAUSTION_FAILURE_CLASS is contracts.EXHAUSTION_FAILURE_CLASS
-    assert PROVIDER_FAILURE_CLASS is contracts.PROVIDER_FAILURE_CLASS
-    assert StageFailure is contracts.StageFailure
-    assert StageResult is contracts.StageResult
-    assert STRUCTURAL_FAILURE_CLASS is contracts.STRUCTURAL_FAILURE_CLASS
+    assert CANONICAL_A1_FAMILIES is contracts.CANONICAL_A1_FAMILIES
+    assert CANONICAL_A2_FAMILIES is contracts.CANONICAL_A2_FAMILIES
+    assert CANONICAL_APPRAISAL_FAMILIES is contracts.CANONICAL_APPRAISAL_FAMILIES
+    assert CANONICAL_COGNITION_INPUT_SCHEMA == contracts.CANONICAL_COGNITION_INPUT_SCHEMA
+    assert CANONICAL_COGNITION_OUTPUT_SCHEMA == contracts.CANONICAL_COGNITION_OUTPUT_SCHEMA
+    assert CANONICAL_FAMILY_AXES is contracts.CANONICAL_FAMILY_AXES
+    assert CanonicalAppraisal is contracts.CanonicalAppraisal
+    assert CanonicalCognitionOutput is contracts.CanonicalCognitionOutput
+    assert CanonicalGoal is contracts.CanonicalGoal
+    assert CanonicalResponsePlan is contracts.CanonicalResponsePlan
+    assert CanonicalTurnWorkspace is contracts.CanonicalTurnWorkspace
     assert bind_protected_chain_records is facade.bind_protected_chain_records
     assert reset_protected_chain_records is (
         facade.reset_protected_chain_records

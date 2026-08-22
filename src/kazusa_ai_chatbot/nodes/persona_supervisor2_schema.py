@@ -11,7 +11,7 @@ from kazusa_ai_chatbot.cognition_shared.contracts import (
     GoalResolutionV2,
     SceneContextV2,
     SceneParticipantBindingV1,
-    TextSurfaceInputV2,
+    TextSurfaceInput,
     TextSurfaceOutputV2,
     VisualSurfaceOutputV2,
 )
@@ -146,7 +146,7 @@ class GlobalPersonaState(TypedDict):
     cognition_state_update: NotRequired[dict]
     character_cognition_base_updated_at: NotRequired[str]
     cognition_state_committed: NotRequired[bool]
-    text_surface_input_v2: NotRequired[TextSurfaceInputV2]
+    text_surface_input: NotRequired[TextSurfaceInput]
     text_surface_output_v2: NotRequired[TextSurfaceOutputV2]
     visual_surface_output_v2: NotRequired[VisualSurfaceOutputV2]
     action_specs: NotRequired[list[ActionSpecV1]]
