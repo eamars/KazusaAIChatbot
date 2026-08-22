@@ -627,7 +627,7 @@ def _style_relevance_projection(source: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _style_cognition_projection(source: Mapping[str, Any]) -> dict[str, Any]:
-    """Project the declared social and engagement guidance for Core V2."""
+    """Project the declared social and engagement guidance for cognition."""
 
     overlay = source["overlay"]
     return {

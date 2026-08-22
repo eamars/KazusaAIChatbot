@@ -1,4 +1,4 @@
-"""Failure-only protected capture for Cognition Core V2 invocations."""
+"""Failure-only protected capture for cognition invocations."""
 
 from __future__ import annotations
 
@@ -67,7 +67,7 @@ def begin_failure_capsule(
 
     Args:
         trace_id: Protected turn trace that owns this invocation.
-        entrypoint: Public Cognition V2 entrypoint being executed.
+        entrypoint: Public cognition entrypoint being executed.
         input_payload: Raw public arguments captured before validation.
 
     Returns:

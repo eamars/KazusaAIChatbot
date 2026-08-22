@@ -6,11 +6,11 @@ from typing import Any
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     validate_text_surface_output,
 )
 from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as surface_module
-from tests.cognition_core_v2_test_helpers import (
+from tests.cognition_test_helpers import (
     canonical_cognition_output,
     canonical_episode,
     canonical_service_character_profile,
@@ -82,17 +82,6 @@ def _character_profile() -> dict[str, Any]:
     return profile
 
 
-def test_surface_input_uses_native_v2_contract() -> None:
-    """Surface input contains semantic projections rather than directive bags."""
-
-    payload = surface_module.build_text_surface_input_from_global_state(
-        _state(),
-        interaction_style_context="brief and natural",
-    )
-
-    assert payload["schema_version"] == "text_surface_input.v2"
-    assert payload["intention"]["route"] == "speech"
-    assert "action_directives" not in payload
 
 
 def test_surface_output_validation_requires_exact_v2_fields() -> None:

@@ -79,7 +79,7 @@ def test_task_resolution_entrypoint_signatures_are_frozen() -> None:
     assert tuple(resume.parameters) == ("checkpoint", "execution_context")
     hints = get_type_hints(module.resolve_task_inline)
     cognition_contracts = importlib.import_module(
-        "kazusa_ai_chatbot.cognition_core_v2.contracts"
+        "kazusa_ai_chatbot.cognition_shared.contracts"
     )
     assert hints["request"] is cognition_contracts.ResolverCapabilityRequestV2
 
@@ -88,7 +88,7 @@ def test_removed_model_facing_handles_are_absent() -> None:
     """The big-bang contract exposes no legacy task-resolution handles."""
 
     action_selection = importlib.import_module(
-        "kazusa_ai_chatbot.cognition_core_v2.action_selection"
+        "kazusa_ai_chatbot.cognition_core_v3.action_selection"
     )
     prompt = action_selection.ACTION_PLANNING_PROMPT.casefold()
     forbidden_handles = (

@@ -11,7 +11,7 @@ from kazusa_ai_chatbot.action_spec.models import ActionValidationError
 from kazusa_ai_chatbot.action_spec.registry import (
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
 )
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     build_scheduled_future_speech_authority,
 )
 from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime

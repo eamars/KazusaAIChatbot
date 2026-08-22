@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 import re
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-
 
 SERVICE_ID_PATTERN = r"^[a-z0-9][a-z0-9_.-]{0,63}$"
 COGNITION_GRAPH_NODE_ID_PATTERN = r"^[a-z0-9][a-z0-9_.:-]{0,79}$"
@@ -213,6 +212,29 @@ class CognitionContextConsumption(StrictModel):
     health: dict[str, Any] = Field(default_factory=dict)
 
 
+class CognitionChainRunSnapshot(StrictModel):
+    """Strict sanitized projection of one Cognition V3 chain-run record."""
+
+    status: Literal[
+        "not_reported",
+        "running",
+        "completed",
+        "failed",
+        "partial",
+    ] = "not_reported"
+    chain_run_id: str | None = Field(default=None, max_length=120)
+    run_id: str | None = Field(default=None, max_length=120)
+    llm_trace_id: str | None = Field(default=None, max_length=120)
+    cognition_invocation_id: str | None = Field(default=None, max_length=120)
+    chain_model_name: str = Field(default="", max_length=160)
+    sidecar_model_name: str = Field(default="", max_length=160)
+    terminal_disposition: str = Field(default="", max_length=80)
+    started_at: str = Field(default="", max_length=120)
+    completed_at: str = Field(default="", max_length=120)
+    step_count: int = Field(default=0, ge=0, le=96)
+    warning_codes: list[str] = Field(default_factory=list, max_length=32)
+
+
 class ServiceActionRequest(StrictModel):
     """Operator request for one state-changing service action."""
 
@@ -406,6 +428,9 @@ class ConsoleDebugChatResponse(StrictModel):
     sent_at: datetime
     error: dict[str, Any] | None = None
     cognition_graph: CognitionRunGraphSnapshot | None = None
+    cognition_chain_run: CognitionChainRunSnapshot = Field(
+        default_factory=CognitionChainRunSnapshot,
+    )
 
 
 class ConsoleLookupQuery(StrictModel):
@@ -448,6 +473,8 @@ class ControlConsoleBootstrapResponse(StrictModel):
     health: dict[str, Any]
     latest_cognition_graph: CognitionRunGraphSnapshot | None = None
     latest_self_cognition_graph: CognitionRunGraphSnapshot | None = None
+    latest_cognition_chain_run: CognitionChainRunSnapshot | None = None
+    latest_self_cognition_chain_run: CognitionChainRunSnapshot | None = None
     recent_audit_events: list[dict[str, Any]]
     event_counters: dict[str, int]
     ui_capabilities: dict[str, bool]

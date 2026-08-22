@@ -36,6 +36,7 @@ class LLMCallConfig:
     presence_penalty: float | None
     timeout_seconds: float | None = None
     thinking: LLMThinkingConfig = field(default_factory=LLMThinkingConfig)
+    context_window_tokens: int | None = None
 
 
 @dataclass(frozen=True)

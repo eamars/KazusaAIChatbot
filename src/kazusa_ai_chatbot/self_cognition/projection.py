@@ -9,7 +9,7 @@ from kazusa_ai_chatbot.channel_scene_projection import (
     project_group_review_instruction_preamble,
 )
 from kazusa_ai_chatbot.config import SELF_COGNITION_SOURCE_PACKET_CHAR_LIMIT
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionContractError,
     validate_scheduled_future_speech_authority,
 )

@@ -32,14 +32,14 @@ from kazusa_ai_chatbot.conversation_progress import (
     logical_turns_as_history_rows,
     project_group_scene_prompt,
 )
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionExecutionError,
     SceneParticipantBindingV1,
     validate_cognition_core_output,
     validate_text_surface_output,
     validate_visual_surface_output,
 )
-from kazusa_ai_chatbot.cognition_core_v2.prompt_budget import (
+from kazusa_ai_chatbot.cognition_shared.prompt_budget import (
     MAX_SCENE_PARTICIPANT_BINDINGS,
 )
 from kazusa_ai_chatbot.cognition_resolver.capabilities import (

@@ -11,7 +11,7 @@ from pymongo.errors import DuplicateKeyError
 from kazusa_ai_chatbot.character_identity_growth.models import (
     TOP_LEVEL_IDENTITY_KEYS,
 )
-from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_character_production_state,
     validate_cognition_state,
 )

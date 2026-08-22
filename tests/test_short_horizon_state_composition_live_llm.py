@@ -15,7 +15,7 @@ import pytest
 from fastapi import BackgroundTasks
 
 from kazusa_ai_chatbot import service as brain_service
-from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
 )

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Literal, NotRequired, TypeAlias, TypedDict
 
-from kazusa_ai_chatbot.cognition_core_v2.contracts import RoleRefV2
+from kazusa_ai_chatbot.cognition_shared.contracts import RoleRefV2
 from kazusa_ai_chatbot.cognition_episode import (
     GoalContinuationRefV1,
     validate_goal_continuation_ref,

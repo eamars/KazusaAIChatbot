@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2.surface import (
+from kazusa_ai_chatbot.cognition_shared.surface import (
     run_text_surface_planning,
 )
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID

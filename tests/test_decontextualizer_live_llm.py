@@ -9,7 +9,7 @@ from time import perf_counter
 import httpx
 import pytest
 
-from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
+from tests.cognition_test_helpers import canonical_user_message_episode
 from kazusa_ai_chatbot.config import MSG_DECONTEXTUALIZER_LLM_BASE_URL
 from kazusa_ai_chatbot.nodes import persona_supervisor2_msg_decontextualizer as decontext
 from tests.llm_trace import write_llm_trace

@@ -4,7 +4,7 @@ Covers:
 
 * Identity resolution (``resolve_global_user_id``, ``link_platform_account``)
 * Profile read/create (``get_user_profile``, ``create_user_profile``)
-* Native V2 relationship-state reads
+* Canonical relationship-state reads
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import re
 import uuid
 
 from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
-from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_acquaintance_user_state,
     validate_cognition_state,
 )
@@ -436,7 +436,7 @@ def _preferred_platform_account(
 
 
 def _relationship_rank_score(relationship: dict) -> int:
-    """Compute an internal ranking score from native V2 relationship axes."""
+    """Compute an internal ranking score from canonical relationship axes."""
 
     return (
         int(relationship.get("positive_regard", 0))
@@ -470,7 +470,7 @@ async def list_users_by_relationship(
     platform: str | None = None,
     limit: int = 5,
 ) -> list[dict]:
-    """List users by native V2 semantic relationship state.
+    """List users by canonical semantic relationship state.
 
     The ranking is deterministic and internal. Returned rows contain only
     qualitative relationship descriptors and stable identity metadata.

@@ -16,7 +16,6 @@ from urllib.parse import parse_qs
 
 from dotenv import load_dotenv
 
-
 STAGE3_TEST_DATABASE_NAME = "_test_kazusa_core_v2"
 STAGE3_URI_ENV = "MONGODB_URI"
 STAGE3_DATABASE_ENV = "MONGODB_DB_NAME"

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass
 import inspect
 import re
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -14,7 +14,6 @@ from kazusa_ai_chatbot.llm_interface.detection import (
     detect_model_family,
     normalize_base_url,
 )
-
 
 MODEL_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:@+/-]{0,199}$"
 MODEL_LIST_LIMIT = 200
@@ -102,103 +101,7 @@ _ROUTES: tuple[BrainModelRouteDescriptor, ...] = (
         route_key="COGNITION_LLM_CHARACTER_CARRYOVER",
         env_prefix="COGNITION_LLM_CHARACTER_CARRYOVER",
         label="Character carry-over",
-        group="Cognition Core V2",
-        required=True,
-        fallback_backed=False,
-    ),
-    BrainModelRouteDescriptor(
-        route_key="COGNITION_LLM_APPRAISAL_EVENT_AGENCY",
-        env_prefix="COGNITION_LLM_APPRAISAL_EVENT_AGENCY",
-        label="Appraisal: event and agency",
-        group="Cognition Core V2",
-        required=True,
-        fallback_backed=False,
-    ),
-    BrainModelRouteDescriptor(
-        route_key="COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL",
-        env_prefix="COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL",
-        label="Appraisal: relationship and social",
-        group="Cognition Core V2",
-        required=True,
-        fallback_backed=False,
-    ),
-    BrainModelRouteDescriptor(
-        route_key="COGNITION_LLM_APPRAISAL_MORAL_IDENTITY",
-        env_prefix="COGNITION_LLM_APPRAISAL_MORAL_IDENTITY",
-        label="Appraisal: moral and identity",
-        group="Cognition Core V2",
-        required=True,
-        fallback_backed=False,
-    ),
-    BrainModelRouteDescriptor(
-        route_key="COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME",
-        env_prefix="COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME",
-        label="Appraisal: goal, threat, and outcome",
-        group="Cognition Core V2",
-        required=True,
-        fallback_backed=False,
-    ),
-    BrainModelRouteDescriptor(
-        route_key="COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY",
-        env_prefix="COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY",
-        label="Appraisal: epistemic, comparison, and memory",
-        group="Cognition Core V2",
-        required=True,
-        fallback_backed=False,
-    ),
-    BrainModelRouteDescriptor(
-        route_key="COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE",
-        env_prefix="COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE",
-        label="Appraisal: existential and drive",
-        group="Cognition Core V2",
-        required=True,
-        fallback_backed=False,
-    ),
-    BrainModelRouteDescriptor(
-        route_key="COGNITION_LLM_GOAL_ORDINARY_RESPONSE",
-        env_prefix="COGNITION_LLM_GOAL_ORDINARY_RESPONSE",
-        label="Goal: ordinary response",
-        group="Cognition Core V2",
-        required=True,
-        fallback_backed=False,
-    ),
-    BrainModelRouteDescriptor(
-        route_key="COGNITION_LLM_GOAL_ACTIVE_BRANCH",
-        env_prefix="COGNITION_LLM_GOAL_ACTIVE_BRANCH",
-        label="Goal: active branch",
-        group="Cognition Core V2",
-        required=True,
-        fallback_backed=False,
-    ),
-    BrainModelRouteDescriptor(
-        route_key="COGNITION_LLM_WORKSPACE_COLLAPSE",
-        env_prefix="COGNITION_LLM_WORKSPACE_COLLAPSE",
-        label="Workspace collapse",
-        group="Cognition Core V2",
-        required=True,
-        fallback_backed=False,
-    ),
-    BrainModelRouteDescriptor(
-        route_key="COGNITION_LLM_ACTION_PLANNING",
-        env_prefix="COGNITION_LLM_ACTION_PLANNING",
-        label="Action planning",
-        group="Cognition Core V2",
-        required=True,
-        fallback_backed=False,
-    ),
-    BrainModelRouteDescriptor(
-        route_key="COGNITION_LLM_ACTION_AUTHORIZATION",
-        env_prefix="COGNITION_LLM_ACTION_AUTHORIZATION",
-        label="Action authorization",
-        group="Cognition Core V2",
-        required=True,
-        fallback_backed=False,
-    ),
-    BrainModelRouteDescriptor(
-        route_key="COGNITION_LLM_RESOLVER_AUTHORIZATION",
-        env_prefix="COGNITION_LLM_RESOLVER_AUTHORIZATION",
-        label="Resolver authorization",
-        group="Cognition Core V2",
+        group="Cognition Shared",
         required=True,
         fallback_backed=False,
     ),
@@ -250,6 +153,22 @@ _ROUTES: tuple[BrainModelRouteDescriptor, ...] = (
         required=True,
         fallback_backed=False,
     ),
+    BrainModelRouteDescriptor(
+        route_key="COGNITION_V3_CHAIN_LLM",
+        env_prefix="COGNITION_V3_CHAIN_LLM",
+        label="Cognition V3 chain",
+        group="Cognition Core V3",
+        required=True,
+        fallback_backed=False,
+    ),
+    BrainModelRouteDescriptor(
+        route_key="COGNITION_V3_SIDECAR_LLM",
+        env_prefix="COGNITION_V3_SIDECAR_LLM",
+        label="Cognition V3 sidecar",
+        group="Cognition Core V3",
+        required=False,
+        fallback_backed=False,
+    ),
 )
 _ROUTE_BY_KEY = {route.route_key: route for route in _ROUTES}
 _ROUTE_BY_UI_KEY = {route.env_prefix.lower(): route for route in _ROUTES}
@@ -260,6 +179,12 @@ def route_descriptors() -> tuple[BrainModelRouteDescriptor, ...]:
     """Return the bounded Brain chat route catalog."""
 
     return _ROUTES
+
+
+def route_is_required_for_config_read(route: BrainModelRouteDescriptor) -> bool:
+    """Return whether this route requires its model value."""
+
+    return route.required
 
 
 def descriptor_for_route(route_key: str) -> BrainModelRouteDescriptor:
@@ -361,6 +286,12 @@ def project_brain_model_routes(
     }
     rows: list[dict[str, Any]] = []
     for route in _ROUTES:
+        family = (
+            "v3"
+            if route.group == "Cognition Core V3"
+            else "shared_non_core"
+        )
+        active = family == "v3"
         default_values: dict[str, Any] = {}
         override_values: dict[str, Any] = {}
         effective_values: dict[str, Any] = {}
@@ -392,7 +323,9 @@ def project_brain_model_routes(
             "env_prefix": route.env_prefix,
             "label": route.label,
             "group": route.group,
-            "required": route.required,
+            "family": family,
+            "active": active,
+            "required": route_is_required_for_config_read(route),
             "fallback_backed": route.fallback_backed,
             "editable_fields": list(route.editable_fields),
             "default": default_values,

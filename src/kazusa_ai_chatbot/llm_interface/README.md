@@ -131,12 +131,24 @@ Config fields:
 | `max_completion_tokens` | caller config | Public completion budget field. |
 | `presence_penalty` | caller config | Provider-neutral presence penalty when a stage uses it. |
 | `thinking` | caller config | Boolean thinking request. Defaults to disabled. |
+| `context_window_tokens` | caller config | Optional served-context declaration for caller-owned admission guards. |
 
 `max_tokens` is not part of this public interface. New route configuration must
 use `max_completion_tokens`.
 
 The caller chooses which config profile to pass. `LLInterface` only maps that
 config into backend-compatible request fields.
+
+`context_window_tokens` remains local metadata. Provider adapters omit it from
+request/client kwargs; Cognition V3 uses it to reject oversized requests before
+provider invocation.
+
+For the serialized V3 chain, the caller starts with a 50,000-token total
+request-window ceiling and may activate one conditional 65,000-token ceiling
+only when its declared serving window supports that tier. The declaration is
+caller-local and is never transported as a provider request field. Timing is
+reported as non-streaming elapsed milliseconds; this interface makes no
+time-to-first-token (TTFT) claim.
 
 The relevance stages impose stricter caller-owned budgets while sharing the
 existing `RELEVANCE_AGENT_LLM` route: frontline uses a 256-token completion
@@ -424,7 +436,9 @@ include:
 - whether the route has fallback-backed configuration.
 
 The startup route report renders only operator-facing route identity:
-`Route`, `Model`, `Source`, and `Optional Feature`. Optional features are
+`Route`, `Group`, `Model`, `Source`, and `Optional Feature`. It reports the
+selected cognition core family together with shared routes. The generic
+`COGNITION_LLM` route is grouped as `shared_non_core`. Optional features are
 active, non-default capability tags such as `thinking_on`; disabled/default
 states are not printed as feature tags.
 
@@ -474,6 +488,8 @@ Runtime modules own:
   can ignore them.
 - Adding required fields to `LLMCallConfig` is breaking and requires all
   module-owned configs to migrate together.
+- Adding caller-owned optional metadata is compatible when provider adapters
+  continue to omit it from transport.
 - Renaming `max_completion_tokens` or adding public `max_tokens` is breaking
   for this ICD.
 - Exposing provider-specific kwargs to runtime modules is breaking.

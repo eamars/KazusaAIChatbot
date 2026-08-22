@@ -22,7 +22,7 @@ from kazusa_ai_chatbot.character_identity_growth.projection import (
     project_growth_run_for_console,
     project_identity_for_console,
 )
-from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+from kazusa_ai_chatbot.cognition_shared.state_projection import (
     project_character_operational_state,
     project_numeric_band,
     project_operational_relationship_context,
@@ -754,7 +754,7 @@ class ControlConsoleRepository:
         include_operational_context: bool = False,
         limit: int,
     ) -> dict[str, Any]:
-        """Return native V2 state for one platform-facing user account."""
+        """Return canonical state for one platform-facing user account."""
 
         timestamp = current_timestamp_utc or datetime.now(timezone.utc).isoformat()
         resolution = await self._resolve_platform_user_identity(
@@ -2892,7 +2892,7 @@ def _project_relationship_panel(cognition_state: Any) -> dict[str, Any]:
         panel = _entity_panel(
             status="empty",
             items=[],
-            reason="native V2 relationship state is not available",
+            reason="relationship state is not available",
         )
         return panel
 
@@ -2914,7 +2914,7 @@ def _project_relationship_panel(cognition_state: Any) -> dict[str, Any]:
     panel = _entity_panel(
         status="available" if items else "empty",
         items=items,
-        reason="native V2 relationship axes are empty" if not items else "",
+        reason="relationship axes are empty" if not items else "",
     )
     panel["evidence_count"] = evidence_count
     panel["updated_at"] = str(relationship.get("updated_at", ""))
@@ -3019,7 +3019,7 @@ def _project_relationship_operational_panel(
         return _entity_panel(
             status="empty",
             items=[],
-            reason="native V2 relationship state is not user-scoped",
+            reason="relationship state is not user-scoped",
         )
     native_effective_at = (
         f"{effective_at[:-6]}Z"
@@ -3038,14 +3038,14 @@ def _project_relationship_operational_panel(
         return _entity_panel(
             status="unavailable",
             items=[],
-            reason="native V2 relationship projection is unavailable",
+            reason="relationship projection is unavailable",
         )
     projected = redact_operational_relationship_context(public_context)
     if not projected:
         return _entity_panel(
             status="unavailable",
             items=[],
-            reason="native V2 relationship projection was redacted",
+            reason="relationship projection was redacted",
         )
     return _entity_panel(status="available", items=[projected], reason="")
 

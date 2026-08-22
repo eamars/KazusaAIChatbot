@@ -1,4 +1,4 @@
-"""Bounded parent-checkpoint recovery for the persona Cognition V2 path."""
+"""Bounded parent-checkpoint recovery for the persona cognition path."""
 
 from __future__ import annotations
 
@@ -9,24 +9,22 @@ from collections.abc import Awaitable, Callable, Mapping
 from contextvars import ContextVar, Token
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, TypeVar
 from uuid import uuid4
 
 from kazusa_ai_chatbot import llm_tracing
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionCoreInputV2,
     CognitionCoreOutputV2,
-    CognitionCoreServicesV2,
     CognitionExecutionError,
 )
-from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
     current_v2_attempt_ledger,
     enable_guarded_v2_attempt_ledger,
     set_v2_attempt_epoch,
     set_v2_parent_recovery_metadata,
 )
 from kazusa_ai_chatbot.llm_tracing import guardrail_capsule
-
 
 ParentRecoveryDisposition = Literal[
     "not_attempted",
@@ -35,8 +33,9 @@ ParentRecoveryDisposition = Literal[
     "exhausted",
 ]
 ReplayClaimOwner = Literal["service_graph", "parent_checkpoint"]
+ServicesT = TypeVar("ServicesT")
 ParentCognitionRunner = Callable[
-    [CognitionCoreInputV2, CognitionCoreServicesV2],
+    [CognitionCoreInputV2, ServicesT],
     Awaitable[CognitionCoreOutputV2],
 ]
 
@@ -197,9 +196,9 @@ def is_parent_recovery_eligible(exception: BaseException) -> bool:
 
 async def run_guarded_cognition(
     input_payload: CognitionCoreInputV2,
-    services: CognitionCoreServicesV2,
+    services: ServicesT,
     *,
-    run_child: ParentCognitionRunner,
+    run_child: ParentCognitionRunner[ServicesT],
 ) -> CognitionCoreOutputV2:
     """Run one cognition child and at most one parent-checkpoint replay."""
 

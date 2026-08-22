@@ -14,6 +14,7 @@ from uuid import uuid4
 from langchain_core.messages import BaseMessage
 
 from kazusa_ai_chatbot.config import DEBUG_LOG_TTL_DAYS, LLM_TRACE_CAPTURE_MODE
+from kazusa_ai_chatbot.db import DatabaseBackendError
 from kazusa_ai_chatbot.db import llm_tracing as db_llm_tracing
 from kazusa_ai_chatbot.llm_interface import LLMCallConfig
 from kazusa_ai_chatbot.llm_tracing import failure_capsule
@@ -297,6 +298,94 @@ async def record_llm_trace_step(
         )
     except Exception as exc:
         logger.warning(f"LLM trace step write failed: {exc.__class__.__name__}")
+        return _write_result(
+            accepted=False,
+            trace_id=trace_id,
+            status="failed",
+            reason=exc.__class__.__name__,
+        )
+    return _write_result(
+        accepted=True,
+        trace_id=trace_id,
+        status="recorded",
+        reason="",
+    )
+
+
+async def record_cognition_chain_transcript(
+    *,
+    trace_id: str,
+    run_id: str,
+    messages: Sequence[BaseMessage],
+    steps: Sequence[Mapping[str, object]],
+    terminal_disposition: str,
+    chain_model_name: str = "",
+    sidecar_model_name: str = "",
+    sequence: int = 0,
+) -> LLMTraceWriteResult:
+    """Record one protected Cognition V3 chain-transcript trace step."""
+
+    if not trace_id or not run_id:
+        return _write_result(
+            accepted=False,
+            trace_id=trace_id,
+            status="skipped",
+            reason="missing trace or run id",
+        )
+    if not _capture_enabled():
+        return _write_result(
+            accepted=False,
+            trace_id=trace_id,
+            status="skipped",
+            reason="capture mode off",
+        )
+
+    full_capture = _full_capture_enabled()
+    created_at = storage_utc_now_iso()
+    message_records = _messages_to_records(messages)
+    document = {
+        "step_id": f"{trace_id}_cognition_chain_transcript_{uuid4().hex}",
+        "trace_id": trace_id,
+        "sequence": sequence,
+        "stage_name": "cognition_chain_transcript",
+        "capture_reason": "cognition_chain_transcript.v1",
+        "schema_version": "cognition_chain_transcript.v1",
+        "run_id": run_id,
+        "terminal_disposition": terminal_disposition,
+        "chain_model_name": chain_model_name,
+        "sidecar_model_name": sidecar_model_name,
+        "message_count": len(message_records),
+        "prompt_chars": sum(len(row["content"]) for row in message_records),
+        "raw_messages": message_records if full_capture else [],
+        "message_hashes": [
+            _sha256_text(row["content"])
+            for row in message_records
+        ],
+        "message_lengths": [len(row["content"]) for row in message_records],
+        "steps": [dict(step) for step in steps] if full_capture else [],
+        "step_count": len(steps),
+        "created_at": created_at,
+        "expires_at": expiry_from_storage_iso(
+            created_at,
+            ttl_days=DEBUG_LOG_TTL_DAYS,
+        ),
+    }
+    try:
+        await asyncio.wait_for(
+            db_llm_tracing.insert_trace_step(document),
+            timeout=LLM_TRACE_WRITE_TIMEOUT_SECONDS,
+        )
+    except (
+        ConnectionError,
+        DatabaseBackendError,
+        OSError,
+        RuntimeError,
+        TimeoutError,
+    ) as exc:
+        logger.warning(
+            "LLM chain-transcript write failed: "
+            f"{exc.__class__.__name__}"
+        )
         return _write_result(
             accepted=False,
             trace_id=trace_id,

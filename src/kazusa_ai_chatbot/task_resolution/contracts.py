@@ -18,7 +18,7 @@ from kazusa_ai_chatbot.cognition_episode import (
 )
 
 if TYPE_CHECKING:
-    from kazusa_ai_chatbot.cognition_core_v2.contracts import SceneContextV2
+    from kazusa_ai_chatbot.cognition_shared.contracts import SceneContextV2
 
 
 TASK_RESOLUTION_EXECUTION_CONTEXT_VERSION = "task_resolution_execution_context.v1"
@@ -1337,9 +1337,9 @@ def _validate_scene_context_value(
         raise TaskResolutionContractError(f"{field_name}: expected object")
 
     # Local import only: a module-scope import would cycle through
-    # cognition_core_v2.facade -> llm_tracing -> db.background_work_jobs,
+    # cognition_core_v3.facade -> llm_tracing -> db.background_work_jobs,
     # which imports this module.
-    from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    from kazusa_ai_chatbot.cognition_shared.contracts import (
         CognitionContractError,
         _validate_scene_context,
     )

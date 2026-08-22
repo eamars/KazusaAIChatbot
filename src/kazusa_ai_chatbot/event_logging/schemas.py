@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, NotRequired, TypedDict
 
 from kazusa_ai_chatbot.event_logging.models import (
+    CognitionChainEventFields,
     CognitionV2EventFields,
     CognitionV2SnapshotSummary,
     EventRefRecord,
@@ -56,6 +57,7 @@ class EventLogEventDoc(TypedDict):
     error: EventErrorRecord
     payload: EventPayloadRecord
     cognition_v2: NotRequired[CognitionV2EventFields]
+    cognition_chain: NotRequired[CognitionChainEventFields]
 
 
 class EventLogSnapshotDoc(TypedDict):

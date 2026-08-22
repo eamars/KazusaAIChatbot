@@ -11,8 +11,21 @@ from kazusa_ai_chatbot.action_spec.registry import (
     FUTURE_SPEAK_CAPABILITY,
     SPEAK_CAPABILITY,
 )
-from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_acquaintance_user_state,
+    build_character_production_state,
+)
+from kazusa_ai_chatbot.cognition_core_v3.contracts import (
+    CognitionChainServicesV3,
+)
+from kazusa_ai_chatbot.config import (
+    CognitionRouteSettingV1,
+    CognitionV3RouteSettingsV1,
+)
+from tests.test_cognition_chain_connector_mapping import (
+    NOW,
+    _core_output,
+    _global_state,
 )
 
 MODULE_PATH = "kazusa_ai_chatbot.nodes.persona_supervisor2_cognition"
@@ -35,6 +48,40 @@ def test_persona_supervisor2_cognition_exposes_owned_contract() -> None:
     assert not missing_symbols, (
         f"{MODULE_PATH} is missing owner symbols: {missing_symbols}"
     )
+
+
+def test_connector_builds_v3_services_from_the_canonical_route_accessor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The V3 service builder uses only the canonical route settings."""
+
+    v3_settings = CognitionV3RouteSettingsV1(
+        chain=CognitionRouteSettingV1(
+            base_url="http://chain.example/v1",
+            api_key="chain-key",
+            model="chain-model",
+            max_completion_tokens=8_192,
+            thinking_enabled=False,
+            context_window_tokens=50_176,
+        ),
+        sidecar=None,
+        subconscious_enabled=False,
+        turn_deadline_seconds=417,
+    )
+
+    monkeypatch.setattr(
+        cognition_module,
+        "get_cognition_v3_route_settings",
+        lambda: v3_settings,
+    )
+
+    v3_services = cognition_module.build_cognition_core_services()
+
+    assert isinstance(v3_services, CognitionChainServicesV3)
+    assert v3_services.chain_lane.route_name == "COGNITION_V3_CHAIN_LLM"
+    assert v3_services.chain_lane.context_window_tokens == 50_176
+    assert v3_services.sidecar_lane is None
+    assert v3_services.turn_deadline_seconds == 417
 
 
 @pytest.mark.asyncio
@@ -256,3 +303,156 @@ def test_future_speak_v2_bridge_preserves_validated_authority_proposal(
     assert materialized_request["capability"] == FUTURE_SPEAK_CAPABILITY
     assert materialized_request["scheduled_authority_proposal"] == proposal
     assert action_specs == [{"kind": FUTURE_SPEAK_CAPABILITY}]
+
+
+async def _noop_event_recorder(*args: object, **kwargs: object) -> None:
+    """Keep selected-engine tests focused on the persistence boundary."""
+
+    del args, kwargs
+
+
+@pytest.mark.asyncio
+async def test_connector_calls_selected_engine_with_canonical_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The connector hands one canonical input to the selected engine."""
+
+    from kazusa_ai_chatbot.cognition_core_v3 import run_cognition
+
+    assert cognition_module.run_cognition is run_cognition
+
+    state = _global_state()
+    captured_inputs: list[dict[str, object]] = []
+
+    async def fake_run_cognition(cognition_input, services):
+        del services
+        captured_inputs.append(dict(cognition_input))
+        return _core_output()
+
+    async def fetch_user_state(owner_key: str) -> dict[str, object]:
+        """Serve the fixture user base state without a database read."""
+
+        assert owner_key == "user-1"
+        return build_acquaintance_user_state(
+            global_user_id=owner_key,
+            updated_at=NOW,
+        )
+
+    async def fetch_character_state() -> dict[str, object]:
+        """Serve the fixture character base state without a database read."""
+
+        return build_character_production_state(updated_at=NOW)
+
+    monkeypatch.setattr(
+        cognition_module,
+        "run_cognition",
+        fake_run_cognition,
+    )
+    monkeypatch.setattr(
+        cognition_module,
+        "get_user_cognition_state",
+        fetch_user_state,
+    )
+    monkeypatch.setattr(
+        cognition_module,
+        "get_character_cognition_state",
+        fetch_character_state,
+    )
+    monkeypatch.setattr(
+        cognition_module,
+        "record_continuity_boundary_event",
+        _noop_event_recorder,
+    )
+
+    await cognition_module.call_cognition_subgraph(state, commit=False)
+
+    assert len(captured_inputs) == 1
+    captured = captured_inputs[0]
+    assert captured["schema_version"] == "cognition_core_input.v2"
+    assert captured["state_scope"] == "user"
+    assert captured["episode"]["episode_id"] == "episode-1"
+    assert len(captured["evidence"]) == 1
+    evidence_row = captured["evidence"][0]
+    assert evidence_row["evidence_handle"] == "e1"
+    assert evidence_row["evidence_ref"]["source_kind"] == "episode"
+
+
+@pytest.mark.asyncio
+async def test_selected_engine_output_commits_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One selected-engine output commits through the CAS boundary once."""
+
+    state = _global_state()
+    cas_calls: list[dict[str, object]] = []
+
+    async def fake_run_cognition(cognition_input, services):
+        del cognition_input, services
+        return _core_output()
+
+    async def fetch_user_state(owner_key: str) -> dict[str, object]:
+        """Serve the fixture user base state without a database read."""
+
+        assert owner_key == "user-1"
+        return build_acquaintance_user_state(
+            global_user_id=owner_key,
+            updated_at=NOW,
+        )
+
+    async def fetch_character_state() -> dict[str, object]:
+        """Serve the fixture character base state without a database read."""
+
+        return build_character_production_state(updated_at=NOW)
+
+    async def compare_and_replace(
+        owner_key: str,
+        expected_previous_state: dict[str, object],
+        replacement_state: dict[str, object],
+    ) -> bool:
+        """Capture the state boundary and acknowledge the commit."""
+
+        cas_calls.append({
+            "owner_key": owner_key,
+            "expected_previous_state": expected_previous_state,
+            "replacement_state": replacement_state,
+        })
+        return True
+
+    monkeypatch.setattr(
+        cognition_module,
+        "run_cognition",
+        fake_run_cognition,
+    )
+    monkeypatch.setattr(
+        cognition_module,
+        "get_user_cognition_state",
+        fetch_user_state,
+    )
+    monkeypatch.setattr(
+        cognition_module,
+        "get_character_cognition_state",
+        fetch_character_state,
+    )
+    monkeypatch.setattr(
+        cognition_module,
+        "compare_and_replace_user_cognition_state",
+        compare_and_replace,
+    )
+    monkeypatch.setattr(
+        cognition_module,
+        "_record_state_commit_event",
+        _noop_event_recorder,
+    )
+    monkeypatch.setattr(
+        cognition_module,
+        "record_continuity_boundary_event",
+        _noop_event_recorder,
+    )
+
+    await cognition_module.call_cognition_subgraph(state, commit=True)
+
+    assert len(cas_calls) == 1
+    cas_call = cas_calls[0]
+    assert cas_call["owner_key"] == "user-1"
+    state_update = _core_output()["state_update"]
+    assert cas_call["replacement_state"] == state_update["replacement_state"]

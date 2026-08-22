@@ -6,8 +6,6 @@
 - Status: current reference.
 - Execution authority: none; implementation requires an approved or in-progress
   plan under `development_plans/active/`.
-- Current implementation anchor:
-  `development_plans/active/short_term/coding_agent_assessment_gap_phase_d_plan.md`
 
 ## Cleanup Note
 

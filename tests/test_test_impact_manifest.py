@@ -15,7 +15,6 @@ from scripts.validate_test_impact import (
     validate_manifest,
 )
 
-
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -89,7 +88,7 @@ def test_unmapped_changed_source_fails_closed() -> None:
     with pytest.raises(ImpactValidationError, match="no manifest entry"):
         resolve_impacted_test_nodes(
             manifest,
-            ["src/kazusa_ai_chatbot/cognition_core_v2/new_owner.py"],
+            ["src/kazusa_ai_chatbot/cognition_core_v3/new_owner.py"],
         )
 
 
@@ -97,12 +96,12 @@ def test_stale_required_node_fails_closed() -> None:
     """A required node absent from collection is a verification failure."""
 
     missing_nodes = missing_collected_nodes(
-        ["tests/unit/cognition_core_v2/test_contracts.py::test_contract"],
+        ["tests/unit/cognition_core_v3/test_contracts.py::test_contract"],
         [],
     )
 
     assert missing_nodes == [
-        "tests/unit/cognition_core_v2/test_contracts.py::test_contract"
+        "tests/unit/cognition_core_v3/test_contracts.py::test_contract"
     ]
 
 
@@ -111,10 +110,10 @@ def test_required_node_collection_failure_is_reported() -> None:
 
     missing_nodes = missing_collected_nodes(
         [
-            "tests/unit/cognition_core_v2/test_contracts.py::test_contract",
+            "tests/unit/cognition_core_v3/test_contracts.py::test_contract",
             "tests/unit/cognition_resolver/test_state.py::test_state",
         ],
-        ["tests/unit/cognition_core_v2/test_contracts.py::test_contract"],
+        ["tests/unit/cognition_core_v3/test_contracts.py::test_contract"],
     )
 
     assert missing_nodes == [
@@ -160,9 +159,9 @@ def test_cognition_readme_documents_mirrored_unit_tree() -> None:
         REPOSITORY_ROOT
         / "src"
         / "kazusa_ai_chatbot"
-        / "cognition_core_v2"
+        / "cognition_core_v3"
         / "README.md"
     ).read_text(encoding="utf-8")
 
-    assert "tests/unit/cognition_core_v2" in readme_text
+    assert "tests/unit/cognition_core_v3" in readme_text
     assert "source_test_impact_manifest.json" in readme_text

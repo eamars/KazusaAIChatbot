@@ -1,0 +1,245 @@
+{
+  "schema_version": "cognition_v3_architecture_manifest.v2",
+  "baseline_id": "cogv3-d2-v3-shared-20260822",
+  "repository": {
+    "branch": "feature/cognition_core_v3_cache_affine",
+    "head": "2a22d2381efa4596cb800204c4905c3a4dace33b"
+  },
+  "governing_documents": [
+    {
+      "path": "development_plans/active/short_term/cognition_v3_hybrid_agentic_loop_reconciliation_plan.md",
+      "sha256": "331653f8cd8c42a60620ea267e1af3d157d8cf03855295665f79a922b3f16fd0",
+      "role": "approved_execution_contract"
+    },
+    {
+      "path": "docs/architecture/cognition_v3_hybrid_agentic_loop_architecture.md",
+      "sha256": "5af9d595257c17ae11d0636ad6c515c0c3f0e61dbd9bdaedfe1c1447f52429aa",
+      "role": "governing_architecture"
+    }
+  ],
+  "sealed_inputs": {
+    "live_case_manifest": {
+      "path": "tests/fixtures/cognition_core_v3_live_case_manifest.json",
+      "sha256": "a0e1bf705f3042ed9a1230a99191eb6546dfce5e8a6f6a16d93c28d4b257a384",
+      "case_count": 24,
+      "trials_per_engine": 3
+    },
+    "token_calibration_corpus": {
+      "path": "tests/fixtures/cognition_core_v3_token_calibration_corpus.json",
+      "sha256": "cc8715b0022243c8f2b59120bfaf508ca075e0aa38e805e25d781a226d4688d7",
+      "calibration_payload_count": 48,
+      "holdout_payload_count": 16
+    }
+  },
+  "public_contract": {
+    "input_type": "kazusa_ai_chatbot.cognition_shared.contracts:CognitionCoreInputV2",
+    "input_schema_version": "cognition_core_input.v2",
+    "input_fields": [
+      "schema_version",
+      "episode",
+      "state_scope",
+      "mutable_state",
+      "character_constraints",
+      "character_identity_context",
+      "character_operational_context",
+      "relationship_context",
+      "evidence",
+      "direct_facts",
+      "available_actions",
+      "available_resolver_capabilities",
+      "resolver_context",
+      "runtime_capability_limits",
+      "resolver_goal_progress",
+      "required_resolver_evidence_dependency",
+      "current_turn_relational_willingness",
+      "resolver_cycle_index",
+      "pending_resolver_resume",
+      "scene_context",
+      "private_continuity_context",
+      "past_dialog_cognition_context",
+      "group_engagement_action_context"
+    ],
+    "output_type": "kazusa_ai_chatbot.cognition_shared.contracts:CognitionCoreOutputV2",
+    "output_schema_version": "cognition_core_output.v2",
+    "output_fields": [
+      "schema_version",
+      "intention",
+      "goal_continuation_ref",
+      "admitted_bid",
+      "supporting_bids",
+      "state_update",
+      "affect_projection",
+      "relationship_projection",
+      "action_requests",
+      "resolver_requests",
+      "goal_resolution",
+      "resolver_pending_resolution",
+      "resolver_goal_progress",
+      "resolver_progress",
+      "selected_bid_reason",
+      "private_monologue",
+      "expression_policy",
+      "diagnostics",
+      "cognition_observability",
+      "relational_willingness",
+      "self_cognition_response",
+      "self_cognition_response_contract_status"
+    ],
+    "validator_module": "kazusa_ai_chatbot.cognition_shared.contracts",
+    "validators": [
+      "kazusa_ai_chatbot.cognition_shared.contracts:validate_cognition_core_input",
+      "kazusa_ai_chatbot.cognition_shared.contracts:validate_cognition_core_output"
+    ]
+  },
+  "canonical_shared_owners": [
+    "src/kazusa_ai_chatbot/cognition_shared/contracts.py",
+    "src/kazusa_ai_chatbot/cognition_shared/state_models.py",
+    "src/kazusa_ai_chatbot/cognition_shared/state_projection.py",
+    "src/kazusa_ai_chatbot/cognition_shared/state_reducers.py",
+    "src/kazusa_ai_chatbot/cognition_shared/transition_guards.py",
+    "src/kazusa_ai_chatbot/cognition_shared/emotion_definitions.py",
+    "src/kazusa_ai_chatbot/cognition_shared/emotion_derivation.py",
+    "src/kazusa_ai_chatbot/cognition_shared/output_projection.py",
+    "src/kazusa_ai_chatbot/cognition_shared/model_attempt_policy.py",
+    "src/kazusa_ai_chatbot/cognition_shared/surface.py",
+    "src/kazusa_ai_chatbot/cognition_shared/surface_stages.py",
+    "src/kazusa_ai_chatbot/cognition_shared/character_carryover.py",
+    "src/kazusa_ai_chatbot/cognition_shared/morning_refresh.py"
+  ],
+  "current_topology": {
+    "entrypoint": "kazusa_ai_chatbot.cognition_core_v3:run_cognition",
+    "services": "CognitionChainServicesV3",
+    "appraisal_stage_layout": "fixed_a1_a2",
+    "appraisal_families": [
+      "event_agency",
+      "relationship_social",
+      "moral_identity",
+      "goal_threat_outcome",
+      "epistemic_comparison_memory",
+      "existential_drive"
+    ],
+    "model_route_count": 1,
+    "effect_boundary": "facade_returns_replacement_state_and_requests; connector_owns_commit_and_execution"
+  },
+  "target_topology": {
+    "primary_serial_steps": [
+      "anchor",
+      "A1",
+      "A2",
+      "I1",
+      "G1a",
+      "G1b",
+      "I2",
+      "W1_when_eligible",
+      "P1"
+    ],
+    "sidecar_streams": ["L1", "json_repair", "X1", "X2"],
+    "resolver_recurrence_steps": [
+      "append_observation",
+      "delta_appraisal",
+      "revise_bids",
+      "P1"
+    ],
+    "terminal_projection": "exact_CognitionCoreOutputV2_validation",
+    "primary_max_in_flight": 1,
+    "sidecar_max_in_flight": 1,
+    "foreign_primary_interleave_allowance": 0
+  },
+  "quality_protocol": {
+    "closed_dimensions": [
+      "groundedness",
+      "character_judgment",
+      "contract_fidelity",
+      "role_and_target_fidelity",
+      "permission_and_privacy",
+      "task_progress",
+      "conversation_continuity"
+    ],
+    "v3_trial_denominator": 72,
+    "minimum_semantic_success_count": 69,
+    "maximum_semantic_failure_count": 3,
+    "hard_gate_failure_allowance": 0,
+    "retain_every_completed_eligible_trial": true,
+    "automated_judge": false,
+    "score_rewrite": false
+  },
+  "performance_protocol": {
+    "nodes": [],
+    "cold_trial_count": 0,
+    "warm_exact_repeat_trial_count": 0,
+    "warm_changed_tail_trial_count": 0,
+    "resolver_continuation_trial_count": 0,
+    "sidecar_overlap_trial_count": 0,
+    "thresholds": {
+      "primary_max_in_flight": 1,
+      "foreign_primary_interleave_allowance": 0
+    }
+  },
+  "environment_fingerprint_schema": {
+    "schema_version": "cognition_v3_environment_fingerprint.v2",
+    "required_fields": [
+      "recorded_at_utc",
+      "repository_head",
+      "python_version",
+      "selected_engine",
+      "appraisal_stage_layout",
+      "service_health",
+      "mongodb_health",
+      "route_count",
+      "route_endpoint_sha256",
+      "provider_model_inventory_count",
+      "primary_model",
+      "primary_model_loaded",
+      "primary_declared_context",
+      "primary_loaded_context",
+      "sidecar_model",
+      "sidecar_model_loaded",
+      "models_are_distinct",
+      "control_console_health"
+    ],
+    "forbidden_fields": [
+      "api_key",
+      "credential",
+      "mongodb_uri",
+      "raw_endpoint",
+      "raw_database_name",
+      "raw_user_identifier",
+      "appraisal_group_count"
+    ]
+  },
+  "owned_paths": {
+    "delete": [],
+    "create": [
+      "src/kazusa_ai_chatbot/cognition_shared",
+      "src/kazusa_ai_chatbot/cognition_core_v3/authorization.py",
+      "src/kazusa_ai_chatbot/cognition_core_v3/execution_types.py",
+      "src/kazusa_ai_chatbot/cognition_core_v3/facade_helpers.py",
+      "src/kazusa_ai_chatbot/cognition_core_v3/semantic_appraisal.py",
+      "src/kazusa_ai_chatbot/cognition_core_v3/semantic_source_planner.py",
+      "tests/cognition_test_helpers.py",
+      "tests/cognition_v3_candidate_support.py",
+      "tests/unit/nodes/surface_fixtures.py"
+    ],
+    "modify": [
+      "src/kazusa_ai_chatbot/cognition_core_v3",
+      "src/kazusa_ai_chatbot/config.py",
+      "src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition.py",
+      "src/kazusa_ai_chatbot/service.py",
+      "src/kazusa_ai_chatbot/brain_service/contracts.py",
+      "src/kazusa_ai_chatbot/db/cognition_chain_runs.py",
+      "src/control_console/brain_model_routes.py",
+      "tests/fixtures/cognition_core_v3_architecture_manifest.json",
+      "tests/fixtures/cognition_core_v3_live_case_manifest.json",
+      "tests/fixtures/cognition_core_v3_token_calibration_corpus.json",
+      "tests/fixtures/cognition_llm_producer_matrix.json",
+      "tests/ownership/source_test_impact_manifest.json",
+      "tests/unit/cognition_core_v3",
+      "tests/integration/cognition_core_v3"
+    ]
+  },
+  "generated_artifact_patterns": [
+    "test_artifacts/cognition_core_v3/<baseline_id>/baseline_index.json",
+    "test_artifacts/cognition_core_v3/<run_id>/local_semantic_resets/*.json",
+    "test_artifacts/cognition_core_v3/<run_id>/inherited_semantic_residuals.json"
+  ]
+}

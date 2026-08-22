@@ -2,25 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 
 from kazusa_ai_chatbot.llm_interface.diagnostics import RouteDiagnostic
 
-COGNITION_CORE_V2_ROUTE_ROWS = (
-    "COGNITION_LLM_APPRAISAL_EVENT_AGENCY",
-    "COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL",
-    "COGNITION_LLM_APPRAISAL_MORAL_IDENTITY",
-    "COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME",
-    "COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY",
-    "COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE",
-    "COGNITION_LLM_GOAL_ORDINARY_RESPONSE",
-    "COGNITION_LLM_GOAL_ACTIVE_BRANCH",
-    "COGNITION_LLM_WORKSPACE_COLLAPSE",
-    "COGNITION_LLM_ACTION_PLANNING",
-    "COGNITION_LLM_ACTION_AUTHORIZATION",
-    "COGNITION_LLM_RESOLVER_AUTHORIZATION",
-)
 EXPECTED_ROUTE_TABLE_ROWS = (
     "RELEVANCE_AGENT_LLM",
     "VISION_DESCRIPTOR_LLM",
@@ -29,7 +16,8 @@ EXPECTED_ROUTE_TABLE_ROWS = (
     "RAG_SUBAGENT_LLM",
     "WEB_SEARCH_LLM",
     "COGNITION_LLM",
-    *COGNITION_CORE_V2_ROUTE_ROWS,
+    "COGNITION_LLM_CHARACTER_CARRYOVER",
+    "COGNITION_V3_CHAIN_LLM",
     "DIALOG_GENERATOR_LLM",
     "CONSOLIDATION_LLM",
     "JSON_REPAIR_LLM",
@@ -77,6 +65,7 @@ def test_llm_route_inventory_uses_configured_models_and_sources() -> None:
         row["route_name"]: row
         for row in _table_rows(configured_route_diagnostics())
     }
+    settings = config.get_cognition_v3_route_settings()
 
     for route_name in EXPECTED_ROUTE_TABLE_ROWS:
         if route_name == "EMBEDDING":
@@ -87,14 +76,25 @@ def test_llm_route_inventory_uses_configured_models_and_sources() -> None:
             )
             continue
 
-        assert (
-            rows_by_route[route_name]["model"]
-            == getattr(config, f"{route_name}_MODEL")
-        )
-        assert (
-            rows_by_route[route_name]["normalized_base_url"]
-            == getattr(config, f"{route_name}_BASE_URL").rstrip("/")
-        )
+        if route_name == "COGNITION_V3_CHAIN_LLM":
+            setting = settings.chain
+        else:
+            setting = None
+        if setting is None:
+            assert (
+                rows_by_route[route_name]["model"]
+                == getattr(config, f"{route_name}_MODEL")
+            )
+            assert (
+                rows_by_route[route_name]["normalized_base_url"]
+                == getattr(config, f"{route_name}_BASE_URL").rstrip("/")
+            )
+        else:
+            assert rows_by_route[route_name]["model"] == setting.model
+            assert (
+                rows_by_route[route_name]["normalized_base_url"]
+                == setting.base_url.rstrip("/")
+            )
 
 
 def test_llm_route_inventory_renders_optional_feature_tags() -> None:
@@ -203,9 +203,12 @@ def test_llm_route_table_omits_api_keys() -> None:
     for route_name in EXPECTED_ROUTE_TABLE_ROWS:
         assert route_name in table
 
+    settings = config.get_cognition_v3_route_settings()
     api_keys = (
         *(
-            getattr(config, f"{route_name}_API_KEY")
+            settings.chain.api_key
+            if route_name == "COGNITION_V3_CHAIN_LLM"
+            else getattr(config, f"{route_name}_API_KEY")
             for route_name in EXPECTED_ROUTE_TABLE_ROWS
             if route_name != "EMBEDDING"
         ),
@@ -216,47 +219,45 @@ def test_llm_route_table_omits_api_keys() -> None:
             assert api_key not in table
 
 
-def test_cognition_builder_uses_independent_stage_routes(tmp_path) -> None:
-    """The production connector preserves independent stage route values."""
+def test_route_report_includes_only_v3_cognition_routes_and_shared_generic_cognition_route(
+    tmp_path,
+) -> None:
+    """Diagnostics include one selected core family plus shared cognition."""
 
-    from tests.test_config import _configured_subprocess_env_without_dotenv
+    from tests.test_config import (
+        _v3_configured_subprocess_env_without_dotenv,
+    )
 
-    env = _configured_subprocess_env_without_dotenv()
-    event_prefix = "COGNITION_LLM_APPRAISAL_EVENT_AGENCY"
-    social_prefix = "COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL"
-    env[f"{event_prefix}_BASE_URL"] = "http://event.example/v1"
-    env[f"{event_prefix}_MODEL"] = "event-model"
-    env[f"{social_prefix}_BASE_URL"] = "http://social.example/v1/"
-    env[f"{social_prefix}_MODEL"] = "social-model"
+    script = (
+        "import json\n"
+        "from kazusa_ai_chatbot.llm_interface.route_report import "
+        "_table_rows, configured_route_diagnostics\n"
+        "print(json.dumps(_table_rows(configured_route_diagnostics())))\n"
+    )
+    v3_env = _v3_configured_subprocess_env_without_dotenv(
+        include_sidecar=True,
+    )
 
     result = subprocess.run(
-        [
-            sys.executable,
-                "-c",
-                (
-                    "from kazusa_ai_chatbot.nodes "
-                    "import persona_supervisor2_cognition as c; "
-                    "services = c.build_cognition_core_services(); "
-                    "configs = ("
-                    "services.appraisal_event_agency_config, "
-                    "services.appraisal_relationship_social_config"
-                    "); "
-                    "print(';'.join('|'.join(("
-                    "config.route_name, config.base_url.rstrip('/'), config.model"
-                    ")) for config in configs))"
-                ),
-            ],
+        [sys.executable, "-c", script],
         cwd=tmp_path,
-        env=env,
+        env=v3_env,
         capture_output=True,
         text=True,
         check=False,
     )
+    assert result.returncode == 0, result.stderr
+    v3_rows = {
+        row["route_name"]
+        : row
+        for row in json.loads(result.stdout)
+    }
 
-    assert result.returncode == 0
-    assert result.stdout.strip() == (
-        "COGNITION_LLM_APPRAISAL_EVENT_AGENCY|"
-        "http://event.example/v1|event-model;"
-        "COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL|"
-        "http://social.example/v1|social-model"
+    assert v3_rows["COGNITION_V3_CHAIN_LLM"]["route_group"] == (
+        "v3_cognition"
     )
+    assert v3_rows["COGNITION_V3_SIDECAR_LLM"]["route_group"] == (
+        "v3_cognition"
+    )
+    assert v3_rows["COGNITION_LLM"]["route_group"] == "shared_non_core"
+    assert "COGNITION_LLM_CHARACTER_CARRYOVER" in v3_rows

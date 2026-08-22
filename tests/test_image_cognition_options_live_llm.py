@@ -11,7 +11,7 @@ import httpx
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
+from tests.cognition_test_helpers import canonical_user_message_episode
 from kazusa_ai_chatbot.config import (
     COGNITION_LLM_API_KEY,
     COGNITION_LLM_BASE_URL,

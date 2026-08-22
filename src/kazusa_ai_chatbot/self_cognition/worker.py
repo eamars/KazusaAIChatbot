@@ -598,7 +598,7 @@ def _validate_worker_v2_cognition_result(
     core_output = output.get("cognition_core_output")
     if not isinstance(core_output, dict):
         if required:
-            raise StateContractError("self-cognition V2 core output is missing")
+            raise StateContractError("self-cognition core output is missing")
         return
     state_update = core_output.get("state_update")
     if not isinstance(state_update, dict):
@@ -1215,7 +1215,7 @@ async def _ensure_self_cognition_trace(
     case: models.SelfCognitionCase,
     trace_id: str,
 ) -> None:
-    """Ensure protected trace metadata before Cognition V2 starts."""
+    """Ensure protected trace metadata before cognition starts."""
 
     target_scope = case.get("target_scope")
     scope = target_scope if isinstance(target_scope, dict) else {}

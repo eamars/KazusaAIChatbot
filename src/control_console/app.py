@@ -2,23 +2,23 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
-from contextlib import asynccontextmanager
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Literal
 import asyncio
 import inspect
 import logging
 import os
 import secrets
 import uuid
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Literal
 
+import httpx
+from dotenv import dotenv_values, find_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from dotenv import dotenv_values, find_dotenv
-import httpx
 from pymongo.errors import PyMongoError
 
 from control_console.audit import LocalAuditWriter
@@ -31,6 +31,13 @@ from control_console.auth import (
     require_operator,
     session_csrf_token,
     verify_operator_token,
+)
+from control_console.brain_model_routes import (
+    descriptor_for_route,
+    fetch_available_models,
+    project_brain_model_routes,
+    route_environment_value,
+    route_field_key,
 )
 from control_console.contracts import (
     BrainModelRouteActionResponse,
@@ -49,46 +56,45 @@ from control_console.contracts import (
     ServiceConfigResetRequest,
     ServiceConfigRestartResult,
 )
-from control_console.brain_model_routes import (
-    descriptor_for_route,
-    fetch_available_models,
-    project_brain_model_routes,
-    route_environment_value,
-    route_field_key,
-)
 from control_console.event_monitor import (
     ATTENTION_LEVELS,
     ATTENTION_STATUSES,
     DEFAULT_AGGREGATE_EVENT_TYPES,
     EventMonitor,
 )
-from control_console.kazusa_client import KazusaClient, not_reported_cognition_graph
+from control_console.kazusa_client import (
+    KazusaClient,
+    not_reported_cognition_chain_run,
+    not_reported_cognition_graph,
+)
 from control_console.log_store import ProcessLogStore
 from control_console.process_store import ProcessStore
 from control_console.redaction import redact_mapping
 from control_console.repository import ControlConsoleRepository
-from control_console.service_registry import load_service_registry
 from control_console.service_config import (
     ServiceConfigOverrideStore,
     ServiceConfigRegistry,
     ServiceConfigValidationError,
     build_default_service_config_registry,
 )
+from control_console.service_registry import load_service_registry
 from control_console.settings import ControlConsoleSettings
-from control_console.stream import SSEEventBuffer, encode_sse_event
-from control_console.stream import LogStreamHub
-from control_console.stream import log_keepalive_event
-from control_console.stream import log_ready_event
-from control_console.stream import log_snapshot_event
-from control_console.stream import log_status_event
-from control_console.stream import parse_log_streams
+from control_console.stream import (
+    LogStreamHub,
+    SSEEventBuffer,
+    encode_sse_event,
+    log_keepalive_event,
+    log_ready_event,
+    log_snapshot_event,
+    log_status_event,
+    parse_log_streams,
+)
 from control_console.supervisor import (
     ENDPOINT_CONFLICT_MESSAGE,
     ProcessSupervisor,
     ServiceLifecycleError,
 )
 from kazusa_ai_chatbot.event_logging import repository as event_repository
-
 
 STATIC_DIR = Path(__file__).parent / "static"
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -117,6 +123,19 @@ SAFE_KAZUSA_EVENT_CORRELATION_FIELDS = (
     "request_id",
     "tracking_id",
     "background_work_job_id",
+)
+COGNITION_ENGINE_DESCRIPTOR_SCHEMA = "cognition_engine_descriptor.v2"
+COGNITION_ENGINE_DESCRIPTOR_FIELDS = (
+    "engine_id",
+    "chain_model_name",
+    "sidecar_model_name",
+    "sidecar_enabled",
+    "subconscious_enabled",
+    "appraisal_stage_layout",
+    "chain_context_window_tokens",
+    "normal_budget_tokens",
+    "extended_budget_tokens",
+    "turn_deadline_seconds",
 )
 
 
@@ -347,6 +366,12 @@ def create_app(
         latest_self_cognition_graph = operational_sources[
             "latest_self_cognition_graph"
         ]
+        latest_cognition_chain_run = operational_sources[
+            "latest_cognition_chain_run"
+        ]
+        latest_self_cognition_chain_run = operational_sources[
+            "latest_self_cognition_chain_run"
+        ]
         latest_cognition_graph_state["run_id"] = (
             latest_cognition_graph.run_id
         )
@@ -371,8 +396,11 @@ def create_app(
             states=states,
             health_page=health_page,
             audit_page=audit_page,
+            runtime_status=operational_sources["runtime_status"],
             latest_cognition_graph=latest_cognition_graph,
             latest_self_cognition_graph=latest_self_cognition_graph,
+            latest_cognition_chain_run=latest_cognition_chain_run,
+            latest_self_cognition_chain_run=latest_self_cognition_chain_run,
         )
         return page
 
@@ -411,6 +439,12 @@ def create_app(
         latest_self_cognition_graph = operational_sources[
             "latest_self_cognition_graph"
         ]
+        latest_cognition_chain_run = operational_sources[
+            "latest_cognition_chain_run"
+        ]
+        latest_self_cognition_chain_run = operational_sources[
+            "latest_self_cognition_chain_run"
+        ]
         latest_cognition_graph_state["run_id"] = latest_cognition_graph.run_id
         latest_cognition_graph_state["self_run_id"] = (
             latest_self_cognition_graph.run_id
@@ -433,8 +467,11 @@ def create_app(
             states=states,
             health_page=health_page,
             audit_page=audit_page,
+            runtime_status=operational_sources["runtime_status"],
             latest_cognition_graph=latest_cognition_graph,
             latest_self_cognition_graph=latest_self_cognition_graph,
+            latest_cognition_chain_run=latest_cognition_chain_run,
+            latest_self_cognition_chain_run=latest_self_cognition_chain_run,
         )
         application_identity = await repository.application_identity()
         payload = ControlConsoleBootstrapResponse(
@@ -452,6 +489,8 @@ def create_app(
             health=health_page,
             latest_cognition_graph=latest_cognition_graph,
             latest_self_cognition_graph=latest_self_cognition_graph,
+            latest_cognition_chain_run=latest_cognition_chain_run,
+            latest_self_cognition_chain_run=latest_self_cognition_chain_run,
             recent_audit_events=audit_page["actions"],
             event_counters={"audit": len(recent_audit), "services": len(states)},
             ui_capabilities={
@@ -915,6 +954,9 @@ def create_app(
                     run_id=request_id,
                     reason="debug chat did not start because brain is unavailable",
                 ).model_dump(mode="json"),
+                "cognition_chain_run": not_reported_cognition_chain_run().model_dump(
+                    mode="json",
+                ),
             }
             return payload
 
@@ -955,6 +997,9 @@ def create_app(
                     run_id=request_id,
                     reason="debug chat failed before cognition telemetry was reported",
                 ).model_dump(mode="json"),
+                "cognition_chain_run": not_reported_cognition_chain_run().model_dump(
+                    mode="json",
+                ),
             }
         return payload
 
@@ -2319,10 +2364,17 @@ async def _load_operational_sources(
     latest_self_cognition_graph = not_reported_cognition_graph(
         source="self_latest",
     )
+    latest_cognition_chain_run = not_reported_cognition_chain_run()
+    latest_self_cognition_chain_run = not_reported_cognition_chain_run()
     if brain_http_available:
         try:
-            latest_cognition_graph = await (
-                kazusa_client.get_latest_cognition_graph()
+            (
+                latest_cognition_graph,
+                latest_cognition_chain_run,
+                latest_self_cognition_graph,
+                latest_self_cognition_chain_run,
+            ) = await (
+                kazusa_client.get_latest_cognition_graph_with_chain_runs()
             )
         except (AttributeError, httpx.HTTPError) as exc:
             latest_cognition_graph = not_reported_cognition_graph(
@@ -2332,23 +2384,17 @@ async def _load_operational_sources(
                     f"{exc}"
                 ),
             )
-        try:
-            latest_self_cognition_graph = await (
-                kazusa_client.get_latest_self_cognition_graph()
-            )
-        except (AttributeError, httpx.HTTPError) as exc:
-            latest_self_cognition_graph = not_reported_cognition_graph(
-                source="self_latest",
-                reason=(
-                    "brain latest self-cognition graph unavailable: "
-                    f"{exc}"
-                ),
+            latest_cognition_chain_run = not_reported_cognition_chain_run()
+            latest_self_cognition_chain_run = (
+                not_reported_cognition_chain_run()
             )
     sources = {
         "brain_health": brain_health,
         "runtime_status": runtime_status,
         "latest_cognition_graph": latest_cognition_graph,
         "latest_self_cognition_graph": latest_self_cognition_graph,
+        "latest_cognition_chain_run": latest_cognition_chain_run,
+        "latest_self_cognition_chain_run": latest_self_cognition_chain_run,
     }
     return sources
 
@@ -2554,6 +2600,9 @@ def _project_overview_page(
     audit_page: dict[str, Any],
     latest_cognition_graph: Any,
     latest_self_cognition_graph: Any,
+    latest_cognition_chain_run: Any,
+    latest_self_cognition_chain_run: Any,
+    runtime_status: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Project only bounded cross-owner aggregates for Overview."""
 
@@ -2664,16 +2713,26 @@ def _project_overview_page(
     recent_failures = (service_failures + audit_failures)[:5]
 
     graph_items: list[dict[str, Any]] = []
-    for graph_kind, graph in (
-        ("conversation", latest_cognition_graph),
-        ("self_cognition", latest_self_cognition_graph),
+    for graph_kind, graph, graph_kind_chain_run in (
+        (
+            "conversation",
+            latest_cognition_graph,
+            latest_cognition_chain_run,
+        ),
+        (
+            "self_cognition",
+            latest_self_cognition_graph,
+            latest_self_cognition_chain_run,
+        ),
     ):
         graph_payload = graph.model_dump(mode="json")
         if graph_payload.get("status") == "not_reported":
             continue
+        chain_payload = graph_kind_chain_run.model_dump(mode="json")
         graph_items.append({
             "graph_kind": graph_kind,
             "graph": graph_payload,
+            "chain_run": chain_payload,
         })
 
     cognition_graphs_panel = _console_panel(
@@ -2720,6 +2779,21 @@ def _project_overview_page(
     page = {
         "status": _console_page_status(panels),
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "latest_cognition_graph": latest_cognition_graph.model_dump(
+            mode="json",
+        ),
+        "latest_self_cognition_graph": latest_self_cognition_graph.model_dump(
+            mode="json",
+        ),
+        "latest_cognition_chain_run": latest_cognition_chain_run.model_dump(
+            mode="json",
+        ),
+        "latest_self_cognition_chain_run": (
+            latest_self_cognition_chain_run.model_dump(mode="json")
+        ),
+        "cognition_engine": _project_cognition_engine_descriptor(
+            runtime_status,
+        ),
         "panels": panels,
     }
     return page
@@ -2792,6 +2866,37 @@ def _source_failure_reason(*sources: dict[str, Any]) -> str:
     ]
     reason = "; ".join(dict.fromkeys(reasons))
     return reason
+
+
+def _project_cognition_engine_descriptor(
+    runtime_status: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Allowlist the selected cognition-engine descriptor for Overview."""
+
+    raw_descriptor = (
+        runtime_status.get("cognition_engine")
+        if isinstance(runtime_status, Mapping)
+        else None
+    )
+    if not isinstance(raw_descriptor, Mapping):
+        return {"status": "not_reported"}
+    if raw_descriptor.get("schema_version") != COGNITION_ENGINE_DESCRIPTOR_SCHEMA:
+        return {"status": "not_reported"}
+    if any(
+        field_name not in raw_descriptor
+        for field_name in COGNITION_ENGINE_DESCRIPTOR_FIELDS
+    ):
+        return {"status": "not_reported"}
+
+    descriptor = {
+        "status": "available",
+        "schema_version": COGNITION_ENGINE_DESCRIPTOR_SCHEMA,
+    }
+    descriptor.update({
+        field_name: raw_descriptor[field_name]
+        for field_name in COGNITION_ENGINE_DESCRIPTOR_FIELDS
+    })
+    return descriptor
 
 
 def _nonnegative_int(value: Any) -> int:
@@ -2932,17 +3037,17 @@ def _page_capabilities() -> dict[str, dict[str, Any]]:
         },
         "character": {
             "status": "ready",
-            "label": "native V2",
+            "label": "canonical cognition",
             "reason": (
-                "Character profile, V2 cognition, self-image, semantic growth, "
+                "Character profile, cognition, self-image, semantic growth, "
                 "and carry-over panels are implemented."
             ),
         },
         "users": {
             "status": "ready",
-            "label": "directory + V2",
+            "label": "directory + cognition",
             "reason": (
-                "Known-user discovery and native V2 relationship, cognition, "
+                "Known-user discovery and canonical relationship, cognition, "
                 "memory, style, progress, and carry-over panels are implemented."
             ),
         },

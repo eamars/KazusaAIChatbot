@@ -12,7 +12,7 @@ from kazusa_ai_chatbot.db.character_identity_growth import (
     IdentityPostCommitPendingError,
     IdentityRevisionStaleError,
 )
-from tests.cognition_core_v2_test_helpers import (
+from tests.cognition_test_helpers import (
     canonical_character_identity,
 )
 

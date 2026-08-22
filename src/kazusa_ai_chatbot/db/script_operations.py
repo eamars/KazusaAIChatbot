@@ -17,7 +17,7 @@ from bson.json_util import RELAXED_JSON_OPTIONS
 from pymongo.errors import PyMongoError
 
 from kazusa_ai_chatbot.config import AUDIT_LOG_TTL_DAYS, DEBUG_LOG_TTL_DAYS
-from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+from kazusa_ai_chatbot.cognition_shared.state_models import (
     validate_cognition_state,
 )
 from kazusa_ai_chatbot.db._client import (

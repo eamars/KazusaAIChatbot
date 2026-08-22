@@ -7,12 +7,20 @@ from ``CHARACTER_TIME_ZONE`` and are safe to place in model-facing payloads.
 
 from __future__ import annotations
 
+import os
 import re
 from datetime import date, datetime, timedelta, timezone
 from typing import TypedDict
 from zoneinfo import ZoneInfo
 
-from kazusa_ai_chatbot.config import CHARACTER_TIME_ZONE
+from dotenv import load_dotenv
+
+load_dotenv(override=False)
+
+CHARACTER_TIME_ZONE = os.getenv(
+    "CHARACTER_TIME_ZONE",
+    "Pacific/Auckland",
+)
 
 _LOCAL_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _LOCAL_MINUTE_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$")

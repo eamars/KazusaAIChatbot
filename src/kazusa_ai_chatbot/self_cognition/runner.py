@@ -21,6 +21,19 @@ from kazusa_ai_chatbot.action_spec.results import (
     build_private_surface_output,
     build_text_surface_output,
 )
+from kazusa_ai_chatbot.cognition_shared.contracts import (
+    CognitionContractError,
+    is_targetless_group_self_cognition_episode,
+    validate_scheduled_future_speech_authority,
+    validate_text_surface_output,
+)
+from kazusa_ai_chatbot.cognition_shared.state_models import (
+    resolve_state_scope,
+)
+from kazusa_ai_chatbot.cognition_core_v3.diagnostics import (
+    bind_protected_chain_records,
+    reset_protected_chain_records,
+)
 from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisodeV1,
     EvidenceRefV1,
@@ -29,15 +42,6 @@ from kazusa_ai_chatbot.cognition_episode import (
     build_internal_thought_episode,
     build_scheduled_tick_episode,
     build_self_cognition_episode,
-)
-from kazusa_ai_chatbot.config import (
-    CHARACTER_GLOBAL_USER_ID,
-    COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS,
-    COGNITION_RESOLVER_MAX_CYCLES,
-)
-from kazusa_ai_chatbot.conversation_progress import (
-    build_group_scene_context,
-    project_group_scene_prompt,
 )
 from kazusa_ai_chatbot.cognition_resolver.capabilities import (
     execute_resolver_capability_request,
@@ -48,22 +52,17 @@ from kazusa_ai_chatbot.cognition_resolver.loop import (
 from kazusa_ai_chatbot.cognition_resolver.state import (
     ensure_initial_resolver_inputs,
 )
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
-    CognitionContractError,
-    is_targetless_group_self_cognition_episode,
-    validate_text_surface_output,
-    validate_scheduled_future_speech_authority,
-)
-from kazusa_ai_chatbot.cognition_core_v2.state_models import (
-    resolve_state_scope,
-)
-from kazusa_ai_chatbot.nodes.dialog_agent import (
-    DIALOG_USAGE_MODE_SELF_COGNITION_ACTION_CANDIDATE,
-    StateContractError,
-    dialog_agent,
+from kazusa_ai_chatbot.config import (
+    CHARACTER_GLOBAL_USER_ID,
+    COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS,
+    COGNITION_RESOLVER_MAX_CYCLES,
 )
 from kazusa_ai_chatbot.consolidation.core import (
     call_consolidation_subgraph,
+)
+from kazusa_ai_chatbot.conversation_progress import (
+    build_group_scene_context,
+    project_group_scene_prompt,
 )
 from kazusa_ai_chatbot.db import build_interaction_style_context
 from kazusa_ai_chatbot.db.self_cognition import (
@@ -72,6 +71,11 @@ from kazusa_ai_chatbot.db.self_cognition import (
 from kazusa_ai_chatbot.internal_monologue_residue import (
     load_residue_context,
     record_completed_episode_residue,
+)
+from kazusa_ai_chatbot.nodes.dialog_agent import (
+    DIALOG_USAGE_MODE_SELF_COGNITION_ACTION_CANDIDATE,
+    StateContractError,
+    dialog_agent,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     build_action_availability_snapshot,
@@ -92,7 +96,6 @@ from kazusa_ai_chatbot.time_boundary import (
     normalize_storage_utc_iso,
     parse_storage_utc_datetime,
 )
-
 
 SelfCognitionClient = Callable[[dict[str, Any]], Any]
 ConsolidationBuildResult = tuple[dict[str, Any], dict[str, Any], bool]
@@ -336,10 +339,25 @@ async def build_self_cognition_case_artifacts_async(
     )
     if pipeline_run_handle is not None:
         pipeline_run_handle.raise_if_cancelled("before_cognition")
-    cognition_output = await _call_maybe_async(
-        active_cognition_client,
-        cognition_state,
+    trigger_id = _string_field(trigger_record, "trigger_id")
+    if not trigger_id:
+        raise StateContractError("self-cognition trigger_id is required")
+    diagnostics_token = bind_protected_chain_records(
+        run_id=f"self_cognition_run:{trigger_id}",
+        source_kind="self_cognition",
+        llm_trace_id=(
+            _string_field(cognition_state, "llm_trace_id")
+            or f"self_cognition_run:{trigger_id}"
+        ),
+        cognition_invocation_id=f"self_cognition_run:{trigger_id}",
     )
+    try:
+        cognition_output = await _call_maybe_async(
+            active_cognition_client,
+            cognition_state,
+        )
+    finally:
+        reset_protected_chain_records(diagnostics_token)
     if pipeline_run_handle is not None:
         pipeline_run_handle.raise_if_cancelled("after_cognition")
     if execute_private_actions:

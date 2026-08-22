@@ -15,7 +15,7 @@ from kazusa_ai_chatbot.consolidation.character_operational_state import (
 from kazusa_ai_chatbot.consolidation.source_policy import (
     validate_character_operational_sources,
 )
-from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_character_production_state,
 )
 

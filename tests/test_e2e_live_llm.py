@@ -16,8 +16,10 @@ from fastapi import BackgroundTasks
 from starlette.requests import Request
 
 from kazusa_ai_chatbot import service as brain_service
-from kazusa_ai_chatbot.cognition_core_v2 import build_character_production_state
-from tests.cognition_core_v2_test_helpers import canonical_user_message_episode
+from kazusa_ai_chatbot.cognition_shared.state_models import (
+    build_character_production_state,
+)
+from tests.cognition_test_helpers import canonical_user_message_episode
 from kazusa_ai_chatbot.config import (
     DIALOG_GENERATOR_LLM_BASE_URL,
     SEARXNG_URL,

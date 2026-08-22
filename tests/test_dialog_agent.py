@@ -17,7 +17,7 @@ from kazusa_ai_chatbot.nodes.dialog_agent import (
     dialog_agent,
     dialog_generator,
 )
-from tests.cognition_core_v2_test_helpers import canonical_episode
+from tests.cognition_test_helpers import canonical_episode
 
 
 @pytest.fixture(autouse=True)

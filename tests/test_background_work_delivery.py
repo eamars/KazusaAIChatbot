@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from kazusa_ai_chatbot.action_spec.results import build_text_surface_output
-from tests.cognition_core_v2_test_helpers import (
+from tests.cognition_test_helpers import (
     canonical_episode_identity_snapshot,
     canonical_service_character_profile,
 )

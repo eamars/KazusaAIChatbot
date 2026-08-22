@@ -11,7 +11,7 @@ from kazusa_ai_chatbot.db import (
     build_user_engagement_relevance_context,
     get_user_profile,
 )
-from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+from kazusa_ai_chatbot.cognition_shared.state_projection import (
     project_relationship_context,
 )
 from kazusa_ai_chatbot.rag.conversation_evidence import ConversationEvidenceAgent

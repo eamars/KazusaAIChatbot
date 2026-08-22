@@ -11,7 +11,7 @@ from kazusa_ai_chatbot.llm_interface.diagnostics import (
     build_route_diagnostics,
 )
 
-_REQUIRED_ROUTES = frozenset((
+_ROUTES_BEFORE_COGNITION_CORE = (
     "RELEVANCE_AGENT_LLM",
     "VISION_DESCRIPTOR_LLM",
     "MSG_DECONTEXTUALIZER_LLM",
@@ -19,25 +19,25 @@ _REQUIRED_ROUTES = frozenset((
     "RAG_SUBAGENT_LLM",
     "WEB_SEARCH_LLM",
     "COGNITION_LLM",
-    "COGNITION_LLM_APPRAISAL_EVENT_AGENCY",
-    "COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL",
-    "COGNITION_LLM_APPRAISAL_MORAL_IDENTITY",
-    "COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME",
-    "COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY",
-    "COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE",
-    "COGNITION_LLM_GOAL_ORDINARY_RESPONSE",
-    "COGNITION_LLM_GOAL_ACTIVE_BRANCH",
-    "COGNITION_LLM_WORKSPACE_COLLAPSE",
-    "COGNITION_LLM_ACTION_PLANNING",
-    "COGNITION_LLM_ACTION_AUTHORIZATION",
-    "COGNITION_LLM_RESOLVER_AUTHORIZATION",
+    "COGNITION_LLM_CHARACTER_CARRYOVER",
+)
+_ROUTES_AFTER_COGNITION_CORE = (
     "DIALOG_GENERATOR_LLM",
     "CONSOLIDATION_LLM",
     "JSON_REPAIR_LLM",
     "BACKGROUND_WORK_LLM",
     "CODING_AGENT_PM_LLM",
     "CODING_AGENT_PROGRAMMER_LLM",
-))
+    "CODING_AGENT_ACTION_LOOP_LLM",
+)
+_V3_COGNITION_ROUTE_NAMES = frozenset({
+    "COGNITION_V3_CHAIN_LLM",
+    "COGNITION_V3_SIDECAR_LLM",
+})
+_SHARED_REQUIRED_ROUTES = frozenset({
+    *_ROUTES_BEFORE_COGNITION_CORE,
+    *_ROUTES_AFTER_COGNITION_CORE[:-1],
+})
 _FALLBACK_BACKED_ROUTES = frozenset()
 
 
@@ -65,39 +65,73 @@ def _route_config(route_name: str) -> LLMCallConfig:
     return config
 
 
-def _configured_chat_routes() -> tuple[LLMCallConfig, ...]:
-    """Return all chat routes shown in startup diagnostics."""
+def _setting_route_config(
+    route_name: str,
+    setting: cfg.CognitionRouteSettingV1,
+) -> LLMCallConfig:
+    """Build one diagnostic config from an engine-selected route setting."""
 
-    route_names = (
-        "RELEVANCE_AGENT_LLM",
-        "VISION_DESCRIPTOR_LLM",
-        "MSG_DECONTEXTUALIZER_LLM",
-        "RAG_PLANNER_LLM",
-        "RAG_SUBAGENT_LLM",
-        "WEB_SEARCH_LLM",
-        "COGNITION_LLM",
-        "COGNITION_LLM_APPRAISAL_EVENT_AGENCY",
-        "COGNITION_LLM_APPRAISAL_RELATIONSHIP_SOCIAL",
-        "COGNITION_LLM_APPRAISAL_MORAL_IDENTITY",
-        "COGNITION_LLM_APPRAISAL_GOAL_THREAT_OUTCOME",
-        "COGNITION_LLM_APPRAISAL_EPISTEMIC_COMPARISON_MEMORY",
-        "COGNITION_LLM_APPRAISAL_EXISTENTIAL_DRIVE",
-        "COGNITION_LLM_GOAL_ORDINARY_RESPONSE",
-        "COGNITION_LLM_GOAL_ACTIVE_BRANCH",
-        "COGNITION_LLM_WORKSPACE_COLLAPSE",
-        "COGNITION_LLM_ACTION_PLANNING",
-        "COGNITION_LLM_ACTION_AUTHORIZATION",
-        "COGNITION_LLM_RESOLVER_AUTHORIZATION",
-        "DIALOG_GENERATOR_LLM",
-        "CONSOLIDATION_LLM",
-        "JSON_REPAIR_LLM",
-        "BACKGROUND_WORK_LLM",
-        "CODING_AGENT_PM_LLM",
-        "CODING_AGENT_PROGRAMMER_LLM",
-        "CODING_AGENT_ACTION_LOOP_LLM",
+    config = LLMCallConfig(
+        stage_name="llm_interface.route_report",
+        route_name=route_name,
+        base_url=setting.base_url,
+        api_key=setting.api_key,
+        model=setting.model,
+        temperature=0.0,
+        top_p=1.0,
+        top_k=None,
+        max_completion_tokens=setting.max_completion_tokens,
+        presence_penalty=None,
+        thinking=LLMThinkingConfig(enabled=setting.thinking_enabled),
+        context_window_tokens=setting.context_window_tokens,
     )
-    routes = tuple(_route_config(route_name) for route_name in route_names)
+    return config
+
+
+def _selected_cognition_routes() -> tuple[LLMCallConfig, ...]:
+    """Return the configured V3 chain and optional sidecar bindings."""
+
+    settings_v3 = cfg.get_cognition_v3_route_settings()
+    route_list = [
+        _setting_route_config(
+            "COGNITION_V3_CHAIN_LLM",
+            settings_v3.chain,
+        ),
+    ]
+    if settings_v3.sidecar is not None:
+        route_list.append(
+            _setting_route_config(
+                "COGNITION_V3_SIDECAR_LLM",
+                settings_v3.sidecar,
+            )
+        )
+    routes = tuple(route_list)
     return routes
+
+
+def _configured_chat_routes() -> tuple[LLMCallConfig, ...]:
+    """Return shared routes plus the selected cognition core family."""
+
+    routes = (
+        *(
+            _route_config(route_name)
+            for route_name in _ROUTES_BEFORE_COGNITION_CORE
+        ),
+        *_selected_cognition_routes(),
+        *(
+            _route_config(route_name)
+            for route_name in _ROUTES_AFTER_COGNITION_CORE
+        ),
+    )
+    return routes
+
+
+def _required_routes() -> set[str]:
+    """Return required shared routes plus the V3 chain route."""
+
+    required_routes = set(_SHARED_REQUIRED_ROUTES)
+    required_routes.add("COGNITION_V3_CHAIN_LLM")
+    return required_routes
 
 
 def configured_route_diagnostics() -> tuple[RouteDiagnostic, ...]:
@@ -105,7 +139,7 @@ def configured_route_diagnostics() -> tuple[RouteDiagnostic, ...]:
 
     diagnostics = build_route_diagnostics(
         _configured_chat_routes(),
-        required_routes=set(_REQUIRED_ROUTES),
+        required_routes=_required_routes(),
         fallback_backed_routes=set(_FALLBACK_BACKED_ROUTES),
     )
     return diagnostics
@@ -116,6 +150,7 @@ def _embedding_row() -> dict[str, str]:
 
     return {
         "route_name": "EMBEDDING",
+        "route_group": "embedding",
         "model": cfg.EMBEDDING_MODEL,
         "normalized_base_url": cfg.EMBEDDING_BASE_URL.rstrip("/"),
         "optional_feature": "-",
@@ -137,6 +172,17 @@ def _optional_feature_tags(diagnostic: RouteDiagnostic) -> str:
     return return_value
 
 
+def _route_group(route_name: str) -> str:
+    """Classify one route for selected-family operator diagnostics."""
+
+    if route_name in _V3_COGNITION_ROUTE_NAMES:
+        return_value = "v3_cognition"
+        return return_value
+
+    return_value = "shared_non_core"
+    return return_value
+
+
 def _table_rows(
     diagnostics: Iterable[RouteDiagnostic],
 ) -> tuple[dict[str, str], ...]:
@@ -145,6 +191,7 @@ def _table_rows(
     rows = [
         {
             "route_name": diagnostic.route_name,
+            "route_group": _route_group(diagnostic.route_name),
             "model": diagnostic.model,
             "normalized_base_url": diagnostic.normalized_base_url,
             "optional_feature": _optional_feature_tags(diagnostic),
@@ -162,6 +209,7 @@ def render_llm_route_table() -> str:
     rows = _table_rows(configured_route_diagnostics())
     columns = (
         ("route_name", "Route"),
+        ("route_group", "Group"),
         ("model", "Model"),
         ("normalized_base_url", "Source"),
         ("optional_feature", "Optional Feature"),

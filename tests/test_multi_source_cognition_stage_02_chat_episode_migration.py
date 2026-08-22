@@ -6,7 +6,7 @@ import pytest
 
 from kazusa_ai_chatbot import service as service_module
 from kazusa_ai_chatbot.cognition_episode import validate_cognitive_episode_v1
-from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
 )
@@ -16,7 +16,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
 from kazusa_ai_chatbot.time_boundary import (
     local_time_context_from_storage_utc,
 )
-from tests.cognition_core_v2_test_helpers import (
+from tests.cognition_test_helpers import (
     canonical_service_character_profile,
     canonical_user_message_episode,
 )

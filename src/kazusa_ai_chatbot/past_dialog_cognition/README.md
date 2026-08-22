@@ -9,7 +9,7 @@
 - Storage readers:
   - `kazusa_ai_chatbot.db.conversation.list_conversation_rows_by_row_ids`
   - `kazusa_ai_chatbot.db.llm_tracing.list_llm_trace_steps_for_trace_ids`
-- Prompt consumer: Cognition Core V2 goal cognition only, via
+- Prompt consumer: cognition goal judgment only, via
   `past_dialog_cognition_context`
 - Non-goals: durable memory, public RAG evidence, dialog planning, L3 surface
   rendering, adapter delivery, scheduler/reflection input, trace backfill, and

@@ -96,6 +96,26 @@
             </div>
           </div>
         </article>
+        <div class="content-grid three cognition-chain-grid">
+          <article class="card cognition-chain-card" id="overview-cognition-chain-card" data-component="Card">
+            <div class="card-header"><h3>V3 live cognition chain</h3><span class="badge" id="overview-cognition-chain-status">not reported</span></div>
+            <div class="card-content cognition-chain-panel" id="overview-cognition-chain" data-cognition-chain="overview_latest">
+              <p class="panel-empty">V3 chain-run telemetry is not reported.</p>
+            </div>
+          </article>
+          <article class="card cognition-chain-card" id="overview-self-cognition-chain-card" data-component="Card">
+            <div class="card-header"><h3>V3 self-cognition chain</h3><span class="badge" id="overview-self-cognition-chain-status">not reported</span></div>
+            <div class="card-content cognition-chain-panel" id="overview-self-cognition-chain" data-cognition-chain="self_latest">
+              <p class="panel-empty">V3 self-cognition chain-run telemetry is not reported.</p>
+            </div>
+          </article>
+          <article class="card cognition-chain-card cognition-engine-card" id="overview-cognition-engine-card" data-component="Card">
+            <div class="card-header"><h3>Cognition engine configuration</h3><span class="badge" id="overview-cognition-engine-status">not reported</span></div>
+            <div class="card-content cognition-chain-panel cognition-engine-panel" id="overview-cognition-engine" data-component="ScrollArea">
+              <p class="panel-empty">Selected cognition-engine configuration is not reported.</p>
+            </div>
+          </article>
+        </div>
       </section>
 
       <section class="page" data-page="services">
@@ -176,14 +196,22 @@
             </div>
           </form>
         </div>
-        <article class="card cognition-card" data-component="Card">
-          <div class="card-header"><h3>Debug cognition run</h3><span class="badge" id="debug-cognition-status">not reported</span></div>
-          <div class="card-content">
-            <div class="cognition-graph" id="debug-cognition-graph" data-cognition-graph="debug_latest">
-              <p class="graph-empty">Send a debug message to inspect reported cognition telemetry.</p>
+        <div class="content-grid two cognition-debug-panels">
+          <article class="card cognition-card" data-component="Card">
+            <div class="card-header"><h3>Debug cognition run</h3><span class="badge" id="debug-cognition-status">not reported</span></div>
+            <div class="card-content">
+              <div class="cognition-graph" id="debug-cognition-graph" data-cognition-graph="debug_latest">
+                <p class="graph-empty">Send a debug message to inspect reported cognition telemetry.</p>
+              </div>
             </div>
-          </div>
-        </article>
+          </article>
+          <article class="card cognition-chain-card" id="debug-cognition-chain-card" data-component="Card">
+            <div class="card-header"><h3>Debug V3 cognition chain</h3><span class="badge" id="debug-cognition-chain-status">not reported</span></div>
+            <div class="card-content cognition-chain-panel" id="debug-cognition-chain" data-cognition-chain="debug_latest">
+              <p class="panel-empty">Debug V3 chain-run telemetry is not reported.</p>
+            </div>
+          </article>
+        </div>
       </section>
 
       <section class="page" data-page="events">
@@ -218,10 +246,10 @@
       </section>
 
       <section class="page" data-page="character">
-        <div class="page-intro"><div><h2>Character</h2><p>Latest identity and Cognition Core V2 state, with redacted growth lineage and runtime-consumption health.</p></div><span class="badge" id="character-status">not loaded</span></div>
+        <div class="page-intro"><div><h2>Character</h2><p>Latest identity and canonical cognition state, with redacted growth lineage and runtime-consumption health.</p></div><span class="badge" id="character-status">not loaded</span></div>
         <div class="content-grid two">
           <article class="card span-two" data-component="Card"><div class="card-header"><h3>Profile</h3><span class="badge">character</span></div><div class="card-content character-panel" id="character-profile-table"><p class="panel-empty">Open this page after login to load character profile.</p></div></article>
-          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Cognition state</h3><span class="badge">V2</span></div><div class="card-content character-panel" id="character-cognition-state-table"><p class="panel-empty">Open this page after login to load native cognition state.</p></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Cognition state</h3><span class="badge">canonical</span></div><div class="card-content character-panel" id="character-cognition-state-table"><p class="panel-empty">Open this page after login to load cognition state.</p></div></article>
           <article class="card span-two" data-component="Card"><div class="card-header"><h3>Operational posture</h3><span class="badge">persisted · effective · consumed</span></div><div class="card-content character-panel" id="character-operational-posture-table"><p class="panel-empty">Open this page after login to load redacted operational posture.</p></div></article>
           <article class="card span-two" data-component="Card"><div class="card-header"><h3>Self-image</h3><span class="badge">latest revision</span></div><div class="card-content character-panel" id="character-self-image-table"><p class="panel-empty">Open this page after login to load the current self-image.</p></div></article>
           <article class="card span-two" data-component="Card"><div class="card-header"><h3>Growth candidates and outcomes</h3><span class="badge">redacted process</span></div><div class="card-content trait-list" id="character-growth-table"><p class="panel-empty">Open this page after login to load growth candidates and routed outcomes.</p></div></article>
@@ -242,7 +270,7 @@
         <div class="page-intro">
           <div>
             <h2>Users</h2>
-            <p>Known-user directory with native V2 relationship, cognition, memory, style, and continuity.</p>
+            <p>Known-user directory with relationship, cognition, memory, style, and continuity.</p>
           </div>
           <span class="badge" id="users-status">needs input</span>
         </div>
@@ -263,9 +291,9 @@
         </article>
         <div class="content-grid two">
           <article class="card span-two" data-component="Card"><div class="card-header"><h3>Profile</h3><span class="badge">safe account identity</span></div><div class="card-content record-list" id="user-profile-table"><p class="panel-empty">Select a known user or enter an exact account.</p></div></article>
-          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Relationship</h3><span class="badge">V2 axes</span></div><div class="table-wrap flush"><table><thead><tr><th>Axis</th><th>Value</th><th>Band</th></tr></thead><tbody id="user-relationship-table"><tr><td colspan="3">Select a user to load relationship state.</td></tr></tbody></table></div></article>
-          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Causal relationship context</h3><span class="badge">native V2</span></div><div class="card-content record-list" id="user-relationship-operational-table"><p class="panel-empty">Select a user to load causal relationship context.</p></div></article>
-          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Cognition state</h3><span class="badge">V2</span></div><div class="card-content record-list" id="user-cognition-state-table"><p class="panel-empty">Select a user to load cognition state.</p></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Relationship</h3><span class="badge">emotion and relationship axes</span></div><div class="table-wrap flush"><table><thead><tr><th>Axis</th><th>Value</th><th>Band</th></tr></thead><tbody id="user-relationship-table"><tr><td colspan="3">Select a user to load relationship state.</td></tr></tbody></table></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Causal relationship context</h3><span class="badge">cause-aware</span></div><div class="card-content record-list" id="user-relationship-operational-table"><p class="panel-empty">Select a user to load causal relationship context.</p></div></article>
+          <article class="card span-two" data-component="Card"><div class="card-header"><h3>Cognition state</h3><span class="badge">canonical</span></div><div class="card-content record-list" id="user-cognition-state-table"><p class="panel-empty">Select a user to load cognition state.</p></div></article>
           <article class="card span-two" data-component="Card"><div class="card-header"><h3>Memory</h3><span class="badge">recent units</span></div><div class="card-content record-list" id="user-memory-table"><p class="panel-empty">Select a user to load recent memory.</p></div></article>
           <article class="card" data-component="Card"><div class="card-header"><h3>Style</h3><span class="badge">relevance · cognition · surface</span></div><div class="card-content record-list" id="user-style-table"><p class="panel-empty">Select a user to load style guidance.</p></div></article>
           <article class="card span-two" data-component="Card"><div class="card-header"><h3>Conversation progress</h3><span class="badge">selected thread</span></div><div class="card-content record-list" id="user-conversation-progress-table"><p class="panel-empty">Select a user and optional channel scope.</p></div></article>

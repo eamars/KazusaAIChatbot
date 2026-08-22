@@ -10,23 +10,31 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from kazusa_ai_chatbot.calendar_scheduler import models as calendar_models
+import kazusa_ai_chatbot.dispatcher.handlers as handlers_module
+from kazusa_ai_chatbot import service
 from kazusa_ai_chatbot.action_spec.registry import SPEAK_CAPABILITY
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.calendar_scheduler import models as calendar_models
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     build_scheduled_future_speech_authority,
 )
-from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
 )
+from kazusa_ai_chatbot.cognition_core_v3.diagnostics import current_chain_scope
 from kazusa_ai_chatbot.db import user_memory_units as memory_units_module
 from kazusa_ai_chatbot.dispatcher import AdapterRegistry, SendResult
-import kazusa_ai_chatbot.dispatcher.handlers as handlers_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as connector
 from kazusa_ai_chatbot.nodes.dialog_agent import StateContractError
-from kazusa_ai_chatbot.self_cognition import models, projection, runner, sources
-from kazusa_ai_chatbot.self_cognition import tracking, worker
-from tests.cognition_core_v2_test_helpers import (
+from kazusa_ai_chatbot.self_cognition import (
+    models,
+    projection,
+    runner,
+    sources,
+    tracking,
+    worker,
+)
+from tests.cognition_test_helpers import (
     canonical_service_character_profile,
 )
 
@@ -815,6 +823,7 @@ async def test_prepared_commitment_state_contains_public_group_scene(
     style_snapshot = _test_interaction_style_snapshot()
     captured_style_calls: list[dict[str, Any]] = []
     captured_state: dict[str, Any] = {}
+    captured_scope_identity: list[tuple[str, str, str]] = []
 
     async def load_style_snapshot(**kwargs: Any) -> dict[str, Any]:
         captured_style_calls.append(dict(kwargs))
@@ -825,6 +834,13 @@ async def test_prepared_commitment_state_contains_public_group_scene(
 
     async def cognition_client(state: dict[str, Any]) -> dict[str, Any]:
         captured_state.update(state)
+        scope = current_chain_scope()
+        assert scope is not None
+        captured_scope_identity.append((
+            scope.run_id,
+            scope.source_kind,
+            scope.cognition_invocation_id,
+        ))
         return _progress_cognition_output()
 
     monkeypatch.setattr(
@@ -838,7 +854,7 @@ async def test_prepared_commitment_state_contains_public_group_scene(
         load_residue,
     )
 
-    await runner.build_self_cognition_case_artifacts_async(
+    artifacts = await runner.build_self_cognition_case_artifacts_async(
         case,
         cognition_client=cognition_client,
     )
@@ -848,6 +864,16 @@ async def test_prepared_commitment_state_contains_public_group_scene(
     assert captured_style_calls[0]["channel_type"] == "group"
     assert captured_state["public_group_scene"] == ""
     assert captured_state["interaction_style_context"] is style_snapshot
+    assert len(captured_scope_identity) == 1
+    run_record = artifacts[models.ARTIFACT_RUN_RECORD]
+    self_graph = service._build_self_cognition_cognition_graph(artifacts)
+    assert self_graph is not None
+    assert self_graph["run_id"] == run_record["run_id"]
+    assert captured_scope_identity[0] == (
+        run_record["run_id"],
+        "self_cognition",
+        run_record["run_id"],
+    )
 
 
 def test_prepared_commitment_state_reaches_strict_v2_input() -> None:

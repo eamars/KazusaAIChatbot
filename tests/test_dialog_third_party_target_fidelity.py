@@ -10,13 +10,13 @@ from unittest.mock import AsyncMock, MagicMock
 from langchain_core.messages import AIMessage
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2 import contracts as contracts_module
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared import contracts as contracts_module
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionContractError,
     validate_surface_addressee_plan,
 )
-from kazusa_ai_chatbot.cognition_core_v2.facade import _role_summary
-from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+from kazusa_ai_chatbot.cognition_core_v3.facade_helpers import _role_summary
+from kazusa_ai_chatbot.cognition_shared.state_projection import (
     project_state_for_prompt,
 )
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
@@ -27,7 +27,7 @@ from kazusa_ai_chatbot.nodes import (
 from kazusa_ai_chatbot.nodes.persona_supervisor2 import (
     _build_scene_participant_bindings,
 )
-from tests.cognition_core_v2_test_helpers import canonical_episode
+from tests.cognition_test_helpers import canonical_episode
 
 
 _FIXTURE_PATH = Path(

@@ -7,17 +7,17 @@ from types import SimpleNamespace
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2 import facade
-from kazusa_ai_chatbot.cognition_core_v2.output_projection import (
+from kazusa_ai_chatbot.cognition_core_v3 import facade_helpers as facade
+from kazusa_ai_chatbot.cognition_shared.output_projection import (
     build_state_update,
     project_affect,
     project_relationship,
 )
-from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_acquaintance_user_state,
     validate_cognition_state,
 )
-from kazusa_ai_chatbot.cognition_core_v2.state_reducers import (
+from kazusa_ai_chatbot.cognition_shared.state_reducers import (
     apply_relationship_maintenance,
     apply_state_update,
     create_deterministic_goals,

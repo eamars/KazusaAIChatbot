@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionContractError,
 )
 from kazusa_ai_chatbot.cognition_resolver.state import (
@@ -24,7 +24,7 @@ from kazusa_ai_chatbot.cognition_episode import (
 from kazusa_ai_chatbot.action_spec.results import build_text_surface_output
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as persona_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_surface
-from tests.cognition_core_v2_test_helpers import (
+from tests.cognition_test_helpers import (
     canonical_character_identity,
     canonical_cognition_output,
     canonical_episode,
@@ -104,7 +104,7 @@ def _character_profile() -> dict[str, object]:
 
 
 def _services() -> object:
-    from kazusa_ai_chatbot.cognition_core_v2.contracts import TextSurfaceServicesV2
+    from kazusa_ai_chatbot.cognition_shared.contracts import TextSurfaceServicesV2
 
     llm = _LLM()
     return TextSurfaceServicesV2(
@@ -115,7 +115,7 @@ def _services() -> object:
 
 
 def _visual_services() -> object:
-    from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    from kazusa_ai_chatbot.cognition_shared.contracts import (
         VisualSurfaceServicesV2,
     )
 
@@ -350,7 +350,7 @@ def test_l3_builder_projects_latest_resolver_result_as_separate_authority() -> N
     }
     assert payload["permitted_action_results"] == []
 
-    from kazusa_ai_chatbot.cognition_core_v2.surface import (
+    from kazusa_ai_chatbot.cognition_shared.surface import (
         build_degraded_text_surface,
     )
 
@@ -418,7 +418,7 @@ def test_pending_task_result_cannot_be_rendered_as_factual_answer() -> None:
         state,
         interaction_style_context="brief and natural",
     )
-    from kazusa_ai_chatbot.cognition_core_v2.surface import (
+    from kazusa_ai_chatbot.cognition_shared.surface import (
         build_degraded_text_surface,
     )
 
@@ -432,7 +432,7 @@ def test_pending_task_result_cannot_be_rendered_as_factual_answer() -> None:
 def test_result_status_wording_matrix_is_exact() -> None:
     """Surface prompts distinguish facts from every non-factual task state."""
 
-    from kazusa_ai_chatbot.cognition_core_v2 import surface_stages
+    from kazusa_ai_chatbot.cognition_shared import surface_stages
 
     prompt = (
         surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
@@ -466,7 +466,7 @@ async def test_text_surface_output_carries_exact_action_result_authority() -> No
         interaction_style_context="brief and natural",
     )
 
-    from kazusa_ai_chatbot.cognition_core_v2.surface import (
+    from kazusa_ai_chatbot.cognition_shared.surface import (
         run_text_surface_planning,
     )
 
@@ -493,7 +493,7 @@ async def test_text_surface_output_carries_exact_action_result_authority() -> No
 def test_surface_prompt_projects_action_roles_without_identity_leak() -> None:
     """L3 sees target semantics while the exact output ledger retains ids."""
 
-    from kazusa_ai_chatbot.cognition_core_v2.surface import (
+    from kazusa_ai_chatbot.cognition_shared.surface import (
         _project_action_results_for_prompt,
     )
 

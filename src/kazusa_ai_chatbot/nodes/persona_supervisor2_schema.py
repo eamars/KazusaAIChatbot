@@ -7,7 +7,7 @@ from kazusa_ai_chatbot.action_spec.results import (
     SurfaceOutputV1,
 )
 from kazusa_ai_chatbot.cognition_episode import CognitiveEpisodeV1
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     GoalResolutionV2,
     SceneContextV2,
     SceneParticipantBindingV1,

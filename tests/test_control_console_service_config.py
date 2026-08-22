@@ -376,6 +376,45 @@ def test_brain_config_exposes_identity_growth_pace_and_renders_overrides() -> No
     }
 
 
+def test_brain_config_requires_v3_chain_and_keeps_optional_sidecar() -> None:
+    """The V3 chain is required while its sidecar remains optional."""
+
+    from control_console.service_config import (
+        ServiceConfigOverrideStore,
+        ServiceConfigValidationError,
+        build_default_service_config_registry,
+    )
+
+    environment = _brain_service_environment()
+    environment.pop("COGNITION_V3_SIDECAR_LLM_MODEL")
+
+    registry = build_default_service_config_registry()
+    snapshot = registry.snapshot_for_service(
+        service_id="brain",
+        environment=environment,
+        overrides=ServiceConfigOverrideStore(),
+    )
+    fields = {field.key: field for field in snapshot.fields}
+
+    assert fields["cognition_llm_model"].effective_value == "test-model"
+    assert fields["cognition_v3_chain_llm_model"].effective_value == "test-model"
+    assert fields["cognition_v3_sidecar_llm_model"].default_value == ""
+    assert fields["cognition_v3_sidecar_llm_model"].override_value is None
+    assert fields["cognition_v3_sidecar_llm_model"].effective_value == ""
+
+    missing_v3_chain_model = dict(environment)
+    missing_v3_chain_model.pop("COGNITION_V3_CHAIN_LLM_MODEL")
+    with pytest.raises(
+        ServiceConfigValidationError,
+        match="cognition_v3_chain_llm_model",
+    ):
+        registry.snapshot_for_service(
+            service_id="brain",
+            environment=missing_v3_chain_model,
+            overrides=ServiceConfigOverrideStore(),
+        )
+
+
 def test_brain_identity_growth_pace_rejects_bounds_and_cross_field_values() -> None:
     """Pace settings should fail before an invalid Brain restart."""
 

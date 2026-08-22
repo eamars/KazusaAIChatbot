@@ -10,7 +10,9 @@ from typing import Any
 
 from kazusa_ai_chatbot import db
 from kazusa_ai_chatbot import event_logging
-from kazusa_ai_chatbot.cognition_core_v2 import run_character_morning_refresh
+from kazusa_ai_chatbot.cognition_shared.morning_refresh import (
+    run_character_morning_refresh,
+)
 from kazusa_ai_chatbot.config import (
     AFFECT_SETTLING_WAKE_PREP_MINUTES,
     CHARACTER_SLEEP_LOCAL_PERIOD,

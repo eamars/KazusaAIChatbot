@@ -281,7 +281,7 @@ async def test_future_speak_duplicate_authority_mismatch_fails_before_related_so
     """An active future-speak duplicate with a different authority is rejected."""
 
     from kazusa_ai_chatbot.accepted_task import lifecycle
-    from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    from kazusa_ai_chatbot.cognition_shared.contracts import (
         build_scheduled_future_speech_authority,
     )
     from kazusa_ai_chatbot.db import accepted_tasks as repository

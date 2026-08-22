@@ -1,9 +1,9 @@
-"""V2 clarification ownership tests."""
+"""Clarification ownership tests."""
 
 import inspect
 
-from kazusa_ai_chatbot.cognition_core_v2 import action_selection
-from kazusa_ai_chatbot.cognition_core_v2.emotion_definitions import (
+from kazusa_ai_chatbot.cognition_core_v3 import action_selection
+from kazusa_ai_chatbot.cognition_shared.emotion_definitions import (
     EMOTION_DEFINITIONS,
 )
 
@@ -26,7 +26,7 @@ def test_clarification_validation_does_not_classify_user_text() -> None:
     """Code validates handles while the model owns semantic interpretation."""
 
     source = inspect.getsource(
-        action_selection._validate_action_plan_decision
+        action_selection.validate_action_plan_decision
     )
 
     assert "bid_handle" in source

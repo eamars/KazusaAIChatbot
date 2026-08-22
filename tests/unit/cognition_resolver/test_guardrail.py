@@ -3,24 +3,26 @@
 from __future__ import annotations
 
 import asyncio
-from typing import cast
+from typing import cast, get_type_hints
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_core_v3.contracts import (
+    CognitionChainServicesV3,
+)
+from kazusa_ai_chatbot.cognition_resolver import guardrail
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionCoreInputV2,
     CognitionCoreOutputV2,
-    CognitionCoreServicesV2,
     CognitionExecutionError,
 )
-from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
     bind_v2_attempt_ledger,
     create_v2_attempt_ledger,
     reset_v2_attempt_ledger,
     snapshot_v2_attempt_ledger,
     snapshot_v2_guarded_attempt_ledger,
 )
-from kazusa_ai_chatbot.cognition_resolver import guardrail
 
 
 def _input_payload(cycle_index: int = 0) -> CognitionCoreInputV2:
@@ -33,10 +35,10 @@ def _input_payload(cycle_index: int = 0) -> CognitionCoreInputV2:
     })
 
 
-def _services() -> CognitionCoreServicesV2:
+def _services() -> CognitionChainServicesV3:
     """Return a type-only service placeholder for patched child calls."""
 
-    return cast(CognitionCoreServicesV2, object())
+    return cast(CognitionChainServicesV3, object())
 
 
 def _goal_exhaustion(
@@ -112,7 +114,7 @@ async def test_parent_epoch_persists_after_recovery() -> None:
 
     async def run_child(
         payload: CognitionCoreInputV2,
-        _services: CognitionCoreServicesV2,
+        _services: CognitionChainServicesV3,
     ) -> CognitionCoreOutputV2:
         calls.append(coordinator.epoch)
         if len(calls) == 1:
@@ -135,6 +137,48 @@ async def test_parent_epoch_persists_after_recovery() -> None:
     finally:
         guardrail.reset_cognition_retry_coordinator(coordinator_token)
         reset_v2_attempt_ledger(ledger_token)
+
+
+@pytest.mark.asyncio
+async def test_guardrail_passes_engine_neutral_services_and_preserves_v3_attempt_epochs() -> None:
+    """The parent checkpoint preserves one V3 service object across epochs."""
+
+    annotations = get_type_hints(guardrail.run_guarded_cognition)
+    assert annotations["services"] is guardrail.ServicesT
+
+    ledger = create_v2_attempt_ledger("v3-engine-neutral")
+    ledger_token = bind_v2_attempt_ledger(ledger, graph_attempt=1)
+    coordinator = guardrail.create_cognition_retry_coordinator(
+        "v3-engine-neutral",
+    )
+    coordinator_token = guardrail.bind_cognition_retry_coordinator(coordinator)
+    v3_services = cast(CognitionChainServicesV3, object())
+    observed_services: list[CognitionChainServicesV3] = []
+    observed_epochs: list[int] = []
+
+    async def run_child(
+        _payload: CognitionCoreInputV2,
+        services: CognitionChainServicesV3,
+    ) -> CognitionCoreOutputV2:
+        observed_services.append(services)
+        observed_epochs.append(coordinator.epoch)
+        if len(observed_services) == 1:
+            raise _goal_exhaustion()
+        return _output()
+
+    try:
+        output = await guardrail.run_guarded_cognition(
+            _input_payload(),
+            v3_services,
+            run_child=run_child,
+        )
+    finally:
+        guardrail.reset_cognition_retry_coordinator(coordinator_token)
+        reset_v2_attempt_ledger(ledger_token)
+
+    assert output == _output()
+    assert observed_services == [v3_services, v3_services]
+    assert observed_epochs == [0, 1]
 
 
 def test_parent_recovery_allows_only_goal_exhaustion_codes() -> None:
@@ -191,7 +235,7 @@ async def test_parent_recovery_isolated_between_concurrent_contexts() -> None:
 
         async def run_child(
             _payload: CognitionCoreInputV2,
-            _services: CognitionCoreServicesV2,
+            _services: CognitionChainServicesV3,
         ) -> CognitionCoreOutputV2:
             nonlocal calls
             calls += 1
@@ -228,7 +272,7 @@ async def test_parent_recovery_cancellation_restores_context() -> None:
 
     async def cancelled_child(
         _payload: CognitionCoreInputV2,
-        _services: CognitionCoreServicesV2,
+        _services: CognitionChainServicesV3,
     ) -> CognitionCoreOutputV2:
         raise asyncio.CancelledError()
 
@@ -254,7 +298,7 @@ async def test_parent_recovery_failure_preserves_typed_error() -> None:
 
     async def failing_child(
         _payload: CognitionCoreInputV2,
-        _services: CognitionCoreServicesV2,
+        _services: CognitionChainServicesV3,
     ) -> CognitionCoreOutputV2:
         raise _goal_exhaustion(error_code="goal_bid_provider_exhausted")
 
@@ -289,7 +333,7 @@ def test_guarded_ledger_has_two_epochs_and_unguarded_snapshot_stays_v1() -> None
     ledger = create_v2_attempt_ledger("guarded-ledger")
     token = bind_v2_attempt_ledger(ledger, graph_attempt=1)
     try:
-        from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
+        from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
             enable_guarded_v2_attempt_ledger,
             set_v2_attempt_epoch,
             set_v2_parent_recovery_metadata,
@@ -297,7 +341,7 @@ def test_guarded_ledger_has_two_epochs_and_unguarded_snapshot_stays_v1() -> None
 
         enable_guarded_v2_attempt_ledger()
         set_v2_attempt_epoch(0)
-        from kazusa_ai_chatbot.cognition_core_v2 import model_attempt_policy
+        from kazusa_ai_chatbot.cognition_shared import model_attempt_policy
 
         attempt_zero = model_attempt_policy.reserve_v2_model_attempt(
             stage="goal_bid_structure",

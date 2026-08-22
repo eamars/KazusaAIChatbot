@@ -16,10 +16,10 @@ from unittest.mock import patch
 import pytest
 
 import kazusa_ai_chatbot.relevance.persona_relevance_agent as settled_module
-from kazusa_ai_chatbot.cognition_core_v2 import (
+from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_character_production_state,
 )
-from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
+from kazusa_ai_chatbot.cognition_shared.state_projection import (
     project_character_operational_state,
     project_relationship_context,
     select_character_operational_context,

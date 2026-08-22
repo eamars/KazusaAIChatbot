@@ -10,7 +10,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 import kazusa_ai_chatbot.llm_tracing as tracing
 from kazusa_ai_chatbot import utils as utils_module
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionExecutionError,
 )
 from kazusa_ai_chatbot.llm_tracing import failure_capsule, guardrail_capsule

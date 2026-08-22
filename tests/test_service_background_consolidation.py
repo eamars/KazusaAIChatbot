@@ -16,7 +16,7 @@ from kazusa_ai_chatbot.action_spec.registry import (
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
 )
 from kazusa_ai_chatbot.brain_service import post_turn as post_turn_module
-from kazusa_ai_chatbot.cognition_core_v2.state_models import (
+from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_character_production_state,
 )
 from kazusa_ai_chatbot.consolidation import (
@@ -28,7 +28,7 @@ from kazusa_ai_chatbot.consolidation.character_operational_state import (
 from kazusa_ai_chatbot.chat_input_queue import QueuedChatItem
 from kazusa_ai_chatbot.llm_tracing import failure_capsule
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
-from tests.cognition_core_v2_test_helpers import (
+from tests.cognition_test_helpers import (
     canonical_episode_identity_snapshot,
     canonical_service_character_profile,
 )

@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
 import re
+from collections.abc import Callable, Mapping
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-
 
 NAPCAT_ACTIVE_GROUP_PATTERN = r"^[0-9]{1,32}$"
 DEFAULT_MAX_ITEMS = 50
@@ -43,6 +42,7 @@ class ServiceConfigField(StrictConfigModel):
     default_env: str | None = Field(default=None, pattern=r"^[A-Z0-9_]{1,80}$")
     default_fallback_env: list[str] = Field(default_factory=list, max_length=8)
     default_literal: str = Field(default="", max_length=240)
+    allow_empty_string_default: bool = False
     sensitive: bool = False
     restart_required: bool = True
     max_items: int = Field(default=DEFAULT_MAX_ITEMS, ge=1, le=500)
@@ -452,6 +452,10 @@ def _default_from_raw(
 ) -> ConfigValue:
     """Parse and validate an environment-backed default value."""
 
+    if field.allow_empty_string_default and not raw_value.strip():
+        empty_value = ""
+        return empty_value
+
     if field.value_type == "string_list":
         raw_items = re.split(r"[\s,]+", raw_value.strip()) if raw_value.strip() else []
         value = [item for item in raw_items if item]
@@ -647,6 +651,7 @@ def _brain_model_route_fields() -> list[ServiceConfigField]:
         route_descriptors,
         route_env_name,
         route_field_key,
+        route_is_required_for_config_read,
     )
 
     fields: list[ServiceConfigField] = []
@@ -660,6 +665,9 @@ def _brain_model_route_fields() -> list[ServiceConfigField]:
                 default_env=route_env_name(route, "model"),
                 default_fallback_env=route_default_fallback_env(route, "model"),
                 default_literal=route_default_literal("model"),
+                allow_empty_string_default=(
+                    not route_is_required_for_config_read(route)
+                ),
                 pattern=MODEL_ID_PATTERN,
                 max_item_length=200,
                 restart_required=True,

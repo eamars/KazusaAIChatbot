@@ -7,6 +7,10 @@ from __future__ import annotations
 
 import logging
 
+from kazusa_ai_chatbot.accepted_task.models import ACCEPTED_TASKS_COLLECTION
+from kazusa_ai_chatbot.background_work.models import (
+    BACKGROUND_WORK_JOBS_COLLECTION,
+)
 from kazusa_ai_chatbot.config import (
     MEDIA_DESCRIPTOR_CACHE_MAX_PERSISTENT_ENTRIES,
 )
@@ -15,49 +19,48 @@ from kazusa_ai_chatbot.conversation_progress.policy import (
     BLOCK_VECTOR_INDEX_NAME,
 )
 from kazusa_ai_chatbot.db._client import enable_vector_index, get_db
-from kazusa_ai_chatbot.background_work.models import (
-    BACKGROUND_WORK_JOBS_COLLECTION,
-)
-from kazusa_ai_chatbot.accepted_task.models import ACCEPTED_TASKS_COLLECTION
 from kazusa_ai_chatbot.db.accepted_tasks import ensure_accepted_task_indexes
 from kazusa_ai_chatbot.db.background_work_jobs import (
     ensure_background_work_job_indexes,
 )
-from kazusa_ai_chatbot.db.conversation import (
-    CONVERSATION_VECTOR_FILTER_FIELDS,
-    CONVERSATION_VECTOR_INDEX_NAME,
-)
-from kazusa_ai_chatbot.db.interaction_style_images import (
-    ensure_interaction_style_image_indexes,
-)
-from kazusa_ai_chatbot.db.internal_monologue_residue import (
-    INTERNAL_MONOLOGUE_RESIDUE_COLLECTION,
-    ensure_internal_monologue_residue_indexes,
-)
-from kazusa_ai_chatbot.db.internal_action_latches import (
-    INTERNAL_ACTION_LATCHES_COLLECTION,
-    ensure_internal_action_latch_indexes,
-)
-from kazusa_ai_chatbot.db.post_turn_lifecycle import (
-    POST_TURN_LIFECYCLE_RECORDS_COLLECTION,
-    ensure_post_turn_lifecycle_record_indexes,
-    expire_character_operational_receipts,
-)
 from kazusa_ai_chatbot.db.character_identity_growth import (
     GROWTH_COLLECTION_NAMES,
     ensure_character_identity_growth_indexes,
+)
+from kazusa_ai_chatbot.db.cognition_chain_runs import (
+    COGNITION_CHAIN_RUNS_COLLECTION,
+    ensure_cognition_chain_run_indexes,
+)
+from kazusa_ai_chatbot.db.conversation import (
+    CONVERSATION_VECTOR_FILTER_FIELDS,
+    CONVERSATION_VECTOR_INDEX_NAME,
 )
 from kazusa_ai_chatbot.db.event_logging import (
     EVENT_LOG_EVENTS_COLLECTION,
     EVENT_LOG_SNAPSHOTS_COLLECTION,
     ensure_event_log_indexes,
 )
+from kazusa_ai_chatbot.db.interaction_style_images import (
+    ensure_interaction_style_image_indexes,
+)
+from kazusa_ai_chatbot.db.internal_action_latches import (
+    INTERNAL_ACTION_LATCHES_COLLECTION,
+    ensure_internal_action_latch_indexes,
+)
+from kazusa_ai_chatbot.db.internal_monologue_residue import (
+    INTERNAL_MONOLOGUE_RESIDUE_COLLECTION,
+    ensure_internal_monologue_residue_indexes,
+)
 from kazusa_ai_chatbot.db.llm_tracing import (
     LLM_TRACE_RUNS_COLLECTION,
     LLM_TRACE_STEPS_COLLECTION,
     ensure_llm_trace_indexes,
 )
-from kazusa_ai_chatbot.db.reflection_cycle import ensure_reflection_run_indexes
+from kazusa_ai_chatbot.db.post_turn_lifecycle import (
+    POST_TURN_LIFECYCLE_RECORDS_COLLECTION,
+    ensure_post_turn_lifecycle_record_indexes,
+    expire_character_operational_receipts,
+)
 from kazusa_ai_chatbot.db.rag_cache2_persistent import (
     PERSISTENT_CACHE_COLLECTION,
     PERSISTENT_CACHE_LOOKUP_INDEX,
@@ -65,6 +68,7 @@ from kazusa_ai_chatbot.db.rag_cache2_persistent import (
     prune_media_descriptor_entries,
     purge_stale_media_descriptor_entries,
 )
+from kazusa_ai_chatbot.db.reflection_cycle import ensure_reflection_run_indexes
 from kazusa_ai_chatbot.db.self_cognition import (
     SELF_COGNITION_ACTION_ATTEMPTS_COLLECTION,
     SELF_COGNITION_GROUP_REVIEW_WINDOWS_COLLECTION,
@@ -103,6 +107,7 @@ async def db_bootstrap() -> None:
         EVENT_LOG_SNAPSHOTS_COLLECTION,
         LLM_TRACE_RUNS_COLLECTION,
         LLM_TRACE_STEPS_COLLECTION,
+        COGNITION_CHAIN_RUNS_COLLECTION,
         SELF_COGNITION_ACTION_ATTEMPTS_COLLECTION,
         SELF_COGNITION_GROUP_REVIEW_WINDOWS_COLLECTION,
         ACCEPTED_TASKS_COLLECTION,
@@ -378,6 +383,7 @@ async def db_bootstrap() -> None:
     await ensure_character_identity_growth_indexes()
     await ensure_event_log_indexes()
     await ensure_llm_trace_indexes()
+    await ensure_cognition_chain_run_indexes()
     await ensure_internal_monologue_residue_indexes()
 
     await purge_stale_media_descriptor_entries()

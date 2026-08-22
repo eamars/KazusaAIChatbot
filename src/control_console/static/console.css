@@ -236,6 +236,13 @@ body[data-auth-state="authenticated"] #login-form { display: none; }
 .message .meta { color: var(--muted); font-size: 12px; font-family: var(--mono); }
 .cognition-card .card-content { overflow: visible; }
 .cognition-graph { min-height: 260px; display: grid; align-content: stretch; }
+.cognition-chain-grid, .cognition-debug-panels { min-width: 0; }
+.cognition-chain-card { min-width: 0; }
+.cognition-chain-panel { min-width: 0; overflow: hidden; }
+.cognition-chain-table-wrap { min-width: 0; }
+.cognition-chain-table { min-width: 0; table-layout: fixed; }
+.cognition-chain-table th, .cognition-chain-table td { overflow-wrap: anywhere; word-break: break-word; }
+.cognition-chain-table th { width: 42%; }
 .cognition-graph-shell { display: grid; gap: 12px; min-width: 0; }
 .graph-run-summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; align-items: start; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--panel-soft); }
 .graph-run-title { display: grid; gap: 3px; min-width: 0; }

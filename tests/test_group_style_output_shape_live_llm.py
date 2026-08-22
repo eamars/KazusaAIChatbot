@@ -14,7 +14,7 @@ from uuid import uuid4
 import httpx
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2.surface import (
+from kazusa_ai_chatbot.cognition_shared.surface import (
     run_text_surface_planning,
 )
 from kazusa_ai_chatbot.cognition_episode import (
@@ -29,7 +29,7 @@ from kazusa_ai_chatbot.config import (
 from kazusa_ai_chatbot.db import interaction_style_images as style_store
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_module
-from tests.cognition_core_v2_test_helpers import canonical_episode
+from tests.cognition_test_helpers import canonical_episode
 from tests.llm_trace import write_llm_trace
 from tests.live_llm_mongo import live_db
 

@@ -45,20 +45,27 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
-| [coding_agent_assessment_gap_phase_d_plan.md](active/short_term/coding_agent_assessment_gap_phase_d_plan.md) | Coding-agent persistent JSON action-loop and repository-index migration | in_progress |
-| [cognition_v3_cache_affine_semantic_chain_bigbang_plan.md](active/short_term/cognition_v3_cache_affine_semantic_chain_bigbang_plan.md) | Cognition V3 cache-affine semantic-chain engine, exhaustive sealed V2 baseline/replay, and evidence-gated default cutover | draft |
-| [unified_llm_native_structured_output_default_plan.md](active/short_term/unified_llm_native_structured_output_default_plan.md) | Unified LLM native structured-output default, semantic-prompt cleanup, live-LLM baseline verification, and preserved recovery behavior | draft |
+
+### Superseded Plans
+
+| Document | Type | Status |
+|---|---|---|
+| [cognition_v3_cache_affine_semantic_chain_bigbang_plan.md](archive/superseded/cognition_v3_cache_affine_semantic_chain_bigbang_plan.md) | Former parallel cache-affine semantic-chain projection and partial execution record | superseded by `cognition_v3_hybrid_agentic_loop_reconciliation_plan.md` |
 
 ### Completed Short-Term Plans
 
 | Document | Type | Status |
 |---|---|---|
+| [cognition_v3_hybrid_agentic_loop_reconciliation_plan.md](archive/completed/cognition_v3_hybrid_agentic_loop_reconciliation_plan.md) | Cognition V3 single-lane hybrid agentic-loop reconciliation and V3-only cutover | completed |
+| [cognition_v3_hybrid_agentic_loop_reconciliation_plan_handover_2026-08-21.md](archive/completed/cognition_v3_hybrid_agentic_loop_reconciliation_plan_handover_2026-08-21.md) | Gate 7/8 execution and closure handover | completed |
+| [cognition_v2_runtime_decommission_after_v3_cutover_plan_2026-08-22.md](archive/completed/cognition_v2_runtime_decommission_after_v3_cutover_plan_2026-08-22.md) | V2 cognition-engine removal and V3-only cutover closure | completed |
 | [cognition_v2_stale_axes_and_validator_policy_plan.md](archive/completed/cognition_v2_stale_axes_and_validator_policy_plan.md) | Stale relationship-axis maintenance and semantic/structural cognition admission policy | completed |
 
 ### Active Bugfix Plans
 
 | Document | Type | Status |
 |---|---|---|
+| [control_console_v3_cutover_startup_and_config_cleanup_plan_2026-08-22.md](active/bugfix/control_console_v3_cutover_startup_and_config_cleanup_plan_2026-08-22.md) | Control-console startup repair and V3-only environment cleanup | in_progress |
 
 ### Completed Bugfix Plans
 

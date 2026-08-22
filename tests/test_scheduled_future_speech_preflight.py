@@ -139,7 +139,7 @@ def _legacy_active_rows() -> dict[str, list[dict[str, Any]]]:
 def _compatible_active_rows() -> dict[str, list[dict[str, Any]]]:
     """Build active rows carrying a valid new authority."""
 
-    from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    from kazusa_ai_chatbot.cognition_shared.contracts import (
         build_scheduled_future_speech_authority,
     )
 
@@ -301,7 +301,7 @@ async def test_preflight_reads_calendar_authority_from_payload(
 ) -> None:
     """Calendar schedule and run authority is read from the production payload."""
 
-    from kazusa_ai_chatbot.cognition_core_v2.contracts import (
+    from kazusa_ai_chatbot.cognition_shared.contracts import (
         build_scheduled_future_speech_authority,
     )
 

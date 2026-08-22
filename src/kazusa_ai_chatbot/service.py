@@ -7,7 +7,6 @@ Start with:
 from __future__ import annotations
 
 import asyncio
-from copy import deepcopy
 import hashlib
 import hmac
 import json
@@ -16,44 +15,100 @@ import os
 import socket
 import time
 import traceback
-from uuid import uuid4
 from collections.abc import Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
+from copy import deepcopy
 from typing import Any, Literal
+from uuid import uuid4
 
 from fastapi import BackgroundTasks, FastAPI, Request
 
+from kazusa_ai_chatbot import event_logging, llm_tracing
 from kazusa_ai_chatbot.action_spec.execution import execute_action_specs_for_trace
 from kazusa_ai_chatbot.action_spec.results import (
     has_consolidatable_output,
     project_episode_trace_for_consolidation,
 )
-from kazusa_ai_chatbot.config import (
-    CALENDAR_SCHEDULER_CLAIM_LIMIT,
-    CALENDAR_SCHEDULER_ENABLED,
-    CALENDAR_SCHEDULER_LEASE_SECONDS,
-    CALENDAR_SCHEDULER_MAX_ATTEMPTS,
-    CALENDAR_SCHEDULER_POLL_INTERVAL_SECONDS,
-    BACKGROUND_WORK_INPUT_CHAR_LIMIT,
-    BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
-    BACKGROUND_WORK_WORKER_CLAIM_LIMIT,
-    BACKGROUND_WORK_WORKER_ENABLED,
-    BACKGROUND_WORK_WORKER_INTERVAL_SECONDS,
-    BACKGROUND_WORK_WORKER_LEASE_SECONDS,
-    BACKGROUND_WORK_WORKER_MAX_ATTEMPTS,
-    CHARACTER_GLOBAL_USER_ID,
-    CHAT_HISTORY_RECENT_LIMIT,
-    CONVERSATION_HISTORY_LIMIT,
-    COGNITION_VISUAL_DIRECTIVES_ENABLED,
-    KAZUSA_CONTROL_BRAIN_SHARED_SECRET,
-    MEDIA_DESCRIPTOR_CACHE_MAX_HYDRATION_ENTRIES,
-    REFLECTION_CYCLE_ENABLED,
-    REFLECTION_PHASE_MAX_SLOTS_PER_PERIOD,
-    REFLECTION_PHASE_MIN_SLOT_SPACING_SECONDS,
-    REFLECTION_WORKER_INTERVAL_SECONDS,
-    SELF_COGNITION_ENABLED,
-    SELF_COGNITION_MAX_CASES_PER_TICK,
-    SELF_COGNITION_WORKER_INTERVAL_SECONDS,
+from kazusa_ai_chatbot.background_work import (
+    BackgroundWorkRuntimeHandle,
+    start_background_work_runtime,
+    stop_background_work_runtime,
+)
+from kazusa_ai_chatbot.brain_service import (
+    cache_startup as brain_cache_startup,
+)
+from kazusa_ai_chatbot.brain_service import (
+    graph as brain_graph,
+)
+from kazusa_ai_chatbot.brain_service import (
+    health as brain_health,
+)
+from kazusa_ai_chatbot.brain_service import (
+    intake as brain_intake,
+)
+from kazusa_ai_chatbot.brain_service import (
+    post_turn as brain_post_turn,
+)
+from kazusa_ai_chatbot.brain_service import (
+    runtime_adapters as brain_runtime_registry,
+)
+from kazusa_ai_chatbot.brain_service.character_state_ordering import (
+    _registered_predecessor_receipt,
+    await_predecessors,
+    capture_predecessor_watermark,
+    complete_predecessor,
+    register_predecessor,
+)
+from kazusa_ai_chatbot.brain_service.contracts import (
+    AttachmentIn as AttachmentIn,
+)
+from kazusa_ai_chatbot.brain_service.contracts import (
+    AttachmentOut as AttachmentOut,
+)
+from kazusa_ai_chatbot.brain_service.contracts import (
+    AttachmentRefIn as AttachmentRefIn,
+)
+from kazusa_ai_chatbot.brain_service.contracts import (
+    Cache2AgentStatsResponse as Cache2AgentStatsResponse,
+)
+from kazusa_ai_chatbot.brain_service.contracts import (
+    Cache2HealthResponse as Cache2HealthResponse,
+)
+from kazusa_ai_chatbot.brain_service.contracts import (
+    ChatRequest,
+    ChatRequestReceiptMetadata,
+    ChatResponse,
+    DeliveryReceiptRequest,
+    DeliveryReceiptResponse,
+    EventRequest,
+    HealthResponse,
+    OperationalErrorOut,
+    OpsLatestCognitionGraphResponse,
+    OpsRuntimeStatusResponse,
+    OpsSelfCognitionStatsResponse,
+    OpsStatsResponse,
+    RuntimeAdapterRegistrationRequest,
+    RuntimeAdapterRegistrationResponse,
+)
+from kazusa_ai_chatbot.brain_service.contracts import (
+    DebugModesIn as DebugModesIn,
+)
+from kazusa_ai_chatbot.brain_service.contracts import (
+    MentionIn as MentionIn,
+)
+from kazusa_ai_chatbot.brain_service.contracts import (
+    MessageEnvelopeIn as MessageEnvelopeIn,
+)
+from kazusa_ai_chatbot.brain_service.contracts import (
+    ReplyTargetIn as ReplyTargetIn,
+)
+from kazusa_ai_chatbot.brain_service.delivery_mentions import (
+    build_inline_delivery_mentions,
+)
+from kazusa_ai_chatbot.brain_service.turn_settlement import (
+    AssessmentLease,
+    PersistedChatFragment,
+    TurnSettlementCoordinator,
 )
 from kazusa_ai_chatbot.calendar_scheduler import models as calendar_models
 from kazusa_ai_chatbot.calendar_scheduler import repository as calendar_repository
@@ -68,6 +123,36 @@ from kazusa_ai_chatbot.calendar_scheduler.worker import (
     start_calendar_scheduler_worker,
     stop_calendar_scheduler_worker,
 )
+from kazusa_ai_chatbot.character_identity_growth.runner import (
+    reconcile_identity_growth_post_commit,
+)
+from kazusa_ai_chatbot.character_identity_growth.runtime import (
+    load_latest_identity_for_episode,
+    snapshot_state_update,
+)
+from kazusa_ai_chatbot.chat_input_queue import ChatInputQueue, QueuedChatItem
+from kazusa_ai_chatbot.cognition_shared.character_carryover import (
+    CharacterCarryoverServicesV1,
+    build_character_carryover_services,
+)
+from kazusa_ai_chatbot.cognition_shared.contracts import (
+    CognitionContextLimitError,
+    CognitionContractError,
+    CognitionExecutionError,
+    validate_cognition_observability,
+)
+from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
+    bind_v2_attempt_ledger,
+    create_v2_attempt_ledger,
+    reset_v2_attempt_ledger,
+    snapshot_v2_guarded_attempt_ledger,
+)
+from kazusa_ai_chatbot.cognition_shared.state_projection import (
+    project_character_operational_state,
+    project_operational_relationship_context,
+    project_relationship_context,
+    select_character_operational_context,
+)
 from kazusa_ai_chatbot.cognition_episode import (
     CURRENT_CHARACTER_ROLE,
     CURRENT_USER_ROLE,
@@ -79,12 +164,47 @@ from kazusa_ai_chatbot.cognition_episode import (
     build_text_chat_media_description_rows,
     build_user_message_episode,
 )
-from kazusa_ai_chatbot.cognition_core_v2.state_projection import (
-    project_character_operational_state,
-    project_operational_relationship_context,
-    project_relationship_context,
-    select_character_operational_context,
+from kazusa_ai_chatbot.cognition_resolver.guardrail import (
+    bind_cognition_retry_coordinator,
+    create_cognition_retry_coordinator,
+    reset_cognition_retry_coordinator,
 )
+from kazusa_ai_chatbot.config import (
+    BACKGROUND_WORK_INPUT_CHAR_LIMIT,
+    BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
+    BACKGROUND_WORK_WORKER_CLAIM_LIMIT,
+    BACKGROUND_WORK_WORKER_ENABLED,
+    BACKGROUND_WORK_WORKER_INTERVAL_SECONDS,
+    BACKGROUND_WORK_WORKER_LEASE_SECONDS,
+    BACKGROUND_WORK_WORKER_MAX_ATTEMPTS,
+    CALENDAR_SCHEDULER_CLAIM_LIMIT,
+    CALENDAR_SCHEDULER_ENABLED,
+    CALENDAR_SCHEDULER_LEASE_SECONDS,
+    CALENDAR_SCHEDULER_MAX_ATTEMPTS,
+    CALENDAR_SCHEDULER_POLL_INTERVAL_SECONDS,
+    CHARACTER_GLOBAL_USER_ID,
+    CHAT_HISTORY_RECENT_LIMIT,
+    COGNITION_V3_APPRAISAL_STAGE_LAYOUT,
+    COGNITION_VISUAL_DIRECTIVES_ENABLED,
+    CONVERSATION_HISTORY_LIMIT,
+    KAZUSA_CONTROL_BRAIN_SHARED_SECRET,
+    MEDIA_DESCRIPTOR_CACHE_MAX_HYDRATION_ENTRIES,
+    REFLECTION_CYCLE_ENABLED,
+    REFLECTION_PHASE_MAX_SLOTS_PER_PERIOD,
+    REFLECTION_PHASE_MIN_SLOT_SPACING_SECONDS,
+    REFLECTION_WORKER_INTERVAL_SECONDS,
+    SELF_COGNITION_ENABLED,
+    SELF_COGNITION_MAX_CASES_PER_TICK,
+    SELF_COGNITION_WORKER_INTERVAL_SECONDS,
+    CognitionV3RouteSettingsV1,
+    get_cognition_v3_route_settings,
+)
+from kazusa_ai_chatbot.consolidation.character_operational_state import (
+    CharacterOperationalExecutionContext,
+    prepare_character_operational_target,
+    run_character_operational_target,
+)
+from kazusa_ai_chatbot.consolidation.core import call_consolidation_subgraph
 from kazusa_ai_chatbot.conversation_progress import (
     ConversationProgressScope,
     ConversationProgressSourceRefV2,
@@ -95,57 +215,31 @@ from kazusa_ai_chatbot.conversation_progress import (
     select_recent_logical_turns,
     select_recordable_turn_outcome,
 )
-from kazusa_ai_chatbot.character_identity_growth.runtime import (
-    load_latest_identity_for_episode,
-    snapshot_state_update,
-)
-from kazusa_ai_chatbot.character_identity_growth.runner import (
-    reconcile_identity_growth_post_commit,
-)
-from kazusa_ai_chatbot.internal_monologue_residue import (
-    load_residue_context,
-    record_completed_episode_residue,
-)
-from kazusa_ai_chatbot.past_dialog_cognition import (
-    build_past_dialog_cognition_context,
-    candidate_from_conversation_row,
-)
-from kazusa_ai_chatbot.llm_interface.route_report import render_llm_route_table
-from kazusa_ai_chatbot import llm_tracing
-from kazusa_ai_chatbot.llm_tracing import (
-    failure_capsule,
-    guardrail_capsule,
-)
-from kazusa_ai_chatbot.reflection_cycle.phase_scheduler import (
-    REFLECTION_PHASE_GROUPS_PER_SLOT,
-)
-from kazusa_ai_chatbot.runtime_coordination import (
-    PipelineCoordinator,
-    PipelineScope,
-)
 from kazusa_ai_chatbot.db import (
     DatabaseBackendError,
+    IdentityLedgerNotFoundError,
+    apply_assistant_delivery_receipt,
     backfill_character_conversation_identity,
+    build_interaction_style_context,
     check_database_connection,
     close_db,
+    complete_character_operational_receipt,
     db_bootstrap,
-    ensure_operational_character_state,
-    issue_internal_action_latch,
     ensure_character_identity,
-    apply_assistant_delivery_receipt,
-    build_interaction_style_context,
-    get_current_identity,
+    ensure_operational_character_state,
+    get_ambient_conversation_history,
     get_character_profile,
     get_character_runtime_state,
-    get_ambient_conversation_history,
+    get_cognition_chain_run,
     get_conversation_by_platform_message_id,
     get_conversation_history,
-    get_user_profile,
+    get_current_identity,
     get_user_message_by_platform_message_id,
     get_user_message_by_row_id,
+    get_user_profile,
     has_inbound_after,
+    issue_internal_action_latch,
     load_media_descriptor_entries,
-    complete_character_operational_receipt,
     query_active_commitment_memory_units_for_user,
     resolve_global_user_id,
     save_conversation,
@@ -153,101 +247,31 @@ from kazusa_ai_chatbot.db import (
     set_conversation_source_episode_id,
     update_conversation_row_llm_trace_id,
     upsert_post_turn_lifecycle_record,
-    IdentityLedgerNotFoundError,
 )
-from kazusa_ai_chatbot.mcp_client import mcp_manager
-from kazusa_ai_chatbot.state import IMProcessState, MultiMediaDoc, DebugModes, ReplyContext
-from kazusa_ai_chatbot.time_boundary import (
-    parse_storage_utc_datetime,
-    storage_utc_now,
-    storage_utc_now_iso,
-)
-from kazusa_ai_chatbot.chat_input_queue import ChatInputQueue, QueuedChatItem
-from kazusa_ai_chatbot.message_envelope import (
-    MessageEnvelope,
-    project_prompt_message_context,
-    project_reply_attachment_summaries,
-)
-from kazusa_ai_chatbot.media_inspection.session_cache import (
-    begin_session_turn,
-    put_session_media,
-)
-from kazusa_ai_chatbot.utils import log_list_preview, log_preview, trim_history_dict
-from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.dispatcher import (
     AdapterRegistry,
     DispatchContext,
     RemoteHttpAdapter,
     handle_send_message,
 )
-
-from kazusa_ai_chatbot.brain_service import (
-    cache_startup as brain_cache_startup,
-    graph as brain_graph,
-    health as brain_health,
-    intake as brain_intake,
-    post_turn as brain_post_turn,
-    runtime_adapters as brain_runtime_registry,
+from kazusa_ai_chatbot.internal_monologue_residue import (
+    load_residue_context,
+    record_completed_episode_residue,
 )
-from kazusa_ai_chatbot.brain_service.turn_settlement import (
-    AssessmentLease,
-    PersistedChatFragment,
-    TurnSettlementCoordinator,
+from kazusa_ai_chatbot.llm_interface.route_report import render_llm_route_table
+from kazusa_ai_chatbot.llm_tracing import (
+    failure_capsule,
+    guardrail_capsule,
 )
-from kazusa_ai_chatbot.brain_service.delivery_mentions import (
-    build_inline_delivery_mentions,
+from kazusa_ai_chatbot.mcp_client import mcp_manager
+from kazusa_ai_chatbot.media_inspection.session_cache import (
+    begin_session_turn,
+    put_session_media,
 )
-from kazusa_ai_chatbot.brain_service.contracts import (
-    AttachmentIn as AttachmentIn,
-    AttachmentOut as AttachmentOut,
-    AttachmentRefIn as AttachmentRefIn,
-    Cache2AgentStatsResponse as Cache2AgentStatsResponse,
-    Cache2HealthResponse as Cache2HealthResponse,
-    ChatRequest,
-    ChatRequestReceiptMetadata,
-    ChatResponse,
-    DebugModesIn as DebugModesIn,
-    DeliveryReceiptRequest,
-    DeliveryReceiptResponse,
-    EventRequest,
-    HealthResponse,
-    MentionIn as MentionIn,
-    MessageEnvelopeIn as MessageEnvelopeIn,
-    OpsLatestCognitionGraphResponse,
-    OpsRuntimeStatusResponse,
-    OpsSelfCognitionStatsResponse,
-    OpsStatsResponse,
-    OperationalErrorOut,
-    ReplyTargetIn as ReplyTargetIn,
-    RuntimeAdapterRegistrationRequest,
-    RuntimeAdapterRegistrationResponse,
-)
-from kazusa_ai_chatbot.cognition_core_v2.contracts import (
-    CognitionContextLimitError,
-    CognitionContractError,
-    CognitionExecutionError,
-    validate_cognition_observability,
-)
-from kazusa_ai_chatbot.cognition_core_v2.model_attempt_policy import (
-    bind_v2_attempt_ledger,
-    create_v2_attempt_ledger,
-    reset_v2_attempt_ledger,
-    snapshot_v2_guarded_attempt_ledger,
-)
-from kazusa_ai_chatbot.cognition_resolver.guardrail import (
-    bind_cognition_retry_coordinator,
-    create_cognition_retry_coordinator,
-    reset_cognition_retry_coordinator,
-)
-from kazusa_ai_chatbot.relevance import (
-    SettledRelevanceContractError,
-    build_group_attention_context,
-    frontline_relevance_agent,
-    relevance_agent,
-)
-from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer import (
-    multimedia_descriptor_agent,
-    select_media_for_turn,
+from kazusa_ai_chatbot.message_envelope import (
+    MessageEnvelope,
+    project_prompt_message_context,
+    project_reply_attachment_summaries,
 )
 from kazusa_ai_chatbot.nodes.dialog_agent import (
     DialogGenerationContractError,
@@ -256,22 +280,13 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2 import persona_supervisor2
 from kazusa_ai_chatbot.nodes.persona_supervisor2_memory_lifecycle import (
     call_post_surface_memory_lifecycle_review,
 )
-from kazusa_ai_chatbot.consolidation.core import call_consolidation_subgraph
-from kazusa_ai_chatbot.consolidation.character_operational_state import (
-    CharacterOperationalExecutionContext,
-    prepare_character_operational_target,
-    run_character_operational_target,
+from kazusa_ai_chatbot.nodes.persona_supervisor2_msg_decontextualizer import (
+    multimedia_descriptor_agent,
+    select_media_for_turn,
 )
-from kazusa_ai_chatbot.cognition_core_v2.character_carryover import (
-    CharacterCarryoverServicesV1,
-    build_character_carryover_services,
-)
-from kazusa_ai_chatbot.brain_service.character_state_ordering import (
-    _registered_predecessor_receipt,
-    await_predecessors,
-    capture_predecessor_watermark,
-    complete_predecessor,
-    register_predecessor,
+from kazusa_ai_chatbot.past_dialog_cognition import (
+    build_past_dialog_cognition_context,
+    candidate_from_conversation_row,
 )
 from kazusa_ai_chatbot.rag.cache2_policy import (
     MEDIA_DESCRIPTOR_CACHE_NAME,
@@ -284,17 +299,37 @@ from kazusa_ai_chatbot.reflection_cycle import (
     start_reflection_cycle_worker,
     stop_reflection_cycle_worker,
 )
+from kazusa_ai_chatbot.reflection_cycle.phase_scheduler import (
+    REFLECTION_PHASE_GROUPS_PER_SLOT,
+)
+from kazusa_ai_chatbot.relevance import (
+    SettledRelevanceContractError,
+    build_group_attention_context,
+    frontline_relevance_agent,
+    relevance_agent,
+)
+from kazusa_ai_chatbot.runtime_coordination import (
+    PipelineCoordinator,
+    PipelineScope,
+)
 from kazusa_ai_chatbot.self_cognition import (
     SelfCognitionWorkerHandle,
     start_self_cognition_worker,
     stop_self_cognition_worker,
 )
 from kazusa_ai_chatbot.self_cognition import models as self_cognition_models
-from kazusa_ai_chatbot.background_work import (
-    BackgroundWorkRuntimeHandle,
-    start_background_work_runtime,
-    stop_background_work_runtime,
+from kazusa_ai_chatbot.state import (
+    DebugModes,
+    IMProcessState,
+    MultiMediaDoc,
+    ReplyContext,
 )
+from kazusa_ai_chatbot.time_boundary import (
+    parse_storage_utc_datetime,
+    storage_utc_now,
+    storage_utc_now_iso,
+)
+from kazusa_ai_chatbot.utils import log_list_preview, log_preview, trim_history_dict
 
 logger = logging.getLogger(__name__)
 
@@ -2291,12 +2326,41 @@ def _record_latest_self_cognition_graph(
     _latest_self_cognition_graph = deepcopy(cognition_graph)
 
 
-def _latest_cognition_graph_response() -> OpsLatestCognitionGraphResponse:
+async def _resolve_chain_run_for_graph(
+    graph: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Resolve one graph's paired chain-run row by exact correlation."""
+
+    if not isinstance(graph, Mapping):
+        return None
+    run_id = graph.get("run_id")
+    llm_trace_id = graph.get("llm_trace_id")
+    if not isinstance(run_id, str) or not isinstance(
+        llm_trace_id,
+        str,
+    ):
+        return None
+    if not run_id.strip() or not llm_trace_id.strip():
+        return None
+    chain_run = await get_cognition_chain_run(
+        run_id=run_id,
+        llm_trace_id=llm_trace_id,
+    )
+    return chain_run
+
+
+async def _latest_cognition_graph_response() -> OpsLatestCognitionGraphResponse:
     """Build the read-only latest cognition graph API response."""
 
     response = OpsLatestCognitionGraphResponse(
         cognition_graph=deepcopy(_latest_cognition_graph),
         self_cognition_graph=deepcopy(_latest_self_cognition_graph),
+        cognition_chain_run=await _resolve_chain_run_for_graph(
+            _latest_cognition_graph
+        ),
+        self_cognition_chain_run=await _resolve_chain_run_for_graph(
+            _latest_self_cognition_graph
+        ),
     )
     return response
 
@@ -2336,6 +2400,32 @@ async def _handle_calendar_reflection_phase_run(
         pipeline_coordinator=_pipeline_coordinator,
     )
     return result
+
+
+def _cognition_engine_descriptor() -> dict[str, object]:
+    """Build the safe selected-engine descriptor from loaded config."""
+
+    selected_settings = get_cognition_v3_route_settings()
+    if not isinstance(selected_settings, CognitionV3RouteSettingsV1):
+        raise RuntimeError("selected cognition engine settings are unavailable")
+    context_window_tokens = selected_settings.chain.context_window_tokens
+    if context_window_tokens is None:
+        raise RuntimeError("selected V3 chain context window is unavailable")
+    sidecar = selected_settings.sidecar
+    descriptor = {
+        "schema_version": "cognition_engine_descriptor.v2",
+        "engine_id": "v3",
+        "chain_model_name": selected_settings.chain.model,
+        "sidecar_model_name": sidecar.model if sidecar else "",
+        "sidecar_enabled": sidecar is not None,
+        "subconscious_enabled": selected_settings.subconscious_enabled,
+        "appraisal_stage_layout": COGNITION_V3_APPRAISAL_STAGE_LAYOUT,
+        "chain_context_window_tokens": context_window_tokens,
+        "normal_budget_tokens": 50_000,
+        "extended_budget_tokens": 65_000,
+        "turn_deadline_seconds": selected_settings.turn_deadline_seconds,
+    }
+    return descriptor
 
 
 def _ops_runtime_status_payload(
@@ -2421,6 +2511,7 @@ def _ops_runtime_status_payload(
         "semantic_descriptors": dict(
             base_status.get("semantic_descriptors", {}),
         ),
+        "cognition_engine": _cognition_engine_descriptor(),
     }
     return payload
 
@@ -4040,18 +4131,22 @@ def _build_response_cognition_graph(
     cognition_output = state.get("cognition_core_output")
     if not isinstance(cognition_output, Mapping):
         cognition_output = graph_result.get("cognition_core_output")
-    native_nodes, native_edges = _graph_native_v2_nodes(
+    cognition_nodes, cognition_edges = _graph_cognition_nodes(
         cognition_output,
         failure=failure,
     )
-    nodes.extend(native_nodes)
-    edges.extend(native_edges)
+    nodes.extend(cognition_nodes)
+    edges.extend(cognition_edges)
     if (
         graph_status == "completed"
         and any(
             node["status"] in {"failed", "partial"}
-            for node in native_nodes
-            if node["id"] in {"v2.parallel", "v2.appraisal", "v2.failure"}
+            for node in cognition_nodes
+            if node["id"] in {
+                "cognition.parallel",
+                "cognition.appraisal",
+                "cognition.failure",
+            }
         )
     ):
         graph_status = "partial"
@@ -4458,7 +4553,7 @@ _GRAPH_FUTURE_FIELDS = _GRAPH_CONTINUATION_FIELDS | frozenset(
         "objective_summary",
     }
 )
-_GRAPH_V2_EXECUTION_FIELDS = frozenset(
+_GRAPH_COGNITION_EXECUTION_FIELDS = frozenset(
     {
         "selected_question_count",
         "dispatched_question_count",
@@ -4472,7 +4567,7 @@ _GRAPH_V2_EXECUTION_FIELDS = frozenset(
         "total_ms",
     }
 )
-_GRAPH_V2_APPRAISAL_FIELDS = frozenset(
+_GRAPH_COGNITION_APPRAISAL_FIELDS = frozenset(
     {
         "question_kind",
         "semantic_question",
@@ -4487,7 +4582,7 @@ _GRAPH_V2_APPRAISAL_FIELDS = frozenset(
         "failure_code",
     }
 )
-_GRAPH_V2_BRANCH_FIELDS = frozenset(
+_GRAPH_COGNITION_BRANCH_FIELDS = frozenset(
     {
         "phase",
         "branch_index",
@@ -4504,7 +4599,7 @@ _GRAPH_V2_BRANCH_FIELDS = frozenset(
         "failure_code",
     }
 )
-_GRAPH_V2_COLLAPSE_FIELDS = frozenset(
+_GRAPH_COGNITION_COLLAPSE_FIELDS = frozenset(
     {
         "primary_branch_index",
         "supporting_branch_indices",
@@ -4512,14 +4607,14 @@ _GRAPH_V2_COLLAPSE_FIELDS = frozenset(
         "selection_reason",
     }
 )
-_GRAPH_V2_SELECTED_INTENTION_FIELDS = frozenset(
+_GRAPH_COGNITION_SELECTED_INTENTION_FIELDS = frozenset(
     {
         "route",
         "intention",
         "reason",
     }
 )
-_GRAPH_V2_EXPRESSION_FIELDS = frozenset(
+_GRAPH_COGNITION_EXPRESSION_FIELDS = frozenset(
     {
         "visibility",
         "emotional_tone",
@@ -4527,7 +4622,7 @@ _GRAPH_V2_EXPRESSION_FIELDS = frozenset(
         "directness",
     }
 )
-_GRAPH_V2_AFFECT_FIELDS = frozenset(
+_GRAPH_COGNITION_AFFECT_FIELDS = frozenset(
     {
         "emotion",
         "phase",
@@ -4663,21 +4758,21 @@ def _graph_project_text_list(value: Any) -> list[str]:
     return [item for item in value if isinstance(item, str) and item.strip()]
 
 
-def _graph_v2_failure_node(
+def _graph_cognition_failure_node(
     *,
     failure_code: str,
     stage: str,
     attempt_count: int = 1,
     safe_checkpoint: str = "unknown",
     retryable: bool = False,
-    label: str = "Native V2 failure",
+    label: str = "Cognition failure",
 ) -> dict[str, Any]:
-    """Build bounded native failure detail without exception text or IDs."""
+    """Build bounded cognition failure detail without exception text or IDs."""
 
     return {
-        "id": "v2.failure",
+        "id": "cognition.failure",
         "label": label,
-        "stage": "V2",
+        "stage": "Cognition",
         "lane": "cognition",
         "column": 3,
         "branch": "failure",
@@ -4694,12 +4789,12 @@ def _graph_v2_failure_node(
     }
 
 
-def _graph_native_v2_nodes(
+def _graph_cognition_nodes(
     cognition_output: Any,
     *,
     failure: BaseException | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Project native V2 branch results into the operator graph."""
+    """Project canonical cognition branch results into the operator graph."""
 
     failure_nodes: list[dict[str, Any]] = []
     failure_edges: list[dict[str, Any]] = []
@@ -4711,7 +4806,7 @@ def _graph_native_v2_nodes(
             failure_retryable,
             _,
         ) = _operational_failure_metadata(failure)
-        failure_node = _graph_v2_failure_node(
+        failure_node = _graph_cognition_failure_node(
             failure_code=failure_code,
             stage=failure_stage,
             attempt_count=failure_attempt_count,
@@ -4723,9 +4818,9 @@ def _graph_native_v2_nodes(
         failure_nodes.append(failure_node)
         failure_edges.append({
             "source": "l1.relevance",
-            "target": "v2.failure",
+            "target": "cognition.failure",
             "kind": "fork",
-            "label": "native V2 failure",
+            "label": "cognition failure",
         })
     if not isinstance(cognition_output, Mapping):
         return failure_nodes, failure_edges
@@ -4735,17 +4830,17 @@ def _graph_native_v2_nodes(
             if failure_nodes:
                 return failure_nodes, failure_edges
             return [
-                _graph_v2_failure_node(
+                _graph_cognition_failure_node(
                     failure_code="native_observability_missing",
                     stage="cognition_observability",
-                    label="Native V2 telemetry missing",
+                    label="Cognition telemetry missing",
                 ),
             ], [
                 {
                     "source": "l1.relevance",
-                    "target": "v2.failure",
+                    "target": "cognition.failure",
                     "kind": "fork",
-                    "label": "native V2 telemetry",
+                    "label": "cognition telemetry",
                 },
             ]
         return failure_nodes, failure_edges
@@ -4755,35 +4850,35 @@ def _graph_native_v2_nodes(
         if failure_nodes:
             return failure_nodes, failure_edges
         return [
-            _graph_v2_failure_node(
+            _graph_cognition_failure_node(
                 failure_code="native_observability_invalid",
                 stage="cognition_observability",
-                label="Native V2 telemetry invalid",
+                label="Cognition telemetry invalid",
             ),
         ], [
             {
                 "source": "l1.relevance",
-                "target": "v2.failure",
+                "target": "cognition.failure",
                 "kind": "fork",
-                "label": "native V2 telemetry",
+                "label": "cognition telemetry",
             },
         ]
 
     execution = _graph_project_mapping(
         observability.get("execution"),
-        _GRAPH_V2_EXECUTION_FIELDS,
+        _GRAPH_COGNITION_EXECUTION_FIELDS,
     )
     branch_rows = _graph_project_semantic_rows(
         observability.get("branches"),
-        _GRAPH_V2_BRANCH_FIELDS,
+        _GRAPH_COGNITION_BRANCH_FIELDS,
     )
     appraisal_rows = _graph_project_semantic_rows(
         observability.get("appraisals"),
-        _GRAPH_V2_APPRAISAL_FIELDS,
+        _GRAPH_COGNITION_APPRAISAL_FIELDS,
     )
     collapse = _graph_project_mapping(
         observability.get("collapse"),
-        _GRAPH_V2_COLLAPSE_FIELDS,
+        _GRAPH_COGNITION_COLLAPSE_FIELDS,
     )
     nodes: list[dict[str, Any]] = list(failure_nodes)
     edges: list[dict[str, Any]] = list(failure_edges)
@@ -4802,9 +4897,9 @@ def _graph_native_v2_nodes(
     if branch_rows:
         parallel_detail["branch_results"] = branch_rows
     nodes.append({
-        "id": "v2.parallel",
+        "id": "cognition.parallel",
         "label": "Parallel cognition",
-        "stage": "V2",
+        "stage": "Cognition",
         "lane": "cognition",
         "column": 3,
         "branch": "parallel",
@@ -4840,9 +4935,9 @@ def _graph_native_v2_nodes(
             else "skipped"
         )
     nodes.append({
-        "id": "v2.appraisal",
+        "id": "cognition.appraisal",
         "label": "Appraisal results",
-        "stage": "V2",
+        "stage": "Cognition",
         "lane": "cognition",
         "column": 3,
         "branch": "appraisal",
@@ -4854,9 +4949,9 @@ def _graph_native_v2_nodes(
         branch_index = branch_detail.get("branch_index")
         if not isinstance(branch_index, int) or isinstance(branch_index, bool):
             branch_index = index
-        node_id = f"v2.branch.{branch_index}"
+        node_id = f"cognition.branch.{branch_index}"
         if node_id in branch_node_ids:
-            node_id = f"v2.branch.{index}"
+            node_id = f"cognition.branch.{index}"
         branch_node_ids.append(node_id)
         branch_status = branch_detail.get("status")
         if branch_status not in {"completed", "failed", "not_reported"}:
@@ -4864,7 +4959,7 @@ def _graph_native_v2_nodes(
         nodes.append({
             "id": node_id,
             "label": f"Goal branch {branch_index}",
-            "stage": "V2",
+            "stage": "Cognition",
             "lane": "cognition",
             "column": 4,
             "branch": f"branch-{branch_index}",
@@ -4877,7 +4972,7 @@ def _graph_native_v2_nodes(
         collapse_detail["collapse"] = collapse
     selected_intention = _graph_project_mapping(
         cognition_output.get("intention"),
-        _GRAPH_V2_SELECTED_INTENTION_FIELDS,
+        _GRAPH_COGNITION_SELECTED_INTENTION_FIELDS,
     )
     if selected_intention:
         collapse_detail["selected_intention"] = selected_intention
@@ -4896,14 +4991,14 @@ def _graph_native_v2_nodes(
         collapse_detail["goal_resolution"] = goal_resolution
     expression_policy = _graph_project_mapping(
         cognition_output.get("expression_policy"),
-        _GRAPH_V2_EXPRESSION_FIELDS,
+        _GRAPH_COGNITION_EXPRESSION_FIELDS,
     )
     if expression_policy:
         collapse_detail["expression_policy"] = expression_policy
     nodes.append({
-        "id": "v2.collapse",
+        "id": "cognition.collapse",
         "label": "Workspace collapse",
-        "stage": "V2",
+        "stage": "Cognition",
         "lane": "decision",
         "column": 5,
         "branch": "collapse",
@@ -4913,7 +5008,7 @@ def _graph_native_v2_nodes(
 
     affect_rows = _graph_project_semantic_rows(
         cognition_output.get("affect_projection"),
-        _GRAPH_V2_AFFECT_FIELDS,
+        _GRAPH_COGNITION_AFFECT_FIELDS,
     )
     if affect_rows:
         affect_detail = {"affect_projection": affect_rows}
@@ -4922,9 +5017,9 @@ def _graph_native_v2_nodes(
         affect_detail = {"empty_state": "No affect projection was reported."}
         affect_status = "skipped"
     nodes.append({
-        "id": "v2.affect",
+        "id": "cognition.affect",
         "label": "Affect projection",
-        "stage": "V2",
+        "stage": "Cognition",
         "lane": "cognition",
         "column": 5,
         "branch": "affect",
@@ -4935,36 +5030,36 @@ def _graph_native_v2_nodes(
     edges.extend([
         {
             "source": "l1.relevance",
-            "target": "v2.parallel",
+            "target": "cognition.parallel",
             "kind": "fork",
-            "label": "native V2",
+            "label": "cognition",
         },
         {
-            "source": "v2.parallel",
-            "target": "v2.appraisal",
+            "source": "cognition.parallel",
+            "target": "cognition.appraisal",
             "kind": "fork",
             "label": "appraisal",
         },
         {
-            "source": "v2.appraisal",
-            "target": "v2.collapse",
+            "source": "cognition.appraisal",
+            "target": "cognition.collapse",
             "kind": "join",
             "label": "semantic result",
         },
         {
-            "source": "v2.collapse",
-            "target": "v2.affect",
+            "source": "cognition.collapse",
+            "target": "cognition.affect",
             "kind": "sequence",
             "label": "state projection",
         },
         {
-            "source": "v2.affect",
+            "source": "cognition.affect",
             "target": "l3.visual_directives",
             "kind": "join",
             "label": "expression",
         },
         {
-            "source": "v2.affect",
+            "source": "cognition.affect",
             "target": "l3.surface",
             "kind": "join",
             "label": "surface",
@@ -4981,14 +5076,14 @@ def _graph_native_v2_nodes(
             else ""
         )
         edges.append({
-            "source": "v2.parallel",
+            "source": "cognition.parallel",
             "target": node_id,
             "kind": "fork",
             "label": "parallel branch",
         })
         edges.append({
             "source": node_id,
-            "target": "v2.collapse",
+            "target": "cognition.collapse",
             "kind": "join",
             "label": str(selection or "branch result"),
         })
@@ -5366,7 +5461,7 @@ def _graph_public_style_projection(
 
 
 def _graph_public_group_engagement_context(value: Any) -> dict[str, Any]:
-    """Copy the exact group-action selection passed into Core V2."""
+    """Copy the exact group-action selection passed into cognition."""
 
     if not isinstance(value, Mapping):
         return {}
@@ -6712,7 +6807,7 @@ async def _process_queued_chat_item(
         cognition_graph = _build_response_cognition_graph(
             graph_result=result,
             consolidation_state=consolidation_state_dict,
-            run_id=delivery_tracking_id or correlation_id,
+            run_id=cognition_attempt_ledger.cognition_invocation_id,
             cognition_invocation_id=(
                 cognition_attempt_ledger.cognition_invocation_id
             ),
@@ -8135,7 +8230,7 @@ async def ops_runtime_status(
 async def ops_latest_cognition_graph() -> OpsLatestCognitionGraphResponse:
     """Return the latest bounded cognition graph snapshot for operators."""
 
-    response = _latest_cognition_graph_response()
+    response = await _latest_cognition_graph_response()
     return response
 
 

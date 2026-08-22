@@ -7,7 +7,7 @@ import inspect
 
 import pytest
 
-from tests.cognition_core_v2_test_helpers import canonical_episode
+from tests.cognition_test_helpers import canonical_episode
 
 
 EXPECTED_CAPABILITIES = {

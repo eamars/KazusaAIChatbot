@@ -18,7 +18,7 @@ from kazusa_ai_chatbot.nodes.dialog_agent import (
 )
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 from tests.llm_trace import write_llm_trace
-from tests.cognition_core_v2_test_helpers import canonical_episode
+from tests.cognition_test_helpers import canonical_episode
 
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]

@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v2 import (
+from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_character_production_state,
 )
 from kazusa_ai_chatbot.config import (
