@@ -20,6 +20,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from kazusa_ai_chatbot import llm_tracing
 from kazusa_ai_chatbot.cognition_core_v3.appraisal import (
     bind_axis_changes,
+    cut_over_ordinary_response_goals,
     validate_canonical_appraisal,
 )
 from kazusa_ai_chatbot.cognition_core_v3.contracts import (
@@ -72,19 +73,71 @@ class CanonicalContractError(ValueError):
     """A mechanically unusable single-pass model product."""
 
 
-_STAGE_INSTRUCTIONS = {
-    "A1": "Judge the current observation with the three world-facing appraisal families.",
-    "A2": "Judge the accepted meaning with relationship, moral, and existential families.",
-    "G": "Choose one meaningful active-character goal and relational willingness.",
-    "P": "Choose the active-character response goal and only supplied capabilities.",
+_STAGE_SYSTEM_PROMPTS = {
+    "A1": '''# 任务
+使用三个面向客观情境的评估类别，判断当前观察对当前角色意味着什么。
+
+# 证据边界
+`current_observation` 和 `direct_facts` 可以用于确认当下发生了什么。
+`continuation_state` 只提供仍在起作用的因果压力。输入不会提供角色身份、
+习惯、反思倾向或 `participant_continuity`，因为这些信息不能证明当前世界中的
+事实。''',
+    "A2": '''# 任务
+根据已接受的 A1 语义，使用关系与社会判断、道德身份、存在性驱力三个评估类别
+作出判断。
+
+# 证据边界
+`current_observation` 和 `direct_facts` 可以用于确认事实。
+`participant_continuity` 只描述此前参与者、行为及结果，不能证明新的行为、
+同意、承诺、许可或当前意图。`conditional_character_context` 只可影响当前角色的
+判断、边界、动机和情绪解释。''',
+    "G": '''# 任务
+选择一个有意义的当前角色目标、一项关系互动意愿记录，以及一段简洁的第一人称
+`private_monologue`。
+
+# 内心独白边界
+`private_monologue` 要连接角色此刻的感受、造成这种感受的具体原因，以及角色眼下
+想保护、揭示、回避或追求的事。它不能用于确认事实、许可、能力、目标对象或状态
+变化。''',
+    "P": '''# 任务
+确定当前角色的回应目标和 `epistemic_boundary`，并且只选择输入中提供的能力。
+
+# 断言边界
+`current_observation` 和 `direct_facts` 限定可以作出的断言。
+`participant_continuity` 只支持对先前参与者、行为及结果的描述。
+`epistemic_boundary` 必须说明可见措辞可以断言什么、哪些内容只能作为解释，以及
+哪些内容仍然未知。每一项未被观察到的功能、原因、来源、意图或结果，都只能作为
+解释，并且在可见措辞中必须明确表达不确定性。没有观察到某项特征或缺少证据，都
+不能据此作出否定断言，也不能排除任何可能。
+
+# 输出边界
+只返回 `output_contract` 指定的字段。不得把任何输入权威通道名称写入输出对象。''',
 }
+
+_EXACT_JSON_SYSTEM_SUFFIX = '''# 输出约束
+严格按照 `output_contract` 返回一个 JSON 对象，并且只输出该 JSON 对象。所有可
+自由填写的语义文本必须使用简体中文。契约字段名、枚举值、能力名和动作名必须原样
+保留；引用原文、代码和 URL 也保持原样。不得输出内部标识符、句柄、路径或证据
+引用。'''
+_PRIVATE_MONOLOGUE_MAX_CHARS = 600
+_EPISTEMIC_BOUNDARY_MAX_CHARS = 1000
 
 _COGNITION_STAGE_SEQUENCE = {"A1": 0, "A2": 1, "G": 2, "P": 3}
 _COGNITION_TRACE_FIELDS = {
     "A1": ("event_agency", "goal_threat_outcome", "epistemic_comparison_memory"),
     "A2": ("relationship_social", "moral_identity", "existential_drive"),
-    "G": ("active_character_goal", "relational_willingness"),
-    "P": ("goal_resolution", "response_goal", "action_requests", "resolver_requests"),
+    "G": (
+        "active_character_goal",
+        "relational_willingness",
+        "private_monologue",
+    ),
+    "P": (
+        "goal_resolution",
+        "response_goal",
+        "action_requests",
+        "resolver_requests",
+        "epistemic_boundary",
+    ),
 }
 
 
@@ -107,6 +160,18 @@ def _validate_canonical_input(value: object) -> dict[str, object]:
         raise CanonicalContractError("canonical evidence must be an array")
     if value["state_scope"] not in {"user", "character"}:
         raise CanonicalContractError("canonical state scope is invalid")
+    continuation = value.get("_continuation_goal_ref")
+    if continuation is not None and (
+        not isinstance(continuation, Mapping)
+        or set(continuation) != {"scope", "kind", "entity_id"}
+        or continuation.get("scope") != value["state_scope"]
+        or continuation.get("kind") != "goal"
+        or not isinstance(continuation.get("entity_id"), str)
+        or not str(continuation["entity_id"]).strip()
+    ):
+        raise CanonicalContractError(
+            "canonical continuation goal reference is invalid"
+        )
     return dict(value)
 
 
@@ -195,6 +260,10 @@ def _prepare_state_transaction(
         if isinstance(persisted_base, Mapping)
         else current_state
     )
+    current_state = cut_over_ordinary_response_goals(
+        current_state,
+        continuation_goal_ref=payload.get("_continuation_goal_ref"),
+    )
     episode = payload.get("episode")
     if not isinstance(episode, Mapping):
         raise CanonicalContractError("canonical episode is invalid")
@@ -246,11 +315,10 @@ async def _call_once(
     )
     started = time.monotonic()
     messages = [
-        SystemMessage(content=(
-            f"{_STAGE_INSTRUCTIONS[stage]} Return exactly the JSON object "
-            "described by output_contract. Never emit internal identifiers, "
-            "handles, paths, or evidence references."
-        )),
+        SystemMessage(content="\n\n".join((
+            _STAGE_SYSTEM_PROMPTS[stage],
+            _EXACT_JSON_SYSTEM_SUFFIX,
+        ))),
         HumanMessage(content=_json(packet)),
     ]
     try:
@@ -411,8 +479,15 @@ def _appraisal_summary(
     ]
 
 
-def _validate_goal(raw: object) -> tuple[CanonicalGoal, dict[str, object]]:
-    if not isinstance(raw, dict) or set(raw) != {"active_character_goal", "relational_willingness"}:
+def _validate_goal(
+    raw: object,
+) -> tuple[CanonicalGoal, dict[str, object], str]:
+    required = {
+        "active_character_goal",
+        "relational_willingness",
+        "private_monologue",
+    }
+    if not isinstance(raw, dict) or set(raw) != required:
         raise CanonicalContractError("goal product fields are not exact")
     goal = raw["active_character_goal"]
     willingness = raw["relational_willingness"]
@@ -436,14 +511,22 @@ def _validate_goal(raw: object) -> tuple[CanonicalGoal, dict[str, object]]:
         "reason": _bounded_text(willingness["reason"], "willingness reason"),
         "cause_summary": _bounded_text(willingness["cause_summary"], "willingness cause"),
     }
-    return typed_goal, typed_willingness
+    private_monologue = _bounded_text(
+        raw["private_monologue"],
+        "private monologue",
+        _PRIVATE_MONOLOGUE_MAX_CHARS,
+    )
+    return typed_goal, typed_willingness, private_monologue
 
 
 def _validate_plan(raw: object, *, self_cognition: bool, capabilities: dict[str, object]) -> CanonicalResponsePlan:
     if not isinstance(raw, dict):
         raise CanonicalContractError("response plan must be an object")
     if self_cognition:
-        if set(raw) != {"self_cognition_response"} or not isinstance(raw["self_cognition_response"], dict):
+        if set(raw) != {
+            "self_cognition_response",
+            "epistemic_boundary",
+        } or not isinstance(raw["self_cognition_response"], dict):
             raise CanonicalContractError("self-cognition plan fields are not exact")
         item = raw["self_cognition_response"]
         if set(item) != {"decision", "response_goal", "reason", "cause_summary"}:
@@ -454,6 +537,11 @@ def _validate_plan(raw: object, *, self_cognition: bool, capabilities: dict[str,
             goal_resolution="answerable_now",
             response_goal=_bounded_text(item["response_goal"], "self response goal"),
             action_requests=(), resolver_requests=(),
+            epistemic_boundary=_bounded_text(
+                raw["epistemic_boundary"],
+                "epistemic boundary",
+                _EPISTEMIC_BOUNDARY_MAX_CHARS,
+            ),
             self_cognition_response={
                 "decision": item["decision"],
                 "response_goal": _bounded_text(item["response_goal"], "self response goal"),
@@ -461,7 +549,13 @@ def _validate_plan(raw: object, *, self_cognition: bool, capabilities: dict[str,
                 "cause_summary": _bounded_text(item["cause_summary"], "self response cause"),
             },
         )
-    required = {"goal_resolution", "response_goal", "action_requests", "resolver_requests"}
+    required = {
+        "goal_resolution",
+        "response_goal",
+        "action_requests",
+        "resolver_requests",
+        "epistemic_boundary",
+    }
     if set(raw) != required or raw["goal_resolution"] not in GOAL_RESOLUTION_VALUES:
         raise CanonicalContractError("ordinary response plan fields are not exact")
     action_roster = {
@@ -531,6 +625,11 @@ def _validate_plan(raw: object, *, self_cognition: bool, capabilities: dict[str,
         goal_resolution=raw["goal_resolution"],
         response_goal=_bounded_text(raw["response_goal"], "response goal"),
         action_requests=tuple(clean_actions), resolver_requests=tuple(clean_resolvers),
+        epistemic_boundary=_bounded_text(
+            raw["epistemic_boundary"],
+            "epistemic boundary",
+            _EPISTEMIC_BOUNDARY_MAX_CHARS,
+        ),
     )
 
 
@@ -601,7 +700,7 @@ async def _run_cognition(
         services=services, stage="G",
         packet=build_canonical_goal_question(workspace=workspace, appraisal_summary=summaries),
     )
-    goal, willingness = _validate_goal(goal_raw)
+    goal, willingness, private_monologue = _validate_goal(goal_raw)
     self_cognition = _is_self_cognition(validated)
     plan_raw = await _call_once(
         services=services, stage="P",
@@ -677,7 +776,9 @@ async def _run_cognition(
     result = CanonicalCognitionOutput(
         schema_version=CANONICAL_COGNITION_OUTPUT_SCHEMA,
         appraisals=tuple(appraisals), active_character_goal=goal,
-        relational_willingness=willingness, response_plan=plan,
+        relational_willingness=willingness,
+        private_monologue=private_monologue,
+        response_plan=plan,
         affect_projection=tuple(affect_projection),
         relationship_projection=_canonical_relationship_projection({
             "relationship_context": {"axes": replacement_state.get("relationship", {})}

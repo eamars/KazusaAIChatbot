@@ -4774,6 +4774,12 @@ def _graph_canonical_cognition_nodes(
     goal = cognition_output.get("active_character_goal")
     projected_goal = goal_detail(goal)
     if projected_goal:
+        goal_node_detail: dict[str, Any] = {"goal": projected_goal}
+        private_monologue = text(
+            cognition_output.get("private_monologue")
+        )
+        if private_monologue:
+            goal_node_detail["private_monologue"] = private_monologue
         nodes.append({
             "id": "cognition.goal",
             "label": "Active character goal",
@@ -4782,12 +4788,16 @@ def _graph_canonical_cognition_nodes(
             "column": 4,
             "category": "active_character_goal",
             "status": "completed",
-            "detail": {"goal": projected_goal},
+            "detail": goal_node_detail,
         })
     plan = cognition_output.get("response_plan")
     if isinstance(plan, Mapping):
         projected_plan: dict[str, Any] = {}
-        for key in ("response_goal", "goal_resolution"):
+        for key in (
+            "response_goal",
+            "goal_resolution",
+            "epistemic_boundary",
+        ):
             field_value = text(plan.get(key))
             if field_value:
                 projected_plan[key] = field_value

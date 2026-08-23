@@ -528,7 +528,13 @@ def _build_recorder_input(
 ) -> RecorderInput | None:
     """Build minimal model-facing recorder input from completed state."""
 
-    internal_monologue = _string_field(completed_state, "internal_monologue")
+    cognition_output = completed_state.get("cognition_core_output")
+    if not isinstance(cognition_output, Mapping):
+        return None
+    internal_monologue = _string_field(
+        cognition_output,
+        "private_monologue",
+    )
     if not internal_monologue:
         return None
 

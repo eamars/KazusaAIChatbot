@@ -107,6 +107,7 @@ def _state() -> dict[str, Any]:
             "schema_version": "text_surface_output.v2",
             "content_plan": "Revisit the missed promise.",
             "content_requirements": ["Clarify the unresolved promise."],
+            "epistemic_boundary": "Preserve unresolved facts as unresolved.",
             "visible_boundaries": [],
             "addressee_plan": [{
                 "handle": "current_user",

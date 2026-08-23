@@ -2,14 +2,36 @@
 
 from __future__ import annotations
 
+import re
+
 from kazusa_ai_chatbot.cognition_core_v3.prompt import (
+    A1_QUESTION_GUIDANCE,
+    A2_QUESTION_GUIDANCE,
+    APPRAISAL_QUESTION_GUIDANCE,
+    GOAL_QUESTION_GUIDANCE,
+    ORDINARY_PLAN_GUIDANCE,
+    SELF_PLAN_GUIDANCE,
     build_canonical_appraisal_question,
     build_canonical_goal_question,
+    build_canonical_plan_question,
     build_canonical_turn_workspace,
+    build_turn_workspace_stage_contracts,
 )
 from kazusa_ai_chatbot.cognition_shared.state_models import validate_cognition_state
 from kazusa_ai_chatbot.cognition_shared.state_reducers import materialize_causal_root
 from tests.unit.cognition_core_v3.test_handleless_contract import _input
+
+_CODE_SPAN_PATTERN = re.compile(r"`[^`]+`")
+_HAN_PATTERN = re.compile(r"[\u3400-\u9fff]")
+_MULTIWORD_ENGLISH_PATTERN = re.compile(
+    r"\b[A-Za-z]+(?:[ \t]+[A-Za-z]+){2,}\b"
+)
+
+
+def _assert_native_chinese_instruction(value: str) -> None:
+    assert _HAN_PATTERN.search(value)
+    prose = _CODE_SPAN_PATTERN.sub("", value)
+    assert _MULTIWORD_ENGLISH_PATTERN.search(prose) is None
 
 
 def _workspace(
@@ -33,6 +55,37 @@ def _workspace(
         relationship_context=payload["mutable_state"].get("relationship", {}),
         character_affect_context=character_affect_context,
     )
+
+
+def test_cognition_chain_guidance_uses_native_chinese() -> None:
+    payload = _input()
+    workspace = _workspace(payload, payload["evidence"])
+    packets = build_turn_workspace_stage_contracts(workspace=workspace)
+    self_plan = build_canonical_plan_question(
+        workspace=workspace,
+        goal=packets["P"]["goal"],
+        appraisal_summary=[],
+        self_cognition=True,
+    )
+    guidance_values = (
+        A1_QUESTION_GUIDANCE,
+        A2_QUESTION_GUIDANCE,
+        APPRAISAL_QUESTION_GUIDANCE,
+        GOAL_QUESTION_GUIDANCE,
+        ORDINARY_PLAN_GUIDANCE,
+        SELF_PLAN_GUIDANCE,
+        *(packet["guidance"] for packet in packets.values()),
+        self_plan["guidance"],
+    )
+    for guidance in guidance_values:
+        _assert_native_chinese_instruction(guidance)
+    assert workspace["orientation"]["operation"] == "回应当前观察"
+    assert packets["P"]["goal"] == {
+        "goal_kind": "open_goal",
+        "intent": "理解当前请求",
+        "reason": "当前观察需要一个有依据的回应",
+        "cause_summary": "当前观察",
+    }
 
 
 def test_stage_context_preserves_identity_relationship_and_emotion_cause() -> None:
@@ -86,17 +139,17 @@ def test_stage_context_preserves_identity_relationship_and_emotion_cause() -> No
             "cause_summary": "the observed action caused the change",
         }],
     )
-    context = a2["context"]
-    assert context["character_context"]["identity"]["name"] == "Test Character"
-    assert context["character_context"]["constraints"]["standards"]
-    assert context["relationship_context"]["axes"]["trust"] == "信任尚未建立"
-    assert context["affect_context"][0]["emotion"] == "sadness"
-    assert context["affect_context"][0]["cause_summary"] == (
+    context = a2["conditional_character_context"]
+    assert context["identity"]["name"] == "Test Character"
+    assert context["constraints"]["standards"]
+    assert context["relationship"]["axes"]["trust"] == "信任尚未建立"
+    assert context["affect"][0]["emotion"] == "sadness"
+    assert context["affect"][0]["cause_summary"] == (
         "the current observation recalls a concrete loss"
     )
-    operational = context["character_context"]["operational"]
+    operational = context["operational"]
     assert set(operational) == {"affect", "pressures"}
-    assert context["character_context"]["constraints"]["standards"][0][
+    assert context["constraints"]["standards"][0][
         "importance"
     ] == "高"
 
@@ -118,14 +171,18 @@ def test_actual_identity_partitions_are_selected_by_stage() -> None:
     workspace = _workspace(payload, payload["evidence"])
     a1 = build_canonical_appraisal_question(workspace=workspace, stage_name="A1")
     a2 = build_canonical_appraisal_question(workspace=workspace, stage_name="A2")
-    assert set(a1["context"]["character_context"]["identity"]) == {
-        "event_agency", "goal_threat_outcome", "epistemic_comparison_memory",
-    }
-    assert set(a2["context"]["character_context"]["identity"]) == {
+    goal = build_canonical_goal_question(
+        workspace=workspace,
+        appraisal_summary=[],
+    )
+    assert "conditional_character_context" not in a1
+    assert set(a2["conditional_character_context"]["identity"]) == {
         "relationship_social", "moral_identity", "existential_drive",
     }
-    assert "constraints" not in a1["context"]["character_context"]
-    assert "constraints" in a2["context"]["character_context"]
+    assert set(goal["conditional_character_context"]["identity"]) == {
+        "goal_cognition",
+    }
+    assert "constraints" in a2["conditional_character_context"]
 
 
 def test_scheduler_visibility_reaches_a1_goal_threat_but_not_a2() -> None:
@@ -146,11 +203,11 @@ def test_scheduler_visibility_reaches_a1_goal_threat_but_not_a2() -> None:
     a2 = build_canonical_appraisal_question(workspace=workspace, stage_name="A2")
     assert any(
         row["semantic_text"] == "a scheduled task is due"
-        for row in a1["observation"]["evidence"]
+        for row in a1["current_observation"]["evidence"]
     )
     assert all(
         row["semantic_text"] != "a scheduled task is due"
-        for row in a2["observation"]["evidence"]
+        for row in a2["current_observation"]["evidence"]
     )
 
 
@@ -194,7 +251,7 @@ def test_current_resolver_and_action_evidence_precedes_supporting_rag() -> None:
     a1 = build_canonical_appraisal_question(workspace=workspace, stage_name="A1")
     goal = build_canonical_goal_question(workspace=workspace, appraisal_summary=[])
     for packet in (a1, goal):
-        evidence = packet["observation"]["evidence"]
+        evidence = packet["direct_facts"]["evidence"]
         assert len(evidence) == 32
         assert evidence[0]["semantic_text"] == "current resolver result"
         assert evidence[1]["semantic_text"] == "current action result"
@@ -222,10 +279,111 @@ def test_character_affect_projection_reaches_a2_and_goal_context() -> None:
     a2 = build_canonical_appraisal_question(workspace=workspace, stage_name="A2")
     goal = build_canonical_goal_question(workspace=workspace, appraisal_summary=[])
     for packet in (a2, goal):
-        affect_context = packet.get("affect_context")
-        if affect_context is None:
-            affect_context = packet["context"]["affect_context"]
+        affect_context = packet["conditional_character_context"]["affect"]
         assert any(
             row.get("cause_summary") == "the character remembers a concrete loss"
             for row in affect_context
         )
+
+
+def test_stage_authority_lanes_partition_fact_continuity_and_character_context() -> None:
+    """Every semantic source reaches only its declared authority lane."""
+
+    payload = _input()
+    timestamp = payload["mutable_state"]["updated_at"]
+    evidence = [
+        *payload["evidence"],
+        {
+            "evidence_ref": {
+                "source_kind": "resolver_observation",
+                "source_id": "resolver:fact",
+                "occurred_at": timestamp,
+                "semantic_summary": "the resolver confirmed one fact",
+            },
+            "semantic_text": "the resolver confirmed one fact",
+            "authority": "contextual_fact_only",
+        },
+        {
+            "evidence_ref": {
+                "source_kind": "conversation_evidence",
+                "source_id": "conversation:prior",
+                "occurred_at": timestamp,
+                "semantic_summary": "the user discussed a prior action",
+            },
+            "semantic_text": "the user discussed a prior action",
+            "authority": "participant_continuity",
+        },
+        {
+            "evidence_ref": {
+                "source_kind": "promoted_reflection",
+                "source_id": "reflection:tendency",
+                "occurred_at": timestamp,
+                "semantic_summary": "the character tends to test reciprocity",
+            },
+            "semantic_text": "the character tends to test reciprocity",
+            "authority": "conditional_character_guidance",
+        },
+    ]
+    workspace = _workspace(payload, evidence)
+    a1 = build_canonical_appraisal_question(
+        workspace=workspace,
+        stage_name="A1",
+    )
+    a2 = build_canonical_appraisal_question(
+        workspace=workspace,
+        stage_name="A2",
+        accepted_appraisal_summary=[],
+    )
+    goal = build_canonical_goal_question(
+        workspace=workspace,
+        appraisal_summary=[],
+    )
+    plan = build_canonical_plan_question(
+        workspace=workspace,
+        goal={
+            "goal_kind": "clarify",
+            "intent": "clarify the observation",
+            "reason": "the referent is unknown",
+            "cause_summary": "the current observation",
+        },
+        appraisal_summary=[],
+    )
+
+    assert [
+        row["semantic_text"]
+        for row in a1["current_observation"]["evidence"]
+    ] == ["the current observation"]
+    assert [
+        row["semantic_text"] for row in a1["direct_facts"]["evidence"]
+    ] == ["the resolver confirmed one fact"]
+    assert "participant_continuity" not in a1
+    assert "conditional_character_context" not in a1
+    assert [
+        row["semantic_text"] for row in a2["participant_continuity"]
+    ] == ["the user discussed a prior action"]
+    assert [
+        row["semantic_text"]
+        for row in a2["conditional_character_context"]["evidence"]
+    ] == ["the character tends to test reciprocity"]
+    assert goal["participant_continuity"] == a2["participant_continuity"]
+    assert plan["participant_continuity"] == a2["participant_continuity"]
+    assert "conditional_character_context" not in plan
+    assert "缺少证据" in plan["guidance"]
+    assert "明确表达不确定性" in plan["guidance"]
+    assert "不得把输入中的权威通道名称复制到输出对象中" in plan["guidance"]
+
+
+def test_a1_excludes_conditional_character_context() -> None:
+    """A1 remains a world-facing appraisal over facts and causal pressure."""
+
+    payload = _input()
+    workspace = _workspace(payload, payload["evidence"])
+    packet = build_canonical_appraisal_question(
+        workspace=workspace,
+        stage_name="A1",
+    )
+
+    rendered = str(packet)
+    assert "conditional_character_context" not in packet
+    assert "character_context" not in packet
+    assert "personality" not in rendered

@@ -7,6 +7,7 @@ from copy import deepcopy
 import pytest
 
 from kazusa_ai_chatbot.cognition_episode import (
+    build_goal_continuation_ref,
     build_self_cognition_episode,
     build_tool_result_episode,
     build_user_message_episode,
@@ -112,6 +113,16 @@ def _tool_result_episode():
     """Build a valid canonical completed-tool-result episode."""
 
     turn_clock = build_turn_clock("2026-05-10 22:00:00")
+    continuation_ref = build_goal_continuation_ref(
+        source_episode_id="episode-tool-result-1",
+        source_message_id="message-tool-result-1",
+        branch_id="ordinary_response",
+        goal_ref={
+            "scope": "user",
+            "kind": "goal",
+            "entity_id": "global-user-1",
+        },
+    )
     return build_tool_result_episode(
         result={
             "schema_version": "tool_result_ready.v1",
@@ -125,6 +136,7 @@ def _tool_result_episode():
             "evidence_refs": [],
             "coding_run_context": {},
             "result_ref": "result-1",
+            "goal_continuation_ref": continuation_ref,
         },
         evidence_refs=[],
         local_time_context=turn_clock["local_time_context"],

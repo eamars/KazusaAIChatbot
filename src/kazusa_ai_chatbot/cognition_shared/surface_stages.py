@@ -18,7 +18,6 @@ from kazusa_ai_chatbot.cognition_shared.contracts import (
     TextSurfaceServicesV2,
     VisualSurfaceServicesV2,
     validate_lexical_avoidances,
-    validate_surface_addressee_plan,
 )
 from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
     V2_MODEL_TOTAL_ATTEMPTS,
@@ -41,7 +40,6 @@ _SURFACE_TRACE_FIELDS = {
         "delivery_profile",
         "lexical_avoidances",
     ),
-    "preference": ("visible_boundaries", "addressee_plan"),
     "visual": ("visual_directives",),
 }
 DELIVERY_PROFILE_FIELDS = (
@@ -58,10 +56,40 @@ SURFACE_REPAIR_INSTRUCTION = '保留原始的角色判断、\r\n情绪方向、�
 
 CONTENT_PLAN_SYSTEM_PROMPT = '''规划当前角色实际会说出或发送的内容，表达已经形成的角色判断。综合 active character goal、response plan、
 visible episode、semantic affect、semantic relationship、expression policy、interaction style、
-permitted_action_results、resolver_result、runtime_capability_limits 和 character_expression_context。task_resolution_request
+permitted_action_results、resolver_result、runtime_capability_limits、character_expression_context、
+subjective_expression_context 和 addressee_plan。task_resolution_request
 的 resolver_result 还含 source-owned evidence_state、evidence_excerpts、evidence_handles、prompt_safe_observation_handle
 和 remaining_needs；只据这些来源表达事实。recent_character_dialog 最多两条最近角色可见消息，仅用于本轮措辞连续性，
 不是事实或立场来源。
+
+# 最高优先级的行动事实
+permitted_action_results 是物理或外部效果是否完成的唯一权威。空列表或没有 executed 行时，
+本轮就没有已执行、已完成、已交付或已被接收的外部效果。角色可以在言语上接受、拒绝、
+提议、邀请或表达意图，但 content_plan 和 content_requirements 不能要求或预设对应行动已发生。
+每个可见完成效果都必须由同一类型、同一效果的 executed 行精确支持；一个 executed 行不是对其他行动的概括授权。
+action_kind=speak 只授权说出或发送文字，不授权肢体或面部动作、触碰、物体操作、拥抱、亲吻、感官效果或其他外部结果。
+只有 executed 行明确命名了同一行动与效果，content_plan 和 content_requirements 才能要求对应的完成描写；否则保持纯言语表达。
+对未来外部效果的具体承诺也属于行动主张：登记、预留、排期、发送、交付、调用工具或稍后联络等承诺，必须有同一效果的 pending、scheduled 或 executed 行。
+没有对应结果时，可以表达 response_plan 已选择的当前言语立场、愿望、提议或条件，不承诺具体外部执行将发生。
+动作舞台提示、拟声、感官反馈和结果反问也属于完成主张。输出前检查每条内容要求，删去任何
+没有 executed 权威的完成主张，同时保留角色的言语立场。
+
+subjective_expression_context.private_monologue is expression-only private
+subjectivity: translate its feeling and motivation into delivery without
+quoting or exposing it as internal analysis, and never use it to establish a
+fact, permission, capability, target, consent, or commitment.
+subjective_expression_context.epistemic_boundary is the authoritative visible
+assertion boundary. It outranks every invitation elsewhere in the payload to
+sound more certain: content_plan and every content_requirements row must keep
+assertions, interpretations, and unknowns within it, including when character
+style or motivation favors confidence, playfulness, intimacy, or initiative.
+Audit every planned functional, causal, origin, intention, and outcome claim.
+When the boundary keeps a claim interpretive or unknown, the content_plan and
+the same content requirement must visibly require uncertainty wording.
+Absence of an observed feature or of evidence cannot support an exclusion
+unless epistemic_boundary explicitly authorizes that assertion.
+Preserve every caller-owned addressee_plan row exactly when planning clause
+direction and forms of address.
 
 goal_resolution 是当前目标可回答性的已确认判断：answerable_now 直接回答；requires_required_evidence 或 requires_user_input
 说明缺口；blocked 表达当前边界和下一步。permitted_action_results 按 executed、pending、scheduled、failed 或 unavailable
@@ -69,7 +97,6 @@ goal_resolution 是当前目标可回答性的已确认判断：answerable_now �
  不要改写成失败或能力不可用；task_resolution_request 仅以 complete 的 evidence_excerpts 回答；partial 只能依据
  evidence_excerpts 陈述已确认部分并保留 remaining_needs；pending、missing、blocked、unavailable 和 failed 只陈述
  客观状态、缺口或下一步，不得编造缺失的事实答案。
-
 # 规划步骤
 1. 回应当前输入，结合先前消息、角色关系、情绪和场景压力推进互动。
 2. 在事实、角色方向和明确约束一致的范围内，自由加入连贯的想象细节、玩笑、主动性和创造性展开。
@@ -81,6 +108,15 @@ goal_resolution 是当前目标可回答性的已确认判断：answerable_now �
 
 输出规划字段；最终对话由 dialog 渲染器生成。当前用户的即时发言来自 visible percept；角色反思是语境证据；运行元数据留在内部。
 自由文本使用简体中文，用户引文、专有名词、代码、URL、schema 或 enum token 原样保留。
+
+# 输出前不可跳过的合同检查
+1. 逐句对照 subjective_expression_context.epistemic_boundary。对每个功能、原因、来源、意图、结果或排除性主张，
+   边界未允许直接断言时，必须在 content_plan 和同一条 content_requirements 中明确要求猜测或未知措辞。
+   缺少可见特征或证据不等于能排除一种功能或可能性。
+2. 逐条对照 permitted_action_results。每个动作舞台提示、身体反应、触碰、物体操作、拟声、感官反馈或外部结果，
+   都必须有同一行动与效果的 executed 行。action_kind=speak 只支持文字交付；它不支持任何身体或外部效果。
+   未来时的具体外部承诺同样必须有同一效果的 pending、scheduled 或 executed 行。删去不匹配的完成描写和外部执行承诺，
+   保留 response_plan 已选择的当前言语立场、愿望、提议或条件。
 
 # 输出格式
 字段恰好是 content_plan、content_requirements、delivery_profile 和 lexical_avoidances。content_plan 非空且最多 1000 字符；
@@ -101,43 +137,6 @@ async def run_content_plan_stage(
         config=services.content_plan_config,
         stage_name="content_plan",
         validator=_validate_content_plan_result,
-        safe_checkpoint="pre_state_commit",
-    )
-
-
-PREFERENCE_SYSTEM_PROMPT = '''识别当前角色判断和场景中真实存在的表达边界与称呼安排。以 active character goal、response plan、visible episode、
-expression policy、semantic affect、semantic relationship、interaction style 和 permitted_action_results 为语境；
-relational_willingness、resolver_result 按原义保留。task_resolution_request 的 resolver_result 中 evidence_state、
-evidence_excerpts、evidence_handles 和 remaining_needs 是来源自有的答案边界；complete 只支持 supplied excerpts，
- partial 只支持 supplied excerpts 和 remaining_needs；其他状态保留事实缺口。runtime_capability_limits 只约束现实能力。
-
-当前版本没有 typed source-bound visible-boundary contract，因此 visible_boundaries 始终返回空列表；不要从关系、情绪、主题、能力
-或一般常识推导可见边界。每一条 addressee_plan 都对应真实存在的称呼安排；逐条保留输入的 handle、display_name、semantic_role 和 wording_policy，不新增、删除、
-改名或把第三方改成 current_user。相应约束为空时返回空列表。普通场景事实、时间、情绪、关系状态和已选回应立场分别归入内容规划字段；拒绝、接受、指责、协商、条件和立场变化归入 content_plan 或 content_requirements；
-dialog 生成最终对话。
-
-当前用户的即时发言来自 visible percept；角色反思是语境证据；运行元数据留内部。自由文本使用简体中文；用户引文、专有名词、
-代码、URL、schema 或 enum token 原样保留；中文自由文本使用当前角色、当前用户或其他参与者。
-
-# 输出格式
-字段恰好是 visible_boundaries 和 addressee_plan。visible_boundaries 是零到八个非空且唯一的字符串，
-每条最多 500 字符；addressee_plan 是零到八个对象，每个对象恰好包含 handle、display_name、semantic_role 和 wording_policy，
-并逐字保留输入的结构化目标行。'''
-
-
-async def run_preference_stage(
-    payload: Mapping[str, Any],
-    services: TextSurfaceServicesV2,
-) -> tuple[list[str], list[dict[str, Any]]]:
-    """Run the stage-local preference prompt and return two distinct lists."""
-
-    return await _run_surface_stage(
-        payload=payload,
-        system_prompt=PREFERENCE_SYSTEM_PROMPT,
-        llm=services.llm,
-        config=services.preference_config,
-        stage_name="preference",
-        validator=_validate_preference_result,
         safe_checkpoint="pre_state_commit",
     )
 
@@ -506,26 +505,6 @@ def _validate_delivery_profile_result(value: object) -> dict[str, str]:
         for field_name in DELIVERY_PROFILE_FIELDS
     }
     return delivery_profile
-
-
-def _validate_preference_result(
-    value: object,
-) -> tuple[list[str], list[dict[str, Any]]]:
-    """Validate the exact preference-stage object."""
-
-    if not isinstance(value, Mapping) or set(value) != {
-        "visible_boundaries",
-        "addressee_plan",
-    }:
-        raise ValueError("preference stage fields are not exact")
-    if value["visible_boundaries"] != []:
-        raise ValueError(
-            "visible boundaries must remain empty until a typed source contract exists"
-        )
-    visible_boundaries: list[str] = []
-    addressee_plan = value["addressee_plan"]
-    validate_surface_addressee_plan(addressee_plan)
-    return visible_boundaries, [dict(row) for row in addressee_plan]
 
 
 def _validate_visual_result(value: object) -> str:

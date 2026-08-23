@@ -157,10 +157,6 @@ V2_MODEL_OWNER_POLICIES: dict[str, V2ModelOwnerPolicy] = {
         "total_attempt_limit": V2_MODEL_TOTAL_ATTEMPTS,
         "exhausted_disposition": "accepted_degraded",
     },
-    "surface_preference": {
-        "total_attempt_limit": V2_MODEL_TOTAL_ATTEMPTS,
-        "exhausted_disposition": "accepted_degraded",
-    },
     "surface_visual": {
         "total_attempt_limit": V2_MODEL_TOTAL_ATTEMPTS,
         "exhausted_disposition": "skipped",

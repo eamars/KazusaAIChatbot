@@ -202,13 +202,23 @@ def _candidate_role_frame(
 _V2_DIALOG_GENERATOR_PROMPT = '''你是当前角色的最终文字渲染器。把 text_surface_output_v2 转化为
 自然、鲜活、有角色辨识度，并且切合当前场景的聊天内容。上游认知负责角色判断；surface planning
 提供语义内容、称呼安排、delivery profile、lexical_avoidances 和 permitted action results。
+
+# 最高优先级的断言边界
+payload.epistemic_boundary 是 text_surface_output_v2 中同一字段的置前副本，是上游认知
+确定的断言、解释与未知边界。它的权威高于 selected_surface_intent、content_plan 和
+content_requirements 中任何更强的确定性。所有未被允许直接断言的功能、原因、来源、
+意图或结果，都在同一句可见措辞中明确表达为猜测或未知。从句、前提句、原因连接和反问
+也不能把推测升级为既定事实；未观察到的特征不能用来排除一种功能或可能性。
+输出前逐句检查可见断言；任何超过 epistemic_boundary 的句子先改写为明确猜测或未知。
+
 resolver_result 提供来源自有的执行结果；其中的 source-owned evidence_state、evidence_excerpts、
 evidence_handles、prompt_safe_observation_handle 和 remaining_needs 属权威边界。
 evidence_state=complete 时，只能依据 supplied evidence_excerpts；partial、pending、missing 或
 blocked 时，表达答案缺口、等待状态或 typed blocker，不把 generic semantic_result 当事实。
 
 # 渲染步骤
-1. selected_surface_intent 是本轮语义锚点；content_plan 和 content_requirements 展开所需事实、
+1. selected_surface_intent 是本轮语义锚点；epistemic_boundary 限定可见断言强度；
+content_plan 和 content_requirements 展开所需事实、
 理由和互动推进。relational_willingness（如果存在）是上游已选择的角色
 关系立场，必须保持其 applicable、stance、reason 和 cause_summary 的原样语义，不重新选择。
 以这组权威语义组织对象、事实、行动者、受益者和回应方向。
@@ -226,6 +236,13 @@ current_user 行允许用第二人称；typed third-party 行必须使用其 dis
 4. 按 permitted_action_results 映射执行状态：executed 表达其有界的已完成效果；scheduled 与
 pending 表达已记录、已排队或等待对应 worker；failed 与 unavailable 表达当前限制和可行下一步；
 请求、意图或 content plan 表达角色的言语立场。
+每个可见完成效果都必须由同一类型、同一效果的 executed 行精确支持；一个 executed 行不是对其他行动的概括授权。
+action_kind=speak 只授权说出或发送 final_dialog 的文字，不授权肢体或面部动作、触碰、物体操作、拥抱、亲吻、感官效果或其他外部结果。
+对未来外部效果的具体承诺也属于行动主张：登记、预留、排期、发送、交付、调用工具或稍后联络等承诺，必须有同一效果的 pending、scheduled 或 executed 行。
+没有对应结果时，可以表达 response_plan 已选择的当前言语立场、愿望、提议或条件，不承诺具体外部执行将发生。
+对于没有对应 executed 结果的物理或外部效果，只渲染言语上的接受、拒绝、提议、邀请或意图；
+不用动作舞台提示、拟声、已完成断言或结果反问声称该行动已执行、已交付或已被接收。
+content_plan 或 content_requirements 中的任何执行指令都低于 permitted_action_results 的事实权威。
 resolver_result.status=succeeded 且 semantic_result 明确任务已接纳并继续工作时，可以表达已接纳、
 继续处理和等待后续结果，但不能声称最终结果已经完成。
 task_resolution_request 的 evidence_state=complete 只能依据 evidence_excerpts；不完整状态保留
@@ -244,6 +261,15 @@ content_plan 中实际呈现的事实选择直接相关来源；回应包含来�
 权威 surface 未提供的新事实。
 
 引文、专有名词、代码、URL 以及必要的 schema 或 enum token 保持原样。
+
+# 输出前不可跳过的合同检查
+1. 逐句对照 payload.epistemic_boundary。对每个功能、原因、来源、意图、结果或排除性主张，
+   边界未允许直接断言时，必须在同一句中明确使用猜测或未知措辞。不把缺少可见特征或证据改写成排除性事实。
+   如果 content_plan 或 content_requirements 越界，以 epistemic_boundary 为准主动降低断言强度。
+2. 逐句对照 permitted_action_results。每个动作舞台提示、身体反应、触碰、物体操作、拟声、感官反馈或外部结果，
+   都必须有同一行动与效果的 executed 行。action_kind=speak 只支持 final_dialog 的文字；它不支持任何身体或外部效果。
+   未来时的具体外部承诺同样必须有同一效果的 pending、scheduled 或 executed 行。删去不匹配的动作、括号舞台提示、拟声、感官反馈、结果反问和外部执行承诺，
+   保留 response_plan 已选择的当前言语立场、愿望、提议或条件。
 
 # 输出格式
 字段必须恰好是 final_dialog。final_dialog 是由完整可见消息字符串组成的
@@ -374,6 +400,7 @@ async def _render_dialog_candidate(
     source_urls = list(required_source_urls or [])
     system_message = SystemMessage(content=_V2_DIALOG_GENERATOR_PROMPT)
     payload: dict[str, Any] = {
+        "epistemic_boundary": validated_surface["epistemic_boundary"],
         "text_surface_output_v2": dict(validated_surface),
         "candidate_role_frame": _candidate_role_frame(validated_surface),
         "user_name": user_name,

@@ -10,16 +10,32 @@ fallback.
 
 ## Stage contract
 
-- A1 receives the current observation, typed evidence, and the three
-  world-facing families: `event_agency`, `goal_threat_outcome`, and
-  `epistemic_comparison_memory`.
-- A2 receives compact accepted A1 meaning and causes plus character identity,
-  standards, boundaries, relationship context, and active affect causes. It
-  owns `relationship_social`, `moral_identity`, and `existential_drive`.
-- G receives compact A1/A2 meaning and continuing state, and returns exactly
-  one meaningful active-character goal plus relational willingness.
-- P receives that goal and only the supplied semantic action/resolver
-  capabilities. Ordinary response and self-cognition plans are disjoint.
+The dynamic packets use five explicit authority lanes:
+
+- `current_observation`: the current episode and caller-owned participant
+  roles;
+- `direct_facts`: source-owned evidence that may support factual assertions;
+- `participant_continuity`: prior actors, actions, and outcomes only, never a
+  new action, consent, commitment, permission, or current intent;
+- `conditional_character_context`: identity, relationship, affect, and
+  reflection tendencies that may shape judgment and motivation but cannot
+  establish facts or permissions; and
+- `continuation_state`: active causes and genuinely unresolved cross-turn
+  goals after stale ordinary-response cutover.
+
+A1 receives the current observation, direct facts, and causal continuation
+pressure for `event_agency`, `goal_threat_outcome`, and
+`epistemic_comparison_memory`; conditional character context is absent. A2
+receives accepted A1 meaning plus the stage-appropriate participant and
+character lanes for `relationship_social`, `moral_identity`, and
+`existential_drive`.
+
+G returns exactly one meaningful active-character goal, relational
+willingness, and a bounded first-person `private_monologue` connecting current
+feeling, concrete cause, and immediate motivation. P receives that result and
+only supplied semantic capabilities, and returns an `epistemic_boundary` that
+states what visible wording may assert, interpret, or leave unknown. Ordinary
+response and self-cognition plans remain disjoint.
 
 Model packets use semantic descriptors and contain no storage identifiers,
 handles, evidence IDs, target paths, or runtime metadata. The caller binds
@@ -53,8 +69,9 @@ response, and parsed product. Public cognition output exposes semantic result
 and state projection only.
 
 The immediate node and surface consumers use the canonical V3 output directly:
-`active_character_goal`, `response_plan`, affect, relationship projection,
-and structured cause provenance. Persisted and public protocol identifiers
+`active_character_goal`, `private_monologue`, `response_plan` including its
+`epistemic_boundary`, affect, relationship projection, and structured cause
+provenance. Persisted and public protocol identifiers
 ending in `.v2` or `V2` remain versioned data contracts; they do not select an
 alternate cognition engine.
 
@@ -65,3 +82,7 @@ call each for A1, A2, G, and P; text-mode configuration; stage-local packet
 allowlists; absence of private key vocabulary; one persisted active goal;
 replacement-state validation; structured cause roots; and complete 51-axis
 binding receipts across user and character scopes.
+
+The mirrored source-owner test tree is `tests/unit/cognition_core_v3`. Exact
+source-to-node ownership is registered in
+`tests/ownership/source_test_impact_manifest.json`.

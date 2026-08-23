@@ -51,6 +51,9 @@ def build_dialog_state() -> dict[str, object]:
         "content_requirements": [
             "Preserve the requested response operation and current time scope.",
         ],
+        "epistemic_boundary": (
+            "Keep unsupported details framed as inference or unknown."
+        ),
         "visible_boundaries": [],
         "addressee_plan": [{
             "handle": "current_user",

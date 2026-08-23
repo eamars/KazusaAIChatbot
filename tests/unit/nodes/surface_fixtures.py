@@ -37,11 +37,17 @@ def build_surface_state(
             "reason": "the current episode establishes the selected route",
             "cause_summary": "grounded current episode",
         },
+        "private_monologue": (
+            "I feel attentive because this turn asks for a grounded response."
+        ),
         "response_plan": {
             "response_goal": "acknowledge the grounded episode",
             "goal_resolution": "answerable_now",
             "action_requests": [],
             "resolver_requests": [],
+            "epistemic_boundary": (
+                "Assert the visible turn and keep unsupported details unknown."
+            ),
         },
         "affect_projection": [],
         "relationship_projection": None,
@@ -50,11 +56,22 @@ def build_surface_state(
     return {
         "storage_timestamp_utc": "2026-07-14T00:00:00Z",
         "user_input": "current turn input",
+        "user_name": "Test User",
         "cognitive_episode": canonical_episode(
             episode_id="relational-surface-episode",
             content="current turn input",
         ),
         "cognition_core_output": output,
         "pre_surface_action_results": [],
+        "action_specs": [{
+            "kind": "speak",
+            "cognition_provenance": {
+                "target_roles": [{
+                    "role": "target",
+                    "entity_kind": "user",
+                    "entity_id": "user-1",
+                }],
+            },
+        }],
         "character_profile": canonical_character_identity(marker="surface"),
     }

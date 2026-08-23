@@ -139,8 +139,7 @@
         "tests/test_control_console_web_surface.py::test_cognition_chain_panels_render_correlated_sanitized_runs",
         "tests/test_control_console_web_surface.py::test_cognition_engine_projection_fails_closed_for_unknown_or_incomplete_data"
       ],
-      "supplemental_tests": [
-      ]
+      "supplemental_tests": []
     },
     {
       "source": "src/control_console/static/index.html",
@@ -150,8 +149,7 @@
         "tests/test_control_console_web_surface.py::test_cognition_chain_panels_render_correlated_sanitized_runs",
         "tests/test_control_console_web_surface.py::test_cognition_engine_projection_fails_closed_for_unknown_or_incomplete_data"
       ],
-      "supplemental_tests": [
-      ]
+      "supplemental_tests": []
     },
     {
       "source": "src/control_console/static/console.js",
@@ -161,15 +159,13 @@
         "tests/test_control_console_web_surface.py::test_cognition_chain_panels_render_correlated_sanitized_runs",
         "tests/test_control_console_web_surface.py::test_cognition_engine_projection_fails_closed_for_unknown_or_incomplete_data"
       ],
-      "supplemental_tests": [
-      ]
+      "supplemental_tests": []
     },
     {
       "source": "src/control_console/static/console.css",
       "owner": "control-console cognition-chain layout owner",
       "contract": "responsive bounded cognition-chain panels without horizontal overflow",
-      "required_unit_tests": [
-      ],
+      "required_unit_tests": [],
       "supplemental_tests": []
     },
     {
@@ -203,8 +199,7 @@
       "source": "src/kazusa_ai_chatbot/db/self_cognition.py",
       "owner": "self-cognition persistence owner",
       "contract": "atomic source-window action-attempt reservation",
-      "required_unit_tests": [
-      ],
+      "required_unit_tests": [],
       "supplemental_tests": [
         "tests/test_action_spec_attempt_ledger.py::test_new_action_attempt_record_extends_existing_collection_shape"
       ]
@@ -245,16 +240,14 @@
       "source": "src/kazusa_ai_chatbot/event_logging/sanitization.py",
       "owner": "event logging sanitizer owner",
       "contract": "closed bounded cognition-chain fields with secret and raw-content exclusion",
-      "required_unit_tests": [
-      ],
+      "required_unit_tests": [],
       "supplemental_tests": []
     },
     {
       "source": "src/kazusa_ai_chatbot/event_logging/schemas.py",
       "owner": "event-logging document schema owner",
       "contract": "bounded cognition-chain event field projection",
-      "required_unit_tests": [
-      ],
+      "required_unit_tests": [],
       "supplemental_tests": []
     },
     {
@@ -463,8 +456,7 @@
       "source": "src/kazusa_ai_chatbot/db/bootstrap.py",
       "owner": "database bootstrap owner",
       "contract": "chain-run collection and unique/correlation/invocation/engine/TTL indexes",
-      "required_unit_tests": [
-      ],
+      "required_unit_tests": [],
       "supplemental_tests": []
     },
     {
@@ -502,18 +494,6 @@
         "tests/test_cognition_relationship_maintenance_migration.py::test_migration_fails_closed_on_missing_already_valid_row",
         "tests/test_cognition_relationship_maintenance_migration.py::test_migration_uses_named_db_maintenance_boundary"
       ]
-    },
-    {
-      "owner": "Cognition V3 token estimator calibration owner",
-      "contract": "frozen corpus and holdout calculation with zero-underestimate deterministic acceptance",
-      "required_unit_tests": [],
-      "supplemental_tests": []
-    },
-    {
-      "owner": "Cognition V3 serving overflow probe owner",
-      "contract": "effect-free dry run and explicit declared-window validation",
-      "required_unit_tests": [],
-      "supplemental_tests": []
     },
     {
       "source": "src/kazusa_ai_chatbot/db/internal_monologue_residue.py",
@@ -597,12 +577,6 @@
         "tests/test_conversation_progress_v2_service.py::test_post_turn_preserves_trace_link_when_diagnostic_event_write_fails",
         "tests/test_service_event_logging.py::test_progress_disposition_telemetry_is_trace_linked_and_sanitized"
       ],
-      "supplemental_tests": []
-    },
-    {
-      "owner": "parent cognition guardrail owner",
-      "contract": "one invocation-wide replay token, engine-neutral service handoff, and bounded parent recovery",
-      "required_unit_tests": [],
       "supplemental_tests": []
     },
     {
@@ -697,8 +671,7 @@
       "source": "src/kazusa_ai_chatbot/llm_tracing/__init__.py",
       "owner": "protected trace facade owner",
       "contract": "scoped chain-transcript export only",
-      "required_unit_tests": [
-      ],
+      "required_unit_tests": [],
       "supplemental_tests": []
     },
     {
@@ -950,18 +923,6 @@
       ]
     },
     {
-      "owner": "V3 byte-stable system anchor owner",
-      "contract": "static engine manual plus exact ordered prompt-safe identity partitions with no dynamic turn data",
-      "required_unit_tests": [],
-      "supplemental_tests": []
-    },
-    {
-      "owner": "V3 primary and sidecar lane coordination owner",
-      "contract": "FIFO full-primary ownership, serialized L1/repair/X1/X2 sidecar streams, bounded logical admissions, and cancellation cleanup",
-      "required_unit_tests": [],
-      "supplemental_tests": []
-    },
-    {
       "source": "src/kazusa_ai_chatbot/cognition_core_v3/prompt.py",
       "owner": "V3 dynamic chain question owner",
       "contract": "volatility-ordered first packet, bounded typed questions, canonical V2 required-selection output contract, advisory L1 packet projection, recurrence delta payloads, post-revision interlude folding, goal-only holdout, and evaluation-integrity boundary",
@@ -969,36 +930,6 @@
         "tests/unit/cognition_core_v3/test_prompt_context.py::test_stage_context_preserves_identity_relationship_and_emotion_cause",
         "tests/unit/cognition_core_v3/test_prompt_context.py::test_current_resolver_and_action_evidence_precedes_supporting_rag"
       ],
-      "supplemental_tests": []
-    },
-    {
-      "owner": "V3 fixed serial topology and grouping owner",
-      "contract": "exact serial A1..P1 chain, frozen family order, and 1/2/3/6 grouping maps",
-      "required_unit_tests": [],
-      "supplemental_tests": []
-    },
-    {
-      "owner": "V3 context estimator and budget ledger owner",
-      "contract": "CJK-aware deterministic estimator, 50k/65k total ceilings, one-time extension, re-anchor token, and serving-window overflow",
-      "required_unit_tests": [],
-      "supplemental_tests": []
-    },
-    {
-      "owner": "V3 append-only chain transcript owner",
-      "contract": "append, accept, tail rollback, interlude queue, re-anchor, and immutable message projection",
-      "required_unit_tests": [],
-      "supplemental_tests": []
-    },
-    {
-      "owner": "V3 chain-session registry owner",
-      "contract": "process-local bounded recurrence sessions with exact prefix/one resolver-observation reattachment using a nonempty novel evidence handle, prior replacement state, next-admissible cycle index, and single-owner claim disposition",
-      "required_unit_tests": [],
-      "supplemental_tests": []
-    },
-    {
-      "owner": "V3 advisory L1 residue owner",
-      "contract": "closed nonblocking L1ResidueV1 with bounded supplied-handle membership and no semantic authority",
-      "required_unit_tests": [],
       "supplemental_tests": []
     },
     {
@@ -1014,12 +945,6 @@
       ]
     },
     {
-      "owner": "V3 serial primary-chain executor owner",
-      "contract": "one serial primary chain, lane-scoped canonical JSON repair, exact accepted typed-product retention, V2 epoch-aware attempt reservations, and non-authoritative session-ledger projection",
-      "required_unit_tests": [],
-      "supplemental_tests": []
-    },
-    {
       "source": "src/kazusa_ai_chatbot/cognition_core_v3/appraisal.py",
       "owner": "V3 cache-affine appraisal semantics owner",
       "contract": "six-family domains, shared static prompt, candidate admission classification, and provisional reduction",
@@ -1031,63 +956,9 @@
       "supplemental_tests": []
     },
     {
-      "owner": "V3 cache-affine goal cognition owner",
-      "contract": "shared static goal prompt, ordinary-only relational-willingness ownership including cold required-selection complete bids and recurrence-carried stance, isolated sibling transcripts, canonical required-selection fixed-role binding and progress evidence projection, fail-closed exhaustion disposition",
-      "required_unit_tests": [],
-      "supplemental_tests": []
-    },
-    {
-      "owner": "V3 complete-bid workspace collapse owner",
-      "contract": "complete-bid admission, registry-order partitioning, and authoritative relational collapse without confidence ranking",
-      "required_unit_tests": [],
-      "supplemental_tests": []
-    },
-    {
-      "owner": "V3 action planning and isolated authorization owner",
-      "contract": "fresh authorizer context projection, injected V3 X1/X2 execution, stance effect suppression, future-speak authority validation, selected-intention and goal-progress preservation",
-      "required_unit_tests": [],
-      "supplemental_tests": []
-    },
-    {
       "source": "src/kazusa_ai_chatbot/cognition_core_v3/diagnostics.py",
       "owner": "V3 public diagnostics and protected chain metadata owner",
       "contract": "exact V2 stage-trace public field parity plus credential-free config identity and typed-only protected failure projection",
-      "required_unit_tests": [],
-      "supplemental_tests": []
-    },
-    {
-      "owner": "V3 protected-to-sanitized observability integration-test owner",
-      "contract": "exact protected transcript, sanitized event, DB, service, and console correlation path",
-      "required_unit_tests": [],
-      "supplemental_tests": []
-    },
-    {
-      "owner": "V3 authorization owner",
-      "contract": "canonical action and resolver authorization validation",
-      "required_unit_tests": [],
-      "supplemental_tests": []
-    },
-    {
-      "owner": "V3 execution result types owner",
-      "contract": "typed serial execution dispositions and branch outcomes",
-      "required_unit_tests": [],
-      "supplemental_tests": []
-    },
-    {
-      "owner": "V3 facade pure-helper owner",
-      "contract": "prompt-safe state and deterministic facade projections",
-      "required_unit_tests": [],
-      "supplemental_tests": []
-    },
-    {
-      "owner": "V3 semantic appraisal owner",
-      "contract": "canonical appraisal validation and reduction bridge",
-      "required_unit_tests": [],
-      "supplemental_tests": []
-    },
-    {
-      "owner": "V3 semantic source planning owner",
-      "contract": "evidence-bound appraisal questions and canonical domains",
       "required_unit_tests": [],
       "supplemental_tests": []
     },
@@ -1178,16 +1049,14 @@
       "source": "src/kazusa_ai_chatbot/cognition_shared/surface.py",
       "owner": "shared text and visual surface owner",
       "contract": "surface planning and bounded dialog handoff",
-      "required_unit_tests": [
-      ],
+      "required_unit_tests": [],
       "supplemental_tests": []
     },
     {
       "source": "src/kazusa_ai_chatbot/cognition_shared/surface_stages.py",
       "owner": "shared surface stage owner",
       "contract": "stage-specific surface projections and handoff contracts",
-      "required_unit_tests": [
-      ],
+      "required_unit_tests": [],
       "supplemental_tests": []
     },
     {

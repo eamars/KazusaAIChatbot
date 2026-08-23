@@ -52,6 +52,7 @@ def _dialog_state() -> dict:
             "schema_version": "text_surface_output.v2",
             "content_plan": "answer",
             "content_requirements": ["address the current user"],
+            "epistemic_boundary": "Assert only the supplied answer.",
             "visible_boundaries": [],
             "addressee_plan": [{
                 "handle": "current_user",
@@ -128,6 +129,10 @@ async def test_dialog_generator_preserves_inline_tag_without_delivery_context(
     assert human_payload["text_surface_output_v2"]["schema_version"] == (
         "text_surface_output.v2"
     )
+    assert human_payload["epistemic_boundary"] == (
+        human_payload["text_surface_output_v2"]["epistemic_boundary"]
+    )
+    assert "private_monologue" not in json.dumps(human_payload)
     assert "platform_user_id" not in human_payload
     assert "global_user_id" not in human_payload
 

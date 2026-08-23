@@ -79,6 +79,7 @@ class CanonicalResponsePlan:
     response_goal: str
     action_requests: tuple[Mapping[str, object], ...]
     resolver_requests: tuple[Mapping[str, object], ...]
+    epistemic_boundary: str
     self_cognition_response: Mapping[str, object] | None = None
 
 @dataclass(frozen=True)
@@ -87,6 +88,7 @@ class CanonicalCognitionOutput:
     appraisals: tuple[CanonicalAppraisal, ...]
     active_character_goal: CanonicalGoal
     relational_willingness: Mapping[str, object]
+    private_monologue: str
     response_plan: CanonicalResponsePlan
     affect_projection: tuple[Mapping[str, object], ...]
     relationship_projection: Mapping[str, object]
@@ -113,11 +115,13 @@ class CanonicalCognitionOutput:
                 "cause_summary": self.active_character_goal.cause_summary,
             },
             "relational_willingness": dict(self.relational_willingness),
+            "private_monologue": self.private_monologue,
             "response_plan": {
                 "goal_resolution": self.response_plan.goal_resolution,
                 "response_goal": self.response_plan.response_goal,
                 "action_requests": [dict(row) for row in self.response_plan.action_requests],
                 "resolver_requests": [dict(row) for row in self.response_plan.resolver_requests],
+                "epistemic_boundary": self.response_plan.epistemic_boundary,
             },
             "affect_projection": [dict(row) for row in self.affect_projection],
             "relationship_projection": dict(self.relationship_projection),
@@ -135,8 +139,9 @@ def validate_canonical_cognition_output(
 ) -> Mapping[str, object]:
     required = {
         "schema_version", "appraisals", "active_character_goal",
-        "relational_willingness", "response_plan", "affect_projection",
-        "relationship_projection", "cause_provenance", "diagnostics",
+        "relational_willingness", "private_monologue", "response_plan",
+        "affect_projection", "relationship_projection", "cause_provenance",
+        "diagnostics",
     }
     if not isinstance(payload, Mapping) or payload.get("schema_version") != CANONICAL_COGNITION_OUTPUT_SCHEMA:
         raise ValueError("canonical cognition output schema is invalid")

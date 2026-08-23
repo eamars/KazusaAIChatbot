@@ -30,6 +30,7 @@ from kazusa_ai_chatbot.self_cognition import (
     worker,
 )
 from tests.cognition_test_helpers import (
+    canonical_cognition_output,
     canonical_service_character_profile,
 )
 
@@ -532,6 +533,54 @@ def _patch_dispatcher_persistence(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+def _self_cognition_core_output(
+    *,
+    state_scope: str = "user",
+) -> dict[str, Any]:
+    """Build one exact canonical self-cognition product for worker tests."""
+
+    output = canonical_cognition_output(
+        route="silence",
+        state_scope=state_scope,
+    )
+    response_goal = "stay silent and retain internal progress"
+    output["response_plan"].update({
+        "goal_resolution": "answerable_now",
+        "response_goal": response_goal,
+        "self_cognition_response": {
+            "decision": "stay_silent",
+            "response_goal": response_goal,
+            "reason": "the due source supports this bounded decision",
+            "cause_summary": "the current self-cognition episode is due",
+        },
+    })
+    return output
+
+
+def _self_cognition_visible_core_output(
+    *,
+    state_scope: str = "user",
+) -> dict[str, Any]:
+    """Build one exact visible self-cognition product for worker tests."""
+
+    output = canonical_cognition_output(
+        route="speech",
+        state_scope=state_scope,
+    )
+    response_goal = "send the grounded scheduled follow-up"
+    output["response_plan"].update({
+        "goal_resolution": "answerable_now",
+        "response_goal": response_goal,
+        "self_cognition_response": {
+            "decision": "propose_visible_reply",
+            "response_goal": response_goal,
+            "reason": "the due source supports this bounded decision",
+            "cause_summary": "the current self-cognition episode is due",
+        },
+    })
+    return output
+
+
 def _progress_cognition_output(
     *,
     state_scope: str = "user",
@@ -542,9 +591,9 @@ def _progress_cognition_output(
         "logical_stance": "OBSERVE",
         "character_intent": "WAIT",
         "self_cognition_route": models.ROUTE_PROGRESS_MAINTENANCE,
-        "cognition_core_output": {
-            "state_update": {"state_scope": state_scope},
-        },
+        "cognition_core_output": _self_cognition_core_output(
+            state_scope=state_scope,
+        ),
         "cognition_state_committed": True,
     }
     return output
@@ -594,6 +643,7 @@ def _text_surface_output(content_plan: str = "Checking in now.") -> dict[str, An
         "schema_version": "text_surface_output.v2",
         "content_plan": content_plan,
         "content_requirements": ["Preserve the scheduled follow-up purpose."],
+        "epistemic_boundary": "Preserve the scheduled state exactly.",
         "visible_boundaries": [],
         "addressee_plan": [{
             "handle": "current_user",
@@ -624,9 +674,9 @@ def _action_cognition_output(
         "character_intent": "PROVIDE",
         "text_surface_output_v2": _text_surface_output(),
         "action_specs": [_speak_action_spec()],
-        "cognition_core_output": {
-            "state_update": {"state_scope": state_scope},
-        },
+        "cognition_core_output": _self_cognition_visible_core_output(
+            state_scope=state_scope,
+        ),
         "cognition_state_committed": True,
     }
     return output
@@ -1576,6 +1626,13 @@ async def test_worker_tick_marks_future_cognition_run_completed(
                 "internal_monologue": "bounded self-cognition reason",
                 "logical_stance": "inspect due promise",
                 "character_intent": "decide whether to act",
+                "cognition_core_output": _self_cognition_core_output(
+                    state_scope="character",
+                ),
+                "cognition_state_committed": True,
+            },
+            models.ARTIFACT_COGNITION_INPUT: {
+                "state_scope": "character",
             },
         }
 
@@ -3540,9 +3597,7 @@ async def test_scheduled_worker_scrubs_gate_accepted_candidate_after_delivery_fa
             "summary": "episode audit retained",
         }
         payloads[models.ARTIFACT_COGNITION_OUTPUT] = {
-            "cognition_core_output": {
-                "state_update": {"state_scope": "user"},
-            },
+            "cognition_core_output": _self_cognition_visible_core_output(),
             "cognition_state_committed": True,
             "surface_outputs": [visible_surface, private_surface],
         }

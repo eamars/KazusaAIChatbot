@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Mapping
 from typing import Any
 
@@ -24,7 +23,6 @@ from kazusa_ai_chatbot.cognition_shared.state_projection import (
 )
 from kazusa_ai_chatbot.cognition_shared.surface_stages import (
     run_content_plan_stage,
-    run_preference_stage,
     run_visual_stage,
 )
 from kazusa_ai_chatbot.llm_tracing import failure_capsule
@@ -71,7 +69,7 @@ async def _run_text_surface_planning(
     *,
     session: failure_capsule.FailureCapsuleSession | None,
 ) -> TextSurfaceOutputV2:
-    """Run two bounded text-surface stages after cognition is committed."""
+    """Run one bounded text-surface stage after cognition is committed."""
 
     payload = validate_text_surface_input_canonical(input_payload)
     stage_payload = _project_surface_payload(payload)
@@ -81,32 +79,17 @@ async def _run_text_surface_planning(
         payload["character_expression_context"]
     )
     validate_prompt_projection(content_payload)
-    content_result, preference = await asyncio.gather(
-        run_content_plan_stage(content_payload, services),
-        run_preference_stage(stage_payload, services),
-        return_exceptions=True,
-    )
-    stage_results = (content_result, preference)
-    for stage_result in stage_results:
-        if (
-            isinstance(stage_result, BaseException)
-            and not isinstance(stage_result, CognitionExecutionError)
-        ):
-            raise stage_result
-    if any(
-        isinstance(stage_result, CognitionExecutionError)
-        for stage_result in stage_results
-    ):
-        failed_stages = []
-        if isinstance(content_result, CognitionExecutionError):
-            failed_stages.append("content_plan")
-        if isinstance(preference, CognitionExecutionError):
-            failed_stages.append("preference")
+    try:
+        content_result = await run_content_plan_stage(
+            content_payload,
+            services,
+        )
+    except CognitionExecutionError:
         failure_capsule.mark_failure(
             session,
             failure_kind="degraded_surface",
             stage_name="run_text_surface_planning",
-            details={"failed_stages": failed_stages},
+            details={"failed_stages": ["content_plan"]},
         )
         degraded_output = build_degraded_text_surface(payload)
         return degraded_output
@@ -116,17 +99,15 @@ async def _run_text_surface_planning(
         delivery_profile,
         lexical_avoidances,
     ) = content_result
-    visible_boundaries, addressee_plan = preference
-    addressee_plan = _authoritative_addressee_plan(
-        payload,
-        addressee_plan,
-    )
     output: TextSurfaceOutputV2 = {
         "schema_version": "text_surface_output.v2",
         "content_plan": content_plan,
         "content_requirements": content_requirements,
-        "visible_boundaries": visible_boundaries,
-        "addressee_plan": addressee_plan,
+        "epistemic_boundary": payload[
+            "subjective_expression_context"
+        ]["epistemic_boundary"],
+        "visible_boundaries": [],
+        "addressee_plan": _deterministic_addressee_plan(payload),
         "delivery_profile": delivery_profile,
         "selected_surface_intent": payload["response_plan"].get("response_goal", ""),
         "permitted_action_results": [
@@ -175,10 +156,12 @@ def build_degraded_text_surface(
         "content_requirements": [
             "表达已选择的回应意图，并保持当前事实、角色方向和能力结果原义。",
         ],
+        "epistemic_boundary": payload[
+            "subjective_expression_context"
+        ]["epistemic_boundary"],
         "visible_boundaries": [],
-        "addressee_plan": _authoritative_addressee_plan(
+        "addressee_plan": _deterministic_addressee_plan(
             payload,
-            [],
         ),
         "delivery_profile": {
             "lexical_register": "自然、清楚",
@@ -252,6 +235,7 @@ async def _run_visual_surface_planning(
 
     payload = validate_text_surface_input_canonical(input_payload)
     stage_payload = _project_surface_payload(payload)
+    stage_payload.pop("subjective_expression_context")
     stage_payload["visual_character_context"] = payload[
         "visual_character_context"
     ]
@@ -269,7 +253,7 @@ async def _run_visual_surface_planning(
 def _project_surface_payload(
     payload: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Remove persistent/private fields before any surface stage sees input."""
+    """Project bounded semantic fields for the selected surface stage."""
 
     plan = payload["response_plan"]
     intention = {
@@ -295,6 +279,9 @@ def _project_surface_payload(
             payload["permitted_action_results"]
         ),
         "interaction_style_context": payload["interaction_style_context"],
+        "subjective_expression_context": dict(
+            payload["subjective_expression_context"]
+        ),
     }
     if "recent_character_dialog" in payload:
         result["recent_character_dialog"] = list(
@@ -322,18 +309,15 @@ def _project_surface_payload(
     return result
 
 
-def _authoritative_addressee_plan(
+def _deterministic_addressee_plan(
     input_payload: Mapping[str, Any],
-    candidate: object,
 ) -> list[dict[str, Any]]:
-    """Preserve cognition-owned target identity as structural surface context."""
+    """Copy cognition-owned target identity into the public surface."""
 
     source = input_payload.get("addressee_plan")
-    if isinstance(source, list):
-        return [dict(row) for row in source]
-    if not isinstance(candidate, list):
+    if not isinstance(source, list):
         raise ValueError("surface addressee plan must be a list")
-    return [dict(row) for row in candidate]
+    return [dict(row) for row in source]
 
 
 def _project_action_results_for_prompt(

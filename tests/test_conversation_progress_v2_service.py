@@ -41,6 +41,8 @@ def _trace(terminal_status: str) -> dict[str, object]:
             'surface_kind': 'text',
             'visibility': 'user_visible',
             'action_attempt_id': None,
+            'surface_role': 'ordinary',
+            'goal_continuation_ref': None,
             'fragments': ['accepted response'],
             'artifact_refs': [],
             'delivery_intent': 'deliver_now',

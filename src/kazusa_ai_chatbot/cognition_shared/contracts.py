@@ -888,6 +888,13 @@ class CharacterExpressionContextV2(TypedDict):
     linguistic_texture: str
 
 
+class SubjectiveExpressionContextV1(TypedDict):
+    """Exact cognition-owned subjectivity available to text planning."""
+
+    private_monologue: str
+    epistemic_boundary: str
+
+
 class DeliveryProfileV2(TypedDict):
     """Bounded delivery dimensions owned atomically with surface content."""
 
@@ -930,6 +937,7 @@ class TextSurfaceOutputV2(TypedDict):
     schema_version: Literal["text_surface_output.v2"]
     content_plan: str
     content_requirements: list[str]
+    epistemic_boundary: str
     visible_boundaries: list[str]
     addressee_plan: list[SurfaceAddresseePlanV1]
     delivery_profile: DeliveryProfileV2
@@ -951,11 +959,10 @@ class VisualSurfaceOutputV2(TypedDict):
 
 @dataclass(frozen=True)
 class TextSurfaceServicesV2:
-    """Injected two-stage V2 text-surface bindings."""
+    """Injected single-stage V2 text-surface binding."""
 
     llm: LLMInvoker
     content_plan_config: LLMCallConfig
-    preference_config: LLMCallConfig
 
 
 @dataclass(frozen=True)
@@ -1117,6 +1124,7 @@ def validate_text_surface_output(
         "schema_version",
         "content_plan",
         "content_requirements",
+        "epistemic_boundary",
         "visible_boundaries",
         "addressee_plan",
         "delivery_profile",
@@ -1146,6 +1154,7 @@ def validate_text_surface_output(
         raise CognitionContractError("unsupported text surface output schema")
     for field_name in (
         "content_plan",
+        "epistemic_boundary",
         "selected_surface_intent",
     ):
         _require_text(payload[field_name], field_name, maximum=1000)
@@ -3650,6 +3659,8 @@ class TextSurfaceInput(TypedDict, total=False):
     permitted_action_results: list[SemanticActionResultV2]
     interaction_style_context: str
     character_expression_context: CharacterExpressionContextV2
+    subjective_expression_context: SubjectiveExpressionContextV1
+    addressee_plan: list[SurfaceAddresseePlanV1]
     visual_character_context: str
     recent_character_dialog: NotRequired[list[str]]
     relational_willingness: NotRequired[RelationalWillingness]
@@ -3670,6 +3681,8 @@ def validate_text_surface_input_canonical(
         "permitted_action_results",
         "interaction_style_context",
         "character_expression_context",
+        "subjective_expression_context",
+        "addressee_plan",
         "visual_character_context",
     }
     optional = {"recent_character_dialog", "relational_willingness"}
@@ -3692,6 +3705,23 @@ def validate_text_surface_input_canonical(
     _require_text(payload["interaction_style_context"], "text surface interaction style")
     if not isinstance(payload["character_expression_context"], Mapping):
         raise CognitionContractError("text surface character expression context is invalid")
+    subjective_context = payload["subjective_expression_context"]
+    _require_exact_keys(
+        subjective_context,
+        {"private_monologue", "epistemic_boundary"},
+        "text surface subjective expression context",
+    )
+    _require_text(
+        subjective_context["private_monologue"],
+        "text surface private monologue",
+        maximum=600,
+    )
+    _require_text(
+        subjective_context["epistemic_boundary"],
+        "text surface epistemic boundary",
+        maximum=1000,
+    )
+    validate_surface_addressee_plan(payload["addressee_plan"])
     _require_text(payload["visual_character_context"], "text surface visual context")
     if "recent_character_dialog" in payload:
         _validate_recent_character_dialog(payload["recent_character_dialog"])

@@ -160,6 +160,45 @@ def validate_canonical_appraisal_stage(
     return validate_canonical_appraisal(raw, families=families)
 
 
+def cut_over_ordinary_response_goals(
+    state: Mapping[str, object],
+    *,
+    continuation_goal_ref: object = None,
+) -> dict[str, object]:
+    """Keep only the explicitly current unresolved response goal.
+
+    The canonical V3 boundary treats ordinary response goals as turn-local
+    unless the caller supplies the exact private continuation reference from
+    the immediately preceding resolver cycle. Other goal kinds and every
+    causal or affect row remain untouched.
+    """
+
+    validated = validate_cognition_state(state)
+    preserved_entity_id = ""
+    if isinstance(continuation_goal_ref, Mapping):
+        scope = continuation_goal_ref.get("scope")
+        kind = continuation_goal_ref.get("kind")
+        entity_id = continuation_goal_ref.get("entity_id")
+        if (
+            scope == validated["state_scope"]
+            and kind == "goal"
+            and isinstance(entity_id, str)
+        ):
+            preserved_entity_id = entity_id.strip()
+    validated["goals"] = [
+        goal
+        for goal in validated["goals"]
+        if (
+            goal.get("goal_kind") != "ordinary_response"
+            or (
+                goal.get("entity_id") == preserved_entity_id
+                and goal.get("status") in {"pursuing", "blocked"}
+            )
+        )
+    ]
+    return validate_cognition_state(validated)
+
+
 def bind_axis_changes(
     payload: Mapping[str, object],
     appraisals: Sequence[CanonicalAppraisal],
@@ -287,6 +326,7 @@ def bind_axis_changes(
         )
     )
     need_goal = needs_continuation_goal
+    state = cut_over_ordinary_response_goals(state)
     relationship_changes = any(
         item.family == "relationship_social"
         and item.applicable
@@ -651,6 +691,7 @@ __all__ = [
     "AppraisalContractError",
     "bind_axis_changes",
     "bind_canonical_appraisal",
+    "cut_over_ordinary_response_goals",
     "validate_canonical_appraisal",
     "validate_canonical_appraisal_stage",
 ]

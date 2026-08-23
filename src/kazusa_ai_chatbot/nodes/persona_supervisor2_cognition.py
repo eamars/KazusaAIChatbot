@@ -682,6 +682,12 @@ async def call_cognition_subgraph(
         cognition_input["_persisted_base_state"] = deepcopy(
             dict(persisted_base_state)
         )
+    if prior_replacement is not None and isinstance(prior_update, Mapping):
+        continuation_goal_ref = prior_update.get("continuation_goal_ref")
+        if isinstance(continuation_goal_ref, Mapping):
+            cognition_input["_continuation_goal_ref"] = deepcopy(
+                dict(continuation_goal_ref)
+            )
     reflection_count = sum(
         1
         for row in cognition_input["evidence"]
@@ -953,7 +959,8 @@ def _project_output_to_global_state(
         "goal_resolution": plan.get("goal_resolution", "answerable_now"),
         "resolver_capability_requests": resolver_requests,
         "action_specs": action_specs,
-        "internal_monologue": goal.get("reason", ""),
+        "internal_monologue": output["private_monologue"],
+        "interaction_subtext": output["active_character_goal"]["reason"],
         "character_intent": goal.get("intent", ""),
         "logical_stance": output.get("relational_willingness", {}).get(
             "stance", ""

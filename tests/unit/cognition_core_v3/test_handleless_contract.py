@@ -49,6 +49,18 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     _project_output_to_global_state,
 )
 
+_CODE_SPAN_PATTERN = re.compile(r"`[^`]+`")
+_HAN_PATTERN = re.compile(r"[\u3400-\u9fff]")
+_MULTIWORD_ENGLISH_PATTERN = re.compile(
+    r"\b[A-Za-z]+(?:[ \t]+[A-Za-z]+){2,}\b"
+)
+
+
+def _assert_native_chinese_instruction(value: str) -> None:
+    assert _HAN_PATTERN.search(value)
+    prose = _CODE_SPAN_PATTERN.sub("", value)
+    assert _MULTIWORD_ENGLISH_PATTERN.search(prose) is None
+
 
 def _input() -> dict[str, object]:
     timestamp = "2026-07-14T00:00:00Z"
@@ -167,6 +179,18 @@ def _services(invoker: object) -> CognitionChainServicesV3:
     )
 
 
+def test_cognition_chain_system_prompts_use_native_chinese() -> None:
+    assert set(facade_module._STAGE_SYSTEM_PROMPTS) == {"A1", "A2", "G", "P"}
+    for prompt in facade_module._STAGE_SYSTEM_PROMPTS.values():
+        _assert_native_chinese_instruction(prompt)
+    _assert_native_chinese_instruction(
+        facade_module._EXACT_JSON_SYSTEM_SUFFIX
+    )
+    assert "自由填写的语义文本必须使用简体中文" in (
+        facade_module._EXACT_JSON_SYSTEM_SUFFIX.replace("\n", "")
+    )
+
+
 def test_canonical_stage_packets_are_handleless_and_disjoint() -> None:
     payload = _input()
     workspace = build_canonical_turn_workspace(
@@ -183,13 +207,16 @@ def test_canonical_stage_packets_are_handleless_and_disjoint() -> None:
     assert packets["A1"]["output_contract"]["required_fields"] == list(CANONICAL_A1_FAMILIES)
     assert packets["A2"]["output_contract"]["required_fields"] == list(CANONICAL_A2_FAMILIES)
     assert packets["G"]["output_contract"]["required_fields"] == [
-        "active_character_goal", "relational_willingness"
+        "active_character_goal", "relational_willingness", "private_monologue"
     ]
     assert packets["P"]["output_contract"]["required_fields"] == [
-        "goal_resolution", "response_goal", "action_requests", "resolver_requests"
+        "goal_resolution", "response_goal", "action_requests",
+        "resolver_requests", "epistemic_boundary",
     ]
     assert set(packets["P"]) == {
-        "stage", "guidance", "goal", "capabilities", "output_contract",
+        "stage", "guidance", "goal", "current_observation",
+        "direct_facts", "participant_continuity", "continuation_state",
+        "capabilities", "output_contract",
     }
     rendered = json.dumps(packets, ensure_ascii=False)
     assert all(token not in rendered for token in ("source_id", "entity_id", "target_path"))
@@ -273,6 +300,9 @@ def test_model_capabilities_are_semantic_and_reserve_speak_capacity() -> None:
                     for row in action_rows
                 ],
                 "resolver_requests": [],
+                "epistemic_boundary": (
+                    "Assert only the supplied current observation."
+                ),
             },
             self_cognition=False,
             capabilities=three_action_capabilities,
@@ -589,6 +619,9 @@ def test_caller_materializes_typed_speak_and_resolver_envelopes() -> None:
             "reason": "the request needs a grounded clarification",
             "cause_summary": "the request",
         },
+        "private_monologue": (
+            "I want to answer, but I need the missing detail first."
+        ),
         "response_plan": {
             "goal_resolution": "requires_user_input",
             "response_goal": "ask for the missing detail",
@@ -598,6 +631,9 @@ def test_caller_materializes_typed_speak_and_resolver_envelopes() -> None:
                 "goal": "clarify the missing detail",
                 "reason": "the current evidence is insufficient",
             }],
+            "epistemic_boundary": (
+                "The missing detail remains unknown and must be asked."
+            ),
         },
         "state_projection": {"replacement_state": replacement},
         "affect_projection": [],
@@ -640,7 +676,7 @@ def test_goal_capacity_deferral_preserves_response_and_unrelated_resolver() -> N
         }
         state["goals"].append(create_guarded_goal(
             state,
-            goal_kind="ordinary_response",
+            goal_kind="safety",
             description=f"protected continuing goal {index}",
             role_refs=[],
             evidence_refs=[row_evidence],
@@ -682,6 +718,9 @@ def test_goal_capacity_deferral_preserves_response_and_unrelated_resolver() -> N
             "reason": "the current request still has a visible response",
             "cause_summary": "the current request",
         },
+        "private_monologue": (
+            "I still want to give a useful answer despite the blocked task."
+        ),
         "response_plan": {
             "goal_resolution": "requires_user_input",
             "response_goal": "explain the missing detail",
@@ -698,6 +737,9 @@ def test_goal_capacity_deferral_preserves_response_and_unrelated_resolver() -> N
                     "reason": "the current evidence is insufficient",
                 },
             ],
+            "epistemic_boundary": (
+                "State the current limitation without claiming a task result."
+            ),
         },
         "state_projection": {
             "replacement_state": replacement,
@@ -734,10 +776,12 @@ class _FourStageInvoker:
         self.calls: list[str] = []
         self.configs: list[LLMCallConfig] = []
         self.packets: list[dict[str, object]] = []
+        self.system_prompts: list[str] = []
 
     async def ainvoke(self, messages: object, *, config: LLMCallConfig) -> object:
         self.calls.append(config.stage_name.rsplit(".", 1)[-1])
         self.configs.append(config)
+        self.system_prompts.append(messages[0].content)
         self.packets.append(json.loads(messages[1].content))
         stage = self.calls[-1]
         if stage == "A1":
@@ -772,18 +816,24 @@ class _FourStageInvoker:
                     "reason": "no relationship judgment is needed",
                     "cause_summary": "current observation",
                 },
+                "private_monologue": (
+                    "I want to understand what they mean before I answer."
+                ),
             }
         else:
             value = {
                 "goal_resolution": "requires_user_input",
                 "response_goal": "ask for clarification",
                 "action_requests": [], "resolver_requests": [],
+                "epistemic_boundary": (
+                    "The intended referent remains unknown; ask rather than assert."
+                ),
             }
         return SimpleNamespace(content=json.dumps(value, ensure_ascii=False))
 
 
 @pytest.mark.asyncio
-async def test_canonical_cognition_calls_a1_a2_g_p_once_with_one_goal(
+async def test_canonical_cognition_calls_a1_a2_g_p_once_with_subjective_outputs(
     monkeypatch,
 ) -> None:
     invoker = _FourStageInvoker()
@@ -825,14 +875,30 @@ async def test_canonical_cognition_calls_a1_a2_g_p_once_with_one_goal(
     assert [row["attempt_index"] for row in trace_rows] == [1] * 4
     assert all(row["parsed_output"] for row in trace_rows)
     assert [config.output_mode for config in invoker.configs] == ["text"] * 4
-    assert set(invoker.packets[0]) >= {"stage", "observation", "output_contract"}
-    assert "character_context" not in invoker.packets[0]
-    assert set(invoker.packets[1]["context"]) >= {"accepted_a1_meaning", "character_context"}
-    assert "capabilities" not in invoker.packets[1]["context"]
-    assert all("axis_changes" not in row for row in invoker.packets[1]["context"]["accepted_a1_meaning"])
-    assert set(invoker.packets[2]) >= {"appraisal_summary", "character_context"}
+    assert set(invoker.packets[0]) >= {
+        "stage", "current_observation", "direct_facts",
+        "continuation_state", "output_contract",
+    }
+    assert "conditional_character_context" not in invoker.packets[0]
+    assert set(invoker.packets[1]) >= {
+        "accepted_a1_meaning", "conditional_character_context",
+        "participant_continuity",
+    }
+    assert "capabilities" not in invoker.packets[1]
+    assert all(
+        "axis_changes" not in row
+        for row in invoker.packets[1]["accepted_a1_meaning"]
+    )
+    assert set(invoker.packets[2]) >= {
+        "appraisal_summary", "conditional_character_context",
+    }
     assert "output_contract" in invoker.packets[3]
     assert "appraisal_summary" not in invoker.packets[3]
+    assert "缺少证据" in invoker.system_prompts[3]
+    assert "必须明确表达不确定性" in invoker.system_prompts[3]
+    assert "不得把任何输入权威通道名称写入输出对象" in (
+        invoker.system_prompts[3]
+    )
     def walk(value: object) -> None:
         if isinstance(value, dict):
             for key, child in value.items():
@@ -851,6 +917,12 @@ async def test_canonical_cognition_calls_a1_a2_g_p_once_with_one_goal(
     assert all(record["status"] == "parsed" for record in records)
     assert output["schema_version"] == "cognition_output.v3"
     assert output["active_character_goal"]["goal_kind"] == "clarify"
+    assert output["private_monologue"] == (
+        "I want to understand what they mean before I answer."
+    )
+    assert output["response_plan"]["epistemic_boundary"] == (
+        "The intended referent remains unknown; ask rather than assert."
+    )
     assert len(output["appraisals"]) == 6
     assert output["diagnostics"] == {"status": "complete"}
     assert output["state_projection"]["replacement_state"]["relationship"]["trust"] > (

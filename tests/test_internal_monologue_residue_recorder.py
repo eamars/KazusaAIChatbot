@@ -50,6 +50,9 @@ def _completed_state() -> dict[str, object]:
         'global_user_id': 'user-1',
         'user_name': 'User',
         'internal_monologue': 'I am still considering the current scene.',
+        'cognition_core_output': {
+            'private_monologue': 'I am still considering the current scene.',
+        },
         'logical_stance': 'TENTATIVE',
         'character_intent': 'CONSIDER',
         'emotional_appraisal': '',
@@ -177,6 +180,11 @@ def test_build_recorder_input_includes_group_review_reliability_notes() -> None:
         "internal_monologue": (
             '我刚才看到灯说“你的头发软软的”，但这行属于雪凪和灯的侧线。'
         ),
+        "cognition_core_output": {
+            "private_monologue": (
+                "I am evaluating an ambiguous group side thread."
+            ),
+        },
         "logical_stance": "TENTATIVE",
         "character_intent": "DISMISS",
         "emotional_appraisal": "",
@@ -220,6 +228,51 @@ def test_build_recorder_input_includes_group_review_reliability_notes() -> None:
     assert recorder_input["source_reliability_notes"] == [
         "group review contained ambiguous second-person side-thread rows",
     ]
+
+
+def test_build_recorder_input_uses_cognition_private_monologue() -> None:
+    """Residue consumes the exact G product instead of an analytic alias."""
+
+    completed_state = {
+        "character_profile": {
+            "name": "Test Character",
+            "global_user_id": "character-global",
+        },
+        "platform": "debug",
+        "platform_channel_id": "private-1",
+        "channel_type": "private",
+        "global_user_id": "user-1",
+        "user_name": "Test User",
+        "internal_monologue": "analytic goal reason alias",
+        "cognition_core_output": {
+            "private_monologue": (
+                "I am curious, but I do not want to pretend I know this."
+            ),
+        },
+        "logical_stance": "tentative",
+        "character_intent": "clarify",
+        "emotional_appraisal": "curious",
+        "interaction_subtext": "",
+        "social_distance": "",
+        "relational_dynamic": "",
+        "final_dialog": ["What is that object?"],
+        "cognitive_episode": {
+            "episode_id": "episode-private-monologue",
+            "trigger_source": "user_message",
+            "origin_metadata": {},
+        },
+        "text_surface_output_v2": {
+            "content_plan": "ask what the object is",
+            "visible_boundaries": [],
+        },
+    }
+
+    recorder_input = recorder._build_recorder_input(completed_state)
+
+    assert recorder_input is not None
+    assert recorder_input["internal_monologue"] == (
+        "I am curious, but I do not want to pretend I know this."
+    )
 
 
 @pytest.mark.asyncio
@@ -273,6 +326,9 @@ async def test_record_completed_episode_retries_wrong_schema_output(
         "global_user_id": "user-1",
         "user_name": "Tobacco",
         "internal_monologue": '我还记得 Tobacco 用提拉米苏逗我。',
+        "cognition_core_output": {
+            "private_monologue": "I remember the tiramisu teasing.",
+        },
         "logical_stance": "TENTATIVE",
         "character_intent": "BANTAR",
         "emotional_appraisal": "",

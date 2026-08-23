@@ -391,13 +391,21 @@ def canonical_cognition_output(
     *,
     route: str = "speech",
     owner_user_id: str = "v2-test-user",
+    state_scope: str = "user",
 ) -> dict[str, Any]:
     """Build one minimal current cognition output for adjacent tests."""
 
-    state = build_acquaintance_user_state(
-        global_user_id=owner_user_id,
-        updated_at=NOW,
-    )
+    if state_scope == "user":
+        state = build_acquaintance_user_state(
+            global_user_id=owner_user_id,
+            updated_at=NOW,
+        )
+        owner_key = owner_user_id
+    elif state_scope == "character":
+        state = build_character_production_state(updated_at=NOW)
+        owner_key = "character"
+    else:
+        raise ValueError("canonical cognition test state scope is invalid")
     response_goal = "acknowledge the grounded episode" if route == "speech" else ""
     output: dict[str, Any] = {
         "schema_version": "cognition_output.v3",
@@ -414,23 +422,33 @@ def canonical_cognition_output(
             "reason": "当前回合证据不涉及关系立场判断",
             "cause_summary": "当前回合证据不涉及关系立场判断",
         },
+        "private_monologue": (
+            "I feel attentive because the current episode needs a grounded "
+            "decision, and I want to preserve that judgment."
+        ),
         "response_plan": {
             "goal_resolution": "answerable_now" if route == "speech" else "defer",
             "response_goal": response_goal,
             "action_requests": [],
             "resolver_requests": [],
+            "epistemic_boundary": (
+                "Assert only the supplied current-episode facts; keep every "
+                "unobserved cause, intent, and outcome uncertain."
+            ),
         },
         "affect_projection": [],
         "relationship_projection": {"relationship_summary": "stable", "axis_summaries": {}},
         "cause_provenance": [],
         "diagnostics": {"status": "complete"},
         "state_projection": {
-            "state_scope": "user",
-            "owner_key": owner_user_id,
+            "state_scope": state_scope,
+            "owner_key": owner_key,
             "expected_previous_state": state,
+            "original_persisted_state": state,
             "replacement_state": state,
             "transition_contexts": [],
             "binding_receipts": [],
+            "capacity_deferred": [],
         },
     }
     return output

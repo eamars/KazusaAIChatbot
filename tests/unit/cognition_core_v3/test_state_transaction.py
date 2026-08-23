@@ -17,13 +17,17 @@ from kazusa_ai_chatbot.cognition_core_v3.contracts import (
     CANONICAL_A2_FAMILIES,
     CanonicalAppraisal,
 )
-from kazusa_ai_chatbot.cognition_core_v3.facade import run_cognition
+from kazusa_ai_chatbot.cognition_core_v3.facade import (
+    _prepare_state_transaction,
+    run_cognition,
+)
 from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_character_production_state,
     validate_cognition_state,
 )
 from kazusa_ai_chatbot.cognition_shared.state_reducers import (
     apply_relationship_maintenance,
+    create_guarded_goal,
     materialize_causal_root,
 )
 from tests.unit.cognition_core_v3.test_handleless_contract import (
@@ -120,6 +124,124 @@ def test_repeated_answerable_turns_do_not_accumulate_transient_events_or_goals()
     assert state["active_events"] == []
     assert state["goals"] == []
     validate_cognition_state(state)
+
+
+def test_stale_response_goal_cutover_preserves_active_causes_and_other_goals() -> None:
+    """Canonical cutover removes only stale ordinary-response goals."""
+
+    payload = _input()
+    state = deepcopy(payload["mutable_state"])
+    evidence = payload["evidence"][0]["evidence_ref"]
+    state, event_id, _created = materialize_causal_root(
+        state,
+        kind="event",
+        primary_evidence=evidence,
+        description="an active emotional cause",
+    )
+    stale_evidence = {**evidence, "source_id": "pre-cutover-response"}
+    durable_evidence = {**evidence, "source_id": "durable-bond-goal"}
+    state["goals"] = [
+        create_guarded_goal(
+            state,
+            goal_kind="ordinary_response",
+            description="answer a completed prior turn",
+            role_refs=[],
+            evidence_refs=[stale_evidence],
+            axes={},
+        ),
+        create_guarded_goal(
+            state,
+            goal_kind="bond_protection",
+            description="protect an existing bond",
+            role_refs=[{
+                "role": "affected_relationship",
+                "entity_kind": "relationship",
+                "entity_id": state["relationship"]["relationship_id"],
+            }],
+            evidence_refs=[durable_evidence],
+            axes={},
+        ),
+    ]
+    state["affect_activations"] = [{
+        "activation_id": "emotion:sadness",
+        "emotion_id": "sadness",
+        "primary_root": {
+            "scope": "user",
+            "kind": "event",
+            "entity_id": event_id,
+        },
+        "root_refs": [{
+            "scope": "user",
+            "kind": "event",
+            "entity_id": event_id,
+        }],
+        "phase": "active",
+        "score": 40,
+        "peak_score": 40,
+        "trend": "stable",
+        "cause_status": "active",
+        "started_at": state["updated_at"],
+        "updated_at": state["updated_at"],
+        "last_reinforced_at": state["updated_at"],
+    }]
+    validate_cognition_state(state)
+    payload["mutable_state"] = state
+
+    _original, prepared, _transitions = _prepare_state_transaction(payload)
+
+    assert [goal["goal_kind"] for goal in prepared["goals"]] == [
+        "bond_protection",
+    ]
+    assert any(
+        event["entity_id"] == event_id
+        for event in prepared["active_events"]
+    )
+    assert prepared["affect_activations"][0]["primary_root"]["entity_id"] == (
+        event_id
+    )
+
+
+def test_unresolved_continuation_replaces_prior_response_goal_exactly() -> None:
+    """One unresolved turn owns one current ordinary-response goal."""
+
+    payload = _input()
+    state = deepcopy(payload["mutable_state"])
+    evidence = payload["evidence"][0]["evidence_ref"]
+    prior_goal = create_guarded_goal(
+        state,
+        goal_kind="ordinary_response",
+        description="the prior unresolved wording goal",
+        role_refs=[],
+        evidence_refs=[{**evidence, "source_id": "prior-response-goal"}],
+        axes={},
+    )
+    state["goals"] = [prior_goal]
+    payload["mutable_state"] = state
+    binding_metadata: dict[str, object] = {}
+
+    updated, _transitions, _receipts, _provenance = bind_axis_changes(
+        payload,
+        (),
+        goal={
+            "intent": "ask for the current missing detail",
+            "cause_summary": "the current observation",
+        },
+        goal_resolution="requires_user_input",
+        binding_metadata=binding_metadata,
+    )
+
+    response_goals = [
+        goal
+        for goal in updated["goals"]
+        if goal["goal_kind"] == "ordinary_response"
+    ]
+    assert len(response_goals) == 1
+    assert response_goals[0]["description"] == (
+        "ask for the current missing detail"
+    )
+    assert binding_metadata["continuation_goal_ref"]["entity_id"] == (
+        response_goals[0]["entity_id"]
+    )
 
 
 def test_all_protected_capacity_defers_without_losing_semantic_state() -> None:
@@ -293,6 +415,9 @@ class _CharacterTransactionInvoker:
                     "reason": "no relationship judgment is needed",
                     "cause_summary": "the current observation",
                 },
+                "private_monologue": (
+                    "I want to understand this because the observation matters."
+                ),
             }
         else:
             value = {
@@ -300,6 +425,9 @@ class _CharacterTransactionInvoker:
                 "response_goal": "acknowledge the observation",
                 "action_requests": [],
                 "resolver_requests": [],
+                "epistemic_boundary": (
+                    "Assert only what the current observation supports."
+                ),
             }
         return SimpleNamespace(content=json.dumps(value, ensure_ascii=False))
 

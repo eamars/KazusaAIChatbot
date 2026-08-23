@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from kazusa_ai_chatbot.cognition_episode import (
+    build_goal_continuation_ref,
     build_tool_result_episode,
     build_user_message_episode,
 )
@@ -250,6 +251,16 @@ async def test_decontextualizer_leaves_accepted_task_episode_source_owned():
     state["user_input"] = "Accepted task result is failed."
     state["channel_topic"] = ""
     state["indirect_speech_context"] = ""
+    continuation_ref = build_goal_continuation_ref(
+        source_episode_id="episode-task-1",
+        source_message_id="message-task-1",
+        branch_id="ordinary_response",
+        goal_ref={
+            "scope": "user",
+            "kind": "goal",
+            "entity_id": state["global_user_id"],
+        },
+    )
     state["cognitive_episode"] = build_tool_result_episode(
         result={
             "schema_version": "tool_result_ready.v1",
@@ -271,6 +282,7 @@ async def test_decontextualizer_leaves_accepted_task_episode_source_owned():
             },
             "evidence_refs": [],
             "result_ref": "task-1",
+            "goal_continuation_ref": continuation_ref,
             "source_platform_bot_id": state["platform_bot_id"],
             "source_character_name": state["character_profile"]["name"],
         },

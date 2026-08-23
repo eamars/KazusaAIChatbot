@@ -80,7 +80,11 @@ input order.
 
 ## Prompt And Validation Contract
 
-The recorder receives a minimal current-run payload:
+After visible outcome selection, the recorder reads the exact current-turn
+`cognition_core_output.private_monologue` produced by G. It does not reconstruct
+first-person subjectivity from `active_character_goal.reason` or the legacy
+global analytic alias. The recorder then receives a minimal current-run
+payload:
 
 - `internal_monologue`
 - `current_speaker_display_name`
@@ -134,7 +138,7 @@ completed episode in post-turn/background work. For self-cognition, writing
 runs after the completed self-cognition state is available. The normal visible
 `/chat` response path does not gain an extra foreground LLM call.
 
-V2 goal-cognition branches receive only the bounded
+Goal cognition receives only the bounded
 `internal_monologue_residue_context` projection. Appraisal, L3, dialog,
 adapters, scheduler, and generic persistence paths must not receive raw prior
 residue rows or the projected private continuity string.

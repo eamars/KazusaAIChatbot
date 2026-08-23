@@ -168,6 +168,9 @@ def test_graph_projection_preserves_semantic_cognition_rows() -> None:
                                 "reason": "The evidence is incomplete.",
                                 "cause_summary": "The current message is ambiguous.",
                             },
+                            "private_monologue": (
+                                "I want to understand this before I claim more."
+                            ),
                         },
                     },
                     {
@@ -181,6 +184,9 @@ def test_graph_projection_preserves_semantic_cognition_rows() -> None:
                         "detail": {
                             "response_goal": "Ask a focused question.",
                             "goal_resolution": "answerable_now",
+                            "epistemic_boundary": (
+                                "The object remains unknown; ask rather than identify it."
+                            ),
                         },
                     },
                     {
@@ -229,6 +235,12 @@ def test_graph_projection_preserves_semantic_cognition_rows() -> None:
     assert node_by_category["active_character_goal"].detail["goal"]["intent"] == (
         "Clarify the observation."
     )
+    assert node_by_category["active_character_goal"].detail[
+        "private_monologue"
+    ] == "I want to understand this before I claim more."
+    assert node_by_category["response_plan"].detail[
+        "epistemic_boundary"
+    ] == "The object remains unknown; ask rather than identify it."
     assert node_by_category["affect_causes"].detail["cause_provenance"][0][
         "cause_status"
     ] == "active"

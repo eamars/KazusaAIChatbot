@@ -46,7 +46,6 @@ from kazusa_ai_chatbot.cognition_shared.surface import (
 from kazusa_ai_chatbot.config import (
     COGNITION_STAGE_TIMEOUT_SECONDS,
     SURFACE_CONTENT_DEFAULT_MAX_COMPLETION_TOKENS,
-    SURFACE_PREFERENCE_DEFAULT_MAX_COMPLETION_TOKENS,
     SURFACE_VISUAL_DEFAULT_MAX_COMPLETION_TOKENS,
 )
 from kazusa_ai_chatbot.llm_interface import LLMCallConfig
@@ -97,6 +96,12 @@ def build_text_surface_input_from_global_state(
     goal = output.get("active_character_goal")
     if not isinstance(plan, Mapping) or not isinstance(goal, Mapping):
         raise ValueError("canonical cognition response product is incomplete")
+    private_monologue = output.get("private_monologue")
+    epistemic_boundary = plan.get("epistemic_boundary")
+    if not isinstance(private_monologue, str) or not private_monologue.strip():
+        raise ValueError("canonical private monologue is required")
+    if not isinstance(epistemic_boundary, str) or not epistemic_boundary.strip():
+        raise ValueError("canonical epistemic boundary is required")
     expression_context, visual_context = _character_surface_contexts(state)
     canonical_payload: TextSurfaceInput = {
         "schema_version": "text_surface_input.v3",
@@ -113,6 +118,14 @@ def build_text_surface_input_from_global_state(
         "permitted_action_results": _action_results(state),
         "interaction_style_context": interaction_style_context,
         "character_expression_context": expression_context,
+        "subjective_expression_context": {
+            "private_monologue": private_monologue,
+            "epistemic_boundary": epistemic_boundary,
+        },
+        "addressee_plan": _surface_addressee_plan(
+            _surface_target_roles(state),
+            state=state,
+        ),
         "visual_character_context": visual_context,
         "recent_character_dialog": _recent_character_dialog(state),
     }
@@ -408,12 +421,6 @@ def _build_text_surface_services() -> TextSurfaceServicesV2:
                 SURFACE_CONTENT_DEFAULT_MAX_COMPLETION_TOKENS
             ),
         ),
-        preference_config=_surface_config(
-            "v2_surface_preference",
-            max_completion_tokens=(
-                SURFACE_PREFERENCE_DEFAULT_MAX_COMPLETION_TOKENS
-            ),
-        ),
     )
 
 
@@ -559,7 +566,7 @@ def _surface_addressee_plan(
         elif entity_kind == "user":
             handle = "current_user"
             display_name = str(state.get("user_name", "当前用户"))
-            semantic_role = "embedded_target"
+            semantic_role = "direct_recipient"
             wording_policy = "second_person_allowed"
         elif entity_kind == "character":
             handle = "self"
@@ -583,6 +590,34 @@ def _surface_addressee_plan(
             "wording_policy": wording_policy,
         })
     return result
+
+
+def _surface_target_roles(
+    state: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Read the caller-owned target roles from the selected speak action."""
+
+    action_specs = state.get("action_specs")
+    if not isinstance(action_specs, list):
+        return []
+    speak_specs = [
+        row
+        for row in action_specs
+        if isinstance(row, Mapping) and row.get("kind") == "speak"
+    ]
+    if len(speak_specs) > 1:
+        raise ValueError("surface received multiple speak action specs")
+    if not speak_specs:
+        return []
+    provenance = speak_specs[0].get("cognition_provenance")
+    if not isinstance(provenance, Mapping):
+        raise ValueError("speak action cognition provenance is required")
+    target_roles = provenance.get("target_roles")
+    if not isinstance(target_roles, list):
+        raise ValueError("speak action target roles must be a list")
+    if any(not isinstance(role, Mapping) for role in target_roles):
+        raise ValueError("speak action target role must be a mapping")
+    return [dict(role) for role in target_roles]
 
 
 def _canonical_episode(state: Mapping[str, Any]) -> dict[str, Any]:

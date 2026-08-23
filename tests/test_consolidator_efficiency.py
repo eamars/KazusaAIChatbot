@@ -89,6 +89,7 @@ def _global_state() -> dict:
             "schema_version": "text_surface_output.v2",
             "content_plan": "acknowledge",
             "content_requirements": ["Acknowledge the current user."],
+            "epistemic_boundary": "Assert only the grounded turn.",
             "visible_boundaries": [],
             "addressee_plan": [{
                 "handle": "current_user",

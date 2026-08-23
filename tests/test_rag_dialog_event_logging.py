@@ -154,6 +154,7 @@ def _dialog_global_state() -> dict[str, object]:
             "schema_version": "text_surface_output.v2",
             "content_plan": "Acknowledge the request.",
             "content_requirements": ["Address the current user."],
+            "epistemic_boundary": "Assert only the supplied request.",
             "visible_boundaries": [],
             "addressee_plan": [{
                 "handle": "current_user",

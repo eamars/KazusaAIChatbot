@@ -57,7 +57,8 @@ stage_0_msg_decontextualizer
   -> route from the canonical response plan
        speech
          -> build the canonical text-surface input
-         -> run three bounded text stages
+         -> run one bounded semantic text stage
+         -> project visible boundaries and addressees deterministically
          -> run one terminal visual stage as a sibling when enabled
          -> retain the validated text input and output for dialog
          -> dialog_agent renders the text output
@@ -111,8 +112,9 @@ bands. RAG evidence does not become persona, affect, or final stance merely by
 being retrieved.
 
 The cognition output preserves all six appraisal families and axes, structured
-emotion causes, one active-character goal, relational willingness, and a
-canonical response plan. Surface and action consumers receive only validated
+emotion causes, one active-character goal, relational willingness, the exact G
+`private_monologue`, and a canonical response plan with P's
+`epistemic_boundary`. Surface and action consumers receive only validated
 semantic projections; they do not re-derive ownership from prose.
 
 ## Action Ownership
@@ -144,6 +146,9 @@ from:
 - expression policy;
 - semantic affect and optional relationship projections;
 - permitted semantic action results; and
+- the exact private monologue and epistemic boundary as typed subjective
+  expression context;
+- the selected speak action's caller-owned addressee roles; and
 - bounded interaction-style guidance, exact tempo/linguistic-texture character
   expression, an interaction-scoped recent-character-dialog projection, and an
   isolated visual-character context.
@@ -155,13 +160,17 @@ bounded surface context. Storage identifiers, revisions,
 reflection lineage, and raw channel/user identifiers are excluded.
 
 `run_text_surface_planning(...)` projects visible episode content and runs
-exactly two bounded stages in parallel. Unified content planning atomically
+exactly one bounded semantic stage. Unified content planning atomically
 returns `content_plan`, `content_requirements`, the exact five-field
 `delivery_profile`, and optional expression-only `lexical_avoidances`; the
-upstream relational decision is carried when present;
-preference planning returns an empty `visible_boundaries` list and the
-upstream `addressee_plan`. Unified content receives tempo and linguistic texture,
-whereas preference receives no character-expression context. Delivery fields
+upstream relational decision is carried when present. Deterministic code emits
+an empty `visible_boundaries` list and copies the validated caller-owned
+`addressee_plan`. Content planning receives tempo, linguistic texture, the
+expression-only private monologue, and the authoritative epistemic boundary.
+The public text output retains that exact epistemic boundary for dialog but
+does not retain the private monologue. A physical or external effect reaches
+visible wording as completed only from a matching `executed`
+`permitted_action_results` row. Delivery fields
 describe lexical register, sentence shape, rhythm, hesitation, and punctuation
 only; they cannot override the cognition-selected stance.
 

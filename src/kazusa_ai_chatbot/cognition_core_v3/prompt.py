@@ -28,36 +28,43 @@ from kazusa_ai_chatbot.cognition_shared.state_projection import (
 )
 
 A1_QUESTION_GUIDANCE = '''
-Return fixed A1 family slots for event agency, goal and threat outcome, and
-epistemic comparison or memory. Keep semantic meaning and concrete causes
-primary; axis changes are optional subordinate evidence.
+按固定位置返回 A1 的三个评估类别：事件与行为归因、目标与威胁结果、认知比较或
+记忆。以开放的语义判断和具体原因作为主要内容；`axis_changes` 只是可选的从属
+证据。`current_observation` 和 `direct_facts` 可以用于确认当下发生了什么。
+`continuation_state` 只提供仍在起作用的因果压力。
 '''
 A2_QUESTION_GUIDANCE = '''
-Return fixed A2 family slots for relationship and social judgment, moral
-identity, and existential drive. Keep semantic meaning and concrete causes
-primary; axis changes are optional subordinate evidence.
+按固定位置返回 A2 的三个评估类别：关系与社会判断、道德身份、存在性驱力。以开放
+的语义判断和具体原因作为主要内容；`axis_changes` 只是可选的从属证据。
+`participant_continuity` 只描述此前参与者、行为及结果。
+`conditional_character_context` 可以影响角色判断和边界，但不能用于确认当前事实、
+同意、承诺、许可、能力或当前用户的意图。
 '''
 APPRAISAL_QUESTION_GUIDANCE = '''
-Return one JSON object with exactly the fixed family slots requested by this
-stage. Each slot keeps an open semantic_summary and concrete cause_summary.
-Axis changes are optional subordinate evidence and use only the listed axis and
-one shift value. The active character remains the subject of judgment.
+返回一个 JSON 对象，并且严格包含本阶段要求的固定评估类别位置。每个位置都要保留
+开放的 `semantic_summary` 和具体的 `cause_summary`。`axis_changes` 只是可选的
+从属证据，只能使用列出的 `axis` 和一个 `shift` 值。当前角色始终是判断主体。
 '''
 GOAL_QUESTION_GUIDANCE = '''
-Return exactly one active_character_goal owned by the active character and one
-relational_willingness record. Keep the goal meaningful even when the request
-is uncertain: clarify, preserve a boundary, defer judgment, or grounded
-silence are valid goals.
+严格返回一个由当前角色拥有的 `active_character_goal`、一项
+`relational_willingness` 记录，以及一段简洁的第一人称 `private_monologue`。
+内心独白要连接此刻的感受、具体原因和眼前动机。它可以影响表达方式，但不能用于
+确认事实、许可、能力、目标对象或状态变化。即使请求仍不明确，也要让角色目标具有
+实际意义；澄清、守住边界、暂缓判断或有依据地保持沉默，都是有效目标。
 '''
 ORDINARY_PLAN_GUIDANCE = '''
-Return a response plan owned by the active character. response_goal describes
-visible dialog intent; action_requests and resolver_requests use only supplied
-semantic capabilities. Do not invent capabilities or private references.
+返回一份由当前角色拥有的回应计划。`response_goal` 描述可见对话的意图；
+`action_requests` 和 `resolver_requests` 只能使用输入中提供的语义能力。
+`epistemic_boundary` 必须说明可见措辞可以断言什么、哪些内容只能作为解释，以及
+哪些内容仍然未知。每一项未经观察的功能、原因、来源、意图或结果，都必须留在解释
+层，并在可见措辞中明确表达不确定性。缺少证据或没有观察到某项特征，都不能据此
+作出否定断言，也不能排除任何可能。不得虚构能力或私有引用。严格只返回
+`goal_resolution`、`response_goal`、`action_requests`、`resolver_requests` 和
+`epistemic_boundary`。不得把输入中的权威通道名称复制到输出对象中。
 '''
 SELF_PLAN_GUIDANCE = '''
-Return the separate self-cognition response contract. Decide whether the
-character should stay silent or propose a visible reply from the supplied
-grounded participation context.
+返回独立的自我认知回应契约。根据输入中有依据的参与语境，判断角色应保持沉默还是
+提出一项可见回复，并为任何可见措辞明确断言边界。
 '''
 
 _PRIVATE_SUFFIXES = (
@@ -628,23 +635,139 @@ def _stage_character_context(
     return result
 
 
-def _stage_observation(
+def _partition_evidence_authority(
+    evidence: Sequence[Mapping[str, object]],
+    *,
+    allowed_questions: frozenset[str],
+) -> dict[str, list[dict[str, object]]]:
+    """Partition one bounded evidence roster by semantic authority."""
+
+    lanes = {
+        "current_observation": [],
+        "direct_facts": [],
+        "participant_continuity": [],
+        "conditional_character_context": [],
+    }
+    projected = _project_evidence(
+        evidence,
+        allowed_questions=allowed_questions,
+        limit=32,
+    )
+    for row in projected:
+        authority = row.get("authority")
+        source_kind = row.get("source_kind")
+        if authority == "conditional_character_guidance":
+            lane = "conditional_character_context"
+        elif authority == "participant_continuity":
+            lane = "participant_continuity"
+        elif (
+            authority in {"current_event", "current_episode"}
+            and source_kind in {
+                "episode",
+                "media_observation",
+                "scheduler_event",
+            }
+        ):
+            lane = "current_observation"
+        else:
+            lane = "direct_facts"
+        lanes[lane].append(row)
+    return lanes
+
+
+def _stage_authority_lanes(
     workspace: Mapping[str, object],
     *,
     allowed_questions: frozenset[str],
 ) -> dict[str, object]:
-    """Apply typed evidence visibility and priority at the first consumer."""
+    """Build the five explicit model-facing authority lanes."""
 
     observation = workspace["observation"]
     if not isinstance(observation, Mapping):
-        return {}
-    projected = dict(observation)
-    projected["evidence"] = _project_evidence(
-        workspace.get("evidence_rows", []),
+        raise PromptContractError("workspace observation must be a mapping")
+    raw_evidence = workspace.get("evidence_rows", [])
+    if not isinstance(raw_evidence, list):
+        raise PromptContractError("workspace evidence rows must be a list")
+    partitioned = _partition_evidence_authority(
+        raw_evidence,
         allowed_questions=allowed_questions,
-        limit=32,
     )
-    return projected
+    current_observation = dict(observation)
+    current_observation["evidence"] = partitioned["current_observation"]
+    direct_facts = {
+        "evidence": partitioned["direct_facts"],
+        "typed_facts": list(workspace.get("direct_facts", [])),
+    }
+    participant_continuity = list(
+        partitioned["participant_continuity"]
+    )
+    continuity = workspace.get("continuity")
+    if isinstance(continuity, Mapping):
+        dialog_context = continuity.get("dialog")
+        if isinstance(dialog_context, str) and dialog_context.strip():
+            participant_continuity.append({
+                "semantic_text": dialog_context,
+                "authority": "participant_continuity",
+                "source_kind": "past_dialog_context",
+                "provenance_role": "prior_dialog_context",
+            })
+    return {
+        "current_observation": current_observation,
+        "direct_facts": direct_facts,
+        "participant_continuity": participant_continuity,
+        "conditional_evidence": partitioned[
+            "conditional_character_context"
+        ],
+    }
+
+
+def _continuation_state(
+    workspace: Mapping[str, object],
+    *,
+    include_goals: bool,
+) -> dict[str, object]:
+    """Project unresolved goals and active causal pressures only."""
+
+    state = workspace.get("state")
+    if not isinstance(state, Mapping):
+        return {}
+    fields = ["threats", "active_events", "knowledge_gaps"]
+    if include_goals:
+        fields.insert(0, "goals")
+    result = {
+        field: list(state.get(field, []))
+        for field in fields
+        if isinstance(state.get(field), list)
+    }
+    affect = state.get("affect_activations")
+    if isinstance(affect, list):
+        result["affect_activations"] = list(affect)
+    return result
+
+
+def _conditional_character_context(
+    workspace: Mapping[str, object],
+    *,
+    identity_families: Sequence[str],
+    conditional_evidence: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    """Project character context with explicit non-factual authority."""
+
+    result = _stage_character_context(
+        workspace,
+        identity_families=identity_families,
+        include_constraints=True,
+        include_operational=True,
+    )
+    result["relationship"] = workspace.get("relationship_context", {})
+    result["affect"] = workspace.get("affect_context", [])
+    result["evidence"] = [dict(row) for row in conditional_evidence]
+    continuity = workspace.get("continuity")
+    if isinstance(continuity, Mapping):
+        private_context = continuity.get("private")
+        if isinstance(private_context, str) and private_context.strip():
+            result["private_continuity"] = private_context
+    return result
 
 
 def build_canonical_turn_workspace(
@@ -690,7 +813,7 @@ def build_canonical_turn_workspace(
         "selection_owner": _role(scene_context.get("character_role", "active_character")),
         "current_user": _role(scene_context.get("current_user_role", "current_user")),
         "operation": _safe_text(
-            str(scene_context.get("operation", "respond to current observation")),
+            str(scene_context.get("operation", "回应当前观察")),
             field="orientation.operation",
             maximum=500,
         ),
@@ -704,7 +827,6 @@ def build_canonical_turn_workspace(
     }
     observation = {
         "visible_observation": visible,
-        "evidence": evidence_rows,
         "dialogue_role_bindings": role_bindings,
         "scene": {
             key: scene_context[key]
@@ -716,7 +838,7 @@ def build_canonical_turn_workspace(
             field="group_engagement",
         ),
     }
-    state = _project_entities(mutable_state)
+    state = _project_entities(mutable_state, include_terminal=False)
     affect_context = _project_affect_context(mutable_state)
     if character_affect_context:
         affect_context.extend(
@@ -778,44 +900,46 @@ def build_canonical_appraisal_question(
     if stage_name not in {"A1", "A2"}:
         raise PromptContractError("appraisal stage must be A1 or A2")
     families = CANONICAL_A1_FAMILIES if stage_name == "A1" else CANONICAL_A2_FAMILIES
-    context: dict[str, object] = {}
-    if stage_name == "A2":
-        context["accepted_a1_meaning"] = accepted_appraisal_summary or []
-        context["affect_context"] = workspace.get("affect_context", [])
-        context["character_context"] = _stage_character_context(
-            workspace,
-            identity_families=tuple(CANONICAL_A2_FAMILIES),
-            include_constraints=True,
-            include_operational=True,
-        )
-        context["relationship_context"] = workspace["relationship_context"]
-        observation = _stage_observation(
-            workspace,
-            allowed_questions=_A2_QUESTIONS,
-        )
-    else:
-        context["character_context"] = _stage_character_context(
-            workspace,
-            identity_families=tuple(CANONICAL_A1_FAMILIES),
-            include_constraints=False,
-        )
-        context["state"] = _project_entities(
-            workspace.get("state", {}),
-            include_terminal=False,
-            collections=("goals", "threats", "active_events", "knowledge_gaps"),
-        )
-        observation = _stage_observation(
-            workspace,
-            allowed_questions=_A1_QUESTIONS,
-        )
-    return {
+    allowed_questions = (
+        _A1_QUESTIONS if stage_name == "A1" else _A2_QUESTIONS
+    )
+    lanes = _stage_authority_lanes(
+        workspace,
+        allowed_questions=allowed_questions,
+    )
+    packet: dict[str, object] = {
         "stage": stage_name,
-        "guidance": A1_QUESTION_GUIDANCE if stage_name == "A1" else A2_QUESTION_GUIDANCE,
+        "guidance": (
+            A1_QUESTION_GUIDANCE
+            if stage_name == "A1"
+            else A2_QUESTION_GUIDANCE
+        ),
         "orientation": workspace["orientation"],
-        "observation": observation,
-        "context": context,
+        "current_observation": lanes["current_observation"],
+        "direct_facts": lanes["direct_facts"],
+        "continuation_state": _continuation_state(
+            workspace,
+            include_goals=False,
+        ),
         "output_contract": _family_contract(families),
     }
+    if stage_name == "A2":
+        packet["accepted_a1_meaning"] = accepted_appraisal_summary or []
+        packet["participant_continuity"] = lanes[
+            "participant_continuity"
+        ]
+        packet["conditional_character_context"] = (
+            _conditional_character_context(
+                workspace,
+                identity_families=tuple(CANONICAL_A2_FAMILIES),
+                conditional_evidence=lanes["conditional_evidence"],
+            )
+        )
+        packet["continuation_state"] = _continuation_state(
+            workspace,
+            include_goals=True,
+        )
+    return packet
 
 
 def build_canonical_goal_question(
@@ -832,30 +956,33 @@ def build_canonical_goal_question(
         for row in appraisal_summary
         if isinstance(row, Mapping)
     ]
+    lanes = _stage_authority_lanes(
+        workspace,
+        allowed_questions=_ALL_QUESTIONS,
+    )
     return {
         "stage": "G",
         "guidance": GOAL_QUESTION_GUIDANCE,
         "orientation": workspace["orientation"],
-        "observation": _stage_observation(
-            workspace,
-            allowed_questions=_ALL_QUESTIONS,
-        ),
-        "character_context": _stage_character_context(
+        "current_observation": lanes["current_observation"],
+        "direct_facts": lanes["direct_facts"],
+        "participant_continuity": lanes["participant_continuity"],
+        "conditional_character_context": _conditional_character_context(
             workspace,
             identity_families=("goal_cognition",),
-            include_constraints=True,
-            include_operational=True,
+            conditional_evidence=lanes["conditional_evidence"],
         ),
-        "relationship_context": workspace["relationship_context"],
-        "affect_context": workspace.get("affect_context", []),
-        "continuity": workspace["continuity"],
-        "state": _project_entities(
-            workspace.get("state", {}),
-            include_terminal=False,
+        "continuation_state": _continuation_state(
+            workspace,
+            include_goals=True,
         ),
         "appraisal_summary": semantic_appraisal,
         "output_contract": {
-            "required_fields": ["active_character_goal", "relational_willingness"],
+            "required_fields": [
+                "active_character_goal",
+                "relational_willingness",
+                "private_monologue",
+            ],
             "additionalProperties": False,
             "active_character_goal_fields": [
                 "goal_kind", "intent", "reason", "cause_summary",
@@ -863,6 +990,11 @@ def build_canonical_goal_question(
             "relational_willingness_fields": [
                 "applicable", "stance", "reason", "cause_summary",
             ],
+            "private_monologue": {
+                "type": "string",
+                "minimum_characters": 1,
+                "maximum_characters": 600,
+            },
         },
     }
 
@@ -876,18 +1008,27 @@ def build_canonical_plan_question(
 ) -> dict[str, object]:
     if self_cognition:
         contract = {
-            "required_fields": ["self_cognition_response"],
+            "required_fields": [
+                "self_cognition_response",
+                "epistemic_boundary",
+            ],
             "additionalProperties": False,
             "self_cognition_fields": [
                 "decision", "response_goal", "reason", "cause_summary",
             ],
             "allowed_decisions": sorted(SELF_COGNITION_RESPONSE_DECISION_VALUES),
+            "epistemic_boundary": {
+                "type": "string",
+                "minimum_characters": 1,
+                "maximum_characters": 1000,
+            },
         }
         guidance = SELF_PLAN_GUIDANCE
     else:
         contract = {
             "required_fields": [
                 "goal_resolution", "response_goal", "action_requests", "resolver_requests",
+                "epistemic_boundary",
             ],
             "additionalProperties": False,
             "goal_resolution_values": sorted(GOAL_RESOLUTION_VALUES),
@@ -897,12 +1038,28 @@ def build_canonical_plan_question(
             "maximum_action_requests_with_response_goal": 2,
             "resolver_request_fields": ["capability", "goal", "reason"],
             "resolver_request_item_bounds": {"minimum": 0, "maximum": 8},
+            "epistemic_boundary": {
+                "type": "string",
+                "minimum_characters": 1,
+                "maximum_characters": 1000,
+            },
         }
         guidance = ORDINARY_PLAN_GUIDANCE
+    lanes = _stage_authority_lanes(
+        workspace,
+        allowed_questions=_ALL_QUESTIONS,
+    )
     return {
         "stage": "P",
         "guidance": guidance,
         "goal": goal,
+        "current_observation": lanes["current_observation"],
+        "direct_facts": lanes["direct_facts"],
+        "participant_continuity": lanes["participant_continuity"],
+        "continuation_state": _continuation_state(
+            workspace,
+            include_goals=True,
+        ),
         "capabilities": workspace["capabilities"],
         "output_contract": contract,
     }
@@ -917,9 +1074,9 @@ def build_turn_workspace_stage_contracts(
 ) -> dict[str, dict[str, object]]:
     selected_goal = goal or {
         "goal_kind": "open_goal",
-        "intent": "understand the current request",
-        "reason": "the current observation requires a grounded response",
-        "cause_summary": "current observation",
+        "intent": "理解当前请求",
+        "reason": "当前观察需要一个有依据的回应",
+        "cause_summary": "当前观察",
     }
     return {
         "A1": build_canonical_appraisal_question(workspace=workspace, stage_name="A1"),

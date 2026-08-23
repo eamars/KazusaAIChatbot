@@ -27,6 +27,7 @@ from kazusa_ai_chatbot.self_cognition import (
     tracking,
     worker,
 )
+from tests.cognition_test_helpers import canonical_cognition_output
 
 
 @pytest.fixture(autouse=True)
@@ -158,7 +159,10 @@ async def test_default_self_cognition_client_uses_resolver_loop(
         "internal_monologue": "resolver completed",
         "action_specs": [],
         "resolver_capability_requests": [],
-        "cognition_core_output": {"state_update": {"scope": "character"}},
+        "cognition_core_output": _self_cognition_core_output(
+            state_scope="character",
+            visible_reply=False,
+        ),
     }
     committed_outputs: list[dict[str, Any]] = []
 
@@ -184,7 +188,12 @@ async def test_default_self_cognition_client_uses_resolver_loop(
         "ensure_initial_resolver_inputs",
         lambda state, *, max_cycles: state,
     )
-    async def commit_cognition_output(output: dict[str, Any]) -> None:
+    async def commit_cognition_output(
+        output: dict[str, Any],
+        *,
+        expected_character_updated_at: str | None = None,
+    ) -> None:
+        assert expected_character_updated_at is None
         committed_outputs.append(output)
 
     monkeypatch.setattr(
@@ -399,6 +408,7 @@ def _action_cognition_output(text: str) -> dict[str, Any]:
             "schema_version": "text_surface_output.v2",
             "content_plan": text,
             "content_requirements": ["Preserve the scheduled follow-up purpose."],
+            "epistemic_boundary": "Preserve the scheduled state exactly.",
             "visible_boundaries": [],
             "addressee_plan": [{
                 "handle": "current_user",
@@ -593,6 +603,7 @@ def _surface_output(content_plan: str = "Continue the GPU model topic.") -> dict
         "schema_version": "text_surface_output.v2",
         "content_plan": content_plan,
         "content_requirements": ["Preserve the scheduled follow-up purpose."],
+        "epistemic_boundary": "Preserve the scheduled state exactly.",
         "visible_boundaries": [],
         "addressee_plan": [{
             "handle": "current_user",
@@ -612,6 +623,37 @@ def _surface_output(content_plan: str = "Continue the GPU model topic.") -> dict
     }
 
 
+def _self_cognition_core_output(
+    *,
+    state_scope: str = "user",
+    visible_reply: bool,
+) -> dict[str, Any]:
+    """Build one exact canonical self-cognition product for tracking tests."""
+
+    output = canonical_cognition_output(
+        route="speech" if visible_reply else "silence",
+        state_scope=state_scope,
+    )
+    response_goal = (
+        "send the grounded scheduled follow-up"
+        if visible_reply
+        else "stay silent and retain internal progress"
+    )
+    output["response_plan"].update({
+        "goal_resolution": "answerable_now",
+        "response_goal": response_goal,
+        "self_cognition_response": {
+            "decision": (
+                "propose_visible_reply" if visible_reply else "stay_silent"
+            ),
+            "response_goal": response_goal,
+            "reason": "the due source supports this bounded decision",
+            "cause_summary": "the current self-cognition episode is due",
+        },
+    })
+    return output
+
+
 def _speak_cognition_output_with_partial_directives() -> dict[str, Any]:
     output = {
         "logical_stance": "CONFIRM",
@@ -623,6 +665,9 @@ def _speak_cognition_output_with_partial_directives() -> dict[str, Any]:
         "vibe_check": "focused",
         "relational_dynamic": "scheduled follow-up",
         "action_specs": [_speak_action_spec()],
+        "cognition_core_output": _self_cognition_core_output(
+            visible_reply=True,
+        ),
     }
     return output
 
@@ -960,6 +1005,7 @@ def test_classify_route_does_not_use_content_plan_without_speak_action() -> None
                 "schema_version": "text_surface_output.v2",
                 "content_plan": "Check whether the user has started work.",
                 "content_requirements": ["Ask whether the user has started work."],
+                "epistemic_boundary": "Keep the user's current status unknown.",
                 "visible_boundaries": [],
                 "addressee_plan": [],
                 "delivery_profile": {

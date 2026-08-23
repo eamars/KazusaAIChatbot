@@ -63,7 +63,7 @@ At a high level, Kazusa provides:
 | Typed message boundary           | Platform syntax is normalized into `MessageEnvelope` fields before cognition or RAG sees it.                                       |
 | Bounded live response path       | Typed intake, frontline relevance, turn settlement, settled relevance, the cognition resolver, selected evidence capabilities, action routing, and L3 surfaces are explicit stages with caps and inspectable payloads. |
 | Multi-horizon memory             | Recent chat, short-term conversation flow, retrieved evidence, durable memory, and scheduled commitments remain separate.          |
-| Internal monologue residue       | A short private residue lane carries bounded first-person reasons from completed episodes into the next L2a cognition pass.       |
+| Internal monologue residue       | A short private residue lane carries the exact bounded G-stage first-person monologue from completed episodes into the next goal-cognition pass. |
 | Task resolution                  | One resolver capability runs a bounded inline session over local context, public research, coding, and text/computation specialists, then returns evidence or promotes the same checkpoint. |
 | Layered cognition                | Cognition decides stance, boundaries, judgment, style, action needs, and response goals before selected L3 surfaces render output. |
 | Background consolidation         | Completed episodes update durable memory, relationship state, Cache2 invalidation, images, and progress from text plus action/surface traces. |
@@ -442,6 +442,17 @@ surface traces can still feed post-turn progress, consolidation, Cache2
 invalidation, residue recording, calendar state, reflection, and
 self-cognition without creating a platform send.
 
+Current-turn cognition partitions model-facing context into
+`current_observation`, `direct_facts`, `participant_continuity`,
+`conditional_character_context`, and `continuation_state`. G owns the exact
+private first-person motivation and P owns the visible assertion boundary. L3
+uses both as typed expression context in one semantic content-planning call;
+deterministic code copies the caller-owned addressee plan and empty visible
+boundary list. The public text-surface output copies P's exact epistemic
+boundary for dialog, while the private monologue remains outside the dialog
+payload. Dialog may describe a physical or external effect as completed only
+when an `executed` permitted-action result supplies that fact.
+
 Generic evidence work is selected through the resolver and begins inline as a
 task-resolution session. Deterministic budget exhaustion promotes the same
 checkpoint to an accepted task and a task-orchestrator job. `future_speak` and
@@ -627,8 +638,9 @@ conversation progress, retrieved evidence, durable memory, promoted reflection,
 and calendar-scheduled commitments each have a separate lifecycle.
 
 The internal monologue residue lane is a separate short-lived lane. It stores
-one compact first-person reason from a completed episode and projects it only
-into L2a as `internal_monologue_residue_context`. It is not
+the exact compact current-turn `private_monologue` produced by G and projects
+post-turn residue only into goal cognition as
+`internal_monologue_residue_context`. Prior residue is not
 `reflection_summary`, durable memory, visible dialog planning, or calendar
 input.
 

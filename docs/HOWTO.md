@@ -249,6 +249,16 @@ projection, and visible-surface planning. Context reduction preserves required
 current-turn facts and causal affect/relationship context before optional
 supporting rows.
 
+The canonical model-facing packets separate five authority lanes:
+`current_observation`, `direct_facts`, `participant_continuity`,
+`conditional_character_context`, and `continuation_state`. A1 receives the
+world-facing observation and factual lanes without conditional character
+context. A2 and G may use character and relationship context only for
+character judgment and motivation. Participant continuity never establishes a
+new action, consent, commitment, permission, or current intent. G returns the
+exact bounded `private_monologue`; P returns the bounded
+`epistemic_boundary` that controls assertions, interpretations, and unknowns.
+
 `RELEVANCE_AGENT_LLM` serves both compact frontline intake and settled
 relevance. Frontline uses a 256-token completion cap, thinking disabled, and
 an 8,000-character rendered-input cap; settled relevance uses a 512-token
@@ -363,6 +373,17 @@ observation.
 disable visual directives by default with
 `origin_metadata.debug_modes.no_visual_directives=true`, so normal
 self-cognition worker runs do not invoke the L3 visual-directive LLM.
+
+Text L3 runs one semantic content-planning provider call. Its typed input
+includes the exact current-turn private monologue for expression only, P's
+authoritative epistemic boundary, and the caller-owned addressee plan.
+Deterministic projection emits an empty `visible_boundaries` list and copies
+the validated addressee rows; there is no preference-model call or preference
+repair path. The validated surface output copies P's exact
+`epistemic_boundary` into dialog, while `private_monologue` remains absent from
+the dialog payload. With no corresponding `executed` permitted-action result,
+surface and dialog express only a verbal acceptance, refusal, proposal,
+invitation, or intent; they do not render an external effect as completed.
 
 The control-console cognition graph exposes the same selected-detail widget in
 Overview Latest, Debug cognition, and the dedicated latest self-cognition

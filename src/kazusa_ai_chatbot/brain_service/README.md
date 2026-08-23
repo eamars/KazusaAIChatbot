@@ -302,6 +302,12 @@ messages, provider configuration, persistence references, and implementation
 topology. Missing graph telemetry is reported as `null` and never changes
 cognition-facing completion.
 
+Canonical cognition graph rows may include the bounded current-turn
+`private_monologue` under the active-character goal and the bounded
+`epistemic_boundary` under the response plan for trusted operator inspection.
+The graph remains implementation-agnostic: it exposes no A1, A2, G, or P stage
+nodes and never forwards either field to adapter delivery.
+
 ### `GET /ops/runtime-status`
 
 Response model: `OpsRuntimeStatusResponse`.

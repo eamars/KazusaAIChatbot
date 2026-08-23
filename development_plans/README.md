@@ -58,6 +58,7 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
+| [cognition_v3_full_chain_native_chinese_prompt_migration_plan_2026-08-23.md](archive/completed/short_term/cognition_v3_full_chain_native_chinese_prompt_migration_plan_2026-08-23.md) | Canonical A1/A2/G/P native-Chinese prompt migration and end-to-end verification | completed |
 | [cognition_v3_handleless_model_contract_bigbang_plan_2026-08-22.md](archive/completed/cognition_v3_handleless_model_contract_bigbang_plan_2026-08-22.md) | Handleless cognition model-contract big-bang cutover and Gate 7 closure | completed |
 | [unified_llm_native_structured_output_default_plan.md](archive/completed/unified_llm_native_structured_output_default_plan.md) | Lightweight native JSON-object default and prompt cleanup | completed |
 | [cognition_v3_hybrid_agentic_loop_reconciliation_plan.md](archive/completed/cognition_v3_hybrid_agentic_loop_reconciliation_plan.md) | Cognition V3 single-lane hybrid agentic-loop reconciliation and V3-only cutover | completed |
@@ -70,12 +71,14 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
-| [cognition_subjective_continuity_dialog_quality_plan_2026-08-23.md](active/bugfix/cognition_subjective_continuity_dialog_quality_plan_2026-08-23.md) | First-person cognition continuity and epistemic dialog-boundary quality proposal | draft |
+| _None_ |  |  |
 
 ### Completed Bugfix Plans
 
 | Document | Type | Status |
 |---|---|---|
+| [cognition_v3_consolidation_interaction_subtext_handoff_bugfix_plan_2026-08-23.md](archive/completed/bugfix/cognition_v3_consolidation_interaction_subtext_handoff_bugfix_plan_2026-08-23.md) | Cognition V3 required subjective-state handoff and zero-exception post-turn consolidation repair | completed |
+| [cognition_subjective_continuity_dialog_quality_plan_2026-08-23.md](archive/completed/bugfix/cognition_subjective_continuity_dialog_quality_plan_2026-08-23.md) | First-person cognition continuity, epistemic dialog-boundary, and exact action-authority quality correction | completed |
 | [cognition_full_protected_trace_capture_bugfix_plan_2026-08-23.md](archive/completed/cognition_full_protected_trace_capture_bugfix_plan_2026-08-23.md) | Successful Cognition V3 and L3 full protected trace capture restoration | completed |
 | [cognition_v3_state_transaction_capacity_and_context_integrity_bugfix_plan_2026-08-23.md](archive/completed/cognition_v3_state_transaction_capacity_and_context_integrity_bugfix_plan_2026-08-23.md) | Cognition V3 state capacity, lifecycle, commit lineage, and prompt-context integrity correction | completed |
 | [unified_llm_json_schema_fallback_no_text_bugfix_plan_2026-08-23.md](archive/completed/unified_llm_json_schema_fallback_no_text_bugfix_plan_2026-08-23.md) | Unified LLM JSON Schema fallback without text correction | completed |

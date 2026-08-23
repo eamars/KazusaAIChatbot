@@ -91,6 +91,7 @@ def _surface(
         "schema_version": "text_surface_output.v2",
         "content_plan": content_plan,
         "content_requirements": [requirement, limitation],
+        "epistemic_boundary": "Use only the supplied task-result evidence.",
         "visible_boundaries": [],
         "addressee_plan": [{
             "handle": "current_user",
