@@ -706,7 +706,9 @@
       "owner": "nodes owner",
       "contract": "persona_supervisor2_cognition public contract",
       "required_unit_tests": [
-        "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_persona_supervisor2_l3_surface_exposes_owned_contract"
+        "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_persona_supervisor2_l3_surface_exposes_owned_contract",
+        "tests/unit/nodes/test_persona_supervisor2_cognition_commit.py::test_resolver_recurrence_commits_against_original_user_base",
+        "tests/unit/nodes/test_persona_supervisor2_cognition_commit.py::test_current_continuation_uses_exact_private_goal_ref"
       ],
       "supplemental_tests": [
         "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_l3_surface_preserves_relational_willingness"
@@ -717,7 +719,8 @@
       "owner": "persona stage owner",
       "contract": "live stage coordinator propagation and one terminal final commit after resolver recurrence",
       "required_unit_tests": [
-        "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_l3_surface_preserves_selected_response_operation"
+        "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_l3_surface_preserves_selected_response_operation",
+        "tests/unit/nodes/test_persona_supervisor2_cognition_commit.py::test_persona_character_commit_reads_canonical_state_projection"
       ],
       "supplemental_tests": [
         "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_persona_supervisor2_l3_surface_exposes_owned_contract"
@@ -939,7 +942,8 @@
       "owner": "V3 internal execution contract owner",
       "contract": "stage outcomes, typed failures, chain checkpoints, and cache-domain identity validation",
       "required_unit_tests": [
-        "tests/unit/cognition_core_v3/test_handleless_contract.py::test_canonical_stage_packets_are_handleless_and_disjoint"
+        "tests/unit/cognition_core_v3/test_handleless_contract.py::test_canonical_stage_packets_are_handleless_and_disjoint",
+        "tests/unit/cognition_core_v3/test_state_transaction.py::test_character_state_transaction_advances_timestamp_and_validates_final_affect"
       ],
       "supplemental_tests": [
         "tests/unit/cognition_core_v3/test_handleless_contract.py::test_canonical_cognition_calls_a1_a2_g_p_once_with_one_goal"
@@ -961,7 +965,10 @@
       "source": "src/kazusa_ai_chatbot/cognition_core_v3/prompt.py",
       "owner": "V3 dynamic chain question owner",
       "contract": "volatility-ordered first packet, bounded typed questions, canonical V2 required-selection output contract, advisory L1 packet projection, recurrence delta payloads, post-revision interlude folding, goal-only holdout, and evaluation-integrity boundary",
-      "required_unit_tests": [],
+      "required_unit_tests": [
+        "tests/unit/cognition_core_v3/test_prompt_context.py::test_stage_context_preserves_identity_relationship_and_emotion_cause",
+        "tests/unit/cognition_core_v3/test_prompt_context.py::test_current_resolver_and_action_evidence_precedes_supporting_rag"
+      ],
       "supplemental_tests": []
     },
     {
@@ -998,8 +1005,13 @@
       "source": "src/kazusa_ai_chatbot/cognition_core_v3/facade.py",
       "owner": "V3 cognition facade owner",
       "contract": "FIFO-held serial cold chain and resolver-session tail with canonical required-selection materialization, authoritative relationship-sensitive collapse, targetless-group response routing, advisory L1, lane-scoped repair, X1/X2 deny-closed authorization, deterministic recurrence reduction, stable live-roster revision, and cold-rebuild disposition",
-      "required_unit_tests": [],
-      "supplemental_tests": []
+      "required_unit_tests": [
+        "tests/unit/cognition_core_v3/test_state_transaction.py::test_character_state_transaction_advances_timestamp_and_validates_final_affect",
+        "tests/unit/cognition_core_v3/test_state_transaction.py::test_cognition_turn_deadline_bounds_full_chain"
+      ],
+      "supplemental_tests": [
+        "tests/test_cognition_v3_capacity_live_llm.py::test_live_captured_full_state_greeting_completes_first_pass"
+      ]
     },
     {
       "owner": "V3 serial primary-chain executor owner",
@@ -1011,7 +1023,11 @@
       "source": "src/kazusa_ai_chatbot/cognition_core_v3/appraisal.py",
       "owner": "V3 cache-affine appraisal semantics owner",
       "contract": "six-family domains, shared static prompt, candidate admission classification, and provisional reduction",
-      "required_unit_tests": [],
+      "required_unit_tests": [
+        "tests/unit/cognition_core_v3/test_state_transaction.py::test_state_transaction_reclaims_terminal_capacity_and_preserves_active_causes",
+        "tests/unit/cognition_core_v3/test_state_transaction.py::test_repeated_answerable_turns_do_not_accumulate_transient_events_or_goals",
+        "tests/unit/nodes/test_persona_supervisor2_cognition_commit.py::test_current_continuation_uses_exact_private_goal_ref"
+      ],
       "supplemental_tests": []
     },
     {
@@ -1153,7 +1169,9 @@
       "source": "src/kazusa_ai_chatbot/cognition_shared/state_reducers.py",
       "owner": "shared deterministic state reducer owner",
       "contract": "canonical semantic reduction and authoritative state replacement",
-      "required_unit_tests": [],
+      "required_unit_tests": [
+        "tests/unit/cognition_core_v3/test_state_transaction.py::test_state_transaction_reclaims_terminal_capacity_and_preserves_active_causes"
+      ],
       "supplemental_tests": []
     },
     {

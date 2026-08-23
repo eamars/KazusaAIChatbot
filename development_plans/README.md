@@ -45,7 +45,7 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
-| _None_ |  |  |
+| [standalone_agentic_resolver_first_pass_plan_2026-08-23.md](active/short_term/standalone_agentic_resolver_first_pass_plan_2026-08-23.md) | Standalone thinking-enabled native-tool streaming resolver with JSON protocol, external skills, and non-recursive same-runtime subagents | draft |
 
 ### Superseded Plans
 
@@ -75,6 +75,7 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
+| [cognition_v3_state_transaction_capacity_and_context_integrity_bugfix_plan_2026-08-23.md](archive/completed/cognition_v3_state_transaction_capacity_and_context_integrity_bugfix_plan_2026-08-23.md) | Cognition V3 state capacity, lifecycle, commit lineage, and prompt-context integrity correction | completed |
 | [unified_llm_json_schema_fallback_no_text_bugfix_plan_2026-08-23.md](archive/completed/unified_llm_json_schema_fallback_no_text_bugfix_plan_2026-08-23.md) | Unified LLM JSON Schema fallback without text correction | completed |
 | [cognition_v3_first_pass_appraisal_structural_exhaustion_diagnosis_2026-08-22.md](archive/completed/cognition_v3_first_pass_appraisal_structural_exhaustion_diagnosis_2026-08-22.md) | First-pass cognition appraisal structural-exhaustion diagnosis | completed |
 | [cognition_v2_semantic_admission_original_contract_restoration_plan.md](archive/completed/cognition_v2_semantic_admission_original_contract_restoration_plan.md) | Cognition V2 semantic-admission original-contract restoration | completed |

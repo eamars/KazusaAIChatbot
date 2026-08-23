@@ -29,9 +29,11 @@ accepted qualitative axis shifts to native state roots after generation.
 
 All 51 registered appraisal axes remain available. The caller-owned binder
 uses guarded native reducers for relationship, causal entities, goals, drives,
-and meaning. Each accepted axis receives an applied, scope-inapplicable,
-no-root, or no-numeric-change receipt, and the complete replacement state is
-validated before it is returned.
+and meaning. Each accepted axis receives an applied, clamped,
+scope-inapplicable, no-numeric-change, or explicitly deferred-capacity receipt,
+and the complete replacement state is validated before it is returned. Safe
+terminal rows are reclaimed before a new causal root is admitted; protected
+capacity leaves the prior valid collection intact.
 
 Emotion derivation runs from that replacement state. Affect projections retain
 emotion identity, intensity and trend, while cause provenance carries

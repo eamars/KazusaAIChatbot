@@ -92,6 +92,12 @@ bounded and caller-owned. Retrieved evidence informs judgment but does not
 become persona or final stance merely by being retrieved. Private persistence
 identifiers remain outside model-facing packets.
 
+Each turn applies trusted direct facts, elapsed evolution, relationship
+maintenance, semantic state binding, affect derivation, and retention as one
+validated transaction. Resolver recurrence carries the immutable persisted
+base and the exact private continuation-goal reference; it never commits a
+later uncommitted replacement as a new compare-and-replace base.
+
 The cognition core preserves all six appraisal families and their axes, derives
 emotion with concrete causes, binds one active-character goal, and returns a
 canonical response plan. The caller owns private state references and native

@@ -1088,11 +1088,10 @@ def apply_relationship_maintenance(
             relationship["familiarity"] + FAMILIARITY_DATE_INCREMENT,
         )
     else:
-        if len(processed_source_ids) >= MAX_PROCESSED_SOURCE_IDS:
-            raise CognitionStateError(
-                "relationship maintenance source ledger exceeds its cap"
-            )
-        next_source_ids = [*processed_source_ids, source_id]
+        next_source_ids = [
+            *processed_source_ids[-(MAX_PROCESSED_SOURCE_IDS - 1):],
+            source_id,
+        ]
 
     relationship["salience"] = max(
         0,
@@ -1343,7 +1342,15 @@ def materialize_causal_root(
             "model_accommodation": 0,
         }
     updated[collection].append(entity)
-    return validate_cognition_state(updated), entity_id, True
+    # Admission must reclaim safe terminal capacity before the final state
+    # validator runs.  A valid state at its declared cap is a legal input; the
+    # reducer owns the existing protection policy for active and affect-root
+    # entities.
+    retained = prune_terminal_entities(
+        updated,
+        preserve_entity_ids={entity_id},
+    )
+    return retained, entity_id, True
 
 
 def reduce_causal_event(

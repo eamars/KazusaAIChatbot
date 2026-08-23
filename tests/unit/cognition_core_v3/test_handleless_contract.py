@@ -40,6 +40,7 @@ from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_character_production_state,
     validate_cognition_state,
 )
+from kazusa_ai_chatbot.cognition_shared.state_reducers import create_guarded_goal
 from kazusa_ai_chatbot.llm_interface import LLMCallConfig, LLMThinkingConfig
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     _build_scheduled_authority_proposal,
@@ -186,6 +187,9 @@ def test_canonical_stage_packets_are_handleless_and_disjoint() -> None:
     assert packets["P"]["output_contract"]["required_fields"] == [
         "goal_resolution", "response_goal", "action_requests", "resolver_requests"
     ]
+    assert set(packets["P"]) == {
+        "stage", "guidance", "goal", "capabilities", "output_contract",
+    }
     rendered = json.dumps(packets, ensure_ascii=False)
     assert all(token not in rendered for token in ("source_id", "entity_id", "target_path"))
     assert not any(
@@ -336,7 +340,9 @@ def test_canonical_binder_covers_every_axis_with_receipts_and_valid_state() -> N
         for family, axes in CANONICAL_FAMILY_AXES.items()
     )
     evidence = [{"evidence_ref": payload["evidence"][0]["evidence_ref"]}]
-    disposition_values = {"applied", "no_numeric_change", "scope_inapplicable"}
+    disposition_values = {
+        "applied", "no_numeric_change", "scope_inapplicable", "turn_local",
+    }
     results = []
     for state in (
         payload["mutable_state"],
@@ -346,6 +352,7 @@ def test_canonical_binder_covers_every_axis_with_receipts_and_valid_state() -> N
             {"mutable_state": state, "state_scope": state["state_scope"], "evidence": evidence},
             appraisals,
             goal={"intent": "retain a grounded active-character goal"},
+            goal_resolution="requires_user_input",
         )
         validate_cognition_state(updated)
         assert len(receipts) == sum(len(axes) for axes in CANONICAL_FAMILY_AXES.values())
@@ -388,13 +395,17 @@ def test_canonical_binder_covers_every_axis_with_receipts_and_valid_state() -> N
             "state_scope": "user",
             "evidence": [{"evidence_ref": current_evidence}],
         },
-        (CanonicalAppraisal(
-            family="relationship_social",
-            applicable=True,
-            semantic_summary="relationship meaning",
-            cause_summary="relationship cause",
-            axis_changes=(),
-        ),),
+            (CanonicalAppraisal(
+                family="relationship_social",
+                applicable=True,
+                semantic_summary="relationship meaning",
+                cause_summary="relationship cause",
+                axis_changes=({
+                    "axis": "trust",
+                    "shift": "slight_increase",
+                    "reason": "the current observation changes trust",
+                },),
+            ),),
         goal={"intent": "retain the relationship context"},
     )
     validate_cognition_state(bounded_updated)
@@ -432,12 +443,36 @@ def test_epistemic_gap_cause_is_retained_without_relief_transition() -> None:
 
 def test_evidence_free_cognition_synthesizes_a_valid_episode_evidence_root() -> None:
     payload = _input()
-    appraisal = CanonicalAppraisal(
-        family="event_agency",
-        applicable=True,
-        semantic_summary="the current observation has a grounded meaning",
-        cause_summary="the current observation is the concrete cause",
-        axis_changes=(),
+    appraisals = (
+        CanonicalAppraisal(
+            family="event_agency",
+            applicable=True,
+            semantic_summary="the current observation has a grounded meaning",
+            cause_summary="the current observation is the concrete cause",
+            axis_changes=(),
+        ),
+        CanonicalAppraisal(
+            family="goal_threat_outcome",
+            applicable=True,
+            semantic_summary="the evidence-free input does not ground a threat",
+            cause_summary="no evidence is available for a threat judgment",
+            axis_changes=({
+                "axis": "expected_harm",
+                "shift": "strong_increase",
+                "reason": "this nonzero proposal must remain turn-local",
+            },),
+        ),
+        CanonicalAppraisal(
+            family="epistemic_comparison_memory",
+            applicable=True,
+            semantic_summary="the evidence-free input does not ground a gap",
+            cause_summary="no evidence is available for a knowledge-gap judgment",
+            axis_changes=({
+                "axis": "novelty",
+                "shift": "strong_increase",
+                "reason": "this nonzero proposal must remain turn-local",
+            },),
+        ),
     )
     updated, _transitions, _receipts, _roots = bind_axis_changes(
         {
@@ -446,15 +481,14 @@ def test_evidence_free_cognition_synthesizes_a_valid_episode_evidence_root() -> 
             "state_scope": payload["state_scope"],
             "evidence": [],
         },
-        (appraisal,),
+        appraisals,
         goal={"intent": "retain the current observation"},
     )
     validate_cognition_state(updated)
-    assert updated["active_events"]
-    evidence_ref = updated["active_events"][0]["evidence_refs"][0]
-    assert set(evidence_ref) == {
-        "source_kind", "source_id", "occurred_at", "semantic_summary",
-    }
+    assert updated["active_events"] == []
+    assert updated["goals"] == []
+    assert updated["threats"] == []
+    assert updated["knowledge_gaps"] == []
 
 
 def test_strong_causal_shifts_retain_magnitude_and_derive_concrete_affect() -> None:
@@ -529,8 +563,8 @@ def test_controllability_only_updates_goal_without_fabricating_threat() -> None:
         goal={"intent": "answer the request", "cause_summary": "the accepted goal cause"},
     )
     assert updated["threats"] == []
-    assert len(receipts[0]["applied_targets"]) == 1
-    assert receipts[0]["target_paths"][0].startswith("goals.")
+    assert receipts[0]["disposition"] == "turn_local"
+    assert receipts[0]["target_paths"] == []
 
 
 def test_caller_materializes_typed_speak_and_resolver_envelopes() -> None:
@@ -592,6 +626,106 @@ def test_caller_materializes_typed_speak_and_resolver_envelopes() -> None:
                 "available_resolver_capabilities"
             ],
         )
+
+
+def test_goal_capacity_deferral_preserves_response_and_unrelated_resolver() -> None:
+    payload = _input()
+    state = deepcopy(payload["mutable_state"])
+    evidence = payload["evidence"][0]["evidence_ref"]
+    for index in range(16):
+        row_evidence = {
+            **evidence,
+            "source_id": f"goal-capacity-{index}",
+        }
+        state["goals"].append(create_guarded_goal(
+            state,
+            goal_kind="ordinary_response",
+            description=f"protected continuing goal {index}",
+            role_refs=[],
+            evidence_refs=[row_evidence],
+            axes={},
+            updated_at=state["updated_at"],
+        ))
+    validate_cognition_state(state)
+    replacement, _transitions, receipts, _provenance = bind_axis_changes(
+        {
+            "episode": payload["episode"],
+            "mutable_state": state,
+            "state_scope": "user",
+            "evidence": payload["evidence"],
+        },
+        (),
+        goal={
+            "intent": "preserve the answer while capacity is full",
+            "cause_summary": "the current request",
+        },
+        goal_resolution="requires_user_input",
+        resolver_requests=[{"capability": "task_resolution_request"}],
+    )
+    assert any(
+        row.get("kind") == "goal"
+        and row.get("disposition") == "capacity_deferred"
+        for row in receipts
+    )
+    caller_state = dict(payload)
+    caller_state.update({
+        "global_user_id": payload["mutable_state"]["owner_user_id"],
+        "cognitive_episode": payload["episode"],
+        "cognition_scene_context": payload["scene_context"],
+    })
+    output = {
+        "schema_version": "cognition_output.v3",
+        "active_character_goal": {
+            "goal_kind": "clarify",
+            "intent": "preserve the answer while capacity is full",
+            "reason": "the current request still has a visible response",
+            "cause_summary": "the current request",
+        },
+        "response_plan": {
+            "goal_resolution": "requires_user_input",
+            "response_goal": "explain the missing detail",
+            "action_requests": [],
+            "resolver_requests": [
+                {
+                    "capability": "task_resolution_request",
+                    "goal": "continue the task",
+                    "reason": "durable task lineage is required",
+                },
+                {
+                    "capability": "human_clarification",
+                    "goal": "clarify the missing detail",
+                    "reason": "the current evidence is insufficient",
+                },
+            ],
+        },
+        "state_projection": {
+            "replacement_state": replacement,
+            "capacity_deferred": [
+                row for row in receipts
+                if row.get("disposition") == "capacity_deferred"
+            ],
+        },
+        "affect_projection": [],
+        "relationship_projection": {},
+        "relational_willingness": {},
+        "cause_provenance": [],
+    }
+    projected = _project_output_to_global_state(
+        output,
+        caller_state,
+        available_actions=payload["available_actions"],
+        available_resolver_capabilities=(
+            payload["available_resolver_capabilities"]
+        ),
+    )
+    assert projected["active_character_goal"]["intent"] == (
+        "preserve the answer while capacity is full"
+    )
+    assert [row["kind"] for row in projected["action_specs"]] == ["speak"]
+    assert [
+        row["capability_kind"]
+        for row in projected["resolver_capability_requests"]
+    ] == ["human_clarification"]
 
 
 class _FourStageInvoker:
@@ -722,4 +856,4 @@ async def test_canonical_cognition_completes_without_input_evidence() -> None:
     payload["evidence"] = []
     output = await run_cognition(payload, _services(invoker))
     assert invoker.calls == ["A1", "A2", "G", "P"]
-    assert output["state_projection"]["replacement_state"]["active_events"]
+    assert output["state_projection"]["replacement_state"]["active_events"] == []

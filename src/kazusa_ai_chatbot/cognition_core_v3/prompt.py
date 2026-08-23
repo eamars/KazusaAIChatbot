@@ -20,6 +20,12 @@ from kazusa_ai_chatbot.cognition_shared.contracts import (
     SELF_COGNITION_RESPONSE_DECISION_VALUES,
     project_evidence_provenance_role,
 )
+from kazusa_ai_chatbot.cognition_shared.state_projection import (
+    RELATIONSHIP_AXIS_FIELDS,
+    project_affect,
+    project_numeric_band,
+    project_relationship_axis,
+)
 
 A1_QUESTION_GUIDANCE = '''
 Return fixed A1 family slots for event agency, goal and threat outcome, and
@@ -57,11 +63,6 @@ grounded participation context.
 _PRIVATE_SUFFIXES = (
     "_id", "_ids", "_handle", "_handles", "_ref", "_refs", "_path", "_paths",
 )
-_ALLOWED_ENTITY_FIELDS = frozenset({
-    "description", "semantic_summary", "cause_summary", "status", "lifecycle",
-    "state", "kind", "goal_kind", "intent", "reason", "residual_pressure",
-    "salience", "source_kind", "evidence", "evidence_refs", "axis_values",
-})
 _ALLOWED_CONTEXT_FIELDS = frozenset({
     "name", "role", "description", "summary", "standard", "boundary",
     "policy", "value", "meaning", "status", "lifecycle", "semantic_summary",
@@ -69,6 +70,25 @@ _ALLOWED_CONTEXT_FIELDS = frozenset({
 _ALLOWED_SCENE_FIELDS = frozenset({
     "operation", "character_role", "current_user_role", "public_group_scene",
     "local_time_context", "semantic_temporal_context", "scene_summary",
+})
+_IDENTITY_PARTITIONS = frozenset({
+    "event_agency", "goal_threat_outcome", "epistemic_comparison_memory",
+    "relationship_social", "moral_identity", "existential_drive",
+    "goal_cognition",
+})
+_A1_QUESTIONS = frozenset({
+    "q:event_agency", "q:goal_threat_outcome",
+    "q:epistemic_comparison_memory",
+})
+_A2_QUESTIONS = frozenset({
+    "q:relationship_social", "q:moral_identity", "q:existential_drive",
+})
+_ALL_QUESTIONS = frozenset(
+    f"q:{family}" for family in _IDENTITY_PARTITIONS
+    if family != "goal_cognition"
+)
+_TERMINAL_STATUSES = frozenset({
+    "satisfied", "failed", "abandoned", "resolved", "replaced",
 })
 
 
@@ -80,6 +100,71 @@ def _safe_text(value: object, *, field: str, maximum: int = 2000) -> str:
     if not isinstance(value, str) or len(value) > maximum:
         raise PromptContractError(f"{field} must be bounded text")
     return value
+
+
+def _semantic_number(value: object, *, field: str, key: str) -> object:
+    """Convert native telemetry into a bounded semantic band."""
+
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return value
+    number = float(value)
+    if key in {"age", "year"}:
+        return int(number)
+    if 0 <= number <= 1:
+        if number <= 0.2:
+            return "极低"
+        if number <= 0.4:
+            return "低"
+        if number <= 0.6:
+            return "中等"
+        if number <= 0.8:
+            return "高"
+        return "极高"
+    if -100 <= number <= 100:
+        try:
+            return project_numeric_band(int(round(number)), signed=number < 0)
+        except ValueError:
+            pass
+    raise PromptContractError(f"{field} numeric value is outside its semantic domain")
+
+
+def _project_semantic_tree(value: object, *, field: str, depth: int = 0) -> object:
+    """Project typed semantic context while excluding storage identity."""
+
+    if depth > 5:
+        return {}
+    if isinstance(value, str):
+        return _safe_text(value, field=field, maximum=3000)
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    if isinstance(value, Mapping):
+        result: dict[str, object] = {}
+        for raw_key, child in value.items():
+            key = str(raw_key)
+            if (
+                key in {"id", "ids", "entity_id", "source_id", "trace_id"}
+                or any(key.endswith(suffix) for suffix in _PRIVATE_SUFFIXES)
+            ):
+                continue
+            if isinstance(child, (int, float)) and not isinstance(child, bool):
+                result[key] = _semantic_number(
+                    child,
+                    field=f"{field}.{key}",
+                    key=key,
+                )
+            else:
+                result[key] = _project_semantic_tree(
+                    child,
+                    field=f"{field}.{key}",
+                    depth=depth + 1,
+                )
+        return result
+    if isinstance(value, list):
+        return [
+            _project_semantic_tree(item, field=field, depth=depth + 1)
+            for item in value[:32]
+        ]
+    return str(value)
 
 
 def _semantic_mapping(
@@ -148,11 +233,24 @@ def _project_percepts(episode: Mapping[str, object]) -> list[dict[str, object]]:
     return rows
 
 
-def _project_evidence(evidence: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
-    rows: list[dict[str, object]] = []
+def _project_evidence(
+    evidence: Sequence[Mapping[str, object]],
+    *,
+    allowed_questions: frozenset[str] | None = None,
+    limit: int = 32,
+) -> list[dict[str, object]]:
+    rows: list[tuple[int, int, dict[str, object]]] = []
     for row in evidence:
         if not isinstance(row, Mapping):
             raise PromptContractError("evidence rows must be mappings")
+        if row.get("visibility") not in {None, "model_visible"}:
+            continue
+        visible_to = row.get("visible_to")
+        if allowed_questions is not None and isinstance(visible_to, list):
+            if not allowed_questions.intersection(
+                item for item in visible_to if isinstance(item, str)
+            ):
+                continue
         reference = row.get("evidence_ref")
         if not isinstance(reference, Mapping):
             raise PromptContractError("evidence provenance must be typed")
@@ -168,37 +266,234 @@ def _project_evidence(evidence: Sequence[Mapping[str, object]]) -> list[dict[str
                 source_kind, row.get("memory_scope")
             ),
         }
-        rows.append(item)
-    return rows
+        authority = item["authority"]
+        if authority in {"current_event", "current_episode"} or source_kind in {
+            "action_result", "resolver_observation", "tool_result",
+        }:
+            priority = 0
+        elif source_kind in {"media_observation", "scheduler_event"}:
+            priority = 1
+        elif source_kind in {"conversation_progress", "promoted_memory", "promoted_reflection"}:
+            priority = 2
+        else:
+            priority = 3
+        rows.append((priority, len(rows), item))
+    rows.sort(key=lambda row: (row[0], row[1]))
+    return [item for _priority, _position, item in rows[:limit]]
 
 
-def _project_entities(state: Mapping[str, object]) -> dict[str, object]:
+def _project_identity_context(value: Mapping[str, object]) -> dict[str, object]:
+    """Keep visible identity and personality descriptors for model judgment."""
+
+    if _IDENTITY_PARTITIONS.intersection(value):
+        return {
+            key: _project_semantic_tree(value[key], field=f"identity.{key}")
+            for key in value
+            if key in _IDENTITY_PARTITIONS and isinstance(value[key], Mapping)
+        }
+    output: dict[str, object] = {}
+    for key in ("name", "display_name", "personality", "personality_judgment", "identity", "summary"):
+        item = value.get(key)
+        if isinstance(item, str):
+            output[key] = _safe_text(item, field=f"identity.{key}", maximum=3000)
+        elif isinstance(item, Mapping):
+            output[key] = _semantic_mapping(
+                item,
+                allowed=_ALLOWED_CONTEXT_FIELDS,
+                field=f"identity.{key}",
+            )
+    return output
+
+
+def _project_constraints(value: Mapping[str, object]) -> dict[str, object]:
+    """Project standards, drives, meaning, and boundaries without IDs."""
+
+    output: dict[str, object] = {}
+    for key in ("standards", "drives", "meaning_state", "boundaries", "personality_judgment"):
+        item = value.get(key)
+        if isinstance(item, Mapping):
+            output[key] = _project_semantic_tree(
+                item,
+                field=f"constraints.{key}",
+            )
+        elif key == "standards" and isinstance(item, list):
+            standards: list[dict[str, object]] = []
+            for row in item[:8]:
+                if not isinstance(row, Mapping):
+                    continue
+                projected: dict[str, object] = {}
+                if isinstance(row.get("description"), str):
+                    projected["description"] = _safe_text(
+                        row["description"],
+                        field="constraints.standards.description",
+                    )
+                importance = row.get("importance")
+                if isinstance(importance, int) and not isinstance(importance, bool):
+                    projected["importance"] = project_numeric_band(importance)
+                if projected:
+                    standards.append(projected)
+            output[key] = standards
+        elif isinstance(item, list):
+            output[key] = [
+                _semantic_mapping(row, allowed=_ALLOWED_CONTEXT_FIELDS, field=f"constraints.{key}")
+                for row in item[:32]
+                if isinstance(row, Mapping)
+            ]
+        elif isinstance(item, str):
+            output[key] = _safe_text(item, field=f"constraints.{key}")
+    return output
+
+
+def _project_relationship_context(value: Mapping[str, object]) -> dict[str, object]:
+    """Project relationship axes and concrete evidence meaning."""
+
+    raw_axes = value.get("axes")
+    axis_source = raw_axes if isinstance(raw_axes, Mapping) else value
+    output: dict[str, object] = {
+        "axes": {
+            axis: project_relationship_axis(axis, axis_source[axis])
+            for axis in RELATIONSHIP_AXIS_FIELDS
+            if isinstance(axis_source.get(axis), (int, float))
+            and not isinstance(axis_source.get(axis), bool)
+        },
+    }
+    for key in ("status", "summary", "semantic_summary", "cause_summary"):
+        if isinstance(value.get(key), str):
+            output[key] = _safe_text(value[key], field=f"relationship.{key}")
+    evidence = value.get("evidence_refs")
+    if isinstance(evidence, list):
+        output["evidence_meaning"] = [
+            _safe_text(row["semantic_summary"], field="relationship.evidence")
+            for row in evidence[:8]
+            if isinstance(row, Mapping) and isinstance(row.get("semantic_summary"), str)
+        ]
+    causal_context = value.get("causal_context")
+    if isinstance(causal_context, list):
+        output["causal_meaning"] = [
+            _project_semantic_tree(
+                {
+                    key: row[key]
+                    for key in ("entity_kind", "semantic_summary", "lifecycle", "salience")
+                    if key in row
+                },
+                field="relationship.causal_meaning",
+            )
+            for row in causal_context[:8]
+            if isinstance(row, Mapping) and isinstance(
+                row.get("cause_summary") or row.get("semantic_summary"),
+                str,
+            )
+        ]
+    relationship_affect = value.get("affect")
+    if isinstance(relationship_affect, list):
+        output["affect"] = [
+            _project_semantic_tree(row, field="relationship.affect")
+            for row in relationship_affect[:8]
+            if isinstance(row, Mapping)
+        ]
+    return output
+
+
+def _project_affect_context(state: Mapping[str, object]) -> list[dict[str, object]]:
+    """Project emotion identity and concrete cause without root references."""
+
+    activation_rows = state.get("affect_activations")
+    structured_activations = isinstance(activation_rows, list) and bool(
+        activation_rows
+    )
+    value = activation_rows if structured_activations else state.get("affect", [])
+    if not isinstance(value, list):
+        return []
+    if (
+        structured_activations
+        and all(
+            isinstance(row, Mapping)
+            and {"primary_root", "cause_status", "emotion_id", "score", "trend"}
+            <= set(row)
+            for row in value
+        )
+    ):
+        projected = project_affect(value, state)
+        result = []
+        for activation, row in zip(value[:32], projected[:32]):
+            if not isinstance(activation, Mapping):
+                continue
+            item = dict(row)
+            item["cause_status"] = activation.get("cause_status", "active")
+            primary_root = activation.get("primary_root")
+            if isinstance(primary_root, Mapping) and primary_root.get("kind") == "relationship":
+                relationship = state.get("relationship")
+                if isinstance(relationship, Mapping):
+                    for evidence in reversed(relationship.get("evidence_refs", [])):
+                        if isinstance(evidence, Mapping) and isinstance(
+                            evidence.get("semantic_summary"),
+                            str,
+                        ):
+                            item["cause_summary"] = evidence["semantic_summary"]
+                            break
+            result.append(item)
+        return result
+    result: list[dict[str, object]] = []
+    for row in value[:32]:
+        if not isinstance(row, Mapping):
+            continue
+        item: dict[str, object] = {}
+        emotion = row.get("emotion") or row.get("emotion_id")
+        if isinstance(emotion, str):
+            item["emotion"] = _safe_text(emotion, field="affect.emotion", maximum=120)
+        for key in ("phase", "intensity", "score", "trend", "cause_status"):
+            if isinstance(row.get(key), (str, int, float, bool)):
+                item[key] = row[key]
+        for key in ("cause_summary", "cause"):
+            if isinstance(row.get(key), str) and row[key].strip():
+                item["cause_summary"] = _safe_text(
+                    row[key], field="affect.cause_summary", maximum=1000
+                )
+                break
+        if item:
+            result.append(item)
+    return result
+
+
+def _project_entities(
+    state: Mapping[str, object],
+    *,
+    include_terminal: bool = True,
+    collections: Sequence[str] | None = None,
+) -> dict[str, object]:
     result: dict[str, object] = {}
-    for collection in ("goals", "threats", "active_events", "knowledge_gaps"):
+    selected_collections = collections or (
+        "goals", "threats", "active_events", "knowledge_gaps"
+    )
+    for collection in selected_collections:
         values = state.get(collection, [])
         if not isinstance(values, list):
             continue
-        result[collection] = [
-            _semantic_mapping(row, allowed=_ALLOWED_ENTITY_FIELDS, field=collection)
-            for row in values[:32] if isinstance(row, Mapping)
-        ]
-    affect = state.get("affect_activations", [])
-    if isinstance(affect, list):
-        result["affect_activations"] = [
-            _semantic_mapping(row, allowed=frozenset({
-                "emotion", "intensity", "score", "trend", "cause_summary",
-                "cause_status", "primary_root", "root_refs",
-            }), field="affect")
-            for row in affect[:32] if isinstance(row, Mapping)
-        ]
+        projected: list[dict[str, object]] = []
+        for row in values[:32]:
+            if not isinstance(row, Mapping):
+                continue
+            if not include_terminal and row.get("status") in _TERMINAL_STATUSES:
+                continue
+            item: dict[str, object] = {}
+            for key in (
+                "description", "semantic_summary", "cause_summary", "status",
+                "goal_kind", "intent", "reason", "residual_pressure", "salience",
+            ):
+                value = row.get(key)
+                if key in {"residual_pressure", "salience"}:
+                    if isinstance(value, int) and not isinstance(value, bool):
+                        item[key] = project_numeric_band(value)
+                    continue
+                if isinstance(value, (str, int, float, bool)):
+                    item[key] = value
+            if item:
+                projected.append(item)
+        result[collection] = projected
+    result["affect_activations"] = _project_affect_context(state)
     relationship = state.get("relationship")
     if isinstance(relationship, Mapping):
-        result["relationship"] = {
-            key: value for key, value in relationship.items()
-            if key in {"axes", "summary", "status"} and not any(
-                key.endswith(suffix) for suffix in _PRIVATE_SUFFIXES
-            )
-        }
+        result["relationship"] = _project_relationship_context(relationship)
     return result
 
 
@@ -258,6 +553,100 @@ def _project_capabilities(
     }
 
 
+def _project_operational_context(value: Mapping[str, object]) -> dict[str, object]:
+    """Preserve bounded affect and pressure context without source identity."""
+
+    result: dict[str, object] = {}
+    for key in ("affect", "pressures"):
+        rows = value.get(key)
+        if isinstance(rows, list):
+            result[key] = [
+                _project_semantic_tree(row, field=f"operational.{key}")
+                for row in rows[:16]
+                if isinstance(row, Mapping)
+            ]
+    return result
+
+
+def _project_continuity(value: Mapping[str, object]) -> dict[str, object]:
+    """Project private/dialog continuity as bounded semantic context."""
+
+    return {
+        key: _safe_text(value[key], field=f"continuity.{key}", maximum=2000)
+        for key in ("private", "dialog")
+        if isinstance(value.get(key), str) and value[key].strip()
+    }
+
+
+def _project_resolver_context(
+    resolver_context: object,
+    resolver_progress: Mapping[str, object] | None,
+) -> dict[str, object]:
+    """Keep resolver observations and progress semantic and bounded."""
+
+    result = {
+        "context": _safe_text(
+            resolver_context if isinstance(resolver_context, str) else "",
+            field="resolver.context",
+            maximum=8000,
+        ),
+    }
+    if resolver_progress:
+        result["progress"] = _project_semantic_tree(
+            resolver_progress,
+            field="resolver.progress",
+        )
+    return result
+
+
+def _stage_character_context(
+    workspace: Mapping[str, object],
+    *,
+    identity_families: Sequence[str],
+    include_constraints: bool,
+    include_operational: bool = False,
+) -> dict[str, object]:
+    """Select only the identity/constraint context owned by one stage."""
+
+    source = workspace["character_context"]
+    if not isinstance(source, Mapping):
+        return {}
+    identity = source.get("identity", {})
+    if isinstance(identity, Mapping) and _IDENTITY_PARTITIONS.intersection(identity):
+        projected_identity = {
+            family: identity[family]
+            for family in identity_families
+            if family in identity
+        }
+    else:
+        projected_identity = dict(identity) if isinstance(identity, Mapping) else {}
+    result: dict[str, object] = {"identity": projected_identity}
+    if include_constraints:
+        result["constraints"] = source.get("constraints", {})
+    if include_operational:
+        result["operational"] = source.get("operational", {})
+    return result
+
+
+def _stage_observation(
+    workspace: Mapping[str, object],
+    *,
+    allowed_questions: frozenset[str],
+) -> dict[str, object]:
+    """Apply typed evidence visibility and priority at the first consumer."""
+
+    observation = workspace["observation"]
+    if not isinstance(observation, Mapping):
+        return {}
+    projected = dict(observation)
+    projected["evidence"] = _project_evidence(
+        workspace.get("evidence_rows", []),
+        allowed_questions=allowed_questions,
+        limit=32,
+    )
+    return projected
+
+
 def build_canonical_turn_workspace(
     *,
     episode: Mapping[str, object],
@@ -271,6 +660,7 @@ def build_canonical_turn_workspace(
     available_resolvers: Sequence[Mapping[str, object]] = (),
     direct_facts: Sequence[Mapping[str, object]] = (),
     character_operational_context: Mapping[str, object] | None = None,
+    character_affect_context: Sequence[Mapping[str, object]] | None = None,
     relationship_context: Mapping[str, object] | None = None,
     resolver_context: object = None,
     resolver_progress: Mapping[str, object] | None = None,
@@ -280,7 +670,7 @@ def build_canonical_turn_workspace(
     if not isinstance(episode, Mapping) or not isinstance(scene_context, Mapping):
         raise PromptContractError("episode and scene_context must be mappings")
     visible = _project_percepts(episode)
-    evidence_rows = _project_evidence(evidence)
+    evidence_rows = _project_evidence(evidence, limit=128)
     role_bindings = [
         {
             key: row[key]
@@ -306,16 +696,10 @@ def build_canonical_turn_workspace(
         ),
     }
     character_context = {
-        "constraints": _semantic_mapping(
-            character_constraints or {}, allowed=_ALLOWED_CONTEXT_FIELDS, field="constraints"
-        ),
-        "identity": _semantic_mapping(
-            identity_context or {}, allowed=_ALLOWED_CONTEXT_FIELDS, field="identity"
-        ),
-        "operational": _semantic_mapping(
-            character_operational_context or {},
-            allowed=_ALLOWED_CONTEXT_FIELDS,
-            field="operational",
+        "constraints": _project_constraints(character_constraints or {}),
+        "identity": _project_identity_context(identity_context or {}),
+        "operational": _project_operational_context(
+            character_operational_context or {}
         ),
     }
     observation = {
@@ -327,36 +711,38 @@ def build_canonical_turn_workspace(
             for key in _ALLOWED_SCENE_FIELDS
             if key in scene_context and isinstance(scene_context[key], (str, int, float, bool))
         },
-        "group_engagement": _semantic_mapping(
+        "group_engagement": _project_semantic_tree(
             group_engagement or scene_context.get("group_engagement_action_context", {}),
-            allowed=_ALLOWED_CONTEXT_FIELDS,
             field="group_engagement",
         ),
     }
     state = _project_entities(mutable_state)
+    affect_context = _project_affect_context(mutable_state)
+    if character_affect_context:
+        affect_context.extend(
+            _project_affect_context({"affect": list(character_affect_context)})
+        )
     return {
         "observation": observation,
+        "evidence_rows": [dict(row) for row in evidence],
         "orientation": orientation,
         "state": state,
         "character_context": character_context,
-        "relationship_context": _semantic_mapping(
-            relationship_context or {}, allowed=_ALLOWED_CONTEXT_FIELDS, field="relationship"
+        "relationship_context": _project_relationship_context(
+            relationship_context or {}
         ),
+        "affect_context": affect_context[:32],
         "direct_facts": [
-            _semantic_mapping(row, allowed=_ALLOWED_CONTEXT_FIELDS, field="direct_fact")
+            _project_semantic_tree(row, field="direct_fact")
             for row in direct_facts if isinstance(row, Mapping)
         ],
-        "continuity": _semantic_mapping(
-            continuity or {}, allowed=_ALLOWED_CONTEXT_FIELDS, field="continuity"
+        "continuity": _project_continuity(continuity or {}),
+        "resolver_context": _project_resolver_context(
+            resolver_context,
+            resolver_progress,
         ),
-        "resolver_context": {
-            "context": resolver_context if isinstance(resolver_context, str) else "",
-            "progress": _semantic_mapping(
-                resolver_progress or {}, allowed=_ALLOWED_CONTEXT_FIELDS, field="resolver_progress"
-            ),
-        },
         "runtime_limits": [
-            _semantic_mapping(row, allowed=_ALLOWED_CONTEXT_FIELDS, field="runtime_limit")
+            _project_semantic_tree(row, field="runtime_limit")
             for row in runtime_limits if isinstance(row, Mapping)
         ],
         "capabilities": _project_capabilities(available_actions, available_resolvers),
@@ -395,14 +781,38 @@ def build_canonical_appraisal_question(
     context: dict[str, object] = {}
     if stage_name == "A2":
         context["accepted_a1_meaning"] = accepted_appraisal_summary or []
-        context["affect_context"] = workspace["state"].get("affect_activations", [])
-        context["character_context"] = workspace["character_context"]
+        context["affect_context"] = workspace.get("affect_context", [])
+        context["character_context"] = _stage_character_context(
+            workspace,
+            identity_families=tuple(CANONICAL_A2_FAMILIES),
+            include_constraints=True,
+            include_operational=True,
+        )
         context["relationship_context"] = workspace["relationship_context"]
+        observation = _stage_observation(
+            workspace,
+            allowed_questions=_A2_QUESTIONS,
+        )
+    else:
+        context["character_context"] = _stage_character_context(
+            workspace,
+            identity_families=tuple(CANONICAL_A1_FAMILIES),
+            include_constraints=False,
+        )
+        context["state"] = _project_entities(
+            workspace.get("state", {}),
+            include_terminal=False,
+            collections=("goals", "threats", "active_events", "knowledge_gaps"),
+        )
+        observation = _stage_observation(
+            workspace,
+            allowed_questions=_A1_QUESTIONS,
+        )
     return {
         "stage": stage_name,
         "guidance": A1_QUESTION_GUIDANCE if stage_name == "A1" else A2_QUESTION_GUIDANCE,
         "orientation": workspace["orientation"],
-        "observation": workspace["observation"],
+        "observation": observation,
         "context": context,
         "output_contract": _family_contract(families),
     }
@@ -426,11 +836,23 @@ def build_canonical_goal_question(
         "stage": "G",
         "guidance": GOAL_QUESTION_GUIDANCE,
         "orientation": workspace["orientation"],
-        "observation": workspace["observation"],
-        "character_context": workspace["character_context"],
+        "observation": _stage_observation(
+            workspace,
+            allowed_questions=_ALL_QUESTIONS,
+        ),
+        "character_context": _stage_character_context(
+            workspace,
+            identity_families=("goal_cognition",),
+            include_constraints=True,
+            include_operational=True,
+        ),
         "relationship_context": workspace["relationship_context"],
+        "affect_context": workspace.get("affect_context", []),
         "continuity": workspace["continuity"],
-        "state": workspace["state"],
+        "state": _project_entities(
+            workspace.get("state", {}),
+            include_terminal=False,
+        ),
         "appraisal_summary": semantic_appraisal,
         "output_contract": {
             "required_fields": ["active_character_goal", "relational_willingness"],
@@ -480,10 +902,8 @@ def build_canonical_plan_question(
     return {
         "stage": "P",
         "guidance": guidance,
-        "orientation": workspace["orientation"],
         "goal": goal,
         "capabilities": workspace["capabilities"],
-        "resolver_context": workspace["resolver_context"],
         "output_contract": contract,
     }
 

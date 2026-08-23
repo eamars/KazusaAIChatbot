@@ -92,6 +92,7 @@ from kazusa_ai_chatbot.cognition_shared.state_models import (
     validate_cognition_state,
 )
 from kazusa_ai_chatbot.cognition_shared.state_projection import (
+    project_affect,
     project_character_operational_state,
     project_character_sleep_phase,
     project_duration,
@@ -445,7 +446,11 @@ def build_cognition_input_from_global_state(
         "character_constraints": constraints,
         "character_identity_context": character_identity_context,
         "character_operational_context": character_operational_context,
-        "evidence": evidence[:32],
+        "character_affect_context": project_affect(
+            selected_character_state.get("affect_activations", []),
+            selected_character_state,
+        ),
+        "evidence": evidence,
         "direct_facts": _typed_direct_facts(state.get("direct_facts")),
         "available_actions": _available_action_affordances(state),
         "available_resolver_capabilities": _available_resolver_affordances(
@@ -578,8 +583,12 @@ async def call_cognition_subgraph(
             state = resolved_state  # type: ignore[assignment]
         prior_update = state.get("cognition_state_update")
         prior_replacement: Mapping[str, Any] | None = None
+        persisted_base_state: Mapping[str, Any] | None = None
         character_base_updated_at: str | None = None
         if isinstance(prior_update, Mapping):
+            original_persisted = prior_update.get("original_persisted_state")
+            if isinstance(original_persisted, Mapping):
+                persisted_base_state = original_persisted
             replacement = prior_update.get("replacement_state")
             if (
                 prior_update.get("state_scope") == scope
@@ -590,6 +599,8 @@ async def call_cognition_subgraph(
         if scope == "character":
             if prior_replacement is None:
                 mutable_state = await get_character_cognition_state()
+                if persisted_base_state is None:
+                    persisted_base_state = mutable_state
                 character_base_updated_at = _character_state_updated_at(
                     mutable_state,
                 )
@@ -602,6 +613,8 @@ async def call_cognition_subgraph(
         else:
             if prior_replacement is None:
                 mutable_state = await get_user_cognition_state(owner)
+                if persisted_base_state is None:
+                    persisted_base_state = mutable_state
             else:
                 mutable_state = prior_replacement
             character_state = await get_character_cognition_state()
@@ -665,6 +678,10 @@ async def call_cognition_subgraph(
         mutable_state=mutable_state,
         character_state=character_state,
     )
+    if persisted_base_state is not None:
+        cognition_input["_persisted_base_state"] = deepcopy(
+            dict(persisted_base_state)
+        )
     reflection_count = sum(
         1
         for row in cognition_input["evidence"]
@@ -857,7 +874,9 @@ async def _commit_cognition_state(
                 "canonical cognition state projection is missing"
             )
         replacement = projection.get("replacement_state")
-        expected = projection.get("expected_previous_state")
+        expected = projection.get("original_persisted_state")
+        if not isinstance(expected, Mapping):
+            expected = projection.get("expected_previous_state")
         scope = projection.get("state_scope")
         owner_key = projection.get("owner_key")
         if not isinstance(replacement, Mapping) or not isinstance(expected, Mapping):
@@ -979,19 +998,23 @@ def _canonical_goal_continuation_ref(
             or episode.get("message_id")
             or ""
         ).strip()
-    goal_row = next(
-        (
-            row for row in replacement_state.get("goals", [])
-            if isinstance(row, Mapping)
-            and row.get("goal_kind") == "ordinary_response"
-        ),
-        None,
+    projection = output.get("state_projection")
+    private_goal_ref = (
+        projection.get("continuation_goal_ref")
+        if isinstance(projection, Mapping)
+        else None
     )
-    if not isinstance(goal_row, Mapping):
-        raise CognitionExecutionError("ordinary-response goal is required for continuation")
+    if not isinstance(private_goal_ref, Mapping):
+        raise CognitionExecutionError(
+            "canonical continuation goal reference is required"
+        )
+    if set(private_goal_ref) != {"scope", "kind", "entity_id"}:
+        raise CognitionExecutionError("canonical continuation goal reference is invalid")
     scope = str(replacement_state.get("state_scope") or "")
     if scope not in {"user", "character"}:
         raise CognitionExecutionError("continuation goal scope is invalid")
+    if private_goal_ref.get("scope") != scope or private_goal_ref.get("kind") != "goal":
+        raise CognitionExecutionError("continuation goal reference scope is invalid")
     return build_goal_continuation_ref(
         source_episode_id=episode_id,
         source_message_id=source_message_id,
@@ -999,8 +1022,25 @@ def _canonical_goal_continuation_ref(
         goal_ref={
             "scope": scope,
             "kind": "goal",
-            "entity_id": str(goal_row["entity_id"]),
+            "entity_id": str(private_goal_ref["entity_id"]),
         },
+    )
+
+
+def _goal_continuation_is_capacity_deferred(output: Mapping[str, Any]) -> bool:
+    """Identify a protected goal-capacity outcome before lineage binding."""
+
+    projection = output.get("state_projection")
+    if not isinstance(projection, Mapping):
+        return False
+    deferred = projection.get("capacity_deferred")
+    if not isinstance(deferred, list) or not deferred:
+        deferred = projection.get("binding_receipts", [])
+    return any(
+        isinstance(row, Mapping)
+        and row.get("kind") == "goal"
+        and row.get("disposition") == "capacity_deferred"
+        for row in deferred
     )
 
 
@@ -1058,6 +1098,7 @@ def _materialize_canonical_action_requests(
         for row in action_affordances
         if isinstance(row, Mapping)
     }
+    continuation_deferred = _goal_continuation_is_capacity_deferred(output)
     requests: list[dict[str, Any]] = []
     for row in rows:
         if not isinstance(row, Mapping):
@@ -1066,6 +1107,16 @@ def _materialize_canonical_action_requests(
         affordance = affordances.get(action_kind)
         if affordance is None:
             raise CognitionExecutionError("canonical action capability is unavailable")
+        if (
+            action_kind == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY
+            and continuation_deferred
+        ):
+            continue
+        continuation_ref = (
+            _canonical_goal_continuation_ref(output, state, replacement_state)
+            if action_kind == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY
+            else None
+        )
         request: dict[str, Any] = {
             "capability": action_kind,
             "decision": str(row["decision"]),
@@ -1075,11 +1126,7 @@ def _materialize_canonical_action_requests(
             "target_roles": deepcopy(list(affordance["target_roles"])),
             "evidence_handles": [],
             "surface_role": "ordinary",
-            "goal_continuation_ref": (
-                _canonical_goal_continuation_ref(output, state, replacement_state)
-                if action_kind == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY
-                else None
-            ),
+            "goal_continuation_ref": continuation_ref,
         }
         if action_kind == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY:
             request["surface_role"] = "task_acknowledgement"
@@ -1161,12 +1208,14 @@ def _materialize_canonical_resolver_requests(
         for row in resolver_affordances
         if isinstance(row, Mapping)
     }
-    continuation = None
-    if any(
+    continuation_deferred = _goal_continuation_is_capacity_deferred(output)
+    task_resolution_requested = any(
         isinstance(row, Mapping)
         and row.get("capability") == "task_resolution_request"
         for row in rows
-    ):
+    )
+    continuation = None
+    if task_resolution_requested and not continuation_deferred:
         continuation = _canonical_goal_continuation_ref(
             output,
             state,
@@ -1179,6 +1228,8 @@ def _materialize_canonical_resolver_requests(
         capability = str(row["capability"])
         if capability not in allowed:
             raise CognitionExecutionError("canonical resolver capability is unavailable")
+        if capability == "task_resolution_request" and continuation_deferred:
+            continue
         validated = validate_resolver_capability_request({
             "schema_version": RESOLVER_CAPABILITY_REQUEST_VERSION,
             "capability_kind": capability,

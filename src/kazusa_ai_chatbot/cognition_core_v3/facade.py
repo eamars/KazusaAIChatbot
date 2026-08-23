@@ -6,11 +6,13 @@ share the historical branch, bid, or repair orchestration helpers.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
 from collections.abc import Mapping
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -49,9 +51,14 @@ from kazusa_ai_chatbot.cognition_shared.contracts import (
 from kazusa_ai_chatbot.cognition_shared.emotion_derivation import (
     derive_persistent_emotion_activations,
 )
+from kazusa_ai_chatbot.cognition_shared.state_models import validate_cognition_state
 from kazusa_ai_chatbot.cognition_shared.state_projection import (
     RELATIONSHIP_AXIS_FIELDS,
     project_affect,
+)
+from kazusa_ai_chatbot.cognition_shared.state_reducers import (
+    apply_relationship_maintenance,
+    apply_state_update,
 )
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
@@ -92,6 +99,126 @@ def _validate_canonical_input(value: object) -> dict[str, object]:
 
 def _json(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _next_transaction_timestamp(value: str) -> str:
+    """Advance one persisted UTC version deterministically."""
+
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise CanonicalContractError("canonical state timestamp is invalid") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return (
+        (parsed + timedelta(microseconds=1))
+        .astimezone(timezone.utc)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
+def _transaction_timing(
+    state: Mapping[str, object],
+    episode: Mapping[str, object],
+) -> tuple[int, str, str]:
+    """Derive elapsed lifecycle time and mutation date from the episode."""
+
+    raw_episode_time = episode.get("created_at")
+    raw_state_time = state.get("updated_at")
+    if not isinstance(raw_episode_time, str) or not isinstance(raw_state_time, str):
+        raise CanonicalContractError("canonical transaction timestamps are invalid")
+    try:
+        episode_time = datetime.fromisoformat(raw_episode_time.replace("Z", "+00:00"))
+        state_time = datetime.fromisoformat(raw_state_time.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise CanonicalContractError("canonical transaction timestamps are invalid") from exc
+    if episode_time.tzinfo is None:
+        episode_time = episode_time.replace(tzinfo=timezone.utc)
+    if state_time.tzinfo is None:
+        state_time = state_time.replace(tzinfo=timezone.utc)
+    elapsed_seconds = max(0, int((episode_time - state_time).total_seconds()))
+    mutation_anchor = max(episode_time, state_time).astimezone(timezone.utc)
+    mutation_time = _next_transaction_timestamp(
+        mutation_anchor.isoformat().replace("+00:00", "Z")
+    )
+    return elapsed_seconds, mutation_time, episode_time.date().isoformat()
+
+
+def _typed_transaction_facts(value: object) -> list[tuple[str, Mapping[str, object]]]:
+    """Convert caller-owned producer/fact rows to the reducer input shape."""
+
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise CanonicalContractError("canonical direct facts must be an array")
+    result: list[tuple[str, Mapping[str, object]]] = []
+    for row in value:
+        if not isinstance(row, Mapping):
+            raise CanonicalContractError("canonical direct fact row is invalid")
+        producer = row.get("producer")
+        fact = row.get("fact")
+        if not isinstance(producer, str) or not producer.strip():
+            raise CanonicalContractError("canonical direct fact producer is invalid")
+        if not isinstance(fact, Mapping):
+            fact = {
+                key: item
+                for key, item in row.items()
+                if key != "producer"
+            }
+        result.append((producer, dict(fact)))
+    return result
+
+
+def _prepare_state_transaction(
+    payload: Mapping[str, object],
+) -> tuple[dict[str, object], dict[str, object], list[dict[str, object]]]:
+    """Apply trusted lifecycle inputs before semantic appraisal binding."""
+
+    current_state = validate_cognition_state(payload["mutable_state"])
+    persisted_base = payload.get("_persisted_base_state")
+    original = (
+        validate_cognition_state(persisted_base)
+        if isinstance(persisted_base, Mapping)
+        else current_state
+    )
+    episode = payload.get("episode")
+    if not isinstance(episode, Mapping):
+        raise CanonicalContractError("canonical episode is invalid")
+    direct_facts = _typed_transaction_facts(payload.get("direct_facts", []))
+    elapsed_seconds, updated_at, interaction_date = _transaction_timing(
+        current_state,
+        episode,
+    )
+    evolved = apply_state_update(
+        current_state,
+        direct_facts=direct_facts,
+        elapsed_seconds=elapsed_seconds,
+        updated_at=updated_at,
+        character_constraints=(
+            payload.get("character_constraints")
+            if isinstance(payload.get("character_constraints"), Mapping)
+            else None
+        ),
+        relationship_context=(
+            payload.get("relationship_context")
+            if isinstance(payload.get("relationship_context"), Mapping)
+            else None
+        ),
+    )
+    payload["_transaction_elapsed_seconds"] = elapsed_seconds
+    payload["_transaction_interaction_date"] = interaction_date
+    payload["_transaction_direct_facts"] = [
+        {"producer": producer, **dict(fact)}
+        for producer, fact in direct_facts
+    ]
+    validated = validate_cognition_state(evolved)
+    transitions = [
+        dict(row)
+        for row in payload.get("transaction_transition_contexts", [])
+        if isinstance(row, Mapping)
+    ]
+    return dict(original), validated, transitions
 
 
 async def _call_once(
@@ -305,9 +432,25 @@ def _validate_plan(raw: object, *, self_cognition: bool, capabilities: dict[str,
 async def run_cognition(
     input_payload: Mapping[str, object], services: CognitionChainServicesV3
 ) -> dict[str, object]:
+    """Run the complete canonical chain under its configured deadline."""
+
+    return await asyncio.wait_for(
+        _run_cognition(input_payload, services),
+        timeout=services.turn_deadline_seconds,
+    )
+
+
+async def _run_cognition(
+    input_payload: Mapping[str, object], services: CognitionChainServicesV3
+) -> dict[str, object]:
     """Run exactly A1, A2, G, and caller-selected P once each."""
 
     validated = _validate_canonical_input(input_payload)
+    original_state, transaction_state, transaction_transitions = (
+        _prepare_state_transaction(validated)
+    )
+    validated["mutable_state"] = transaction_state
+    validated["_transaction_transition_contexts"] = transaction_transitions
     workspace = build_canonical_turn_workspace(
         episode=validated["episode"], scene_context=validated["scene_context"],
         evidence=validated["evidence"], mutable_state=validated["mutable_state"],
@@ -322,6 +465,9 @@ async def run_cognition(
         direct_facts=validated.get("direct_facts", []),
         character_operational_context=validated.get(
             "character_operational_context", {}
+        ),
+        character_affect_context=validated.get(
+            "character_affect_context", []
         ),
         relationship_context=validated.get("relationship_context", {}),
         resolver_context=validated.get("resolver_context", ""),
@@ -362,12 +508,57 @@ async def run_cognition(
         ),
     )
     plan = _validate_plan(plan_raw, self_cognition=self_cognition, capabilities=workspace["capabilities"])
+    binding_metadata: dict[str, object] = {}
     replacement_state, transition_contexts, binding_receipts, cause_provenance = bind_axis_changes(
         validated,
         appraisals,
         goal=goal.__dict__,
         willingness=willingness,
+        goal_resolution=plan.goal_resolution,
+        action_requests=plan.action_requests,
+        resolver_requests=plan.resolver_requests,
+        binding_metadata=binding_metadata,
     )
+    if validated["state_scope"] == "user":
+        episode = validated["episode"]
+        if not isinstance(episode, Mapping):
+            raise CanonicalContractError("canonical episode is invalid")
+        relationship_deltas: list[dict[str, object]] = []
+        for receipt in binding_receipts:
+            if receipt.get("family") != "relationship_social":
+                continue
+            applied_targets = receipt.get("applied_targets", [])
+            if not isinstance(applied_targets, list):
+                continue
+            for applied in applied_targets:
+                if not isinstance(applied, Mapping):
+                    continue
+                target_path = applied.get("target_path")
+                applied_delta = applied.get("applied_delta")
+                if (
+                    isinstance(target_path, str)
+                    and target_path.startswith("relationship.")
+                    and isinstance(applied_delta, int)
+                    and not isinstance(applied_delta, bool)
+                ):
+                    relationship_deltas.append({
+                        "duplicate_disposition": "unique",
+                        "target_path": target_path,
+                        "relationship_axis": receipt.get("axis"),
+                        "applied_delta": applied_delta,
+                    })
+        replacement_state = apply_relationship_maintenance(
+            replacement_state,
+            source_episode_id=str(episode["episode_id"]),
+            interaction_date_utc=str(validated["_transaction_interaction_date"]),
+            elapsed_seconds=int(validated["_transaction_elapsed_seconds"]),
+            accepted_relationship_deltas=relationship_deltas,
+            trusted_facts=tuple(
+                row for row in validated.get("_transaction_direct_facts", [])
+                if isinstance(row, Mapping)
+            ),
+        )
+        replacement_state = validate_cognition_state(replacement_state)
     derived_activations = derive_persistent_emotion_activations(
         replacement_state,
         updated_at=str(replacement_state.get("updated_at", "")),
@@ -376,6 +567,7 @@ async def run_cognition(
         transition_contexts=transition_contexts,
     )
     replacement_state["affect_activations"] = derived_activations
+    replacement_state = validate_cognition_state(replacement_state)
     affect_projection = project_affect(derived_activations, replacement_state)
     result = CanonicalCognitionOutput(
         schema_version=CANONICAL_COGNITION_OUTPUT_SCHEMA,
@@ -396,11 +588,21 @@ async def run_cognition(
         "owner_key": validated["mutable_state"].get("owner_user_id", "")
         if isinstance(validated["mutable_state"], Mapping)
         else "",
-        "expected_previous_state": dict(validated["mutable_state"]),
+        "expected_previous_state": original_state,
+        "original_persisted_state": original_state,
         "replacement_state": replacement_state,
         "transition_contexts": transition_contexts,
         "binding_receipts": binding_receipts,
+        "capacity_deferred": [
+            dict(row)
+            for row in binding_receipts
+            if row.get("disposition") == "capacity_deferred"
+        ],
     }
+    if "continuation_goal_ref" in binding_metadata:
+        output["state_projection"]["continuation_goal_ref"] = dict(
+            binding_metadata["continuation_goal_ref"]
+        )
     return dict(validate_canonical_cognition_output(output))
 
 

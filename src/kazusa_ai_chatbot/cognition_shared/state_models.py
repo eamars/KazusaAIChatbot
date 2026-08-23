@@ -42,6 +42,15 @@ EMOTION_IDS = (
 class CognitionStateError(ValueError):
     """Raised when native cognition state violates a reducer invariant."""
 
+
+class CognitionCapacityDeferredError(CognitionStateError):
+    """Raised when a protected collection cannot admit another native row."""
+
+    def __init__(self, collection: str) -> None:
+        self.collection = collection
+        super().__init__(f"{collection} capacity is protected by active causes")
+
+
 STATE_LIST_CAPS = {
     "goals": 16,
     "threats": 16,
@@ -484,10 +493,15 @@ def resolve_state_scope(
     raise CognitionStateError(f"unsupported state-scope caller: {caller!r}")
 
 
-def prune_terminal_entities(state: Mapping[str, Any]) -> dict[str, Any]:
-    """Prune oldest unreferenced terminal entities until every cap holds."""
+def prune_terminal_entities(
+    state: Mapping[str, Any],
+    *,
+    preserve_entity_ids: set[str] | None = None,
+) -> dict[str, Any]:
+    """Prune oldest safe terminal or inert causal entities until caps hold."""
 
     payload = deepcopy(dict(state))
+    preserved = preserve_entity_ids or set()
     protected_refs = _protected_entity_refs(payload.get("affect_activations"))
     for field_name, cap in STATE_LIST_CAPS.items():
         entities = payload.get(field_name)
@@ -500,7 +514,11 @@ def prune_terminal_entities(state: Mapping[str, Any]) -> dict[str, Any]:
             entity
             for entity in entities
             if isinstance(entity, Mapping)
-            and _is_terminal_entity(entity)
+            and (
+                _is_terminal_entity(entity)
+                or _is_inert_causal_entity(entity, kind)
+            )
+            and entity.get("entity_id") not in preserved
             and (kind, entity.get("entity_id")) not in protected_refs
         ]
         removable.sort(
@@ -511,9 +529,7 @@ def prune_terminal_entities(state: Mapping[str, Any]) -> dict[str, Any]:
         )
         remove_count = len(entities) - cap
         if len(removable) < remove_count:
-            raise CognitionStateError(
-                f"{field_name} capacity is protected by active causes"
-            )
+            raise CognitionCapacityDeferredError(field_name)
         removal_ids = {
             entity["entity_id"] for entity in removable[:remove_count]
         }
@@ -1002,6 +1018,37 @@ def _is_terminal_entity(entity: Mapping[str, Any]) -> bool:
         "resolved",
         "replaced",
     }
+
+
+def _is_inert_causal_entity(
+    entity: Mapping[str, Any],
+    kind: str,
+) -> bool:
+    """Allow reclamation only for zero-pressure causal rows."""
+
+    if kind not in {"event", "threat", "knowledge_gap"}:
+        return False
+    if entity.get("salience") != 0:
+        return False
+    if kind == "event":
+        fields = (
+            "outcome_impact", "responsibility", "intentionality", "harm",
+            "unfairness", "exposure", "repair_need", "expectation_mismatch",
+            "norm_violation", "contamination_risk", "identity_threat",
+            "comparison_gap", "vastness", "memory_warmth", "temporal_loss",
+        )
+        return entity.get("status") == "active" and all(
+            entity.get(field) == 0 for field in fields
+        )
+    if kind == "threat":
+        fields = ("likelihood", "expected_harm", "uncertainty", "residual_pressure")
+        return entity.get("status") == "active" and all(
+            entity.get(field) == 0 for field in fields
+        )
+    fields = ("relevance", "uncertainty", "learnability", "novelty", "model_accommodation")
+    return entity.get("status") in {"open", "reduced"} and all(
+        entity.get(field) == 0 for field in fields
+    )
 
 
 def _require_exact_keys(

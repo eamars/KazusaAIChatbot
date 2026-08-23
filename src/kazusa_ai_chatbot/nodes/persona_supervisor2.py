@@ -5,6 +5,9 @@ from collections.abc import Mapping
 
 from langgraph.graph import END, START, StateGraph
 
+from kazusa_ai_chatbot.accepted_task import (
+    load_open_coding_run_contexts_for_scope,
+)
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
 from kazusa_ai_chatbot.action_spec.execution import execute_action_specs_for_trace
 from kazusa_ai_chatbot.action_spec.registry import (
@@ -18,31 +21,10 @@ from kazusa_ai_chatbot.action_spec.results import (
     build_text_surface_output,
     build_visual_surface_output,
 )
-from kazusa_ai_chatbot.accepted_task import (
-    load_open_coding_run_contexts_for_scope,
-)
-from kazusa_ai_chatbot.config import (
-    COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS,
-    COGNITION_RESOLVER_MAX_CYCLES,
-)
-from kazusa_ai_chatbot.conversation_progress import (
-    GroupSceneProjectionError,
-    build_group_scene_context,
-    filter_group_scene_ambient_turns,
-    logical_turns_as_history_rows,
-    project_group_scene_prompt,
-)
-from kazusa_ai_chatbot.cognition_shared.contracts import (
-    CognitionExecutionError,
-    SceneParticipantBindingV1,
-    validate_text_surface_output,
-    validate_visual_surface_output,
-)
-from kazusa_ai_chatbot.cognition_shared.prompt_budget import (
-    MAX_SCENE_PARTICIPANT_BINDINGS,
-)
 from kazusa_ai_chatbot.cognition_resolver.capabilities import (
     execute_resolver_capability_request,
+)
+from kazusa_ai_chatbot.cognition_resolver.capabilities import (
     run_rag_evidence_for_persona_state as _run_rag_evidence_for_persona_state,
 )
 from kazusa_ai_chatbot.cognition_resolver.loop import (
@@ -55,6 +37,26 @@ from kazusa_ai_chatbot.cognition_resolver.pending import (
 )
 from kazusa_ai_chatbot.cognition_resolver.state import (
     ensure_initial_resolver_inputs,
+)
+from kazusa_ai_chatbot.cognition_shared.contracts import (
+    CognitionExecutionError,
+    SceneParticipantBindingV1,
+    validate_text_surface_output,
+    validate_visual_surface_output,
+)
+from kazusa_ai_chatbot.cognition_shared.prompt_budget import (
+    MAX_SCENE_PARTICIPANT_BINDINGS,
+)
+from kazusa_ai_chatbot.config import (
+    COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS,
+    COGNITION_RESOLVER_MAX_CYCLES,
+)
+from kazusa_ai_chatbot.conversation_progress import (
+    GroupSceneProjectionError,
+    build_group_scene_context,
+    filter_group_scene_ambient_turns,
+    logical_turns_as_history_rows,
+    project_group_scene_prompt,
 )
 from kazusa_ai_chatbot.nodes.dialog_agent import (
     StateContractError,
@@ -704,7 +706,7 @@ async def stage_1_goal_resolver(state: GlobalPersonaState) -> dict:
     core_output = resolved_state.get("cognition_core_output")
     if not isinstance(core_output, Mapping):
         raise ValueError("Resolver completed without cognition_core_output")
-    state_update = core_output.get("state_update")
+    state_update = core_output.get("state_projection")
     if (
         isinstance(state_update, Mapping)
         and state_update.get("state_scope") == "character"

@@ -146,7 +146,45 @@ def validate_canonical_cognition_output(
         raise ValueError("canonical goal is invalid")
     if not isinstance(payload["response_plan"], Mapping):
         raise ValueError("canonical response plan is invalid")
+    validate_canonical_state_projection(payload["state_projection"])
     return payload
+
+
+def validate_canonical_state_projection(value: object) -> Mapping[str, object]:
+    """Validate the private compare-and-replace carrier shape."""
+
+    if not isinstance(value, Mapping):
+        raise ValueError("canonical state projection is invalid")
+    required = {
+        "state_scope",
+        "owner_key",
+        "expected_previous_state",
+        "original_persisted_state",
+        "replacement_state",
+        "transition_contexts",
+        "binding_receipts",
+        "capacity_deferred",
+    }
+    allowed = required | {"continuation_goal_ref"}
+    if set(value) - allowed or required - set(value):
+        raise ValueError("canonical state projection fields are not exact")
+    if value["state_scope"] not in {"user", "character"}:
+        raise ValueError("canonical state projection scope is invalid")
+    if not isinstance(value["owner_key"], str):
+        raise ValueError("canonical state projection owner is invalid")
+    for field in ("expected_previous_state", "original_persisted_state", "replacement_state"):
+        if not isinstance(value[field], Mapping):
+            raise ValueError(f"canonical state projection {field} is invalid")
+    for field in ("transition_contexts", "binding_receipts", "capacity_deferred"):
+        if not isinstance(value[field], list):
+            raise ValueError(f"canonical state projection {field} is invalid")
+    continuation = value.get("continuation_goal_ref")
+    if continuation is not None:
+        if not isinstance(continuation, Mapping) or set(continuation) != {
+            "scope", "kind", "entity_id",
+        }:
+            raise ValueError("canonical continuation goal reference is invalid")
+    return value
 
 _MINIMUM_CHAIN_CONTEXT_WINDOW_TOKENS = 50_000
 _MINIMUM_LANE_COMPLETION_TOKENS = 8_192
@@ -189,4 +227,5 @@ __all__ = [
     "CANONICAL_SHIFT_VALUES", "CanonicalAppraisal", "CanonicalCognitionOutput",
     "CanonicalGoal", "CanonicalResponsePlan", "CanonicalTurnWorkspace",
     "CognitionChainServicesV3", "validate_canonical_cognition_output",
+    "validate_canonical_state_projection",
 ]
