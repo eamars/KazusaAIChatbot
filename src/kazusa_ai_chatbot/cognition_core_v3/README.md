@@ -45,11 +45,12 @@ appraisal or native causal entity.
 
 `run_cognition(input_payload, services)` is the canonical entrypoint.
 `CognitionChainServicesV3` contains one LLM invoker, one chain configuration,
-  and the bounded turn deadline. Invocation-local protected trace capture is
-  opt-in diagnostic evidence: when enabled it records first-pass stage
-  messages, parsed products, status, and timing for inspection, but production
-  protected trace does not independently persist or export those records;
-  public cognition output exposes semantic result and state projection only.
+and the bounded turn deadline. Invocation-local protected trace capture records
+first-pass stage messages, parsed products, status, and timing for inspection.
+When protected trace capture is enabled, every A1, A2, G, and P attempt also
+uses the shared persisted trace lane; `full` mode retains its raw messages,
+response, and parsed product. Public cognition output exposes semantic result
+and state projection only.
 
 The immediate node and surface consumers use the canonical V3 output directly:
 `active_character_goal`, `response_plan`, affect, relationship projection,

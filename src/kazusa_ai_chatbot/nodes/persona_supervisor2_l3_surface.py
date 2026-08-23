@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Mapping
 from typing import Any
 
+from kazusa_ai_chatbot import llm_tracing
 from kazusa_ai_chatbot.action_spec.results import (
     project_trace_action_result_v2,
 )
@@ -122,6 +123,20 @@ def build_text_surface_input_from_global_state(
 
 
 async def call_l3_text_surface_handler(state: GlobalPersonaState) -> dict[str, Any]:
+    """Run surface planning under the state-owned protected trace."""
+
+    trace_token = llm_tracing.bind_trace_id(
+        str(state.get("llm_trace_id") or "")
+    )
+    try:
+        return await _run_l3_text_surface_handler(state)
+    finally:
+        llm_tracing.reset_trace_id(trace_token)
+
+
+async def _run_l3_text_surface_handler(
+    state: GlobalPersonaState,
+) -> dict[str, Any]:
     """Run text and enabled terminal visual surface planning."""
 
     interaction_style_context = await _load_interaction_style_context(state)

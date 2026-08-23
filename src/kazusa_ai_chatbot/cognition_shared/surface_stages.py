@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable, Mapping
 from time import perf_counter
 from typing import Any
@@ -11,6 +12,7 @@ import httpx
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from openai import OpenAIError
 
+from kazusa_ai_chatbot import llm_tracing
 from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionExecutionError,
     TextSurfaceServicesV2,
@@ -25,11 +27,23 @@ from kazusa_ai_chatbot.llm_interface import LLMCallConfig
 from kazusa_ai_chatbot.llm_tracing import failure_capsule
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
+logger = logging.getLogger(__name__)
+
 SURFACE_STAGE_ATTEMPT_LIMIT = V2_MODEL_TOTAL_ATTEMPTS
 SURFACE_STAGE_PROMPT_CAP = 32000
 SURFACE_STAGE_REPAIR_OUTPUT_CAP = 8000
 SURFACE_STAGE_REPAIR_PROMPT_CAP = 32000
 SURFACE_STAGE_ERROR_CAP = 500
+_SURFACE_TRACE_FIELDS = {
+    "content_plan": (
+        "content_plan",
+        "content_requirements",
+        "delivery_profile",
+        "lexical_avoidances",
+    ),
+    "preference": ("visible_boundaries", "addressee_plan"),
+    "visual": ("visual_directives",),
+}
 DELIVERY_PROFILE_FIELDS = (
     "lexical_register",
     "sentence_shape",
@@ -206,7 +220,7 @@ async def _run_surface_stage(
             TimeoutError,
         ) as exc:
             last_error = exc
-            _record_surface_trace(
+            await _record_surface_trace(
                 config=config,
                 messages=request_messages,
                 response_text="",
@@ -251,7 +265,7 @@ async def _run_surface_stage(
             validated_result = validator(parsed)
         except (AttributeError, KeyError, TypeError, ValueError) as exc:
             last_error = exc
-            _record_surface_trace(
+            await _record_surface_trace(
                 config=config,
                 messages=request_messages,
                 response_text=response_text,
@@ -284,7 +298,7 @@ async def _run_surface_stage(
             )
             continue
 
-        _record_surface_trace(
+        await _record_surface_trace(
             config=config,
             messages=request_messages,
             response_text=response_text,
@@ -308,7 +322,7 @@ async def _run_surface_stage(
     )
 
 
-def _record_surface_trace(
+async def _record_surface_trace(
     *,
     config: LLMCallConfig,
     messages: list[BaseMessage],
@@ -322,21 +336,33 @@ def _record_surface_trace(
     attempt_index: int,
     validation_error: str,
 ) -> None:
-    """Preserve one protected surface-owner model boundary."""
+    """Persist one surface attempt without affecting surface execution."""
 
-    failure_capsule.append_model_attempt(
-        stage_name=stage_name,
-        messages=messages,
-        response_text=response_text,
-        parsed_output=parsed_output,
-        parse_status=parse_status,
-        status=status,
-        config=config,
-        branch_id=branch_id,
-        attempt_index=attempt_index,
-        validation_error=validation_error,
-        started_at=started_at,
-    )
+    try:
+        await llm_tracing.record_llm_trace_step(
+            trace_id=llm_tracing.current_trace_id(),
+            stage_name=stage_name,
+            route_name=config.route_name,
+            model_name=config.model,
+            messages=messages,
+            response_text=response_text,
+            parsed_output=parsed_output,
+            parse_status=parse_status,
+            status=status,
+            duration_ms=max(0, int((perf_counter() - started_at) * 1000)),
+            output_state_fields=_SURFACE_TRACE_FIELDS[branch_id],
+            sequence=attempt_index - 1,
+            call_config=config,
+            branch_id=branch_id,
+            attempt_index=attempt_index,
+            validation_error=validation_error,
+            attempt_started_at=started_at,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Surface trace step write failed: %s",
+            exc.__class__.__name__,
+        )
 
 
 def _surface_execution_error(

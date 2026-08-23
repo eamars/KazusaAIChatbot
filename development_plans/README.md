@@ -70,11 +70,13 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
+| [cognition_subjective_continuity_dialog_quality_plan_2026-08-23.md](active/bugfix/cognition_subjective_continuity_dialog_quality_plan_2026-08-23.md) | First-person cognition continuity and epistemic dialog-boundary quality proposal | draft |
 
 ### Completed Bugfix Plans
 
 | Document | Type | Status |
 |---|---|---|
+| [cognition_full_protected_trace_capture_bugfix_plan_2026-08-23.md](archive/completed/cognition_full_protected_trace_capture_bugfix_plan_2026-08-23.md) | Successful Cognition V3 and L3 full protected trace capture restoration | completed |
 | [cognition_v3_state_transaction_capacity_and_context_integrity_bugfix_plan_2026-08-23.md](archive/completed/cognition_v3_state_transaction_capacity_and_context_integrity_bugfix_plan_2026-08-23.md) | Cognition V3 state capacity, lifecycle, commit lineage, and prompt-context integrity correction | completed |
 | [unified_llm_json_schema_fallback_no_text_bugfix_plan_2026-08-23.md](archive/completed/unified_llm_json_schema_fallback_no_text_bugfix_plan_2026-08-23.md) | Unified LLM JSON Schema fallback without text correction | completed |
 | [cognition_v3_first_pass_appraisal_structural_exhaustion_diagnosis_2026-08-22.md](archive/completed/cognition_v3_first_pass_appraisal_structural_exhaustion_diagnosis_2026-08-22.md) | First-pass cognition appraisal structural-exhaustion diagnosis | completed |

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import time
 from collections.abc import Mapping
@@ -16,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from kazusa_ai_chatbot import llm_tracing
 from kazusa_ai_chatbot.cognition_core_v3.appraisal import (
     bind_axis_changes,
     validate_canonical_appraisal,
@@ -60,7 +62,10 @@ from kazusa_ai_chatbot.cognition_shared.state_reducers import (
     apply_relationship_maintenance,
     apply_state_update,
 )
+from kazusa_ai_chatbot.llm_interface import LLMCallConfig
 from kazusa_ai_chatbot.utils import parse_llm_json_output
+
+logger = logging.getLogger(__name__)
 
 
 class CanonicalContractError(ValueError):
@@ -72,6 +77,14 @@ _STAGE_INSTRUCTIONS = {
     "A2": "Judge the accepted meaning with relationship, moral, and existential families.",
     "G": "Choose one meaningful active-character goal and relational willingness.",
     "P": "Choose the active-character response goal and only supplied capabilities.",
+}
+
+_COGNITION_STAGE_SEQUENCE = {"A1": 0, "A2": 1, "G": 2, "P": 3}
+_COGNITION_TRACE_FIELDS = {
+    "A1": ("event_agency", "goal_threat_outcome", "epistemic_comparison_memory"),
+    "A2": ("relationship_social", "moral_identity", "existential_drive"),
+    "G": ("active_character_goal", "relational_willingness"),
+    "P": ("goal_resolution", "response_goal", "action_requests", "resolver_requests"),
 }
 
 
@@ -240,16 +253,57 @@ async def _call_once(
         )),
         HumanMessage(content=_json(packet)),
     ]
-    response = await services.llm.ainvoke(
-        messages,
-        config=config,
-    )
+    try:
+        response = await services.llm.ainvoke(
+            messages,
+            config=config,
+        )
+    except Exception as exc:
+        await _record_cognition_trace_attempt(
+            stage=stage,
+            config=config,
+            messages=messages,
+            response_text="",
+            parsed_output={},
+            parse_status="provider_error",
+            status="failed",
+            started=started,
+            validation_error=str(exc),
+        )
+        record_protected_chain_record({
+            "stage": stage,
+            "config": {
+                "route_name": config.route_name,
+                "model": config.model,
+                "stage_name": config.stage_name,
+            },
+            "messages": [
+                {"role": "system", "content": messages[0].content},
+                {"role": "human", "content": messages[1].content},
+            ],
+            "raw_output": "",
+            "parsed_output": None,
+            "status": "provider_error",
+            "duration_ms": round((time.monotonic() - started) * 1000, 3),
+        })
+        raise
     raw_content = getattr(response, "content", "")
     try:
         parsed = parse_llm_json_output(raw_content, deterministic_only=True)
         if not isinstance(parsed, dict) or not parsed:
             raise CanonicalContractError(f"{stage} returned no usable JSON object")
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as exc:
+        await _record_cognition_trace_attempt(
+            stage=stage,
+            config=config,
+            messages=messages,
+            response_text=str(raw_content),
+            parsed_output=None,
+            parse_status="contract_error",
+            status="failed",
+            started=started,
+            validation_error=str(exc),
+        )
         record_protected_chain_record({
             "stage": stage,
             "config": {
@@ -283,7 +337,58 @@ async def _call_once(
         "status": "parsed",
         "duration_ms": round((time.monotonic() - started) * 1000, 3),
     })
+    await _record_cognition_trace_attempt(
+        stage=stage,
+        config=config,
+        messages=messages,
+        response_text=str(raw_content),
+        parsed_output=parsed,
+        parse_status="succeeded",
+        status="succeeded",
+        started=started,
+        validation_error="",
+    )
     return parsed
+
+
+async def _record_cognition_trace_attempt(
+    *,
+    stage: str,
+    config: LLMCallConfig,
+    messages: list[SystemMessage | HumanMessage],
+    response_text: str,
+    parsed_output: object,
+    parse_status: str,
+    status: str,
+    started: float,
+    validation_error: str,
+) -> None:
+    """Persist one cognition attempt without affecting semantic execution."""
+
+    try:
+        await llm_tracing.record_llm_trace_step(
+            trace_id=llm_tracing.current_trace_id(),
+            stage_name=f"cognition_core_v3.{stage}",
+            route_name=config.route_name,
+            model_name=config.model,
+            messages=messages,
+            response_text=response_text,
+            parsed_output=parsed_output,
+            parse_status=parse_status,
+            status=status,
+            duration_ms=max(0, int((time.monotonic() - started) * 1000)),
+            output_state_fields=_COGNITION_TRACE_FIELDS[stage],
+            sequence=_COGNITION_STAGE_SEQUENCE[stage],
+            call_config=config,
+            attempt_index=1,
+            validation_error=validation_error,
+            attempt_started_at=started,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Cognition trace step write failed: %s",
+            exc.__class__.__name__,
+        )
 
 
 def _bounded_text(value: object, field: str, maximum: int = 2000) -> str:

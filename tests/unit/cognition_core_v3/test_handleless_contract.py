@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from kazusa_ai_chatbot.cognition_core_v3 import facade as facade_module
 from kazusa_ai_chatbot.cognition_core_v3.appraisal import bind_axis_changes
 from kazusa_ai_chatbot.cognition_core_v3.contracts import (
     CANONICAL_A1_FAMILIES,
@@ -782,15 +783,47 @@ class _FourStageInvoker:
 
 
 @pytest.mark.asyncio
-async def test_canonical_cognition_calls_a1_a2_g_p_once_with_one_goal() -> None:
+async def test_canonical_cognition_calls_a1_a2_g_p_once_with_one_goal(
+    monkeypatch,
+) -> None:
     invoker = _FourStageInvoker()
+    trace_rows: list[dict[str, object]] = []
+
+    async def record_trace_step(**kwargs: object) -> dict[str, object]:
+        trace_rows.append(kwargs)
+        return {
+            "accepted": True,
+            "trace_id": "deterministic-trace",
+            "status": "recorded",
+            "reason": "",
+        }
+
+    monkeypatch.setattr(
+        facade_module.llm_tracing,
+        "record_llm_trace_step",
+        record_trace_step,
+    )
+    trace_token = facade_module.llm_tracing.bind_trace_id("deterministic-trace")
     token = bind_protected_chain_records(run_id="deterministic-test")
     try:
         output = await run_cognition(_input(), _services(invoker))
         records = snapshot_protected_chain_records()
     finally:
         reset_protected_chain_records(token)
+        facade_module.llm_tracing.reset_trace_id(trace_token)
     assert invoker.calls == ["A1", "A2", "G", "P"]
+    assert [row["stage_name"] for row in trace_rows] == [
+        "cognition_core_v3.A1",
+        "cognition_core_v3.A2",
+        "cognition_core_v3.G",
+        "cognition_core_v3.P",
+    ]
+    assert [row["trace_id"] for row in trace_rows] == [
+        "deterministic-trace",
+    ] * 4
+    assert [row["status"] for row in trace_rows] == ["succeeded"] * 4
+    assert [row["attempt_index"] for row in trace_rows] == [1] * 4
+    assert all(row["parsed_output"] for row in trace_rows)
     assert [config.output_mode for config in invoker.configs] == ["text"] * 4
     assert set(invoker.packets[0]) >= {"stage", "observation", "output_contract"}
     assert "character_context" not in invoker.packets[0]

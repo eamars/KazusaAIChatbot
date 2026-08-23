@@ -50,6 +50,12 @@ sanitized event-log exports.
 - `full`: stores raw prompt messages, raw response text, and parsed output in
   protected trace collections.
 
+The live response path records model attempts at relevance,
+decontextualization, Cognition V3 A1/A2/G/P, surface content/preference (and
+visual when enabled), dialog generation, and the existing memory lifecycle
+boundaries. Each producing stage uses `record_llm_trace_step(...)`; storage
+failure remains diagnostic-only and cannot replace the stage result.
+
 While `metadata` or `full` capture is enabled, cognition keeps one
 invocation-local exact-input and model-attempt buffer. A clean invocation
 discards that buffer without a capsule write. A terminal or partial invocation
