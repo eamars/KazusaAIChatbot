@@ -45,7 +45,7 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
-| [standalone_agentic_resolver_first_pass_plan_2026-08-23.md](active/short_term/standalone_agentic_resolver_first_pass_plan_2026-08-23.md) | Standalone thinking-enabled native-tool streaming resolver with JSON protocol, external skills, and non-recursive same-runtime subagents | draft |
+| _None_ |  |  |
 
 ### Superseded Plans
 
@@ -58,6 +58,7 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
+| [standalone_agentic_resolver_first_pass_plan_2026-08-23.md](archive/completed/short_term/standalone_agentic_resolver_first_pass_plan_2026-08-23.md) | Standalone thinking-enabled native-tool streaming resolver with JSON protocol, external skills, and non-recursive same-runtime subagents | completed |
 | [cognition_v3_full_chain_native_chinese_prompt_migration_plan_2026-08-23.md](archive/completed/short_term/cognition_v3_full_chain_native_chinese_prompt_migration_plan_2026-08-23.md) | Canonical A1/A2/G/P native-Chinese prompt migration and end-to-end verification | completed |
 | [cognition_v3_handleless_model_contract_bigbang_plan_2026-08-22.md](archive/completed/cognition_v3_handleless_model_contract_bigbang_plan_2026-08-22.md) | Handleless cognition model-contract big-bang cutover and Gate 7 closure | completed |
 | [unified_llm_native_structured_output_default_plan.md](archive/completed/unified_llm_native_structured_output_default_plan.md) | Lightweight native JSON-object default and prompt cleanup | completed |

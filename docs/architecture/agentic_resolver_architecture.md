@@ -768,12 +768,12 @@ The child result returned to the parent is:
   "schema_version": "agentic_resolver_subagent_result.v1",
   "message_type": "subagent_result",
   "subagent_id": "generated-child-id",
+  "observation_id": "root-session:observation:2",
   "description": "Verify public sources",
   "status": "resolved",
   "summary": "Bounded independent result.",
   "evidence": [
     {
-      "evidence_id": "child-observation-id",
       "summary": "Bounded child evidence.",
       "provenance_refs": [
         "public-reference"
@@ -784,6 +784,19 @@ The child result returned to the parent is:
   "remaining_needs": []
 }
 ~~~
+
+The top-level `observation_id` is allocated by the parent session after the
+child returns and is the only observation handle that the parent may cite in
+terminal `submit_result` evidence. Nested child evidence is provenance context
+with `summary`, `provenance_refs`, and `limitations` only; child-session
+observation IDs remain private and are omitted from this message.
+An observation handle may appear only in
+`submit_result.evidence[].observation_id`. Model-authored terminal summary,
+evidence summary or limitations, completed-task, and remaining-need text must
+not repeat a current-session observation ID. The terminal validator rejects a
+misplaced handle with bounded contract feedback for model regeneration and
+preserves the semantic text unchanged; provenance references remain a separate
+validated channel.
 
 The parent does not receive the child's intermediate transcript. It may invoke
 multiple children across separate model steps and then use **submit_result** to
@@ -1097,4 +1110,5 @@ JSON protocol.
 17. Opaque reasoning remains attached to its assistant turn, is replayed only
     through the provider adapter, and never becomes a semantic JSON field.
 18. A retained assistant tool-call turn keeps its provider-required reasoning;
-    compaction removes or retains the complete reasoning/call/result exchange.
+    compaction atomically removes or retains the complete
+    reasoning/call/result exchange.

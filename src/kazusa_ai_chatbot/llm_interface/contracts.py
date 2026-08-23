@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Literal, Mapping, Protocol, Sequence
+from types import MappingProxyType
+from typing import Literal, Protocol
 
 from langchain_core.messages import BaseMessage
 
@@ -69,7 +71,7 @@ class LLMResponse:
         raw_response: object,
         *,
         backend: BackendDescriptor,
-    ) -> "LLMResponse":
+    ) -> LLMResponse:
         """Wrap a provider-native response without hiding the raw object."""
 
         raw_content = getattr(raw_response, "content", "")
@@ -89,6 +91,129 @@ class LLMResponse:
             usage=usage,
         )
         return response
+
+
+@dataclass(frozen=True)
+class LLMToolDefinition:
+    """Provider-neutral native tool definition for one streamed model call."""
+
+    name: str
+    description: str
+    parameters: Mapping[str, object]
+
+    def __post_init__(self) -> None:
+        if not self.name.strip():
+            raise ValueError("LLM tool name must be non-empty")
+        if not self.description.strip():
+            raise ValueError("LLM tool description must be non-empty")
+        if self.parameters.get("type") != "object":
+            raise ValueError("LLM tool parameters must be an object schema")
+        frozen_parameters = MappingProxyType(dict(self.parameters))
+        object.__setattr__(self, "parameters", frozen_parameters)
+
+
+@dataclass(frozen=True)
+class LLMToolCall:
+    """One complete provider-neutral native tool call."""
+
+    call_id: str
+    name: str
+    arguments: Mapping[str, object]
+
+    def __post_init__(self) -> None:
+        if not self.call_id.strip():
+            raise ValueError("LLM tool call id must be non-empty")
+        if not self.name.strip():
+            raise ValueError("LLM tool call name must be non-empty")
+        frozen_arguments = MappingProxyType(dict(self.arguments))
+        object.__setattr__(self, "arguments", frozen_arguments)
+
+
+@dataclass(frozen=True)
+class LLMInvalidToolCall:
+    """Bounded structural error for one provider-native tool call."""
+
+    call_id: str | None
+    name: str | None
+    error: str
+
+    def __post_init__(self) -> None:
+        if not self.error.strip():
+            raise ValueError("invalid LLM tool call error must be non-empty")
+
+
+@dataclass(frozen=True)
+class LLMToolHistoryMessage:
+    """Role-discriminated history row for native tool streaming."""
+
+    role: Literal["system", "user", "assistant", "tool"]
+    content: str = ""
+    reasoning: str | None = None
+    tool_calls: tuple[LLMToolCall, ...] = ()
+    tool_call_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.role in {"system", "user"}:
+            if not self.content:
+                raise ValueError(f"{self.role} tool-history content is required")
+            if self.reasoning is not None or self.tool_calls or self.tool_call_id:
+                raise ValueError(f"{self.role} tool-history fields are invalid")
+            return
+        if self.role == "assistant":
+            if self.tool_call_id is not None:
+                raise ValueError("assistant tool history cannot carry tool_call_id")
+            return
+        if not self.content or not self.tool_call_id:
+            raise ValueError("tool history requires content and tool_call_id")
+        if self.reasoning is not None or self.tool_calls:
+            raise ValueError("tool history cannot carry assistant fields")
+
+
+@dataclass(frozen=True)
+class LLMStreamFinish:
+    """Terminal disposition emitted once for a native tool stream."""
+
+    reason: Literal["stop", "tool_calls", "max_tokens", "aborted", "error"]
+    detail: str = ""
+
+
+@dataclass(frozen=True)
+class LLMStreamChunk:
+    """One normalized block, usage, or finish event from a tool stream."""
+
+    kind: Literal[
+        "block_start",
+        "reasoning_delta",
+        "text_delta",
+        "tool_call_delta",
+        "block_end",
+        "usage",
+        "finish",
+    ]
+    block_index: int | None = None
+    block_type: Literal["reasoning", "text", "tool_call"] | None = None
+    reasoning_delta: str = ""
+    text_delta: str = ""
+    tool_call_id: str | None = None
+    tool_name: str | None = None
+    tool_arguments_delta: str = ""
+    completed_block: Mapping[str, object] = field(default_factory=dict)
+    usage: Mapping[str, object] = field(default_factory=dict)
+    finish: LLMStreamFinish | None = None
+
+    def __post_init__(self) -> None:
+        if self.block_index is not None and self.block_index < 0:
+            raise ValueError("LLM stream block index must be non-negative")
+        object.__setattr__(
+            self,
+            "completed_block",
+            MappingProxyType(dict(self.completed_block)),
+        )
+        object.__setattr__(self, "usage", MappingProxyType(dict(self.usage)))
+        if self.kind == "finish" and self.finish is None:
+            raise ValueError("finish chunks require an LLMStreamFinish")
+        if self.kind != "finish" and self.finish is not None:
+            raise ValueError("only finish chunks may carry LLMStreamFinish")
 
 
 class LLMInvoker(Protocol):
@@ -111,6 +236,19 @@ class LLMInvoker(Protocol):
         """Invoke a chat model synchronously."""
 
 
+class LLMToolStreamInvoker(Protocol):
+    """Explicit-config native tool stream used by agentic runtimes."""
+
+    def astream_tools(
+        self,
+        messages: Sequence[LLMToolHistoryMessage],
+        *,
+        tools: Sequence[LLMToolDefinition],
+        config: LLMCallConfig,
+    ) -> AsyncIterator[LLMStreamChunk]:
+        """Stream one provider-neutral native-tool assistant turn."""
+
+
 class ProviderAdapter(Protocol):
     """Provider adapter contract used by LLInterface sessions."""
 
@@ -131,6 +269,16 @@ class ProviderAdapter(Protocol):
         backend: BackendDescriptor,
     ) -> LLMResponse:
         """Invoke the provider synchronously."""
+
+    def astream_tools(
+        self,
+        messages: Sequence[LLMToolHistoryMessage],
+        *,
+        tools: Sequence[LLMToolDefinition],
+        config: LLMCallConfig,
+        backend: BackendDescriptor,
+    ) -> AsyncIterator[LLMStreamChunk]:
+        """Stream a provider-neutral native-tool assistant turn."""
 
     async def aclose(self) -> None:
         """Close any provider-owned resources."""

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -137,6 +138,25 @@ class ReloadingChatModel:
 
         return response
 
+    async def astream(
+        self,
+        *args: Any,
+        **kwargs: Any,
+    ) -> AsyncIterator[Any]:
+        """Stream with unload recovery only before the first emitted chunk."""
+
+        await _wait_for_no_active_reload_async(self._model_key)
+        emitted_chunk = False
+        try:
+            async for chunk in self._inner_llm.astream(*args, **kwargs):
+                emitted_chunk = True
+                yield chunk
+        except BadRequestError as exc:
+            if emitted_chunk or not is_lm_studio_model_unload_error(exc):
+                raise
+            async for chunk in self._retry_astream_after_unload(args, kwargs):
+                yield chunk
+
     def invoke(self, *args: Any, **kwargs: Any) -> Any:
         """Invoke the wrapped sync chat model with unload recovery."""
 
@@ -169,6 +189,26 @@ class ReloadingChatModel:
             _release_reload_owner(self._model_key, reload_state)
 
         return response
+
+    async def _retry_astream_after_unload(
+        self,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+    ) -> AsyncIterator[Any]:
+        """Retry one stream after a confirmed pre-output unload error."""
+
+        reload_state, is_owner = _claim_reload_owner(self._model_key)
+        if not is_owner:
+            await _wait_for_reload_state_async(reload_state)
+            async for chunk in self._inner_llm.astream(*args, **kwargs):
+                yield chunk
+            return
+
+        try:
+            async for chunk in self._inner_llm.astream(*args, **kwargs):
+                yield chunk
+        finally:
+            _release_reload_owner(self._model_key, reload_state)
 
     def _retry_invoke_after_unload(
         self,

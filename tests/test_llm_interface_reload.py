@@ -8,7 +8,6 @@ import pytest
 
 from kazusa_ai_chatbot.llm_interface.reload import ReloadingChatModel
 
-
 _UNLOAD_ERROR_TEXT = (
     "Error code: 400 - {'error': 'The model has crashed without additional "
     "information. (Exit code: 18446744072635812000)'}"
@@ -50,6 +49,29 @@ class _SyncSequenceLLM:
         if isinstance(outcome, BaseException):
             raise outcome
         return outcome
+
+
+class _AsyncStreamSequenceLLM:
+    """Fake stream model that yields or raises scripted per-call outcomes."""
+
+    def __init__(self, outcomes: list[object]) -> None:
+        self.outcomes = list(outcomes)
+        self.calls = 0
+
+    async def astream(self, *args: object, **kwargs: object):
+        """Yield the next call's chunks or raise its configured error."""
+
+        del args, kwargs
+        self.calls += 1
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        if not isinstance(outcome, list):
+            raise TypeError("stream outcome must be a list")
+        for chunk in outcome:
+            if isinstance(chunk, BaseException):
+                raise chunk
+            yield chunk
 
 
 class _OwnerAsyncLLM:
@@ -125,6 +147,48 @@ async def test_async_unload_error_retries_same_call_once() -> None:
     assert len(llm.calls) == 2
     assert llm.calls[0] == ((["message"],), {"request_id": "abc"})
     assert llm.calls[1] == ((["message"],), {"request_id": "abc"})
+
+
+@pytest.mark.asyncio
+async def test_astream_retries_confirmed_unload_before_first_chunk() -> None:
+    """A confirmed unload may restart a stream before any output is visible."""
+
+    llm = _AsyncStreamSequenceLLM([
+        _unload_error(),
+        [_FakeResponse("reloaded chunk")],
+    ])
+    monitored = ReloadingChatModel(
+        llm,
+        base_url="http://localhost:1234/v1/",
+        model="stream-retry-success",
+    )
+
+    chunks = [chunk async for chunk in monitored.astream(["message"])]
+
+    assert [chunk.content for chunk in chunks] == ["reloaded chunk"]
+    assert llm.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_astream_never_retries_after_first_emitted_chunk() -> None:
+    """A partially emitted stream propagates unload failure without replay."""
+
+    llm = _AsyncStreamSequenceLLM([
+        [_FakeResponse("first chunk"), _unload_error()],
+    ])
+    monitored = ReloadingChatModel(
+        llm,
+        base_url="http://localhost:1234/v1/",
+        model="stream-no-retry-after-output",
+    )
+    observed: list[object] = []
+
+    with pytest.raises(openai.BadRequestError):
+        async for chunk in monitored.astream(["message"]):
+            observed.append(chunk)
+
+    assert [chunk.content for chunk in observed] == ["first chunk"]
+    assert llm.calls == 1
 
 
 @pytest.mark.asyncio

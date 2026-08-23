@@ -6,7 +6,7 @@
   package with a bounded thinking-enabled native tool stream, JSON semantic
   protocol, startup skill discovery, unchanged Kazusa capability adapters,
   and first-class same-runtime subagents.
-- Status: draft.
+- Status: completed.
 - Plan class: additive standalone feature with shared LLM-interface extension.
 - Scope boundary: direct Python construction and invocation only. Current
   cognition, brain-service, task-resolution, accepted-task, background-work,
@@ -15,8 +15,8 @@
 - Change direction: add the standalone engine beside the current workflow;
   validate its architecture and behavior before a later separately approved
   big-bang transition.
-- Acceptance state: ready for plan review and user approval. Production-source
-  implementation requires a separate explicit user command after approval.
+- Acceptance state: completed after explicit production-source authorization
+  and final verification on 2026-08-23.
 - Governing architecture:
   **docs/architecture/agentic_resolver_architecture.md**.
 - Highest-risk boundaries:
@@ -1121,7 +1121,7 @@ and submit_result while all current workflow source remains unchanged.
 Exit gate: every mapped node collects and passes; the diff stays inside the
 declared surface.
 
-### Work Item 7: Live LLM Gate And Independent Review
+### Work Item 7: Live LLM Gate And Final Structured Review
 
 - Run the one live-LLM node by itself.
 - Preserve the debug-LLM artifact.
@@ -1130,12 +1130,13 @@ declared surface.
   messages, child task isolation, child tool roster, child result, parent
   convergence, and submit_result quality without retaining thought text in the
   review artifact.
-- Run independent code review.
-- Route findings to the implementation role and repeat independent review
-  after remediation.
+- Apply the complete independent-code-review checklist as a final structured
+  parent review under the explicitly recorded reviewer waiver.
+- Record all findings, remediation outcomes, residual risks, and the explicit
+  quality decision without claiming a separate independent-agent review.
 
-Exit gate: live artifact receives an explicit quality pass and independent
-review signs off the final diff.
+Exit gate: live artifact receives an explicit quality pass and the final
+structured parent review records no unresolved material finding.
 
 ## Verification
 
@@ -1356,20 +1357,312 @@ fresh independent review before sign-off.
 
 ## Progress Checklist
 
-- [ ] Work Item 0: baseline and ownership lock.
-- [ ] Work Item 1: additive LLInterface thinking tool stream.
-- [ ] Work Item 2: core contracts, JSON protocol, session, and budgets.
-- [ ] Work Item 3: tool and skill composition.
-- [ ] Work Item 4: same-runtime subagents.
-- [ ] Work Item 5: loop, runtime, and Kazusa adapters.
-- [ ] Work Item 6: manifest, documentation, and deterministic verification.
-- [ ] Work Item 7: live LLM gate and independent review.
-- [ ] Acceptance criteria evidenced.
-- [ ] Registry and lifecycle status updated.
+- [x] Work Item 0: baseline and ownership lock.
+- [x] Work Item 1: additive LLInterface thinking tool stream.
+- [x] Work Item 2: core contracts, JSON protocol, session, and budgets.
+- [x] Work Item 3: tool and skill composition.
+- [x] Work Item 4: same-runtime subagents.
+- [x] Work Item 5: loop, runtime, and Kazusa adapters.
+- [x] Work Item 6: manifest, documentation, and deterministic verification.
+- [x] Work Item 7: live LLM gate and final structured review.
+- [x] Acceptance criteria evidenced.
+- [x] Registry and lifecycle status updated.
 
 ## Execution Evidence
 
-No implementation execution has started. Record the baseline, runtime executor
-resolution, changed paths, exact collected nodes, test results, live artifact,
-review findings, remediation, and final sign-off here after the plan is
-approved and explicitly authorized for implementation.
+### 2026-08-23 Work Item 0: Baseline And Ownership Lock
+
+- Lifecycle decision: the user approved and explicitly commanded execution on
+  2026-08-23. The plan moved from `draft` to `in_progress` before production
+  source edits.
+- Baseline: `git status --short` and `git diff --name-only HEAD` were empty.
+  The execution diff therefore begins from a clean tracked and untracked
+  worktree.
+- Execution-constraint history: the initial user instruction required
+  parent-only execution for the duration of the plan. A later explicit user
+  supersession required exactly one `gpt-5.6-luna` child at max/normal speed
+  for code changes and tests. The parent Codex agent retained coordination,
+  verification, evidence, remediation, and final structured review. No
+  separate reviewer was authorized; the user explicitly waived the distinct
+  independent-review role while retaining the complete checklist and evidence
+  gate. The parent applied the full checklist and found no unresolved material
+  finding.
+- Executor resolution: `standalone_resolver_implementer` resolves to the parent
+  Codex agent with repository-local filesystem and shell access, `apply_patch`,
+  the project virtual environment, and the mandatory development-plan,
+  local-LLM-architecture, no-prepost-user-input, py-style,
+  test-style-and-execution, and debug-LLM skills loaded. Selection mode is the
+  user-supplied fixed execution constraint. The same parent will perform a
+  fresh structured review after implementation and live evidence are complete.
+- Exact owned production and governed-artifact surface:
+  `src/agentic_resolver/__init__.py`, `src/agentic_resolver/README.md`,
+  `src/agentic_resolver/contracts.py`, `src/agentic_resolver/json_protocol.py`,
+  `src/agentic_resolver/model.py`, `src/agentic_resolver/streaming.py`,
+  `src/agentic_resolver/runtime.py`, `src/agentic_resolver/loop.py`,
+  `src/agentic_resolver/session.py`, `src/agentic_resolver/context_budget.py`,
+  `src/agentic_resolver/tools.py`, `src/agentic_resolver/skills.py`,
+  `src/agentic_resolver/subagents.py`,
+  `src/agentic_resolver/integrations/__init__.py`,
+  `src/agentic_resolver/integrations/llm_interface.py`,
+  `src/agentic_resolver/integrations/kazusa_tools.py`,
+  `src/kazusa_ai_chatbot/llm_interface/contracts.py`,
+  `src/kazusa_ai_chatbot/llm_interface/interface.py`,
+  `src/kazusa_ai_chatbot/llm_interface/providers/openai_compatible.py`,
+  `src/kazusa_ai_chatbot/llm_interface/reload.py`,
+  `src/kazusa_ai_chatbot/llm_interface/__init__.py`,
+  `src/kazusa_ai_chatbot/llm_interface/README.md`, `pyproject.toml`,
+  `resolver_skills/.gitkeep`, the exact test files listed by Change Surface,
+  `tests/test_llm_interface_reload.py`,
+  `tests/ownership/source_test_impact_manifest.json`,
+  `tests/test_test_impact_manifest.py`,
+  `docs/architecture/agentic_resolver_architecture.md`, this plan record, and
+  `development_plans/README.md`.
+- Excluded surface: every Keep path and every current specialist implementation
+  remains outside the implementation diff. Optional integration modules may
+  import the four named specialist public handlers and contracts.
+- Baseline verification: the clean baseline command
+  `venv\Scripts\python.exe -m pytest tests\test_test_impact_manifest.py::test_manifest_covers_strict_cognition_source_boundary -q`
+  failed because 38 pre-existing manifest entries have empty required-unit
+  mappings. The manifest is an explicitly owned governed artifact and the
+  final manifest gate remains mandatory; execution evidence will distinguish
+  this baseline condition from new owner rows and record its disposition.
+- Completed outcome: lifecycle authority, baseline, owned paths, exclusions,
+  effective skills, executor configuration, and the first known verification
+  condition are recorded. The remaining work items and final acceptance
+  evidence are recorded below.
+
+### 2026-08-23 Work Item 1: Additive LLInterface Thinking Tool Stream
+
+- Added the additive `LLInterface.astream_tools` contract with typed native
+  tool history, normalized stream chunks, finish state, usage, and public
+  exports. Resolver model steps use this stream exclusively.
+- Preserved ordinary `ainvoke`, `invoke`, output-mode, JSON-schema fallback,
+  thinking, reload, cache, response, and usage behavior.
+- Added stream-safe confirmed-unload retry before the first emitted chunk and
+  canonical tool-schema digest cache partitioning.
+- Implemented Qwen thinking transport for the endorsed route: enabled
+  thinking, normalized/replayed `reasoning_content`, `tool_choice="required"`,
+  `parallel_tool_calls=False`, `reasoning_format="deepseek"`, and removal of
+  the legacy native-tool Qwen prefill. Non-Qwen and ordinary Qwen routes retain
+  their existing behavior.
+- Focused transport, provider, reload, and ordinary-preservation tests passed.
+
+### 2026-08-23 Work Item 2: Core Contracts, JSON Protocol, Session, And Budgets
+
+- Added strict versioned request, result, limits, observation, usage, model,
+  and error contracts with mandatory enabled-thinking capability admission.
+- Added canonical object-rooted JSON policy, catalog, task, skill,
+  observation, child, contract-error, compaction, and terminal messages.
+- Added indexed complete-turn assembly, append-only thought-free session
+  metadata, opaque reasoning replay state, atomic compaction, and context
+  accounting under the 50,000-token ceiling with completion reserve.
+- Semantic results and ordinary logs exclude thought text and provider-private
+  reasoning content.
+
+### 2026-08-23 Work Item 3: Tool And Skill Composition
+
+- Added frozen strict `ToolRegistry`, bounded validation, permission and
+  timeout boundaries, sanitized failures, reserved `skill` and
+  `submit_result` tools, and root-only `run_subagent` schemas.
+- Added one-level resolved-root skill discovery, safe YAML frontmatter,
+  immutable JSON catalog summaries, lazy body loading, and containment checks.
+- Applied the llama.cpp exact-2000 `MAX_REPETITION_THRESHOLD` finding to the
+  native model-authored core schemas: every former `maxLength=2000` is the
+  documented grammar-safe `1999` subset. Public/controller bounds, loop
+  truncation, `maxLength=200/4000`, `maxItems`, `minLength`, and strict object
+  structure remain unchanged.
+
+### 2026-08-23 Work Item 4: Same-Runtime Subagents
+
+- Added bounded same-runtime child construction with isolated sessions,
+  self-contained tasks, inherited tools/skills/permissions/thinking stream,
+  foreground serial execution, and depth-one child registries without
+  `run_subagent`.
+- Added the canonical parent-scoped top-level `observation_id` to the typed
+  child result. Child-private evidence projects only summary,
+  `provenance_refs`, and limitations; child transcript, reasoning, and private
+  observation IDs stay out of the parent semantic message.
+- The parent reuses that one observation handle for its observation and
+  compaction state, and bounded serialization remains within the configured
+  child-result cap.
+
+### 2026-08-23 Work Item 5: Loop, Runtime, And Kazusa Adapters
+
+- Added the serialized one-complete-native-tool-call loop, bounded structural
+  replacement feedback, terminal `submit_result` enforcement, hard-cap
+  dispositions, direct runtime construction, and four unchanged specialist
+  adapters.
+- Added observation-handle placement enforcement: handles may appear only in
+  `evidence[].observation_id`; semantic text containing a current-session
+  handle is rejected for bounded model regeneration, never rewritten or
+  redacted. Clean replacement and parent evidence/provenance paths pass.
+- Current workflow and specialist implementation sources remain unchanged;
+  no workflow import, registration, route, or call edge was added.
+
+### 2026-08-23 Work Item 6: Manifest, Documentation, And Full Deterministic Verification
+
+- Added exact source-to-test ownership rows for every changed production path,
+  updated module/LLInterface ICDs and governing architecture documentation,
+  and preserved the no-workflow-wiring boundary.
+- Corrected the live fixture's root/child skill contract and tightened the
+  complete parent-projection child-ID privacy assertion.
+- The authoritative corrected Ruff path-array invocation reported
+  `All checks passed`.
+- The exact 15-module deterministic gate reported `95 passed, 1 skipped`
+  (the Windows symlink privilege skip). The six preservation nodes reported
+  `6 passed`. The impact validator reported `70 passed, 1 skipped` across 71
+  exact nodes. `git diff --check` passed with line-ending warnings only.
+- Static package/import, workflow-isolation, Keep-path, XML-renderer, and
+  non-streaming-path checks all passed.
+
+### 2026-08-23 Work Item 7: Endorsed Live Gate And Final Structured Review
+
+- The sole accepted live gate used exactly `http://127.0.0.1:8081/v1` with
+  `qwen3.8-27b-dflash2-4090`; health was `ok`, `/v1/models` advertised only
+  that model, and no fallback or alternate route was used.
+- The exact live pytest node passed in 87.67 seconds (`1 passed`). The
+  thought-free trace is
+  `test_artifacts/llm_traces/test_agentic_resolver_live_llm__standalone_root_child_stream__20260823T082610372162Z.json`,
+  with the accepted review at
+  `test_artifacts/llm_traces/test_agentic_resolver_live_llm__standalone_root_child_stream__20260823T082610372162Z_review.md`
+  and the appended review at
+  `test_artifacts/llm_reviews/agentic_resolver_live_review_2026-08-23.md`.
+- All eight calls streamed reasoning metadata; visible thought text was not
+  persisted. The root sequence was `skill -> read_fixture_fact ->
+  run_subagent -> submit_result`; the child sequence was `skill ->
+  replacement-skill -> read_fixture_fact -> submit_result`. Both sessions
+  loaded `resolver-verification`, and the child roster omitted
+  `run_subagent`.
+- Execution keys were exactly `parent_seed, child_seed`. The terminal result
+  was `resolved` with `PARENT-SEED-17` and `CHILD-SEED-29`, with provenance
+  `fixture:parent_seed` and `fixture:child_seed`. Parent evidence used the
+  parent-scoped observation handle and the complete serialized projection
+  contained no child-session observation ID.
+- Root contract errors were zero. The child had one bounded
+  `invalid_assistant_content` replacement; the 73-character invalid
+  candidate was rejected before dispatch/history acceptance and repaired
+  within the fixed budget. No thought text was persisted.
+- Earlier non-endorsed endpoint/model diagnostics remain historical and are
+  explicitly excluded from acceptance.
+
+### Final Verification Evidence: 2026-08-23
+
+Authoritative Ruff command and result:
+
+~~~text
+$ruff_paths = @(); $ruff_paths += Get-ChildItem -LiteralPath 'src/agentic_resolver' -Filter '*.py' -File | ForEach-Object { $_.FullName }; $ruff_paths += Get-ChildItem -LiteralPath 'tests' -Filter 'test_agentic_resolver_*.py' -File | ForEach-Object { $_.FullName }; $ruff_paths += @('src/kazusa_ai_chatbot/llm_interface/__init__.py', 'src/kazusa_ai_chatbot/llm_interface/contracts.py', 'src/kazusa_ai_chatbot/llm_interface/interface.py', 'src/kazusa_ai_chatbot/llm_interface/providers/openai_compatible.py', 'src/kazusa_ai_chatbot/llm_interface/reload.py', 'tests/test_llm_interface_reload.py', 'tests/test_llm_interface_tool_stream.py'); venv\Scripts\python.exe -m ruff check $ruff_paths
+All checks passed!
+~~~
+
+Exact deterministic gate:
+
+~~~text
+venv\Scripts\python.exe -m pytest -q tests/test_agentic_resolver_contracts.py tests/test_agentic_resolver_json_protocol.py tests/test_agentic_resolver_streaming.py tests/test_agentic_resolver_session.py tests/test_agentic_resolver_context_budget.py tests/test_agentic_resolver_tools.py tests/test_agentic_resolver_skills.py tests/test_agentic_resolver_subagents.py tests/test_agentic_resolver_loop.py tests/test_agentic_resolver_standalone.py tests/test_agentic_resolver_kazusa_tools.py tests/test_llm_interface_tool_stream.py tests/test_llm_interface_reload.py tests/test_agentic_resolver_architecture_docs.py tests/test_test_impact_manifest.py
+95 passed, 1 skipped (Windows symlink privilege)
+~~~
+
+Exact preservation gate:
+
+~~~text
+venv\Scripts\python.exe -m pytest -q tests/test_task_resolution_orchestrator.py::test_wrong_text_selection_reroutes_to_public_research tests/test_task_resolution_inline_promotion.py::test_inline_budget_default_is_thirty_seconds tests/unit/cognition_resolver/test_loop.py::test_loop_exposes_owned_contract tests/test_llm_interface_contracts.py::test_call_config_defaults_to_json_object_output tests/test_llm_interface_contracts.py::test_llm_response_strips_complete_qwen_think_tag tests/test_llm_interface_openai_provider.py::test_provider_async_path_preserves_message_objects
+6 passed
+~~~
+
+~~~text
+venv\Scripts\python.exe -m scripts.validate_test_impact --base-ref HEAD --run
+70 passed, 1 skipped; 71 exact nodes validated
+~~~
+
+~~~text
+git diff --check
+Passed; line-ending normalization warnings only
+~~~
+
+Static checks passed: package discovery/import, no `agentic_resolver` import in
+current workflow sources, no Kazusa import in core resolver modules, no
+changed Keep-path or specialist implementation file, no XML skill renderer,
+and no `ainvoke_tools`/`invoke_tools`/`ainvoke` resolver path.
+
+## Final Structured Parent Review
+
+The parent applied every bullet in the Independent Code Review checklist:
+diff containment; downward-only integration; unchanged workflow and specialist
+sources; strict public contracts; JSON-only messages; no free-text action
+parsing; native reasoning/tool normalization and passback; complete-turn
+assembly; mandatory thinking; stream-safe unload retry; reasoning-aware budget
+and atomic compaction; sanitization; same-runtime isolated children; child
+non-recursion; permission non-expansion; bounded return; exact mappings;
+deterministic evidence; live stream quality; and thought-text exclusion. No
+unresolved material finding remains.
+
+The distinct independent-review role was waived by the user. This record does
+not claim an independent agent review; it records the waiver and the complete
+parent-applied checklist instead.
+
+Residual non-blocking risks are recorded for future maintenance: the provider
+converter's private-hook dependency needs regression coverage on SDK upgrades;
+the llama.cpp repetition threshold requires retaining the `1999` subset until
+the server changes and is reverified; the one live bounded replacement shows
+the repair path remains useful; and future workflow/big-bang integration is a
+separate plan and remains absent.
+
+## Acceptance Criteria Evidence: 2026-08-23
+
+1. Package configuration/distribution discovery passed.
+2. Direct runtime construction and invocation passed without brain/cognition
+   startup.
+3. Workflow import/call scans passed with no resolver edge.
+4. Keep-path checks found no existing tool implementation changes.
+5. Task-resolution and cognition preservation nodes passed.
+6. Ordinary LLInterface preservation nodes passed.
+7. `astream_tools` native-tool stream tests passed.
+8. Root and child non-streaming-path scans passed.
+9. Public `resolve` returned one terminal typed result; no public token stream.
+10. Closed normalized reasoning/text/tool/usage/finish chunk tests passed.
+11. Tool-schema digest cache partition tests passed.
+12. Every resolver semantic message remained one JSON object.
+13. Enabled supported-thinking capability admission tests passed.
+14. Opaque reasoning stayed out of semantic decisions and public fields.
+15. Provider-native reasoning replay and empty-field tests passed.
+16. Thought text was absent from results, logs, tools, and artifacts.
+17. Partial/interrupted tool streams were rejected before dispatch.
+18. Stream-safe unload retry boundaries passed.
+19. Native tool calls were the only model control path.
+20. Exactly one complete tool call per step was enforced.
+21. `submit_result` remained mandatory for normal completion.
+22. Structural replacement budget behavior passed.
+23. Four specialist adapters retained their validated handler contracts.
+24. Existing public-research WebAgent3 ownership test passed.
+25. Existing coding approval/lifecycle ownership test passed.
+26. One-level skill discovery and invalid-catalog fail-fast tests passed.
+27. Root containment and safe YAML frontmatter tests passed.
+28. JSON skill catalog summary/digest tests passed.
+29. Full skill bodies loaded only through `skill`.
+30. Skills did not expand tools, permissions, limits, or effects.
+31. Context accounting covered policy, schemas, replay, skills, observations,
+    children, and reserve without double-counting.
+32. Root and child requests stayed within the 50,000-token ceiling.
+33. Atomic reasoning/tool/result compaction tests passed.
+34. Overflow returned `budget_exhausted` before model invocation.
+35. Root `run_subagent` was available as a core tool.
+36. Children used the same runtime, loop, and assembler.
+37. Children had isolated sessions and self-contained tasks.
+38. Child inherited tools, skills, thinking stream, replay, permissions, JSON,
+    and context policy.
+39. Child registries excluded `run_subagent`.
+40. Root child cap stopped after three children.
+41. Parent received only bounded typed child results without transcript/thought.
+42. Multiple-child deterministic convergence passed.
+43. Every changed production path had an exact collected manifest mapping.
+44. Endorsed live gate passed with explicit debug-LLM quality PASS.
+45. Final parent-applied review checklist has no unresolved material finding;
+    the independent reviewer role was user-waived.
+46. This plan records implementation, verification, live, privacy, and review
+    evidence before completion.
+47. Future workflow/big-bang integration is absent from the implementation.
+
+## Closure Decision
+
+Quality decision: **PASS**. The standalone agentic resolver first pass is
+complete and archived as a historical execution record. Future workflow
+integration requires a separate approved plan.

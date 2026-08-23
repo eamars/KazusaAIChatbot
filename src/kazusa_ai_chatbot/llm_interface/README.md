@@ -47,9 +47,10 @@ This ICD covers:
 
 - Public contracts exported by `kazusa_ai_chatbot.llm_interface`.
 - `LLInterface.ainvoke(...)`, `LLInterface.invoke(...)`,
+  `LLInterface.astream_tools(...)`,
   `describe_backend(...)`, `invalidate_backend(...)`, and `aclose()`.
 - `LLMCallConfig`, `LLMThinkingConfig`, `BackendDescriptor`, `LLMResponse`,
-  and `LLMInvoker`.
+  `LLMInvoker`, and the additive native-tool history and stream contracts.
 - Provider adapter ownership and request mapping.
 - Backend and model-family detection.
 - Per-interface descriptor and provider-session caching.
@@ -57,9 +58,9 @@ This ICD covers:
 - LM Studio unload retry behavior.
 - Data-only route diagnostics.
 
-It does not cover prompt wording, route choice, JSON schema design, parser
-semantics, embeddings, tool calls, streaming, batch calls, or native non-chat
-provider APIs.
+It does not cover prompt wording, route choice, semantic tool implementation,
+resolver-loop policy, embeddings, batch calls, or native non-chat provider
+APIs.
 
 ## Boundary Summary
 
@@ -106,6 +107,13 @@ The exported public surface is:
 - `LLMResponse`
 - `BackendDescriptor`
 - `LLMInvoker`
+- `LLMToolDefinition`
+- `LLMToolCall`
+- `LLMInvalidToolCall`
+- `LLMToolHistoryMessage`
+- `LLMStreamChunk`
+- `LLMStreamFinish`
+- `LLMToolStreamInvoker`
 
 Provider adapters, session cache internals, detection helpers, and reload
 state are implementation details unless a test is specifically verifying that
@@ -187,6 +195,14 @@ class LLInterface:
         config: LLMCallConfig,
     ) -> LLMResponse: ...
 
+    def astream_tools(
+        self,
+        messages: Sequence[LLMToolHistoryMessage],
+        *,
+        tools: Sequence[LLMToolDefinition],
+        config: LLMCallConfig,
+    ) -> AsyncIterator[LLMStreamChunk]: ...
+
     def describe_backend(
         self,
         *,
@@ -205,6 +221,35 @@ sync JSON-repair usage. Both require an explicit `config=` keyword.
 is retained for diagnostics or targeted tests, but production stage logic
 should prefer the normalized fields unless it has a specific provider-aware
 reason approved by this ICD.
+
+### Additive Native-Tool Stream Contract
+
+`astream_tools(...)` is a separate async provider-neutral stream for agentic
+runtimes. It does not replace or alter `ainvoke(...)` or `invoke(...)`.
+Ordinary calls retain their existing response-format behavior, normalized
+`LLMResponse`, cache identity, and reload retry contract.
+
+The stream input uses role-discriminated `LLMToolHistoryMessage` values and
+object-rooted `LLMToolDefinition` schemas. The closed `LLMStreamChunk` family
+contains indexed reasoning, text, native tool-call argument, usage, block-end,
+and finish events. Tool arguments remain raw string deltas until the consuming
+runtime assembles and validates a complete JSON object. Provider-native
+messages, chunks, SDK types, and exceptions remain inside the provider
+boundary.
+
+Reasoning is a separate opaque assistant-history field. It is never promoted
+into ordinary content, semantic JSON, tool output, evidence, or permission
+state. For DeepSeek-compatible thinking tool calls, the provider replays
+`reasoning_content` only on prior assistant turns that carry tool calls,
+including an empty field when field presence is required. Tool-call-free
+reasoning is omitted when the backend ignores it. Other backends follow their
+adapter-owned replay policy.
+
+The OpenAI-compatible provider binds native tool schemas without setting
+JSON-object `response_format`. Tool-bound model cache identity includes a
+canonical digest of the visible tool-schema roster, so distinct schemas never
+share one bound model. The stream emits a complete normalized finish state;
+the caller owns complete-turn assembly and execution admission.
 
 LLM trace recording is stage-owned and lives outside `LLInterface`.
 Instrumentation belongs at semantic stage call sites, where the caller can name
@@ -366,6 +411,15 @@ class ProviderAdapter(Protocol):
         backend: BackendDescriptor,
     ) -> LLMResponse: ...
 
+    def astream_tools(
+        self,
+        messages: Sequence[LLMToolHistoryMessage],
+        *,
+        tools: Sequence[LLMToolDefinition],
+        config: LLMCallConfig,
+        backend: BackendDescriptor,
+    ) -> AsyncIterator[LLMStreamChunk]: ...
+
     async def aclose(self) -> None: ...
 ```
 
@@ -384,6 +438,9 @@ Provider adapters own:
   unsupported rejection, and omission of `response_format` for explicit text
   mode;
 - conversion from provider-native responses to `LLMResponse`;
+- conversion from provider-native native-tool streams to normalized indexed
+  `LLMStreamChunk` values;
+- provider-required opaque reasoning replay on copied assistant history;
 - provider-local chat-model cache identity.
 
 Provider adapters must not change message content or ordering except for
@@ -421,6 +478,10 @@ transport, separating primary JSON object, fallback JSON Schema, and explicit
 text model construction. Diagnostic fingerprints include the caller-selected
 `output_mode` without exposing provider credentials.
 
+Native-tool-bound cache identity additionally includes the canonical tool
+schema digest. The native-tool transport is distinct from each ordinary
+output mode and never changes an ordinary cached model entry.
+
 ## Reload Retry Contract
 
 `ReloadingChatModel` wraps provider-native chat models and preserves the LM
@@ -437,6 +498,11 @@ the wrapper retries the same request once. Calls for the same normalized
 different model key do not wait.
 
 Other bad requests and non-unload errors are not retried by this path.
+
+For native-tool streaming, a confirmed unload may receive the same single
+retry only before the wrapper emits its first chunk. Once any chunk has been
+yielded, every exception propagates and the stream is never replayed, avoiding
+duplicate reasoning or partial tool-call deltas.
 
 ## Route Diagnostics
 
@@ -484,6 +550,7 @@ Runtime modules own:
 - thinking payload mapping;
 - documented provider-specific thinking triggers;
 - response normalization;
+- normalized native-tool streaming and provider-required reasoning replay;
 - per-interface cache and invalidation;
 - LM Studio unload retry coordination;
 - API-key-safe diagnostics.
@@ -495,8 +562,7 @@ Runtime modules own:
 - cognition or dialog policy;
 - JSON repair semantics beyond sync invocation support;
 - embeddings;
-- streaming;
-- tool calls;
+- resolver-loop policy, complete-turn assembly, and tool execution;
 - batch calls;
 - native Anthropic API support.
 
@@ -508,6 +574,8 @@ Runtime modules own:
   module-owned configs to migrate together.
 - Adding caller-owned optional metadata is compatible when provider adapters
   continue to omit it from transport.
+- The additive `astream_tools(...)` contract is compatible only while
+  ordinary `ainvoke(...)` and `invoke(...)` behavior remains unchanged.
 - Renaming `max_completion_tokens` or adding public `max_tokens` is breaking
   for this ICD.
 - Exposing provider-specific kwargs to runtime modules is breaking.
@@ -553,6 +621,10 @@ Required deterministic coverage includes:
 - provider request mapping and message pass-through;
 - per-interface descriptor caching and route invalidation;
 - LM Studio reload retry and waiter behavior;
+- additive native-tool stream normalization and indexed argument deltas;
+- tool-schema cache partitioning and omission of ordinary response format;
+- provider-required reasoning replay and tool-call-free omission;
+- pre-output stream unload retry and post-output no-retry behavior;
 - static migration checks for removed `get_llm()` and provider-boundary
   imports;
 - representative message/config equivalence for migrated call sites.
