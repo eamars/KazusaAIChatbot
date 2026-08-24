@@ -30,6 +30,25 @@ receives accepted A1 meaning plus the stage-appropriate participant and
 character lanes for `relationship_social`, `moral_identity`, and
 `existential_drive`.
 
+When present, `overused_moves` is an observed-response continuity list owned
+by the current participant lane. A1 does not receive it. A2, G, and P receive
+the exact bounded rows as background evidence only: they are not current facts,
+user intent, consent, permission, commitment, prohibition, or a next action.
+The current observation, including an explicit user correction, owns the
+current semantic delta. A previously observed move may become the current goal
+again only when the user continues, deepens, materially changes, or deliberately
+reopens that matter. The four-call roster and all existing continuation and
+affect projections remain unchanged.
+
+Continuing the underlying task or topic alone does not continue or reopen a
+character-authored response move, offer, demand, condition, or relational
+payoff. An unanswered character proposal remains participant continuity; it is
+not current-user intent, acceptance, commitment, or a required current goal.
+Reselection is grounded when the current user responds to, accepts, rejects,
+references, asks about, materially changes, or explicitly reopens that move.
+Character tendency may shape voice and stance after the current semantic delta
+is selected, but it cannot replace that delta as the primary goal.
+
 G returns exactly one meaningful active-character goal, relational
 willingness, and a bounded first-person `private_monologue` connecting current
 feeling, concrete cause, and immediate motivation. P receives that result and

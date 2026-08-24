@@ -26,6 +26,7 @@ from kazusa_ai_chatbot.conversation_progress.projection import (
     filter_group_scene_ambient_turns,
     GroupSceneProjectionError,
     project_conversation_progress_evidence,
+    project_conversation_progress_overused_moves,
     project_conversation_progress_scene,
     project_group_scene_prompt,
 )
@@ -60,6 +61,7 @@ __all__ = [
     'load_progress_context',
     'logical_turns_as_history_rows',
     'project_conversation_progress_evidence',
+    'project_conversation_progress_overused_moves',
     'project_conversation_progress_scene',
     'project_group_scene_prompt',
     'project_logical_turns_for_prompt',

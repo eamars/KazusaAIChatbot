@@ -32,6 +32,15 @@ def test_dialog_prompt_prioritizes_epistemic_boundary() -> None:
     assert "pending、scheduled 或 executed 行" in prompt
 
 
+def test_dialog_creative_expansion_cannot_add_unselected_stance_or_relationship_payoff() -> None:
+    """Keep wording creativity inside the selected semantic surface."""
+
+    prompt = dialog_module._V2_DIALOG_GENERATOR_PROMPT
+
+    assert "创造性展开不得增加 content_plan 未选择的立场" in prompt
+    assert "不得把已表达的关系性回应模式改写成新的主要收束" in prompt
+
+
 def test_validated_dialog_messages_collapses_blank_line_runs() -> None:
     """Collapse internal blank lines while preserving message boundaries."""
 

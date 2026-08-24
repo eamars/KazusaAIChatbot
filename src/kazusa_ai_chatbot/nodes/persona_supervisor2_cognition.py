@@ -111,6 +111,7 @@ from kazusa_ai_chatbot.config import (
 )
 from kazusa_ai_chatbot.conversation_progress import (
     project_conversation_progress_evidence,
+    project_conversation_progress_overused_moves,
     project_conversation_progress_scene,
 )
 from kazusa_ai_chatbot.db import (
@@ -411,6 +412,16 @@ def build_cognition_input_from_global_state(
         timestamp,
     ))
     conversation_progress = state.get("conversation_progress")
+    if conversation_progress is None:
+        overused_moves: list[str] = []
+    elif not isinstance(conversation_progress, dict):
+        raise CognitionExecutionError(
+            "conversation progress must be a canonical prompt mapping"
+        )
+    else:
+        overused_moves = project_conversation_progress_overused_moves(
+            conversation_progress,
+        )
     if conversation_progress is not None:
         if not isinstance(conversation_progress, dict):
             raise CognitionExecutionError(
@@ -450,6 +461,7 @@ def build_cognition_input_from_global_state(
             selected_character_state.get("affect_activations", []),
             selected_character_state,
         ),
+        "overused_moves": overused_moves,
         "evidence": evidence,
         "direct_facts": _typed_direct_facts(state.get("direct_facts")),
         "available_actions": _available_action_affordances(state),

@@ -28,6 +28,15 @@ Persisted progress contains no `next_affordances` or
 `progression_guidance`. The recorder describes what has happened; it does not
 plan what cognition should do next.
 
+The existing `overused_moves` field records only a semantic description of a
+visible response move that has already occurred for the current participant.
+Paraphrases count as the same move when they deliver the same observable
+conversational payoff; a repeated word alone does not. The scene observer owns
+that judgment and never turns the field into a future instruction, prohibition,
+or response goal. At cognition and surface boundaries, deterministic code
+copies the first four model-authored rows in order, each at most 120
+characters. No new semantic classification or storage field is introduced.
+
 ## Public Facade
 
 Callers use the package facade:

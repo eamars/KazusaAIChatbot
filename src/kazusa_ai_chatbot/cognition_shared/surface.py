@@ -275,6 +275,7 @@ def _project_surface_payload(
         "response_plan": payload["response_plan"],
         "expression_policy": payload["expression_policy"],
         "semantic_affect": payload["semantic_affect"],
+        "overused_moves": list(payload["overused_moves"]),
         "permitted_action_results": _project_action_results_for_prompt(
             payload["permitted_action_results"]
         ),

@@ -65,6 +65,8 @@ from kazusa_ai_chatbot.time_boundary import (
 _CJK_IDEOGRAPH_RE = re.compile(r"[\u4e00-\u9fff]")
 SCENE_PARTICIPANT_HANDLE_RE = re.compile(r"^p[1-9][0-9]*$")
 SURFACE_ROLE_HANDLE_RE = re.compile(r"^(?:current_user|self|p[1-9][0-9]*)$")
+MAX_OVERUSED_MOVE_ROWS = 4
+MAX_OVERUSED_MOVE_CHARS = 120
 
 SELF_COGNITION_RESPONSE_DECISION_VALUES = frozenset({
     "stay_silent",
@@ -1222,6 +1224,29 @@ def _validate_recent_character_dialog(value: Any) -> None:
             f"recent_character_dialog[{index}]",
             maximum=MAX_RECENT_CHARACTER_DIALOG_CHARS,
         )
+
+
+def validate_overused_moves(value: Any) -> list[str]:
+    """Validate the bounded observed-response continuity list."""
+
+    if (
+        not isinstance(value, list)
+        or len(value) > MAX_OVERUSED_MOVE_ROWS
+    ):
+        raise CognitionContractError(
+            "overused_moves must contain 0-4 items"
+        )
+    if any(not isinstance(item, str) or not item.strip() for item in value):
+        raise CognitionContractError("overused_moves must contain text")
+    if len(value) != len(set(value)):
+        raise CognitionContractError("overused_moves contains duplicates")
+    for index, item in enumerate(value):
+        _require_text(
+            item,
+            f"overused_moves[{index}]",
+            maximum=MAX_OVERUSED_MOVE_CHARS,
+        )
+    return list(value)
 
 
 def validate_lexical_avoidances(value: Any) -> list[str]:
@@ -3650,7 +3675,7 @@ def _require_bounded_text(value: Any, label: str, maximum: int) -> None:
 class TextSurfaceInput(TypedDict, total=False):
     """Canonical semantic input passed from cognition to surface planning."""
 
-    schema_version: Literal["text_surface_input.v3"]
+    schema_version: Literal["text_surface_input.v4"]
     episode: CognitiveEpisodeV1
     active_character_goal: dict[str, Any]
     response_plan: dict[str, Any]
@@ -3662,6 +3687,7 @@ class TextSurfaceInput(TypedDict, total=False):
     subjective_expression_context: SubjectiveExpressionContextV1
     addressee_plan: list[SurfaceAddresseePlanV1]
     visual_character_context: str
+    overused_moves: list[str]
     recent_character_dialog: NotRequired[list[str]]
     relational_willingness: NotRequired[RelationalWillingness]
 
@@ -3684,10 +3710,11 @@ def validate_text_surface_input_canonical(
         "subjective_expression_context",
         "addressee_plan",
         "visual_character_context",
+        "overused_moves",
     }
     optional = {"recent_character_dialog", "relational_willingness"}
     _require_exact_keys(payload, required | (set(payload) & optional), "text surface input")
-    if payload["schema_version"] != "text_surface_input.v3":
+    if payload["schema_version"] != "text_surface_input.v4":
         raise CognitionContractError("unsupported canonical text surface input schema")
     if not isinstance(payload["episode"], Mapping):
         raise CognitionContractError("text surface episode is invalid")
@@ -3723,6 +3750,7 @@ def validate_text_surface_input_canonical(
     )
     validate_surface_addressee_plan(payload["addressee_plan"])
     _require_text(payload["visual_character_context"], "text surface visual context")
+    validate_overused_moves(payload["overused_moves"])
     if "recent_character_dialog" in payload:
         _validate_recent_character_dialog(payload["recent_character_dialog"])
     if "relational_willingness" in payload:

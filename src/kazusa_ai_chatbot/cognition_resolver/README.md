@@ -34,6 +34,16 @@ canonical cognition output
   -> caller-owned continuation or final response plan
 ```
 
+Visible resolver fallback actions carry caller-owned addressee provenance. When
+the resolver creates a pending clarification or approval surface, converts a
+user-input blocker, or closes a terminal blocker, its `speak` action includes
+one `target` role for the resolved `GlobalPersonaState.global_user_id` and an
+empty `evidence_handles` list. Delivery remains owned by the current channel;
+the target role lets L3 project the current user as the direct recipient. A
+missing or blank current-user identity is a resolver contract error and fails
+closed before L3. Internal-thought and other non-user episodes retain their
+private behavior and do not receive a fabricated visible fallback.
+
 Resolver capabilities return evidence only. They cannot write cognition state,
 choose a character goal, rewrite response intent, or authorize delivery. The
 caller owns any continuation context, permission check, persistence, and final

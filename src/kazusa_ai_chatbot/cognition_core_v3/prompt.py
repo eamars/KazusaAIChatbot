@@ -32,6 +32,8 @@ A1_QUESTION_GUIDANCE = '''
 记忆。以开放的语义判断和具体原因作为主要内容；`axis_changes` 只是可选的从属
 证据。`current_observation` 和 `direct_facts` 可以用于确认当下发生了什么。
 `continuation_state` 只提供仍在起作用的因果压力。
+当前用户明确纠正自己的意思时，把这项纠正当作当前观察；纠正本身不是相反意思的证据。
+只有新的当下证据支持不确定或不同判断时，才保留相应的不确定性。
 '''
 A2_QUESTION_GUIDANCE = '''
 按固定位置返回 A2 的三个评估类别：关系与社会判断、道德身份、存在性驱力。以开放
@@ -51,6 +53,13 @@ GOAL_QUESTION_GUIDANCE = '''
 内心独白要连接此刻的感受、具体原因和眼前动机。它可以影响表达方式，但不能用于
 确认事实、许可、能力、目标对象或状态变化。即使请求仍不明确，也要让角色目标具有
 实际意义；澄清、守住边界、暂缓判断或有依据地保持沉默，都是有效目标。
+先确定当前观察新增加、改变、纠正、询问或仍未解决的内容，再选择一个对这项当前
+语义增量有贡献的主要目标。已表达的回应模式只是背景连续性；只有当前用户继续、深化、实质改变或重新打开同一事项时，才把它作为当前目标。当前用户明确纠正自己的意思时，把
+这项纠正当作当前观察；纠正本身不是相反意思的证据。
+继续处理同一任务或话题，本身不会继续或重新打开角色此前使用或提出的回应方式、提议、要求、条件或关系性回报。
+角色尚未得到回应的提议只能作为参与者连续性，不能当作当前用户的意图、接受、承诺或必须追求的当前目标。
+只有当前用户回应、接受、拒绝、提及、询问、实质改变或明确重新打开该回应事项时，才可以再次选择它。
+角色倾向可以影响语气和立场，但不能取代当前语义增量成为主要目标。
 '''
 ORDINARY_PLAN_GUIDANCE = '''
 返回一份由当前角色拥有的回应计划。`response_goal` 描述可见对话的意图；
@@ -61,6 +70,14 @@ ORDINARY_PLAN_GUIDANCE = '''
 作出否定断言，也不能排除任何可能。不得虚构能力或私有引用。严格只返回
 `goal_resolution`、`response_goal`、`action_requests`、`resolver_requests` 和
 `epistemic_boundary`。不得把输入中的权威通道名称复制到输出对象中。
+先让回应目标回答当前观察新增加、改变、纠正、询问或仍未解决的内容，再决定如何
+让角色的性格和关系语境影响表达。
+已表达的回应模式只属于背景连续性；只有当前用户继续、深化、实质改变或重新打开同一事项时，才允许重新选择该模式。
+当前用户明确纠正自己的意思时，把这项纠正当作当前观察；纠正本身不是相反意思的证据。
+继续处理同一任务或话题，本身不会继续或重新打开角色此前使用或提出的回应方式、提议、要求、条件或关系性回报。
+角色尚未得到回应的提议只能作为参与者连续性，不能当作当前用户的意图、接受、承诺或必须追求的当前目标。
+只有当前用户回应、接受、拒绝、提及、询问、实质改变或明确重新打开该回应事项时，才可以再次选择它。
+角色倾向可以影响语气和立场，但不能取代当前语义增量成为主要目标。
 '''
 SELF_PLAN_GUIDANCE = '''
 返回独立的自我认知回应契约。根据输入中有依据的参与语境，判断角色应保持沉默还是
@@ -721,6 +738,25 @@ def _stage_authority_lanes(
     }
 
 
+def _overused_move_rows(
+    workspace: Mapping[str, object],
+) -> list[dict[str, str]]:
+    """Project observed response moves as participant continuity evidence."""
+
+    moves = workspace["overused_moves"]
+    if not isinstance(moves, list):
+        raise PromptContractError("workspace overused moves must be a list")
+    return [
+        {
+            "semantic_text": move,
+            "authority": "participant_continuity",
+            "source_kind": "conversation_progress_overused_move",
+            "provenance_role": "observed_response_move",
+        }
+        for move in moves
+    ]
+
+
 def _continuation_state(
     workspace: Mapping[str, object],
     *,
@@ -781,6 +817,7 @@ def build_canonical_turn_workspace(
     continuity: Mapping[str, object] | None = None,
     available_actions: Sequence[Mapping[str, object]] = (),
     available_resolvers: Sequence[Mapping[str, object]] = (),
+    overused_moves: Sequence[str],
     direct_facts: Sequence[Mapping[str, object]] = (),
     character_operational_context: Mapping[str, object] | None = None,
     character_affect_context: Sequence[Mapping[str, object]] | None = None,
@@ -859,6 +896,7 @@ def build_canonical_turn_workspace(
             for row in direct_facts if isinstance(row, Mapping)
         ],
         "continuity": _project_continuity(continuity or {}),
+        "overused_moves": list(overused_moves),
         "resolver_context": _project_resolver_context(
             resolver_context,
             resolver_progress,
@@ -925,8 +963,9 @@ def build_canonical_appraisal_question(
     }
     if stage_name == "A2":
         packet["accepted_a1_meaning"] = accepted_appraisal_summary or []
-        packet["participant_continuity"] = lanes[
-            "participant_continuity"
+        packet["participant_continuity"] = [
+            *lanes["participant_continuity"],
+            *_overused_move_rows(workspace),
         ]
         packet["conditional_character_context"] = (
             _conditional_character_context(
@@ -966,7 +1005,10 @@ def build_canonical_goal_question(
         "orientation": workspace["orientation"],
         "current_observation": lanes["current_observation"],
         "direct_facts": lanes["direct_facts"],
-        "participant_continuity": lanes["participant_continuity"],
+        "participant_continuity": [
+            *lanes["participant_continuity"],
+            *_overused_move_rows(workspace),
+        ],
         "conditional_character_context": _conditional_character_context(
             workspace,
             identity_families=("goal_cognition",),
@@ -1055,7 +1097,10 @@ def build_canonical_plan_question(
         "goal": goal,
         "current_observation": lanes["current_observation"],
         "direct_facts": lanes["direct_facts"],
-        "participant_continuity": lanes["participant_continuity"],
+        "participant_continuity": [
+            *lanes["participant_continuity"],
+            *_overused_move_rows(workspace),
+        ],
         "continuation_state": _continuation_state(
             workspace,
             include_goals=True,

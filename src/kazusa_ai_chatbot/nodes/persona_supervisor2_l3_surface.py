@@ -28,6 +28,9 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     resolver_evidence_excerpts_for_cognition,
 )
 from kazusa_ai_chatbot.cognition_resolver.state import validate_resolver_state
+from kazusa_ai_chatbot.conversation_progress import (
+    project_conversation_progress_overused_moves,
+)
 from kazusa_ai_chatbot.cognition_shared.contracts import (
     MAX_RECENT_CHARACTER_DIALOG_CHARS,
     MAX_RECENT_CHARACTER_DIALOG_ROWS,
@@ -103,8 +106,17 @@ def build_text_surface_input_from_global_state(
     if not isinstance(epistemic_boundary, str) or not epistemic_boundary.strip():
         raise ValueError("canonical epistemic boundary is required")
     expression_context, visual_context = _character_surface_contexts(state)
+    conversation_progress = state.get("conversation_progress")
+    if conversation_progress is None:
+        overused_moves: list[str] = []
+    elif not isinstance(conversation_progress, dict):
+        raise ValueError("conversation progress must be a canonical prompt mapping")
+    else:
+        overused_moves = project_conversation_progress_overused_moves(
+            conversation_progress,
+        )
     canonical_payload: TextSurfaceInput = {
-        "schema_version": "text_surface_input.v3",
+        "schema_version": "text_surface_input.v4",
         "episode": _canonical_episode(state),
         "active_character_goal": dict(goal),
         "response_plan": dict(plan),
@@ -115,6 +127,7 @@ def build_text_surface_input_from_global_state(
             "directness": "balanced",
         },
         "semantic_affect": [dict(row) for row in output.get("affect_projection", [])],
+        "overused_moves": overused_moves,
         "permitted_action_results": _action_results(state),
         "interaction_style_context": interaction_style_context,
         "character_expression_context": expression_context,

@@ -36,6 +36,7 @@ from kazusa_ai_chatbot.cognition_resolver.telemetry import (
     build_resolver_terminal_event,
     write_human_readable_resolver_trace,
 )
+from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_surface
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 from tests.cognition_test_helpers import canonical_episode
 
@@ -1144,6 +1145,14 @@ async def test_duplicate_final_cognition_repeated_request_gets_terminal_speak() 
     assert action_spec["source_refs"][0]["ref_id"] == (
         "resolver_obs_duplicate_request"
     )
+    assert action_spec["cognition_provenance"] == {
+        "target_roles": [{
+            "role": "target",
+            "entity_kind": "user",
+            "entity_id": "global-user-123",
+        }],
+        "evidence_handles": [],
+    }
     assert "当前证据获取已经阻塞" in surface_requirements["detail"]
     assert "已由来源支持的事实" in surface_requirements["detail"]
     assert "final_response_requirements" in surface_requirements["detail"]
@@ -1609,6 +1618,28 @@ async def test_hil_repeated_after_pending_surfaces_pending_question() -> None:
     assert result["action_specs"][0]["goal_continuation_ref"] == (
         expected_continuation_ref
     )
+    action_spec = result["action_specs"][0]
+    assert action_spec["cognition_provenance"] == {
+        "target_roles": [{
+            "role": "target",
+            "entity_kind": "user",
+            "entity_id": "global-user-123",
+        }],
+        "evidence_handles": [],
+    }
+    target_roles = l3_surface._surface_target_roles({
+        "action_specs": [action_spec],
+    })
+    addressee_plan = l3_surface._surface_addressee_plan(
+        target_roles,
+        state=result,
+    )
+    assert addressee_plan == [{
+        "handle": "current_user",
+        "display_name": "Test User",
+        "semantic_role": "direct_recipient",
+        "wording_policy": "second_person_allowed",
+    }]
     assert result["resolver_capability_requests"] == []
     surface_requirements = result["action_specs"][0]["params"][
         "surface_requirements"
@@ -2663,6 +2694,14 @@ async def test_user_input_blocker_converges_after_one_final_cognition() -> None:
     assert result["action_specs"][0]["params"]["surface_requirements"] == {
         "decision": "ask_clarification",
         "detail": "Local context recall requires user input: missing referent.",
+    }
+    assert result["action_specs"][0]["cognition_provenance"] == {
+        "target_roles": [{
+            "role": "target",
+            "entity_kind": "user",
+            "entity_id": "global-user-123",
+        }],
+        "evidence_handles": [],
     }
     assert result["resolver_state"]["status"] == "blocked"
     assert result["resolver_state"]["terminal_reason"] == (

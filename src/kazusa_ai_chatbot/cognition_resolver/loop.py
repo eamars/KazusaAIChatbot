@@ -716,7 +716,11 @@ def _fail_closed_mixed_lifecycle_state(
     ]
     if _should_surface_terminal_blocker(state):
         retained_action_specs.append(
-            _terminal_blocker_speak_action_spec(selected_request, blocker)
+            _terminal_blocker_speak_action_spec(
+                state,
+                selected_request,
+                blocker,
+            )
         )
     state["action_specs"] = retained_action_specs
     return state
@@ -890,6 +894,7 @@ async def _run_max_cycle_final_cognition(
             )
             cognition_state["action_specs"] = [
                 _terminal_blocker_speak_action_spec(
+                    cognition_state,
                     final_selected_request,
                     blocker,
                 ),
@@ -991,6 +996,7 @@ async def _run_duplicate_request_final_cognition(
             )
             cognition_state["action_specs"] = [
                 _terminal_blocker_speak_action_spec(
+                    cognition_state,
                     final_repeated_request,
                     blocker,
                 ),
@@ -1211,6 +1217,7 @@ async def _run_user_input_blocker_final_cognition(
                 )
                 cognition_state["action_specs"] = [
                     _user_input_blocker_speak_action_spec(
+                        cognition_state,
                         selected_request,
                         observation,
                     ),
@@ -1234,6 +1241,7 @@ async def _run_user_input_blocker_final_cognition(
             )
             cognition_state["action_specs"] = [
                 _user_input_blocker_speak_action_spec(
+                    cognition_state,
                     selected_request,
                     observation,
                 ),
@@ -1317,6 +1325,7 @@ def _pending_resume_speak_action_spec(
         },
         "surface_role": "task_status",
         "goal_continuation_ref": continuation_ref,
+        "cognition_provenance": _resolver_speak_cognition_provenance(state),
         "reason": (
             "Resolver created a pending row and must surface its prompt-safe "
             "question or approval summary as a continuation status."
@@ -1325,6 +1334,42 @@ def _pending_resume_speak_action_spec(
     validated_spec = validate_action_spec(action_spec)
     return_value = dict(validated_spec)
     return return_value
+
+
+def _resolver_speak_cognition_provenance(
+    state: GlobalPersonaState,
+) -> dict[str, Any]:
+    """Build current-user provenance for a visible resolver fallback.
+
+    Args:
+        state: Persona state containing the resolved current global user id.
+
+    Returns:
+        The caller-owned target role and an empty evidence-handle list.
+
+    Raises:
+        ResolverValidationError: If the current global user id is missing or
+            blank.
+    """
+
+    if "global_user_id" not in state:
+        raise ResolverValidationError(
+            "global_user_id: expected non-empty string",
+        )
+    global_user_id = state["global_user_id"]
+    if not isinstance(global_user_id, str) or not global_user_id.strip():
+        raise ResolverValidationError(
+            "global_user_id: expected non-empty string",
+        )
+    provenance = {
+        "target_roles": [{
+            "role": "target",
+            "entity_kind": "user",
+            "entity_id": global_user_id,
+        }],
+        "evidence_handles": [],
+    }
+    return provenance
 
 
 def _pending_resume_continuation_ref(
@@ -1370,6 +1415,7 @@ def _pending_resume_continuation_ref(
 
 
 def _user_input_blocker_speak_action_spec(
+    state: GlobalPersonaState,
     request: ResolverCapabilityRequestV1,
     observation: ResolverObservationV1,
 ) -> dict[str, Any]:
@@ -1417,6 +1463,7 @@ def _user_input_blocker_speak_action_spec(
         },
         "surface_role": surface_role,
         "goal_continuation_ref": continuation_ref,
+        "cognition_provenance": _resolver_speak_cognition_provenance(state),
         "reason": (
             "Resolver requires user input before the blocked capability can "
             "act and must surface a prompt-safe clarification."
@@ -1945,6 +1992,7 @@ def _should_surface_terminal_blocker(state: GlobalPersonaState) -> bool:
 
 
 def _terminal_blocker_speak_action_spec(
+    state: GlobalPersonaState,
     request: ResolverCapabilityRequestV1,
     blocker: ResolverObservationV1,
 ) -> dict[str, Any]:
@@ -2010,6 +2058,7 @@ def _terminal_blocker_speak_action_spec(
         },
         "surface_role": surface_role,
         "goal_continuation_ref": continuation_ref,
+        "cognition_provenance": _resolver_speak_cognition_provenance(state),
         "reason": (
             "Resolver reached a terminal capability blocker and must surface "
             "the evidence boundary instead of looping silently."

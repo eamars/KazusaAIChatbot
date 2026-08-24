@@ -9,7 +9,11 @@ from types import SimpleNamespace
 import pytest
 
 from kazusa_ai_chatbot.cognition_shared import surface, surface_stages
-from kazusa_ai_chatbot.cognition_shared.contracts import TextSurfaceServicesV2
+from kazusa_ai_chatbot.cognition_shared.contracts import (
+    CognitionContractError,
+    TextSurfaceServicesV2,
+    validate_text_surface_input_canonical,
+)
 from kazusa_ai_chatbot.llm_interface import LLMCallConfig, LLMThinkingConfig
 from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_surface
 from tests.unit.nodes.surface_fixtures import (
@@ -74,6 +78,68 @@ def test_persona_supervisor2_l3_surface_exposes_owned_contract() -> None:
     """Keep the L3 surface builder attached to this source owner."""
 
     assert callable(l3_surface.build_text_surface_input_from_global_state)
+
+
+def test_text_surface_input_requires_exact_bounded_overused_moves() -> None:
+    """Require the single canonical L3 field with no alias or fallback."""
+
+    state = build_surface_state(build_relational_decision())
+    state["conversation_progress"] = {
+        "overused_moves": [
+            "the character already used a visible response maneuver",
+            "the character already used a second response maneuver",
+        ],
+    }
+    payload = l3_surface.build_text_surface_input_from_global_state(
+        state,
+        interaction_style_context="brief and natural",
+    )
+
+    assert payload["overused_moves"] == state["conversation_progress"]["overused_moves"]
+    missing = dict(payload)
+    missing.pop("overused_moves")
+    with pytest.raises(CognitionContractError):
+        validate_text_surface_input_canonical(missing)
+
+
+def test_surface_payload_projects_exact_overused_moves() -> None:
+    """Copy the accepted move list into the one content-planning packet."""
+
+    state = build_surface_state(build_relational_decision())
+    state["conversation_progress"] = {
+        "overused_moves": ["first observed move", "second observed move"],
+    }
+    payload = l3_surface.build_text_surface_input_from_global_state(
+        state,
+        interaction_style_context="brief and natural",
+    )
+
+    projected = surface._project_surface_payload(payload)
+
+    assert projected["overused_moves"] == payload["overused_moves"]
+
+
+def test_l3_surface_receives_exact_current_participant_overused_moves() -> None:
+    """L3 copies the current participant's bounded rows without rewriting."""
+
+    state = build_surface_state(build_relational_decision())
+    state["conversation_progress"] = {
+        "overused_moves": [
+            "first observed response move",
+            "second observed response move",
+            "third observed response move",
+            "fourth observed response move",
+        ],
+    }
+
+    payload = l3_surface.build_text_surface_input_from_global_state(
+        state,
+        interaction_style_context="brief and natural",
+    )
+
+    assert payload["overused_moves"] == (
+        state["conversation_progress"]["overused_moves"]
+    )
 
 
 @pytest.mark.asyncio
@@ -186,6 +252,9 @@ async def test_text_surface_uses_one_content_call_and_deterministic_preference_p
     assert "输出前不可跳过的合同检查" in (
         surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
     )
+    assert "已表达的回应模式只属于背景连续性" in (
+        surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
+    )
     assert "对未来外部效果的具体承诺也属于行动主张" in (
         surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
     )
@@ -250,6 +319,19 @@ def test_text_surface_services_have_one_semantic_stage() -> None:
         "llm",
         "content_plan_config",
     }
+
+
+def test_text_surface_progression_contract_keeps_one_semantic_call() -> None:
+    """Progression context stays inside the existing one-call surface stage."""
+
+    assert set(TextSurfaceServicesV2.__dataclass_fields__) == {
+        "llm",
+        "content_plan_config",
+    }
+    assert "overused_moves" in surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
+    assert "已表达的回应模式只属于背景连续性" in (
+        surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
+    )
 
 
 @pytest.mark.asyncio

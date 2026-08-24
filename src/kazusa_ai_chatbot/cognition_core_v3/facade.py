@@ -47,9 +47,11 @@ from kazusa_ai_chatbot.cognition_core_v3.prompt import (
     build_canonical_turn_workspace,
 )
 from kazusa_ai_chatbot.cognition_shared.contracts import (
+    CognitionContractError,
     GOAL_RESOLUTION_VALUES,
     SELF_COGNITION_RESPONSE_DECISION_VALUES,
     is_targetless_group_self_cognition_episode,
+    validate_overused_moves,
 )
 from kazusa_ai_chatbot.cognition_shared.emotion_derivation import (
     derive_persistent_emotion_activations,
@@ -81,7 +83,8 @@ _STAGE_SYSTEM_PROMPTS = {
 `current_observation` 和 `direct_facts` 可以用于确认当下发生了什么。
 `continuation_state` 只提供仍在起作用的因果压力。输入不会提供角色身份、
 习惯、反思倾向或 `participant_continuity`，因为这些信息不能证明当前世界中的
-事实。''',
+事实。当前用户明确纠正自己的意思或感受时，把这项纠正当作当前观察；纠正本身
+不是相反意思的证据。''',
     "A2": '''# 任务
 根据已接受的 A1 语义，使用关系与社会判断、道德身份、存在性驱力三个评估类别
 作出判断。
@@ -90,7 +93,8 @@ _STAGE_SYSTEM_PROMPTS = {
 `current_observation` 和 `direct_facts` 可以用于确认事实。
 `participant_continuity` 只描述此前参与者、行为及结果，不能证明新的行为、
 同意、承诺、许可或当前意图。`conditional_character_context` 只可影响当前角色的
-判断、边界、动机和情绪解释。''',
+判断、边界、动机和情绪解释。`overused_moves` 只描述此前已经发生的可见回应模式，
+不表示当前事实、用户意图、禁止事项或下一步行动。''',
     "G": '''# 任务
 选择一个有意义的当前角色目标、一项关系互动意愿记录，以及一段简洁的第一人称
 `private_monologue`。
@@ -98,7 +102,8 @@ _STAGE_SYSTEM_PROMPTS = {
 # 内心独白边界
 `private_monologue` 要连接角色此刻的感受、造成这种感受的具体原因，以及角色眼下
 想保护、揭示、回避或追求的事。它不能用于确认事实、许可、能力、目标对象或状态
-变化。''',
+变化。先根据当前观察的新增加、改变、纠正、询问或未解决内容选择目标；已表达的回应
+模式只能作为背景，除非当前用户继续、深化、实质改变或重新打开同一事项。''',
     "P": '''# 任务
 确定当前角色的回应目标和 `epistemic_boundary`，并且只选择输入中提供的能力。
 
@@ -109,6 +114,11 @@ _STAGE_SYSTEM_PROMPTS = {
 哪些内容仍然未知。每一项未被观察到的功能、原因、来源、意图或结果，都只能作为
 解释，并且在可见措辞中必须明确表达不确定性。没有观察到某项特征或缺少证据，都
 不能据此作出否定断言，也不能排除任何可能。
+
+先让回应目标回答当前观察新增加、改变、纠正、询问或仍未解决的内容，再让性格和关系
+语境影响表达。当前用户明确纠正自己的意思或感受时，把这项纠正当作当前观察；纠正
+本身不是相反意思的证据。已表达的回应模式只能作为背景连续性，不能成为未重新选择的
+主要关系回报。
 
 # 输出边界
 只返回 `output_contract` 指定的字段。不得把任何输入权威通道名称写入输出对象。''',
@@ -150,6 +160,7 @@ def _validate_canonical_input(value: object) -> dict[str, object]:
         "episode", "scene_context", "evidence", "mutable_state",
         "state_scope", "character_constraints", "character_identity_context",
         "available_actions", "available_resolver_capabilities",
+        "overused_moves",
     }
     missing = required - set(value)
     if missing:
@@ -158,6 +169,12 @@ def _validate_canonical_input(value: object) -> dict[str, object]:
         raise CanonicalContractError("canonical mutable state must be an object")
     if not isinstance(value["evidence"], list):
         raise CanonicalContractError("canonical evidence must be an array")
+    try:
+        validate_overused_moves(value["overused_moves"])
+    except CognitionContractError as exc:
+        raise CanonicalContractError(
+            f"canonical overused moves are invalid: {exc}"
+        ) from exc
     if value["state_scope"] not in {"user", "character"}:
         raise CanonicalContractError("canonical state scope is invalid")
     continuation = value.get("_continuation_goal_ref")
@@ -666,6 +683,7 @@ async def _run_cognition(
         },
         available_actions=validated["available_actions"],
         available_resolvers=validated["available_resolver_capabilities"],
+        overused_moves=validated["overused_moves"],
         direct_facts=validated.get("direct_facts", []),
         character_operational_context=validated.get(
             "character_operational_context", {}

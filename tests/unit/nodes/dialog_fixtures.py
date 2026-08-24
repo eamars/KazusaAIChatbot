@@ -12,7 +12,7 @@ def build_dialog_state() -> dict[str, object]:
         content="Infer which option fits my stated preference.",
     )
     surface_input = {
-        "schema_version": "text_surface_input.v3",
+        "schema_version": "text_surface_input.v4",
         "episode": episode,
         "active_character_goal": {
             "goal_kind": "ordinary_response",
@@ -33,6 +33,7 @@ def build_dialog_state() -> dict[str, object]:
             "directness": "balanced",
         },
         "semantic_affect": [],
+        "overused_moves": [],
         "permitted_action_results": [],
         "interaction_style_context": "brief conversational speech",
         "character_expression_context": {

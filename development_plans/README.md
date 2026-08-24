@@ -45,7 +45,7 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
-| _None_ |  |  |
+| [agentic_resolver_phase2_readiness_real_llm_evaluation_plan_2026-08-23.md](active/short_term/agentic_resolver_phase2_readiness_real_llm_evaluation_plan_2026-08-23.md) | Independent Agentic Resolver Phase 2 readiness catalog and real-LLM evaluation | draft; exact scenarios await human-owner approval |
 
 ### Superseded Plans
 
@@ -53,11 +53,15 @@ recorded evidence.
 |---|---|---|
 | [cognition_v3_cache_affine_semantic_chain_bigbang_plan.md](archive/superseded/cognition_v3_cache_affine_semantic_chain_bigbang_plan.md) | Former parallel cache-affine semantic-chain projection and partial execution record | superseded by `cognition_v3_hybrid_agentic_loop_reconciliation_plan.md` |
 | [cognition_v3_hybrid_agentic_loop_static_architecture_review_2026-08-21.md](archive/superseded/cognition_v3_hybrid_agentic_loop_static_architecture_review_2026-08-21.md) | Static findings for the retired hybrid cognition chain | superseded by the handleless cognition cutover |
+| [multi_turn_semantic_progression_and_response_goal_fixation_bugfix_plan_2026-08-23.md](archive/superseded/multi_turn_semantic_progression_and_response_goal_fixation_bugfix_plan_2026-08-23.md) | Partial semantic-progression implementation and immutable execution evidence | superseded by the consolidated Asuna semantic-authority plan |
+| [unaccepted_character_proposal_active_commitment_lane_authority_bugfix_plan_2026-08-24.md](archive/superseded/unaccepted_character_proposal_active_commitment_lane_authority_bugfix_plan_2026-08-24.md) | False-commitment lane RCA and proposed contract | superseded by the consolidated Asuna semantic-authority plan |
+| [cross_user_character_memory_scope_and_authority_bugfix_plan_2026-08-23.md](archive/superseded/cross_user_character_memory_scope_and_authority_bugfix_plan_2026-08-23.md) | Cross-user memory scope, typed authority, audit, and remediation design | superseded by the consolidated Asuna semantic-authority plan |
 
 ### Completed Short-Term Plans
 
 | Document | Type | Status |
 |---|---|---|
+| [asuna_real_e2e_50_turn_conversation_practice_plan_2026-08-23.md](archive/completed/short_term/asuna_real_e2e_50_turn_conversation_practice_plan_2026-08-23.md) | Fresh-identity adaptive 50-turn real debug conversation practice, issue register, and optimization handoff | completed |
 | [standalone_agentic_resolver_first_pass_plan_2026-08-23.md](archive/completed/short_term/standalone_agentic_resolver_first_pass_plan_2026-08-23.md) | Standalone thinking-enabled native-tool streaming resolver with JSON protocol, external skills, and non-recursive same-runtime subagents | completed |
 | [cognition_v3_full_chain_native_chinese_prompt_migration_plan_2026-08-23.md](archive/completed/short_term/cognition_v3_full_chain_native_chinese_prompt_migration_plan_2026-08-23.md) | Canonical A1/A2/G/P native-Chinese prompt migration and end-to-end verification | completed |
 | [cognition_v3_handleless_model_contract_bigbang_plan_2026-08-22.md](archive/completed/cognition_v3_handleless_model_contract_bigbang_plan_2026-08-22.md) | Handleless cognition model-contract big-bang cutover and Gate 7 closure | completed |
@@ -72,12 +76,14 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
-| _None_ |  |  |
+| [asuna_semantic_authority_and_memory_feedback_consolidated_bugfix_plan_2026-08-24.md](active/bugfix/asuna_semantic_authority_and_memory_feedback_consolidated_bugfix_plan_2026-08-24.md) | Consolidated semantic progression, proposal ownership, commitment admission, cross-user learned-memory authority, audit, and real-LLM sign-off | draft; ready for user review and approval |
+| [epistemic_and_role_provenance_fidelity_bugfix_plan_2026-08-24.md](active/bugfix/epistemic_and_role_provenance_fidelity_bugfix_plan_2026-08-24.md) | Independent unsupported-fact, private-residue, and temporary-role provenance fidelity plan from the 50-turn Asuna run | draft; separate ownership and approval boundary |
 
 ### Completed Bugfix Plans
 
 | Document | Type | Status |
 |---|---|---|
+| [resolver_authored_speak_provenance_contract_bugfix_plan_2026-08-24.md](archive/completed/bugfix/resolver_authored_speak_provenance_contract_bugfix_plan_2026-08-24.md) | Resolver-authored pending, user-input, and terminal visible-speak target provenance repair | completed; deterministic and user-approved real-service fallback gates passed on 2026-08-24 |
 | [cognition_v3_consolidation_interaction_subtext_handoff_bugfix_plan_2026-08-23.md](archive/completed/bugfix/cognition_v3_consolidation_interaction_subtext_handoff_bugfix_plan_2026-08-23.md) | Cognition V3 required subjective-state handoff and zero-exception post-turn consolidation repair | completed |
 | [cognition_subjective_continuity_dialog_quality_plan_2026-08-23.md](archive/completed/bugfix/cognition_subjective_continuity_dialog_quality_plan_2026-08-23.md) | First-person cognition continuity, epistemic dialog-boundary, and exact action-authority quality correction | completed |
 | [cognition_full_protected_trace_capture_bugfix_plan_2026-08-23.md](archive/completed/cognition_full_protected_trace_capture_bugfix_plan_2026-08-23.md) | Successful Cognition V3 and L3 full protected trace capture restoration | completed |

@@ -259,6 +259,9 @@ content_plan 中实际呈现的事实选择直接相关来源；回应包含来�
 存在 required_source_urls 时，角色化展开只改变语气、节奏、互动和表达方式；产品规格、价格、库存、
 数量、时间、因果关系和其他可外部核查事实必须来自 content_plan 或 content_requirements，不添加
 权威 surface 未提供的新事实。
+创造性展开不得增加 content_plan 未选择的立场、关系主张、用户意图或对话收束。
+不得把已表达的关系性回应模式改写成新的主要收束，除非当前 response_goal 重新选择；角色
+化细节只能服务已选择的语义，不得用语义换词恢复未选择的关系回报。
 
 引文、专有名词、代码、URL 以及必要的 schema 或 enum token 保持原样。
 

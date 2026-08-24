@@ -32,6 +32,7 @@ from kazusa_ai_chatbot.conversation_progress.policy import (
     MAX_PROGRESS_EVIDENCE_CHARS,
     MAX_PROGRESS_EVIDENCE_ROWS,
     MAX_PROGRESS_SCENE_CHARS,
+    MAX_OVERUSED_MOVE_PROJECTION_ROWS,
     MAX_SCENE_LOGICAL_TURNS,
     MAX_SCENE_NARRATIVE_CHARS,
     MAX_SCENE_TURN_TEXT_CHARS,
@@ -752,6 +753,17 @@ def build_progress_prompt(
             active_packet['compacted_block_refs']
         ),
     }
+
+
+def project_conversation_progress_overused_moves(
+    progress: ConversationProgressPromptV2,
+) -> list[str]:
+    """Return the existing model-authored move rows within the prompt cap."""
+
+    projected_moves = progress['overused_moves'][
+        :MAX_OVERUSED_MOVE_PROJECTION_ROWS
+    ]
+    return list(projected_moves)
 
 
 def project_conversation_progress_scene(

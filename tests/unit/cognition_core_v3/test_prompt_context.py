@@ -54,6 +54,7 @@ def _workspace(
         ),
         relationship_context=payload["mutable_state"].get("relationship", {}),
         character_affect_context=character_affect_context,
+        overused_moves=payload.get("overused_moves", []),
     )
 
 
@@ -371,6 +372,182 @@ def test_stage_authority_lanes_partition_fact_continuity_and_character_context()
     assert "缺少证据" in plan["guidance"]
     assert "明确表达不确定性" in plan["guidance"]
     assert "不得把输入中的权威通道名称复制到输出对象中" in plan["guidance"]
+
+
+def test_overused_moves_reach_participant_continuity_after_a1_only() -> None:
+    """Expose observed response moves to A2/G/P while keeping A1 current-only."""
+
+    payload = _input()
+    payload["overused_moves"] = [
+        "the character has already used one visible relationship maneuver",
+        "the character has already used a second visible maneuver",
+    ]
+    workspace = _workspace(payload, payload["evidence"])
+
+    a1 = build_canonical_appraisal_question(workspace=workspace, stage_name="A1")
+    a2 = build_canonical_appraisal_question(
+        workspace=workspace,
+        stage_name="A2",
+        accepted_appraisal_summary=[],
+    )
+    goal = build_canonical_goal_question(workspace=workspace, appraisal_summary=[])
+    plan = build_canonical_plan_question(
+        workspace=workspace,
+        goal={
+            "goal_kind": "clarify",
+            "intent": "answer the current observation",
+            "reason": "the current observation needs an answer",
+            "cause_summary": "the current observation",
+        },
+        appraisal_summary=[],
+    )
+
+    assert "participant_continuity" not in a1
+    assert all(move not in str(a1) for move in payload["overused_moves"])
+    for packet in (a2, goal, plan):
+        assert [
+            row["semantic_text"]
+            for row in packet["participant_continuity"][-2:]
+        ] == payload["overused_moves"]
+
+
+def test_user_owned_semantic_correction_guides_a1_goal_and_plan_without_hidden_intent_assertion() -> None:
+    """Keep explicit current-user meaning authoritative across stages."""
+
+    payload = _input()
+    workspace = _workspace(payload, payload["evidence"])
+    a1 = build_canonical_appraisal_question(workspace=workspace, stage_name="A1")
+    goal = build_canonical_goal_question(workspace=workspace, appraisal_summary=[])
+    plan = build_canonical_plan_question(
+        workspace=workspace,
+        goal={
+            "goal_kind": "clarify",
+            "intent": "answer the current observation",
+            "reason": "the current observation needs an answer",
+            "cause_summary": "the current observation",
+        },
+        appraisal_summary=[],
+    )
+
+    for packet in (a1, goal, plan):
+        assert "当前用户明确纠正自己的意思时" in packet["guidance"]
+        assert "纠正本身不是相反意思的证据" in packet["guidance"]
+
+
+def test_goal_guidance_progresses_current_delta_and_preserves_deliberate_reopening() -> None:
+    """Keep response goals current-delta grounded with an explicit reopen path."""
+
+    payload = _input()
+    workspace = _workspace(payload, payload["evidence"])
+    authority_distinctions = (
+        "继续处理同一任务或话题，本身不会继续或重新打开角色此前使用或提出的回应方式、提议、要求、条件或关系性回报。",
+        "角色尚未得到回应的提议只能作为参与者连续性，不能当作当前用户的意图、接受、承诺或必须追求的当前目标。",
+        "只有当前用户回应、接受、拒绝、提及、询问、实质改变或明确重新打开该回应事项时，才可以再次选择它。",
+        "角色倾向可以影响语气和立场，但不能取代当前语义增量成为主要目标。",
+    )
+    for packet in (
+        build_canonical_goal_question(workspace=workspace, appraisal_summary=[]),
+        build_canonical_plan_question(
+            workspace=workspace,
+            goal={
+                "goal_kind": "clarify",
+                "intent": "answer the current observation",
+                "reason": "the current observation needs an answer",
+                "cause_summary": "the current observation",
+            },
+            appraisal_summary=[],
+        ),
+    ):
+        assert "当前观察新增加、改变、纠正、询问或仍未解决的内容" in packet["guidance"]
+        assert "只有当前用户继续、深化、实质改变或重新打开同一事项时" in packet["guidance"]
+        for distinction in authority_distinctions:
+            assert distinction in packet["guidance"]
+
+
+def test_semantic_progression_context_preserves_all_existing_multi_affect_rows_and_causes() -> None:
+    """Adding bounded moves cannot alter any continuation or affect row."""
+
+    payload = _input()
+    state = payload["mutable_state"]
+    timestamp = state["updated_at"]
+    emotions = [
+        ("sadness", "a concrete loss remains unresolved"),
+        ("anger", "a boundary was crossed in the current event"),
+        ("gratitude", "a specific act of care was received"),
+        ("embarrassment", "a private mistake became visible"),
+        ("nostalgia", "a remembered shared moment was recalled"),
+    ]
+    for index, (emotion, cause) in enumerate(emotions):
+        state, root_id, _created = materialize_causal_root(
+            state,
+            kind="event",
+            primary_evidence={
+                "source_kind": "episode",
+                "source_id": f"episode:multi-affect-{index}",
+                "occurred_at": timestamp,
+                "semantic_summary": cause,
+            },
+            description=cause,
+        )
+        state["active_events"][-1]["salience"] = 70 - index
+        state["affect_activations"].append({
+            "activation_id": f"emotion:{emotion}",
+            "emotion_id": emotion,
+            "primary_root": {
+                "scope": "user",
+                "kind": "event",
+                "entity_id": root_id,
+            },
+            "root_refs": [{
+                "scope": "user",
+                "kind": "event",
+                "entity_id": root_id,
+            }],
+            "phase": "active",
+            "score": 70 - index,
+            "peak_score": 70 - index,
+            "trend": "rising",
+            "cause_status": "active",
+            "started_at": timestamp,
+            "updated_at": timestamp,
+            "last_reinforced_at": timestamp,
+        })
+    validate_cognition_state(state)
+    payload["mutable_state"] = state
+    baseline = _workspace(payload, payload["evidence"])
+    payload["overused_moves"] = [
+        "a" * 120,
+        "b" * 120,
+        "c" * 120,
+        "d" * 120,
+    ]
+    candidate = _workspace(payload, payload["evidence"])
+    baseline_packets = build_turn_workspace_stage_contracts(workspace=baseline)
+    candidate_packets = build_turn_workspace_stage_contracts(workspace=candidate)
+
+    for stage in ("A1", "A2", "G", "P"):
+        assert candidate_packets[stage]["continuation_state"] == baseline_packets[stage]["continuation_state"]
+        continuation = candidate_packets[stage]["continuation_state"]
+        assert [
+            (row["description"], row["status"])
+            for row in continuation["active_events"]
+        ] == [(cause, "active") for _emotion, cause in emotions]
+        expected_emotions = {emotion for emotion, _cause in emotions}
+        assert [
+            (row["emotion"], row["cause_summary"])
+            for row in continuation["affect_activations"]
+            if row["emotion"] in expected_emotions
+        ] == emotions
+    for stage in ("A2", "G"):
+        assert candidate_packets[stage]["conditional_character_context"]["affect"] == (
+            baseline_packets[stage]["conditional_character_context"]["affect"]
+        )
+        assert [
+            (row["emotion"], row["cause_summary"])
+            for row in candidate_packets[stage][
+                "conditional_character_context"
+            ]["affect"]
+        ] == emotions
 
 
 def test_a1_excludes_conditional_character_context() -> None:

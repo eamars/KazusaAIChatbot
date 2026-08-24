@@ -153,6 +153,14 @@ from:
   expression, an interaction-scoped recent-character-dialog projection, and an
   isolated visual-character context.
 
+The surface connector also copies the current participant's bounded
+`overused_moves` list exactly into the canonical text-surface input. These rows
+are continuity evidence about already-observed response moves; they do not
+override the selected response goal, establish user intent, or authorize a
+relationship payoff. The text planner and dialog generator preserve the
+selected cognition semantics, while allowing a deliberately reopened theme to
+be expressed when the current observation supports it.
+
 The connector loads the existing sanitized user interaction-style overlay and,
 for group turns, the group-channel overlay. It renders only allowlisted speech,
 social, pacing, and engagement guidance in application order into the bounded

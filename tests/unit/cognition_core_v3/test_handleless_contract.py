@@ -20,6 +20,7 @@ from kazusa_ai_chatbot.cognition_core_v3.contracts import (
 )
 from kazusa_ai_chatbot.cognition_core_v3.facade import (
     CanonicalContractError,
+    _validate_canonical_input,
     _validate_plan,
     bind_protected_chain_records,
     reset_protected_chain_records,
@@ -122,6 +123,7 @@ def _input() -> dict[str, object]:
             "personality": "grounded and boundary-aware",
         },
         "character_operational_context": {},
+        "overused_moves": [],
         "evidence": [{
             "evidence_ref": {
                 "source_kind": "episode",
@@ -202,6 +204,7 @@ def test_canonical_stage_packets_are_handleless_and_disjoint() -> None:
         identity_context=payload["character_identity_context"],
         available_actions=payload["available_actions"],
         available_resolvers=payload["available_resolver_capabilities"],
+        overused_moves=payload["overused_moves"],
     )
     packets = build_turn_workspace_stage_contracts(workspace=workspace)
     assert packets["A1"]["output_contract"]["required_fields"] == list(CANONICAL_A1_FAMILIES)
@@ -229,6 +232,23 @@ def test_canonical_stage_packets_are_handleless_and_disjoint() -> None:
         len(set(axes)) == len(axes)
         for axes in CANONICAL_FAMILY_AXES.values()
     )
+
+
+def test_canonical_input_requires_bounded_overused_moves_without_exposing_handles() -> None:
+    """Require one exact bounded semantic continuity field at the boundary."""
+
+    payload = _input()
+    assert _validate_canonical_input(payload)["overused_moves"] == []
+
+    missing = dict(payload)
+    missing.pop("overused_moves")
+    with pytest.raises(CanonicalContractError):
+        _validate_canonical_input(missing)
+
+    oversized = dict(payload)
+    oversized["overused_moves"] = ["x" * 121]
+    with pytest.raises(CanonicalContractError):
+        _validate_canonical_input(oversized)
 
 
 def test_model_capabilities_are_semantic_and_reserve_speak_capacity() -> None:

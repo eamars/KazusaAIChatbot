@@ -12,8 +12,15 @@ from kazusa_ai_chatbot.conversation_progress.policy import (
 )
 from kazusa_ai_chatbot.conversation_progress.projection import (
     build_progress_prompt,
+    project_conversation_progress_overused_moves,
     project_conversation_progress_evidence,
     project_conversation_progress_scene,
+)
+from kazusa_ai_chatbot.conversation_progress import (
+    project_conversation_progress_overused_moves as public_project_overused_moves,
+)
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
+    build_cognition_input_from_global_state,
 )
 from tests.conversation_progress_v2_helpers import (
     NOW,
@@ -180,3 +187,52 @@ def test_equal_priority_tie_uses_stable_event_id_order():
     ]
     evidence = project_conversation_progress_evidence(progress, NOW)
     assert evidence[0]['evidence_ref']['source_id'].endswith('event_a')
+
+
+def test_overused_move_projection_preserves_first_four_model_authored_rows_exactly():
+    """Bound the existing semantic rows without code-side rewriting."""
+
+    progress = _progress()
+    progress['overused_moves'] = [
+        'move one ' + ('x' * 110),
+        'move two',
+        'move three',
+        'move four',
+        'move five',
+    ]
+
+    assert project_conversation_progress_overused_moves(progress) == (
+        progress['overused_moves'][:4]
+    )
+
+
+def test_overused_move_projection_public_contract_is_exact_and_bounded():
+    """Expose one canonical public projection helper."""
+
+    progress = _progress()
+    progress['overused_moves'] = ['first', 'second']
+
+    assert public_project_overused_moves(progress) == ['first', 'second']
+
+
+def test_cognition_input_receives_exact_current_participant_overused_moves():
+    """Carry the current participant packet into the canonical input."""
+
+    from tests.test_short_horizon_state_composition_integration import _state
+
+    state = _state()
+    state['conversation_progress'] = build_progress_prompt(
+        active_packet=packet(),
+        interaction_logical_turns=[],
+    )
+    state['conversation_progress']['overused_moves'] = [
+        'a prior visible response purpose',
+        'a second prior visible response purpose',
+    ]
+
+    payload = build_cognition_input_from_global_state(state)
+
+    assert payload['overused_moves'] == [
+        'a prior visible response purpose',
+        'a second prior visible response purpose',
+    ]

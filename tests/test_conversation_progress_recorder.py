@@ -150,6 +150,30 @@ def test_recorder_prompts_keep_protocol_metadata_code_owned() -> None:
     assert not hasattr(recorder, '_RECORDER_REPAIR_PROMPT')
 
 
+def test_scene_prompt_defines_paraphrased_visible_move_repetition_without_future_planning() -> None:
+    """Require semantic move observation without turning it into planning."""
+
+    prompt = recorder.render_scene_recorder_prompt()
+
+    assert (
+        '`accepted_turn.final_dialog` 与 `recent_turns` 中角色的近期回应'
+        in prompt
+    )
+    assert '`prior_scene.overused_moves` 比较' in prompt
+    assert '即使措辞、意象或句式变化，仍然属于同一重复回应模式' in prompt
+    assert '每条记录使用紧凑的语义描述，不摘录原句' in prompt
+    assert '按最近一次有证据且对当前互动影响更大的顺序排列' in prompt
+    assert (
+        '`scene_relation` 为 `same` 或 `related` 时，只要近期证据仍支持'
+        in prompt
+    )
+    assert '保留' in prompt
+    assert '`prior_scene.overused_moves` 中此前已经记录的模式' in prompt
+    assert '如果是全新场景且没有重复模式，必须返回 `[]`' in prompt
+    assert '只描述已经发生的可见回应目的或互动动作' in prompt
+    assert '不得把重复模式改写成下一轮应该说什么' in prompt
+
+
 def test_recorder_payload_preserves_identity_and_semantic_clock() -> None:
     """Give both owners safe speaker identity and temporal context."""
 

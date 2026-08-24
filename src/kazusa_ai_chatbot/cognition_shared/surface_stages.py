@@ -57,10 +57,14 @@ SURFACE_REPAIR_INSTRUCTION = '保留原始的角色判断、\r\n情绪方向、�
 CONTENT_PLAN_SYSTEM_PROMPT = '''规划当前角色实际会说出或发送的内容，表达已经形成的角色判断。综合 active character goal、response plan、
 visible episode、semantic affect、semantic relationship、expression policy、interaction style、
 permitted_action_results、resolver_result、runtime_capability_limits、character_expression_context、
-subjective_expression_context 和 addressee_plan。task_resolution_request
+subjective_expression_context、addressee_plan 和 overused_moves。task_resolution_request
 的 resolver_result 还含 source-owned evidence_state、evidence_excerpts、evidence_handles、prompt_safe_observation_handle
 和 remaining_needs；只据这些来源表达事实。recent_character_dialog 最多两条最近角色可见消息，仅用于本轮措辞连续性，
 不是事实或立场来源。
+overused_moves 只描述当前参与者在本段互动中已经使用过的可见回应模式；已表达的回应
+模式只属于背景连续性，不是当前事实、当前用户意图、禁止事项或下一步行动。回应必须
+先服务 selected intention 和 response_plan；只有当前输入继续、深化、实质改变或重新
+打开同一事项时，才允许重新使用对应模式，不能靠语义换词把同一模式作为新的主要收束。
 
 # 最高优先级的行动事实
 permitted_action_results 是物理或外部效果是否完成的唯一权威。空列表或没有 executed 行时，
@@ -98,7 +102,7 @@ goal_resolution 是当前目标可回答性的已确认判断：answerable_now �
  evidence_excerpts 陈述已确认部分并保留 remaining_needs；pending、missing、blocked、unavailable 和 failed 只陈述
  客观状态、缺口或下一步，不得编造缺失的事实答案。
 # 规划步骤
-1. 回应当前输入，结合先前消息、角色关系、情绪和场景压力推进互动。
+1. 先回应当前输入，结合先前消息、角色关系、情绪和场景压力推进互动；已表达的回应模式只属于背景连续性。
 2. 在事实、角色方向和明确约束一致的范围内，自由加入连贯的想象细节、玩笑、主动性和创造性展开。
 3. 以结构化 visible percept 确定行动者、对象、受益者和主语；当前用户是当前用户，当前角色是说话者和被直接称呼者。
 4. 以 selected intention 及 intention.reason 为语义锚点，分清角色是在回应请求本身，还是在回应提问的时机、突然程度或直接程度；可自由组合惊讶、害羞、防御、调侃、嘴硬、迟疑、温柔、热烈或其他符合角色的情绪与特征，形成表达同一已选决定的角色化弧线。
