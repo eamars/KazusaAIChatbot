@@ -10,6 +10,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.llm_interface import (
     BackendDescriptor,
+    LLInterface,
     LLMCallConfig,
     LLMThinkingConfig,
 )
@@ -416,6 +417,31 @@ def test_provider_sends_qwen3_disabled_payload_without_prefill() -> None:
     extra_body = created_models[0].constructor_kwargs["extra_body"]
     assert extra_body == {"chat_template_kwargs": {"enable_thinking": False}}
     assert created_models[0].sync_calls == [messages]
+
+
+def test_provider_sends_qwen_disabled_payload_for_generic_alias() -> None:
+    """Generic Qwen aliases send the provider disable control when disabled."""
+
+    created_models: list[_FakeChatModel] = []
+
+    def _factory(**kwargs: object) -> _FakeChatModel:
+        model = _FakeChatModel(**kwargs)
+        created_models.append(model)
+        return model
+
+    config = replace(_config(), model="qwen-production-alias")
+    backend = LLInterface().describe_backend(config=config)
+    provider = OpenAICompatibleProvider(chat_model_factory=_factory)
+
+    provider.invoke(
+        [HumanMessage(content="hello")],
+        config=config,
+        backend=backend,
+    )
+
+    assert backend.thinking_strategy == "qwen3_disabled"
+    extra_body = created_models[0].constructor_kwargs["extra_body"]
+    assert extra_body == {"chat_template_kwargs": {"enable_thinking": False}}
 
 
 def test_provider_does_not_duplicate_existing_gemma4_thinking_trigger() -> None:

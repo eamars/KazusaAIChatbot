@@ -82,6 +82,7 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
+| [qwen_alias_thinking_disable_enforcement_bugfix_plan_2026-08-25.md](archive/completed/bugfix/qwen_alias_thinking_disable_enforcement_bugfix_plan_2026-08-25.md) | Qwen-family alias provider-side thinking-disable enforcement | completed; deterministic and real-LLM gates passed on 2026-08-25 |
 | [asuna_semantic_authority_and_memory_feedback_consolidated_bugfix_plan_2026-08-24.md](archive/completed/bugfix/asuna_semantic_authority_and_memory_feedback_consolidated_bugfix_plan_2026-08-24.md) | Consolidated semantic progression, proposal ownership, commitment admission, cross-user learned-memory authority, audit, and real-LLM execution record | closed with residual failures on 2026-08-25; execution complete, functional sign-off RED |
 | [resolver_authored_speak_provenance_contract_bugfix_plan_2026-08-24.md](archive/completed/bugfix/resolver_authored_speak_provenance_contract_bugfix_plan_2026-08-24.md) | Resolver-authored pending, user-input, and terminal visible-speak target provenance repair | completed; deterministic and user-approved real-service fallback gates passed on 2026-08-24 |
 | [cognition_v3_consolidation_interaction_subtext_handoff_bugfix_plan_2026-08-23.md](archive/completed/bugfix/cognition_v3_consolidation_interaction_subtext_handoff_bugfix_plan_2026-08-23.md) | Cognition V3 required subjective-state handoff and zero-exception post-turn consolidation repair | completed |

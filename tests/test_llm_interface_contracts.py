@@ -131,6 +131,21 @@ def test_describe_backend_ignores_unsupported_model_thinking() -> None:
     assert descriptor.thinking_strategy == "ignored_unsupported_model"
 
 
+def test_describe_backend_enforces_disabled_thinking_for_qwen_alias() -> None:
+    """Generic Qwen-family aliases use the explicit disabled strategy."""
+
+    interface = LLInterface()
+    descriptor = interface.describe_backend(
+        config=_call_config(
+            model="qwen-production-alias",
+            thinking_enabled=False,
+        ),
+    )
+
+    assert descriptor.model_family == "qwen"
+    assert descriptor.thinking_strategy == "qwen3_disabled"
+
+
 def test_describe_backend_detects_qwen3_thinking_strategies() -> None:
     """Qwen3-family models use explicit enabled and disabled strategies."""
 

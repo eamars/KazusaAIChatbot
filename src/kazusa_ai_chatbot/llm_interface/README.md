@@ -78,10 +78,11 @@ runtime module
 Runtime modules own ordinary message content. The interface passes ordered
 `BaseMessage` objects through without rewriting prompts, payloads, or message
 order except when an enabled provider compatibility feature requires a
-backend-specific control token. Current thinking exceptions are Gemma 4 and
-Qwen3-family models. The OpenAI-compatible provider injects their documented
-or validated backend controls on copied messages so caller-owned message
-objects are not mutated.
+backend-specific control token. Current enabled-thinking exceptions are Gemma 4
+and Qwen3-family models. The OpenAI-compatible provider also enforces the
+disabled-thinking control for every detected Qwen-family model, including
+opaque aliases. It injects documented or validated backend controls on copied
+messages so caller-owned message objects are not mutated.
 
 Provider-specific fields terminate inside provider adapters. Stage modules must
 not construct `extra_body`, provider-native clients, backend-kind constants, or
@@ -296,13 +297,15 @@ LLMThinkingConfig(enabled=True)
 
 Default behavior is disabled. When thinking is disabled for ordinary or
 unsupported models, provider request payloads must not contain
-thinking-specific fields. When thinking is disabled for Qwen3-family models,
+thinking-specific fields. When thinking is disabled for the detected `qwen`
+family, including aliases that do not match the Qwen3 thinking-model pattern,
 the OpenAI-compatible provider sends the request-level disable hint where the
 backend supports it and does not add the assistant prefill.
 
-Provider-side thinking support currently covers Gemma 4, Qwen3-family models,
-Qwen-compatible Qwopus 3.x model names, and Qwen-compatible Ornith model
-names.
+Provider-side enabled-thinking support currently covers Gemma 4, Qwen3-family
+models, Qwen-compatible Qwopus 3.x model names, and Qwen-compatible Ornith
+model names. The Qwen3 matcher remains restricted to enabled thinking; disabled
+enforcement is family-wide.
 
 When thinking is enabled and the detected model family is `gemma4`, the
 OpenAI-compatible provider maps it to both the request-level chat-template hint

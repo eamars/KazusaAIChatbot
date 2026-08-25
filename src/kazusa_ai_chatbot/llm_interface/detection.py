@@ -90,10 +90,11 @@ def _thinking_strategy(
 ) -> str:
     """Return the effective provider-side thinking strategy."""
 
-    if model_family == "qwen" and _is_qwen3_thinking_model(model):
-        if thinking_enabled:
+    if model_family == "qwen":
+        if not thinking_enabled:
+            return "qwen3_disabled"
+        if _is_qwen3_thinking_model(model):
             return "qwen3_enabled"
-        return "qwen3_disabled"
 
     if not thinking_enabled:
         return "disabled"
