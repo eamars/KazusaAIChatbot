@@ -328,6 +328,34 @@ def test_provider_adds_gemma4_thinking_payload_only_when_enabled() -> None:
     assert sent_messages[1] is messages[1]
 
 
+def test_provider_sends_gemma4_disabled_payload() -> None:
+    """Disabled Gemma 4 sends false without changing caller messages."""
+
+    created_models: list[_FakeChatModel] = []
+
+    def _factory(**kwargs: object) -> _FakeChatModel:
+        model = _FakeChatModel(**kwargs)
+        created_models.append(model)
+        return model
+
+    config = _config(thinking_enabled=False)
+    backend = LLInterface().describe_backend(config=config)
+    provider = OpenAICompatibleProvider(chat_model_factory=_factory)
+    messages = [SystemMessage(content="system"), HumanMessage(content="hello")]
+
+    provider.invoke(
+        messages,
+        config=config,
+        backend=backend,
+    )
+
+    assert backend.thinking_strategy == "gemma4_disabled"
+    extra_body = created_models[0].constructor_kwargs["extra_body"]
+    assert extra_body == {"chat_template_kwargs": {"enable_thinking": False}}
+    assert created_models[0].sync_calls[0] is messages
+    assert created_models[0].sync_calls[0] == messages
+
+
 def test_provider_adds_qwen3_thinking_payload_and_prefill() -> None:
     """Qwen3 thinking maps request kwargs and LM Studio assistant prefill."""
 

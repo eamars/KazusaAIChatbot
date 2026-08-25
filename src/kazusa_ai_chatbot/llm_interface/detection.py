@@ -95,11 +95,13 @@ def _thinking_strategy(
             return "qwen3_disabled"
         if _is_qwen3_thinking_model(model):
             return "qwen3_enabled"
+    if model_family == "gemma4":
+        if not thinking_enabled:
+            return "gemma4_disabled"
+        return "gemma4_enabled"
 
     if not thinking_enabled:
         return "disabled"
-    if model_family == "gemma4":
-        return "gemma4_enabled"
     return "ignored_unsupported_model"
 
 

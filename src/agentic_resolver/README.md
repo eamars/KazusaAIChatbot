@@ -7,7 +7,7 @@
 - First-pass boundary: standalone direct Python construction and invocation
 - Workflow state: no import, registration, selection, or call edge from Kazusa
   cognition, brain service, task resolution, accepted tasks, or background work
-- Governing architecture:
+- Renewed target architecture:
   `docs/architecture/agentic_resolver_architecture.md`
 
 This package is a bounded native-tool resolver. It owns one serialized root
@@ -151,6 +151,24 @@ exposes exactly the existing `local_context`, `public_research`, `coding`, and
 `text_computation` specialist handlers. Those handlers retain their current
 contracts, internal orchestration, source ownership, approval lifecycle,
 timeouts, and failure behavior.
+
+## Target Transition
+
+This ICD describes the currently implemented standalone prototype. The
+renewed target architecture supersedes its standalone-first, four-facade, and
+DAG-backed direction for future integration.
+
+At the approved cutover, the Kazusa brain action selector remains the caller
+through `task_resolution_request`, and the brain retains foreground/background
+selection, promotion, resume, cognition, and delivery ownership. The
+resolution layer moves in one contract update to the native agent loop and
+eligible base-level semantic tool catalog defined by
+`docs/architecture/agentic_resolver_architecture.md`.
+
+Until that cutover, the four integration adapters above remain a description
+of current code, not the target tool boundary. This README remains the
+implemented-state source of truth and must be updated atomically with the
+production cutover.
 
 ## Verification Contract
 

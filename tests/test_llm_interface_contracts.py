@@ -116,6 +116,18 @@ def test_describe_backend_detects_gemma4_thinking_strategy() -> None:
     assert descriptor.confidence == "model_name_inferred"
 
 
+def test_describe_backend_enforces_disabled_thinking_for_gemma4() -> None:
+    """Gemma 4 disabled thinking uses an explicit provider strategy."""
+
+    interface = LLInterface()
+    descriptor = interface.describe_backend(
+        config=_call_config(thinking_enabled=False),
+    )
+
+    assert descriptor.model_family == "gemma4"
+    assert descriptor.thinking_strategy == "gemma4_disabled"
+
+
 def test_describe_backend_ignores_unsupported_model_thinking() -> None:
     """Unsupported models continue without provider thinking payloads."""
 

@@ -5,7 +5,8 @@
 - Goal: prove whether the standalone Phase 1 agentic resolver can perform
   realistic agent work well enough to become eligible for a separately
   approved Phase 2 integration.
-- Status: draft; the exact scenario inputs await human-owner approval.
+- Status: superseded on 2026-08-25 by the renewed agentic resolver target
+  architecture; this plan must not be executed.
 - Scope boundary: resolver configuration preflight, real-LLM performance-test
   fixtures and harnesses, one-at-a-time execution, raw evidence, agent-authored
   reviews, and a final readiness decision. Phase 2 wiring is outside scope.
@@ -18,6 +19,12 @@
   required case and repeat passes and the human owner accepts the final review.
 - Prior plan:
   `development_plans/archive/completed/short_term/standalone_agentic_resolver_first_pass_plan_2026-08-23.md`.
+- Superseded by:
+  `docs/architecture/agentic_resolver_architecture.md`.
+
+This plan evaluates the retired standalone-first, fixed four-facade direction.
+It is retained only as historical context. A new implementation or evaluation
+plan must be derived from the renewed architecture after architecture review.
 
 ## Scope And Change Direction
 

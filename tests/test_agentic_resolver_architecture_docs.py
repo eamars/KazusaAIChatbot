@@ -1,4 +1,4 @@
-"""Executable documentation contracts for the standalone resolver."""
+"""Executable documentation contracts for the agentic resolver."""
 
 from __future__ import annotations
 
@@ -77,50 +77,72 @@ def test_llm_interface_readme_documents_additive_native_tool_stream_contract() -
     assert "once any chunk has been yielded" in text
 
 
-def test_architecture_declares_standalone_first_pass_and_deferred_bigbang() -> None:
-    """The governing decision keeps the first pass standalone."""
+def test_architecture_preserves_brain_call_and_execution_ownership() -> None:
+    """The renewed resolver stays behind the existing brain-owned boundary."""
 
     text = _normalized(ARCHITECTURE)
 
-    assert "first-pass boundary: additive standalone runtime" in text
-    assert "later transition: a separate big-bang plan" in text
-    assert "no inbound edge from cognition" in text
-    assert "phase 2: later big-bang transition" in text
+    assert "the brain action selector remains the caller" in text
+    assert "task_resolution_request remains the request surface" in text
+    assert (
+        "the resolver never decides whether a job belongs in the background"
+        in text
+    )
+    assert "big-bang replacement inside the resolution layer" in text
+    assert "the same durable session is checkpointed" in text
 
 
-def test_architecture_requires_json_for_resolver_authored_semantic_envelopes() -> None:
-    """The governing decision excludes free-form semantic control messages."""
-
-    text = _normalized(ARCHITECTURE)
-
-    assert "every non-empty resolver-authored semantic textual payload" in text
-    assert "is a json object" in text
-    assert "xml and pseudo-xml prompt frames are outside" in text
-    assert "controller never interprets assistant prose as an action" in text
-
-
-def test_architecture_declares_opaque_reasoning_replay_and_atomic_compaction() -> None:
-    """Reasoning replay and history compaction preserve one atomic exchange."""
+def test_architecture_exposes_complete_leaf_tool_catalog_without_hidden_dags() -> None:
+    """Eligible base interfaces become leaf tools with explicit exclusions."""
 
     text = _normalized(ARCHITECTURE)
 
-    assert "opaque assistant reasoning channel" in text
-    assert "reasoning_content" in text
-    assert "empty field" in text
-    assert "tool-call-free reasoning" in text
-    assert "atomic" in text
-    assert "reasoning" in text
-    assert "tool result" in text
+    assert "all eligible resolution-facing base-level interfaces" in text
+    assert "a catalog completeness test fails" in text
+    assert "conversation_search" in text
+    assert "memory_search" in text
+    assert "web_search" in text
+    assert (
+        "no live tool hides a task, rag, complex, or web orchestration dag"
+        in text
+    )
 
 
-def test_architecture_declares_non_recursive_same_runtime_subagent() -> None:
-    """Children use the same runtime and omit recursive delegation."""
+def test_architecture_adopts_recorded_harness_call_result_pairing() -> None:
+    """Harness-derived sessions persist exact call/result correlations."""
 
     text = _normalized(ARCHITECTURE)
 
-    assert "new instance of the same resolver runtime" in text
-    assert "isolated session" in text
-    assert "registry omits" in text
-    assert "run_subagent" in text
-    assert "fixing delegation depth at one" in text
-    assert "parent receives the bounded child result" in text
+    assert "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e" in text
+    assert "bash-tool/session.jsonl" in text
+    assert "skill-load/session.jsonl" in text
+    assert "tool/call" in text
+    assert "tool/result" in text
+    assert "paired by the same call id" in text
+    assert "a call is persisted before dispatch" in text
+    assert "tool_outcome_unknown" in text
+
+
+def test_architecture_governs_experience_derived_skill_promotion() -> None:
+    """Past experience proposes skills but cannot activate them directly."""
+
+    text = _normalized(ARCHITECTURE)
+
+    assert "skillcandidate" in text
+    assert "held-out replay" in text
+    assert "independent or human approval" in text
+    assert "the agent may propose a skillcandidate" in text
+    assert "it cannot silently activate one" in text
+    assert "skills teach procedure" in text
+
+
+def test_architecture_includes_kazusa_memory_digging_examples() -> None:
+    """The target describes iterative memory and active-recall use cases."""
+
+    text = _normalized(ARCHITECTURE)
+
+    assert "blue comet" in text
+    assert "conversation_list around the strongest matches" in text
+    assert "memory_read for the selected memory and provenance" in text
+    assert "active_recall for current commitments" in text
+    assert "cognition decides how kazusa emotionally interprets" in text

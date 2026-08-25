@@ -43,14 +43,13 @@ recorded evidence.
 
 ### Active Short-Term Plans
 
-| Document | Type | Status |
-|---|---|---|
-| [agentic_resolver_phase2_readiness_real_llm_evaluation_plan_2026-08-23.md](active/short_term/agentic_resolver_phase2_readiness_real_llm_evaluation_plan_2026-08-23.md) | Independent Agentic Resolver Phase 2 readiness catalog and real-LLM evaluation | draft; exact scenarios await human-owner approval |
+No active short-term plans are registered.
 
 ### Superseded Plans
 
 | Document | Type | Status |
 |---|---|---|
+| [agentic_resolver_phase2_readiness_real_llm_evaluation_plan_2026-08-23.md](archive/superseded/agentic_resolver_phase2_readiness_real_llm_evaluation_plan_2026-08-23.md) | Retired standalone-first four-facade resolver readiness evaluation | superseded by the renewed agentic resolver target architecture |
 | [cognition_v3_cache_affine_semantic_chain_bigbang_plan.md](archive/superseded/cognition_v3_cache_affine_semantic_chain_bigbang_plan.md) | Former parallel cache-affine semantic-chain projection and partial execution record | superseded by `cognition_v3_hybrid_agentic_loop_reconciliation_plan.md` |
 | [cognition_v3_hybrid_agentic_loop_static_architecture_review_2026-08-21.md](archive/superseded/cognition_v3_hybrid_agentic_loop_static_architecture_review_2026-08-21.md) | Static findings for the retired hybrid cognition chain | superseded by the handleless cognition cutover |
 | [multi_turn_semantic_progression_and_response_goal_fixation_bugfix_plan_2026-08-23.md](archive/superseded/multi_turn_semantic_progression_and_response_goal_fixation_bugfix_plan_2026-08-23.md) | Partial semantic-progression implementation and immutable execution evidence | superseded by the consolidated Asuna semantic-authority plan |
@@ -76,6 +75,7 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
+| [gemma4_thinking_disable_enforcement_gap_bugfix_plan_2026-08-25.md](active/bugfix/gemma4_thinking_disable_enforcement_gap_bugfix_plan_2026-08-25.md) | Gemma 4 provider-side thinking-disable enforcement gap | in_progress |
 | [epistemic_and_role_provenance_fidelity_bugfix_plan_2026-08-24.md](active/bugfix/epistemic_and_role_provenance_fidelity_bugfix_plan_2026-08-24.md) | Independent unsupported-fact, private-residue, and temporary-role provenance fidelity plan from the 50-turn Asuna run | draft; separate ownership and approval boundary |
 
 ### Completed Bugfix Plans

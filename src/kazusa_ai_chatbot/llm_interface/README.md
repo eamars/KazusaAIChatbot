@@ -80,9 +80,9 @@ Runtime modules own ordinary message content. The interface passes ordered
 order except when an enabled provider compatibility feature requires a
 backend-specific control token. Current enabled-thinking exceptions are Gemma 4
 and Qwen3-family models. The OpenAI-compatible provider also enforces the
-disabled-thinking control for every detected Qwen-family model, including
-opaque aliases. It injects documented or validated backend controls on copied
-messages so caller-owned message objects are not mutated.
+disabled-thinking control for every detected Gemma 4 and Qwen-family model,
+including opaque aliases. It injects documented or validated backend controls
+on copied messages so caller-owned message objects are not mutated.
 
 Provider-specific fields terminate inside provider adapters. Stage modules must
 not construct `extra_body`, provider-native clients, backend-kind constants, or
@@ -297,10 +297,12 @@ LLMThinkingConfig(enabled=True)
 
 Default behavior is disabled. When thinking is disabled for ordinary or
 unsupported models, provider request payloads must not contain
-thinking-specific fields. When thinking is disabled for the detected `qwen`
-family, including aliases that do not match the Qwen3 thinking-model pattern,
-the OpenAI-compatible provider sends the request-level disable hint where the
-backend supports it and does not add the assistant prefill.
+thinking-specific fields. When thinking is disabled for the detected `gemma4`
+or `qwen` family, including Qwen aliases that do not match the Qwen3
+thinking-model pattern, the OpenAI-compatible provider sends the request-level
+disable hint where the backend supports it and does not add the assistant
+prefill. These families use explicit disabled strategies at the provider
+boundary; generic and unsupported families retain the generic omission.
 
 Provider-side enabled-thinking support currently covers Gemma 4, Qwen3-family
 models, Qwen-compatible Qwopus 3.x model names, and Qwen-compatible Ornith

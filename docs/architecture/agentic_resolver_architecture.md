@@ -1,1114 +1,771 @@
-# Agentic Resolver Architecture
+# Agentic Resolver Target Architecture
 
-## Document Control
+## Document control
 
-- Status: target architecture reference.
-- Document type: system architecture and ownership decision.
-- Target package: **src/agentic_resolver**.
-- Execution authority: none. Production implementation requires an approved
-  or in-progress plan under **development_plans/active/** and a separate
-  explicit implementation command.
-- First-pass boundary: additive standalone runtime reached through its Python
-  API only.
-- Later transition: a separate big-bang plan may connect the resolver to
-  Kazusa cognition, accepted tasks, and background work after the standalone
-  runtime is accepted.
-- Governing project references:
-  - **AGENTS.md**
-  - **docs/DOCUMENTATION_GUIDE.md**
-  - **src/kazusa_ai_chatbot/llm_interface/README.md**
-  - **src/kazusa_ai_chatbot/task_resolution/README.md**
-  - **src/kazusa_ai_chatbot/local_context_resolver/README.md**
-  - **src/kazusa_ai_chatbot/complex_task_resolver/README.md**
+| Field | Value |
+| --- | --- |
+| Status | Target architecture for review |
+| Date | 2026-08-25 |
+| Scope | Replacement of Kazusa task-resolution DAGs |
+| Current implementation ICD | src/agentic_resolver/README.md |
+| Stable caller | Kazusa brain action selector through task_resolution_request |
+| Supersedes | Standalone-first, four-facade, and DAG-backed resolver direction |
 
-## Executive Decision
+This document defines the renewed target architecture. It is not a statement
+that the target is already implemented. Until a cutover is approved and
+completed, src/agentic_resolver/README.md remains the implementation contract
+for the current standalone prototype.
 
-Kazusa gains one top-level agentic resolver implemented as a traditional
-native tool-calling loop rather than a DAG. The first implementation lives
-alongside the current runtime and has no inbound edge from cognition, the
-brain service, task resolution, accepted tasks, background work, adapters, or
-delivery.
+## Executive decision
 
-The standalone resolver can consume the current Kazusa capability
-implementations through downward-only adapters. Those implementations retain
-their present contracts, internal graphs, permissions, timeouts, and failure
-semantics. The new package changes orchestration ownership only inside its
-directly invoked standalone session.
+Kazusa will use one agentic resolver as the resolution engine behind the
+existing brain-owned task-resolution boundary.
 
-The resolver also owns a first-class **run_subagent** tool. A subagent is a new
-instance of the same resolver runtime with an isolated session, the same model
-adapter, the same ordinary tools, the same skills, the same permission scope,
-and the same JSON protocol. Its registry omits **run_subagent**, fixing
-delegation depth at one. The parent receives the bounded child result as a
-normal tool observation and owns convergence.
+The brain action selector remains the caller. task_resolution_request remains
+the request surface. The current inline, direct-background, promotion, resume,
+result, and observation mechanics remain the brain-facing contract.
 
-Every non-empty resolver-authored semantic textual payload is a JSON object:
+Inside that boundary, the agentic resolver replaces the current task
+resolution, RAG, internal resolver, complex resolver, and external/web
+orchestration DAGs. The model receives a catalog of eligible base-level
+semantic tools and decides, step by step, which tool to call, whether another
+tool is needed, and when evidence is sufficient to submit a resolution.
 
-- system policy;
-- task input;
-- skill catalog;
-- loaded skill content;
-- tool results;
-- subagent tasks and results;
-- contract-error feedback;
-- compacted observations; and
-- terminal result arguments.
+The resolver never decides whether a job belongs in the background, whether a
+response should be visible, what Kazusa's character stance is, or how the
+final user-facing message is worded. Those decisions remain with the brain.
 
-Native tool schemas and native tool arguments are JSON Schema and JSON
-objects. XML and pseudo-XML prompt frames are outside this architecture.
-The resolver model route requires provider thinking to be enabled and uses a
-streaming native-tool interface for every model step. Resolver-authored
-semantic content remains JSON. Provider reasoning is carried separately as an
-opaque assistant reasoning channel: it is retained for provider-required
-round-trip continuity, counted against context, and excluded from resolver
-actions, evidence, tool observations, terminal fields, and public results.
+This is a big-bang replacement inside the resolution layer while preserving
+the stable boundary above it. The target does not introduce a second live
+resolver path or a compatibility vocabulary between old graphs and new tools.
 
-## Confirmed Decisions
+## Confirmed use-case boundary
 
-1. The first pass introduces the resolver as a standalone package.
-2. Current Kazusa workflows remain behaviorally and structurally unchanged.
-3. Existing tool implementations remain unchanged.
-4. The first pass may call existing public capability functions through new
-   adapter definitions.
-5. The resolver loop itself is non-DAG. A wrapped existing capability may
-   retain its current internal graph during this phase.
-6. Skills use a startup catalog plus one lazy-loading **skill** tool, following
-   the DeepSeek Harness separation between discovery and loading.
-7. The skill catalog is injected as JSON.
-8. The future cognition-facing capability name remains
-   **task_resolution_request**.
-9. Workflow integration and old-orchestrator decommission are a later
-   big-bang change.
-10. Subagents are first-class in the first pass and use the same resolver
-    implementation with recursive delegation disabled.
-11. The root and every child require a thinking-enabled supported model route.
-12. Every resolver model step consumes the additive LLInterface native-tool
-    stream; Phase 1 has no non-streaming resolver model path.
-13. Reasoning is retained as opaque assistant transport state and is never
-    injected as a system, user, tool-result, skill, or terminal JSON field.
+The immediate call sequence is:
 
-## Goals
+    platform adapter or debug client
+        -> Kazusa brain
+        -> action selector
+        -> task_resolution_request
+        -> task-resolution service
+        -> agentic resolver session
+        -> TaskResolutionResult
+        -> ResolverObservation
+        -> cognition
+        -> dialog or another brain-owned action
 
-| Goal | Target state |
-|---|---|
-| Standalone execution | A direct Python caller can construct a runtime and resolve one task without importing or starting Kazusa cognition or the brain service. |
-| Traditional agent loop | One append-only session alternates native model tool calls and deterministic tool observations until a terminal result. |
-| JSON-only model boundary | Every resolver-authored textual message supplied to the model parses as exactly one JSON object; provider reasoning remains a separate typed channel. |
-| Thinking stream | Every model step streams typed reasoning, text, tool-call, usage, and finish events; reasoning remains distinct from semantic JSON. |
-| Dynamic startup composition | The runtime freezes the supplied ordinary tools and discovered skill catalog at construction time and presents that exact set to the model. |
-| Existing capability reuse | The initial Kazusa adapter registry exposes the four current task-resolution specialist boundaries without editing their implementations. |
-| First-class delegation | The parent may run bounded, isolated same-runtime subagents and converge their typed results. |
-| Context safety | Every model request accounts for policy, tool schemas, catalog, task, transcript, retained reasoning, loaded skills, tool results, and completion reserve under the project cap. |
-| Inspectability | Session events, stream chunks, assembled assistant turns, tool calls, results, budget decisions, child lineage, and terminal disposition remain reconstructable. |
-| Future cutover readiness | A later plan can integrate the accepted standalone contract without redesigning the loop. |
+The brain owns:
 
-## First-Pass Non-Goals
+- whether the selected action is task resolution;
+- foreground versus background priority;
+- the inline deadline and deterministic promotion decision;
+- accepted-task notification, queueing, resume, and delivery;
+- character judgment, relationship boundaries, and response goals;
+- whether to speak and the visible wording.
 
-The first pass leaves these areas for later plans:
+The agentic resolver owns:
 
-- cognition or persona-graph integration;
-- replacement of **task_resolution_request** handling;
-- accepted-task or background-work integration;
-- durable database checkpoints and process-restart resume;
-- a slash command, HTTP route, control-console surface, or adapter command;
-- refactoring the local-context, complex-task, WebAgent3, coding, or
-  text/computation implementations;
-- removing any current DAG;
-- skill filesystem watching or live catalog replacement;
-- skill scripts, assets, or arbitrary resource execution;
-- recursive subagents;
-- background, continuable, steerable, or parallel subagent control;
-- incremental public-result, UI, CLI, or adapter streaming;
-- exposing, persisting, summarizing, or treating private reasoning as evidence;
-- arbitrary MCP, shell, database, filesystem, deployment, or delivery tools;
-- a compatibility bridge between the standalone result and current workflow
-  state.
+- interpreting the bounded resolution objective supplied by the brain;
+- selecting eligible tools from the current catalog;
+- forming typed tool arguments;
+- evaluating returned evidence and deciding the next resolution step;
+- requesting clarification or approval through typed terminal outcomes;
+- submitting a structured resolution with evidence provenance.
 
-## System Boundary
+Deterministic runtime code owns:
 
-The first-pass dependency direction is deliberately one-way:
+- schema validation and catalog construction;
+- code-bound scope, permission, and target checks;
+- tool dispatch, timeouts, quotas, and result-size limits;
+- durable event recording and call/result correlation;
+- idempotency, outcome verification, and crash recovery;
+- foreground deadlines, background scheduling, and delivery;
+- persistence constraints and audit records.
 
-~~~text
-direct Python caller
-        |
-        v
-src/agentic_resolver
-  core runtime
-  JSON protocol
-  tool registry
-  skill catalog
-  subagent runtime
-        |
-        +---- optional LLInterface native-tool adapter
-        |
-        +---- optional Kazusa capability adapters
-                    |
-                    +-- current local_context specialist
-                    +-- current public_research specialist
-                    +-- current coding specialist
-                    +-- current text_computation specialist
+## Direction discarded by this architecture
 
-current cognition / brain service / task resolution / background work
-        |
-        +---- no import, call, registration, or runtime selection edge
-              to agentic_resolver in the first pass
-~~~
+The following previous design choices are superseded wherever they conflict
+with this document:
 
-Standalone describes the control-flow and public-entrypoint boundary. The
-optional integration package may depend downward on existing Kazusa public
-capabilities. Existing Kazusa workflow packages remain unaware of the new
-resolver.
+1. A standalone resolver as the long-term product boundary.
+2. A fixed four-tool facade made of local_context, public_research, coding,
+   and text_computation.
+3. Keeping task, RAG, complex, or web DAGs hidden behind those facade tools.
+4. Selecting one specialist route before evidence gathering begins.
+5. Treating Phase 2 as merely adding more adapters to the same facade model.
+6. Allowing an adapter to return prose that bypasses a typed terminal result.
+7. Letting the resolver choose foreground/background execution or user
+   delivery.
+8. Allowing self-authored skills to become active from one successful session.
 
-## Phased Architecture
+Existing leaf executors may be retained where their ownership is appropriate.
+Graph routers, graph state vocabularies, branch selectors, graph checkpoints,
+and facade-only compatibility mappings do not remain on the live target path.
 
-### Phase 1: Standalone Runtime
+## Smallest model-owned contract
 
-Phase 1 creates and validates:
+For each model step, the resolver model does exactly one of these:
 
-- a top-level installable **agentic_resolver** package;
-- an async direct-call runtime API;
-- an append-only in-memory session;
-- provider-neutral native tool stream and assembly contracts;
-- additive native tool streaming support in **LLInterface**;
-- mandatory thinking for root and child model routes;
-- a frozen tool registry;
-- four unchanged Kazusa capability adapters;
-- startup skill discovery and JSON catalog injection;
-- one lazy **skill** tool;
-- one foreground **run_subagent** tool;
-- one controller-owned **submit_result** terminal tool;
-- per-session context and execution budgets;
-- deterministic tests and one inspected live-LLM workflow.
+- call one named tool using schema-valid arguments;
+- call skill to load one curated skill version;
+- call submit_resolution with the terminal structured outcome.
 
-### Phase 2: Later Big-Bang Transition
+The first integrated release accepts one complete native tool call per model
+step. A session can make many successive calls. This makes local-model output
+easier to validate and replay without removing the model's freedom to explore.
 
-Phase 2 requires its own approved plan. Its intended direction is:
+Assistant prose is not runtime control. Private reasoning may be streamed for
+diagnostics, but only a validated native call changes state.
 
-~~~text
-cognition task_resolution_request
-    -> agentic_resolver
-    -> inline result or durable checkpoint
-    -> accepted_task/background resume when required
-    -> ResolverObservation
-    -> cognition owns stance
-    -> dialog owns visible wording
-~~~
+submit_resolution is the normal terminal operation. Its outcome is one of:
 
-That later cutover may replace the current task orchestrator and then decide
-which graph-based resolver implementations become direct tools, are
-decommissioned, or are refactored. Phase 1 supplies evidence for that decision
-and performs no cutover itself.
+- resolved: sufficient evidence supports an answer;
+- partial: useful evidence exists with explicit remaining limitations;
+- needs_user_input: a missing fact or ambiguity prevents continuation;
+- approval_required: the next operation requires brain/user approval;
+- unavailable: no eligible capability or accessible source can complete it;
+- failed: the session reached a typed unrecoverable failure.
 
-## Component Ownership
+These are the existing TaskResolutionResult terminal statuses. deferred is
+runtime-owned and is never selected through submit_resolution.
 
-| Component | Owns | Excludes |
-|---|---|---|
-| AgenticResolverRuntime | Public direct-call lifecycle, runtime composition, root session, final public result | Cognition, delivery, accepted-task persistence |
-| AgentLoop | Model-step stream consumption, native tool-call admission, terminal selection, fixed caps | Tool semantics and caller permissions |
-| ResolverSession | Append-only events, stream chunks, assembled assistant turns, model-history derivation, observation references, child lineage | Database persistence |
-| ContextBudget | Request accounting, output reserve, deterministic compaction, hard-stop decision | Semantic relevance judgment |
-| ToolRegistry | Unique names, JSON schemas, argument validation hooks, permission checks, execution dispatch, frozen views | Tool-domain implementation |
-| SkillCatalog | Startup filesystem discovery, metadata validation, sorted summaries, digest, lazy body load | Capability or permission grants |
-| SubagentRunner | Child construction, depth enforcement, inherited registry view, result projection, child cap | Child semantic reasoning |
-| ModelStreamAssembler | Ordered reasoning/text/tool-call block assembly, usage, finish validation, safe interruption projection | Tool execution and semantic judgment |
-| AgenticModelClient | Provider-neutral async native tool-call chunk stream plus immutable streaming/thinking capability declaration | Resolver loop policy |
-| LLInterfaceToolModel | Adapt additive LLInterface native-tool streams to AgenticModelClient and preserve provider reasoning replay state | Resolver or tool semantics |
-| Kazusa tool integration | Bind the existing four specialist handlers to resolver tool definitions | Changes to specialist implementations |
-| Existing capability handlers | Their current RAG, web, coding, and computation behavior | Resolver session and parent convergence |
+The controller projects the validated terminal call into the existing
+TaskResolutionResultV1 fields: semantic objective, status, scene context, goal
+continuation reference, evidence state, excerpts, handles, prompt-safe
+summary, structured evidence, completed subgoals, remaining needs, checkpoint,
+and coding-run context. The public schema version and caller projection remain
+stable. Its opaque checkpoint payload carries the agentic session identifier
+and revision after cutover rather than legacy graph state.
 
-## Public Runtime Contract
+## Tool exposure policy
 
-The core public API is construction plus one async resolve call:
+### Meaning of all interfaces
 
-~~~python
-runtime = AgenticResolverRuntime(
-    model=model_client,
-    tools=tool_registry,
-    skills=skill_catalog,
-    limits=limits,
-)
+Kazusa exposes all eligible resolution-facing base-level interfaces to the
+agentic resolver as tools by default.
 
-result = await runtime.resolve(request)
-~~~
+Eligibility means the interface:
 
-The request is prompt-safe semantic input:
+- performs one explicit semantic operation useful to resolution;
+- has a typed input and typed result;
+- has a code-enforced authorization scope;
+- declares side effects, idempotency, timeouts, and provenance behavior;
+- can be called without transferring cognition, dialog, delivery, or
+  scheduling ownership to the resolver.
 
-~~~json
-{
-  "schema_version": "agentic_resolver_request.v1",
-  "objective": "Compare the available local record with current public information.",
-  "context": {
-    "facts": [
-      "The caller wants a source-grounded comparison."
-    ],
-    "constraints": [
-      "Separate local evidence from public evidence."
-    ],
-    "desired_output": "A concise comparison with limitations."
-  }
-}
-~~~
+The catalog is capability-complete, not unrestricted. Every public Kazusa
+brain interface must have one of two registry states:
 
-Trusted execution objects, permission scopes, credentials, database handles,
-workspace roots, model configuration, and tool handlers are constructor-owned
-runtime inputs. They are never fields the model can author.
+- exposed, with a versioned tool manifest; or
+- excluded, with a documented ownership or safety reason.
 
-The public result is a code-validated projection:
+A catalog completeness test fails when an eligible interface has neither
+state. This prevents the system from quietly returning to a small hand-picked
+facade.
 
-~~~json
-{
-  "schema_version": "agentic_resolver_result.v1",
-  "session_id": "resolver-session-id",
-  "status": "resolved",
-  "summary": "The comparison is complete.",
-  "evidence": [
+The following are explicit exclusions:
+
+- raw MongoDB collections, database clients, and arbitrary query execution;
+- action selection, cognition, dialog, character state judgment, and delivery;
+- adapters and platform credentials;
+- task queues, schedulers, checkpoint internals, and accepted-task mutation;
+- graph nodes, stage prompts, raw LLM clients, caches, and trace stores;
+- unrestricted shell or filesystem access;
+- persistence writes owned by memory consolidation or another brain action;
+- the resolver's own session and dispatch internals.
+
+These exclusions are not hidden capabilities. They are ownership boundaries.
+If a resolution use case needs one, Kazusa must define a bounded semantic
+interface and expose that interface through the same manifest process.
+
+### Tool manifest
+
+Every exposed tool has one canonical manifest:
+
+| Field | Purpose |
+| --- | --- |
+| name and version | Stable call identity and migration control |
+| description | Model-facing semantic purpose and non-purpose |
+| input_schema | Complete argument contract |
+| output_schema | Complete result contract |
+| semantic_domain | Memory, conversation, people, web, media, coding, and so on |
+| cardinality | One item, page, aggregate, or bounded stream |
+| trusted_scope | Code-derived user, character, channel, workspace, or target scope |
+| side_effect_class | read_only, proposal, reversible_write, or irreversible_write |
+| approval_policy | None, brain approval, or explicit user approval |
+| idempotency | Retry rule and key behavior |
+| outcome_verification | How an uncertain side effect is checked |
+| timeout_and_limits | Duration, calls, bytes, rows, and page bounds |
+| provenance | Source identifiers, timestamps, and freshness semantics |
+| executor | The deterministic implementation boundary |
+| refusal_contract | Typed reasons the executor can decline |
+
+Trusted scope is injected by runtime code from the brain request and
+authorization context. The model cannot broaden a user, character, channel,
+conversation, workspace, or network scope by placing new values in arguments.
+
+### Initial leaf catalog
+
+The target first catalog contains at least these semantic leaf tools:
+
+| Tool | Operation |
+| --- | --- |
+| conversation_search | Search scoped conversation turns by semantic or lexical query |
+| conversation_list | Read bounded turns around known matches or a time window |
+| conversation_aggregate | Compute a bounded participant, topic, or event summary over selected turns |
+| memory_search | Search durable scoped memories and their provenance |
+| memory_read | Read selected memory records and supporting source references |
+| person_resolve | Resolve mentioned people to scoped person identities |
+| profile_read | Read allowed profile facts for resolved people |
+| active_recall | Read active agreements, commitments, reminders, and open loops |
+| current_context_read | Read current scene and conversation context owned by the brain |
+| calendar_read | Read authorized calendar facts needed by the task |
+| web_search | Discover public sources for a stated query |
+| web_read | Fetch and extract one authorized public source |
+| media_inspect | Inspect one supplied or authorized media object |
+| calculate | Perform deterministic arithmetic or structured computation |
+| transform_text | Perform bounded text transformation without external retrieval |
+| coding_read | Inspect authorized repository files and diagnostics |
+| coding_propose | Produce a bounded code-change proposal or patch artifact |
+| accepted_task_status | Read the status of a brain-owned accepted task |
+| skill | Load one curated, versioned skill body into the session |
+| submit_resolution | Submit the terminal typed resolution |
+
+The list grows as eligible Kazusa interfaces are identified. Adding a tool
+does not require adding a graph branch.
+
+### Leaf-tool rule
+
+No live tool hides a task, RAG, complex, or web orchestration DAG.
+
+A leaf tool may contain deterministic implementation details such as:
+
+- database access through the canonical data facade;
+- embedding lookup or lexical search;
+- pagination, caching, and deduplication;
+- one bounded domain model where the operation itself is atomic, such as
+  inspecting a supplied image;
+- source parsing and provenance extraction;
+- permission and size enforcement.
+
+A leaf tool does not:
+
+- choose a different specialist;
+- decide an open-ended sequence of other resolver tools;
+- synthesize the final cross-source answer;
+- decide whether Kazusa should respond;
+- hide graph state, graph checkpoints, or graph fallback behavior.
+
+Search choices that materially affect meaning are explicit arguments. For
+example, conversation_search exposes semantic, lexical, hybrid, time, sender,
+and channel constraints rather than internally routing among opaque RAG
+branches.
+
+### Standard tool result
+
+Each executor returns a typed envelope equivalent to:
+
     {
-      "evidence_id": "observation-1",
-      "summary": "Bounded evidence summary.",
-      "provenance_refs": [
-        "source-reference"
+      "call_id": "call_...",
+      "tool": "conversation_search",
+      "tool_version": "1",
+      "status": "succeeded",
+      "data": {},
+      "evidence": [
+        {
+          "source_type": "conversation_turn",
+          "source_id": "...",
+          "observed_at": "...",
+          "scope": "..."
+        }
       ],
-      "limitations": []
+      "warnings": [],
+      "next_page": null,
+      "error": null
     }
-  ],
-  "completed_tasks": [
-    "Compare the local and public evidence."
-  ],
-  "remaining_needs": [],
-  "usage": {
-    "model_steps": 3,
-    "tool_calls": 2,
-    "subagent_runs": 1,
-    "estimated_context_tokens_peak": 12000
-  }
-}
-~~~
-
-Allowed terminal statuses are:
-
-- **resolved**
-- **partial**
-- **needs_user_input**
-- **approval_required**
-- **unavailable**
-- **budget_exhausted**
-- **failed**
-
-The model supplies the semantic terminal fields through **submit_result**.
-Deterministic code supplies session identity, validated evidence projections,
-usage, and the final disposition when a hard runtime cap terminates the loop.
-
-## Native Tool-Calling Loop
-
-The first-pass loop is serialized and bounded:
-
-~~~text
-construct runtime
-  -> discover skills
-  -> freeze root tool registry
-  -> append JSON system policy
-  -> append JSON skill catalog
-  -> append JSON task
-  -> derive request history from session events
-  -> measure context
-  -> compact old observations when needed
-  -> open thinking-enabled model stream with native JSON tool schemas
-  -> append each normalized stream chunk and feed one assembler
-  -> finalize reasoning, content, tool calls, usage, and finish reason
-  -> require exactly one native tool call
-       -> ordinary capability: validate, execute, append JSON observation
-       -> skill: load body, append JSON skill observation
-       -> run_subagent: run isolated child, append bounded JSON child result
-       -> submit_result: validate and terminalize
-  -> repeat within fixed caps
-~~~
-
-Exactly one native tool call is accepted per model step in Phase 1. This keeps
-ordering, context accounting, error feedback, child lineage, and replay
-unambiguous for weaker local models.
-
-A response with no tool call, multiple tool calls, invalid JSON arguments,
-an unknown tool name, or an invalid terminal payload becomes one bounded JSON
-contract-error observation. The producing model receives another step while
-the replacement budget remains. Exhausting that budget returns **failed**.
-
-The controller never interprets assistant prose as an action or final answer.
-Normal completion requires **submit_result**.
-
-## Thinking And Streaming Contract
-
-### Streaming Is The Resolver Model Boundary
-
-The provider-neutral model seam is an asynchronous chunk stream:
-
-~~~python
-async def astream(
-    messages: Sequence[ModelMessage],
-    *,
-    tools: Sequence[ModelToolDefinition],
-) -> AsyncIterator[ModelStreamChunk]:
-    ...
-~~~
-
-AgenticModelClient also exposes an immutable provider-neutral capability
-descriptor containing **streaming = true**, **thinking_enabled = true**, an
-enabled thinking-strategy identifier, and an adapter-owned reasoning replay
-policy. Runtime construction validates that descriptor before starting a root
-or child session. Provider-specific fields remain inside the adapter.
-
-The normalized closed chunk family is:
-
-- **block_start**, carrying block index and reasoning, text, or tool-call type;
-- **reasoning_delta**, carrying opaque reasoning text for one block index;
-- **text_delta**, carrying assistant content for one block index;
-- **tool_call_delta**, carrying call ID, optional name, and one raw JSON
-  argument fragment for one block index;
-- **block_end**, carrying the completed normalized block;
-- **usage**, carrying provider-neutral token counters; and
-- **finish**, carrying stop, tool_calls, max_tokens, aborted, or error.
-
-Block indexes allow interleaved reasoning, text, and tool-call deltas without
-using arrival order as tool identity. The AgentLoop appends every normalized
-chunk to the in-memory session and feeds the same chunk to one
-ModelStreamAssembler. Only a successfully finished assembled tool call reaches
-argument validation or execution. An interrupted or max-token stream cannot
-execute a partially assembled tool call.
-
-Streaming is internal model transport in Phase 1. The public **resolve** method
-still returns one terminal AgenticResolverResultV1; it does not expose a token
-or thought stream to its caller.
-
-### Thinking Is Opaque Assistant State
-
-Runtime construction requires **LLMCallConfig.thinking.enabled = true** and a
-backend descriptor whose thinking strategy is supported and enabled. A route
-reported as **ignored_unsupported_model** fails construction rather than
-silently running the resolver without thinking. The root and every child use
-the same accepted thinking-enabled model adapter.
-
-Reasoning deltas assemble into a reasoning block attached to the assistant
-turn that produced them. Reasoning is not injected as a new system, user,
-tool-result, skill, compacted-observation, or terminal JSON message. The
-resolver never parses it for actions, validation, evidence, permissions, or
-semantic result fields.
-
-DeepSeek's thinking-mode tool protocol distinguishes assistant turns that
-actually carried tool calls from tool-call-free turns. A tool-calling
-assistant turn's complete **reasoning_content** must be passed back on later
-requests; when that turn has no reasoning text, the adapter still supplies the
-empty field if the API requires its presence. Reasoning from a tool-call-free
-assistant turn may be omitted and is ignored if supplied. The session retains
-a provider-neutral reasoning block, and the LLInterface provider adapter
-applies that provider-specific replay rule. The resolver itself never authors
-a provider-specific reasoning field or copies thought text into ordinary
-content.
-
-The JSON-only rule governs resolver-authored semantic content. Native tool
-schemas and arguments remain JSON; opaque reasoning blocks, native tool-call
-metadata, usage, and finish events are typed transport rather than an
-alternate prompt format. Provider compatibility triggers are applied only by
-LLInterface on copied provider messages and never become resolver session
-instructions.
-
-Reasoning is private operational state. It is excluded from public results,
-ordinary diagnostics, tool observations, subagent results, and evidence. A
-protected debug artifact may record its presence, size, and stream ordering;
-thought text itself remains outside ordinary artifacts.
-
-### DeepSeek Harness Reference Flow
-
-The researched DeepSeek Harness path is:
-
-~~~text
-derive messages from append-only session events
-  -> LlmRuntime.stream(...)
-  -> DeepSeekAdapter sends one streaming SSE request with native tools
-  -> translate reasoning_content, content, and tool-call deltas into indexed chunks
-  -> append assistant/chunk for replay fidelity
-  -> feed the same chunks to the shared BlockAssembler
-  -> append the completed assistant/message
-  -> append and execute complete tool calls, then append tool results
-  -> derive the next request from session events
-  -> serialize reasoning_content only for prior assistant tool-call turns
-     (including an empty field when the provider requires its presence)
-~~~
-
-The direct DeepSeek adapter is streaming-only and requests usage in the stream.
-It ignores the initial empty **reasoning_content** delta rather than creating an
-empty reasoning block, emits usage before the terminal finish event, and emits
-nothing after finish. The shared LLM seam keeps reasoning, visible text, tool
-calls, and tool results as distinct content-block types. This is the reference
-for Kazusa's transport ownership; Kazusa keeps its own JSON semantic protocol
-and smaller Phase-1 execution policy.
-
-## JSON-Only Model Protocol
-
-### Serialization Rule
-
-Every non-empty resolver-authored textual model message uses UTF-8 JSON with:
-
-- exactly one object at the root;
-- a required **schema_version**;
-- a required **message_type** for internal protocol messages;
-- no leading or trailing prose;
-- no XML or pseudo-XML framing;
-- no executable values;
-- bounded strings and arrays; and
-- stable field ordering for cache-friendly prompt prefixes.
-
-Human-readable instructions remain strings or string arrays inside JSON.
-Loaded Markdown skill content remains a JSON string value.
-
-Assistant responses carry their action in native JSON tool-call arguments.
-Assistant textual content is accepted only when empty or when it parses as one
-JSON object; it never supplies control semantics.
-
-### System Policy
-
-~~~json
-{
-  "schema_version": "agentic_resolver_system.v1",
-  "message_type": "system_policy",
-  "role": "Resolve the supplied task by selecting registered tools and returning a typed result.",
-  "decision_process": [
-    "Inspect the task and current observations.",
-    "Load a matching skill before following its instructions.",
-    "Use a tool only when it advances the task.",
-    "Use run_subagent for a focused independent branch.",
-    "Use submit_result when the task is resolved or a terminal limitation is known."
-  ],
-  "protocol": {
-    "response_transport": "native_tool_call",
-    "tool_calls_per_step": 1,
-    "terminal_tool": "submit_result"
-  }
-}
-~~~
-
-### Skill Catalog
-
-~~~json
-{
-  "schema_version": "agentic_resolver_skill_catalog.v1",
-  "message_type": "skill_catalog",
-  "catalog_digest": "sha256-digest",
-  "skills": [
-    {
-      "name": "example-skill",
-      "description": "Instructions for an example task family."
-    }
-  ],
-  "selection": {
-    "tool": "skill",
-    "instruction": "Load every clearly applicable skill before taking task actions."
-  }
-}
-~~~
-
-### Tool Observation
-
-~~~json
-{
-  "schema_version": "agentic_resolver_tool_observation.v1",
-  "message_type": "tool_observation",
-  "tool_call_id": "provider-call-id",
-  "observation_id": "observation-id",
-  "tool_name": "local_context",
-  "status": "success",
-  "output": {
-    "summary": "Bounded tool output.",
-    "evidence_refs": [
-      "local-reference"
-    ],
-    "limitations": []
-  },
-  "error": null
-}
-~~~
-
-### Contract Error
-
-~~~json
-{
-  "schema_version": "agentic_resolver_contract_error.v1",
-  "message_type": "contract_error",
-  "code": "multiple_tool_calls",
-  "message": "Return exactly one registered native tool call.",
-  "remaining_replacements": 1
-}
-~~~
-
-### Compacted Observation
-
-~~~json
-{
-  "schema_version": "agentic_resolver_compacted_observation.v1",
-  "message_type": "compacted_observation",
-  "observation_id": "observation-id",
-  "tool_name": "public_research",
-  "status": "success",
-  "summary": "Previously returned bounded summary.",
-  "evidence_refs": [
-    "public-reference"
-  ]
-}
-~~~
-
-## Session Model
-
-Phase 1 uses an append-only in-memory event log. Model history is derived from
-that log before every request.
-
-Minimum event families are:
-
-- session started;
-- JSON policy appended;
-- JSON skill catalog appended;
-- task appended;
-- model step started;
-- normalized model stream chunk appended;
-- assistant turn assembled with reasoning, content, tool calls, usage, and
-  finish reason;
-- assistant tool call accepted;
-- tool execution started;
-- tool result appended;
-- child started;
-- child completed;
-- context compaction applied;
-- contract error appended; and
-- session terminalized.
-
-The event log retains full bounded tool results and bounded opaque reasoning
-blocks for private process-local replay. Compaction changes only the derived
-model view. Every accepted tool call keeps one paired result or one paired
-sanitized failure, and every retained assistant tool-call turn keeps the exact
-reasoning state required by its provider replay contract.
-
-Database persistence, reload, resume, fork, and accepted-task checkpoint
-materialization are Phase 2 concerns.
-
-## Tool Registry
-
-### Tool Definition
-
-Each registered tool supplies:
-
-- unique name;
-- short semantic description;
-- object-rooted JSON input schema;
-- argument validator;
-- async executor;
-- permission predicate;
-- result projector;
-- result-size bound; and
-- side-effect classification.
-
-Registration is deterministic. Reserved core names are:
-
-- **skill**
-- **run_subagent**
-- **submit_result**
-
-The registry rejects duplicate names, invalid schemas, and attempts to shadow
-reserved tools. It freezes before the first model request. The model receives
-only tools present in the frozen view.
-
-### Phase-1 Kazusa Capability Set
-
-The optional Kazusa integration registers exactly the four current specialist
-boundaries:
-
-| Tool name | Existing implementation | Semantic ownership |
-|---|---|---|
-| local_context | task-resolution local-context specialist | Private/local RAG evidence |
-| public_research | task-resolution public-research specialist | Public research; existing complex resolver and WebAgent3 remain underneath |
-| coding | task-resolution coding specialist | Existing coding-run lifecycle and approval boundary |
-| text_computation | task-resolution text/computation specialist | Bounded transformation and computation |
-
-Adapters construct the current validated specialist request and pass the
-trusted current execution context captured when the registry is built. They
-return the existing specialist result as a bounded JSON observation.
-
-Existing specialist source files remain unchanged. Their current validation,
-graph execution, permission behavior, approval behavior, and failure outputs
-remain authoritative.
-
-The four semantic tools keep the roster compact for the local model while
-covering current local RAG, web research, coding, and computation families.
-Additional interfaces can join a later registry revision without changing the
-agent loop.
-
-## Skill Architecture
-
-### Discovery
-
-The caller supplies one or more explicit filesystem roots when constructing
-the runtime. The repository convention for project-local external skills is
-**resolver_skills/**.
-
-Phase 1 accepts one-level directory bundles:
-
-~~~text
-resolver_skills/
-  example-skill/
-    SKILL.md
-~~~
-
-Each skill requires YAML frontmatter with:
-
-- **name**, matching its directory name;
-- **description**, a bounded routing summary.
-
-Names use lowercase kebab-case. Discovery is non-recursive below each skill
-bundle. Duplicate names, malformed frontmatter, name mismatches, unreadable
-files, configured bound violations, and a resolved SKILL.md path outside its
-explicit configured root fail runtime construction. YAML is parsed with a
-safe loader, and skill discovery never executes tags or constructors.
-
-### Catalog
-
-At startup the runtime:
-
-1. scans every configured root;
-2. validates candidates;
-3. sorts summaries by name;
-4. computes a digest over canonical name/description pairs;
-5. creates one immutable SkillCatalog; and
-6. injects the JSON catalog into each new root or child session.
-
-Phase 1 fixes the catalog for the lifetime of the runtime. A new runtime
-construction observes filesystem changes.
-
-### Lazy Loading
-
-Only name and description enter the startup catalog. The core **skill** tool
-loads the complete body when selected:
-
-~~~json
-{
-  "schema_version": "agentic_resolver_skill_content.v1",
-  "message_type": "skill_content",
-  "name": "example-skill",
-  "description": "Instructions for an example task family.",
-  "catalog_digest": "sha256-digest",
-  "content_format": "markdown",
-  "content": "Complete SKILL.md instruction body."
-}
-~~~
-
-Loaded skill instructions influence semantic reasoning only. They cannot add
-tools, grant permissions, change deterministic limits, create persistence,
-or authorize external effects.
-
-## First-Class Subagents
-
-### Semantic Purpose
-
-The **run_subagent** tool creates an independent reasoning branch for a
-focused task. It supports divergence by giving each child a fresh transcript
-and explicit self-contained task. It supports convergence by returning only a
-typed bounded result to the parent transcript.
-
-### Tool Arguments
-
-~~~json
-{
-  "description": "Verify public sources",
-  "objective": "Independently identify the strongest public evidence for the claim.",
-  "context": {
-    "facts": [
-      "The parent needs an independent evidence branch."
-    ],
-    "constraints": [
-      "Report uncertainty and source limitations."
-    ],
-    "desired_output": "A source-grounded evidence summary."
-  }
-}
-~~~
-
-The controller generates child identity and lineage. The model does not choose
-child permissions, tools, model routes, context caps, timeouts, or delegation
-depth.
-
-### Same-Runtime Invariant
-
-A child is constructed through the same AgenticResolverRuntime and AgentLoop
-implementation as the parent. It receives:
-
-- the same AgenticModelClient;
-- the same thinking-enabled streaming contract and provider replay policy;
-- the same ordinary frozen tools;
-- the same SkillCatalog and JSON catalog;
-- the same JSON policy and terminal contract;
-- the same trusted permission scope;
-- a fresh ResolverSession;
-- a fresh per-session context budget; and
-- a child capability view in which **run_subagent** is absent.
-
-There is no separate child prompt family, planner, summarizer, or resolver
-implementation.
-
-### Isolation
-
-The child receives the explicit **objective** and **context** supplied in the
-tool call. It receives no automatic copy of the parent transcript or sibling
-results. The parent can place selected prompt-safe facts into the child
-context when they are genuinely required.
-
-This keeps independent branches independent and prevents the child from
-consuming the parent conversation budget.
-
-### Result Projection
-
-The child result returned to the parent is:
-
-~~~json
-{
-  "schema_version": "agentic_resolver_subagent_result.v1",
-  "message_type": "subagent_result",
-  "subagent_id": "generated-child-id",
-  "observation_id": "root-session:observation:2",
-  "description": "Verify public sources",
-  "status": "resolved",
-  "summary": "Bounded independent result.",
-  "evidence": [
-    {
-      "summary": "Bounded child evidence.",
-      "provenance_refs": [
-        "public-reference"
-      ],
-      "limitations": []
-    }
-  ],
-  "remaining_needs": []
-}
-~~~
-
-The top-level `observation_id` is allocated by the parent session after the
-child returns and is the only observation handle that the parent may cite in
-terminal `submit_result` evidence. Nested child evidence is provenance context
-with `summary`, `provenance_refs`, and `limitations` only; child-session
-observation IDs remain private and are omitted from this message.
-An observation handle may appear only in
-`submit_result.evidence[].observation_id`. Model-authored terminal summary,
-evidence summary or limitations, completed-task, and remaining-need text must
-not repeat a current-session observation ID. The terminal validator rejects a
-misplaced handle with bounded contract feedback for model regeneration and
-preserves the semantic text unchanged; provenance references remain a separate
-validated channel.
-
-The parent does not receive the child's intermediate transcript. It may invoke
-multiple children across separate model steps and then use **submit_result** to
-converge their results.
-
-### Phase-1 Execution Policy
-
-- Child runs are foreground and awaited.
-- One **run_subagent** call creates one child.
-- A root session may create at most three children.
-- Child depth is exactly one because its registry omits **run_subagent**.
-- The child runs within the root session's remaining wall-clock deadline.
-- Each child has its own 50,000-token project context ceiling.
-- The parent receives at most 8,000 characters of validated child result.
-- A child failure becomes a typed tool observation so the parent can continue
-  or terminalize honestly.
-
-Background children, simultaneous tool calls, follow-up messaging,
-interruption, child listing, and durable child continuation are future
-extensions.
-
-## Context And Execution Budgets
-
-### Context Ceiling
-
-The project context ceiling is 50,000 estimated tokens per resolver session.
-The runtime reserves 8,000 tokens for model completion, leaving a hard
-42,000-token model-input ceiling.
-
-The effective ceiling is:
-
-~~~text
-minimum(
-  project context ceiling,
-  caller-declared model context window
-)
-~~~
-
-A model route without a declared context window still receives the project
-ceiling.
-
-The token meter counts canonical serialized forms of:
-
-- JSON system policy;
-- native tool schemas;
-- JSON skill catalog;
-- JSON task;
-- loaded skill content;
-- assistant reasoning selected for provider replay and assistant text;
-- assistant tool calls;
-- JSON tool observations;
-- JSON subagent results;
-- JSON contract errors; and
-- reserved completion capacity.
-
-The deterministic fallback estimate is ceiling(serialized UTF-8 character
-count divided by four), including provider replay fields. Provider-reported
-usage is recorded after calls but does not retroactively authorize an over-cap
-request. Reported reasoning tokens are informational output detail and are not
-added a second time when already included in output tokens.
-
-### Fixed Phase-1 Limits
-
-| Limit | Default | Hard maximum |
-|---|---:|---:|
-| Context window per session | 50,000 tokens | 50,000 tokens |
-| Reserved completion | 8,000 tokens | 8,000 tokens |
-| Model steps per session | 8 | 16 |
-| Non-terminal tool calls per session | 6 | 12 |
-| Contract-error replacements | 2 | 2 |
-| Root subagent runs | 3 | 3 |
-| Tool observation supplied to model | 8,000 characters | 8,000 characters |
-| Child result supplied to parent | 8,000 characters | 8,000 characters |
-| Skill catalog entries | 64 | 64 |
-| Skill description | 500 characters | 500 characters |
-| Loaded skill body | 16,000 characters | 16,000 characters |
-| Session wall clock | 300 seconds | 600 seconds |
-| Individual ordinary tool call | 180 seconds | 180 seconds |
-
-The caller may lower configurable defaults within these hard maxima. The model
-never receives authority to increase a limit.
-
-### Compaction
-
-Before each model call the runtime measures the complete request. When it
-would exceed the input ceiling, the runtime replaces oldest model-visible tool
-observations with their compact JSON projections while preserving:
-
-- the task;
-- system policy;
-- current skill catalog;
-- loaded applicable skills;
-- recent assistant reasoning/tool-call/result pairing;
-- observation identity;
-- evidence references;
-- recent uncompressed observations; and
-- every unresolved need.
-
-For a completed older step, compaction either retains the assistant reasoning,
-tool call, and result together or removes that complete exchange from the
-derived provider history and replaces it with one compacted JSON observation.
-It never leaves a retained assistant tool call without provider-required
-reasoning passback. The append-only session events retain the original bounded
-observations and private reasoning blocks. If the request still cannot fit,
-the controller returns **budget_exhausted** without sending an over-cap model
-request.
-
-## Permission And Semantic Ownership
-
-The LLM owns:
-
-- interpretation of the supplied task;
-- selection of the next semantic capability;
-- formulation of bounded semantic tool arguments;
-- deciding when an independent child branch is useful;
-- evaluating whether gathered information is sufficient; and
-- the semantic fields of the terminal result.
-
-Deterministic code owns:
-
-- tool registration and visibility;
-- schema validation;
-- permissions and trusted execution scope;
-- call, child, time, size, and context limits;
-- child recursion prevention;
-- observation identifiers and lineage;
-- exception sanitization;
-- evidence-reference existence checks;
-- context compaction;
-- terminal contract validation; and
-- final hard-cap disposition.
-
-The controller does not keyword-route the user's objective, rewrite model
-intent into another channel, infer permissions from prose, or turn skill
-instructions into authority.
-
-## Failure Behavior
-
-| Failure | Resolver behavior |
-|---|---|
-| Malformed skill catalog | Runtime construction fails before a model call. |
-| Duplicate or reserved tool name | Registry construction fails before a model call. |
-| Resolver route has thinking disabled or unsupported | Runtime construction fails before the first model call. |
-| Stream is malformed, closes without a terminal finish, or violates block identity | Return a typed provider failure; execute no partial tool call. |
-| Stream reaches max tokens with an incomplete tool call | Drop the incomplete call and return budget_exhausted. |
-| Provider returns invalid native calls | Append bounded JSON contract error and consume one replacement. |
-| Tool arguments fail validation | Append bounded JSON tool error; the tool remains unexecuted. |
-| Tool raises | Append sanitized bounded JSON tool error without stack trace or secrets. |
-| Child reaches a terminal limitation | Return typed child result to the parent. |
-| Child infrastructure fails | Return a typed failed child observation to the parent. |
-| Context cannot fit after compaction | Return budget_exhausted before the provider call. |
-| Model step, tool, child, or wall-clock cap is reached | Return the matching bounded terminal disposition. |
-| submit_result is structurally invalid | Append JSON contract error within the fixed replacement cap. |
-
-Native tool arguments are provider-decoded JSON objects and receive strict
-contract validation. Textual assistant content is not parsed into control
-decisions.
-
-## LLM Interface Extension
-
-The existing **LLInterface.ainvoke** and **LLInterface.invoke** contracts
-remain unchanged. Phase 1 adds a separate async native-tool stream and
-provider-neutral history/chunk contracts:
-
-~~~python
-async def astream_tools(
-    messages: Sequence[LLMToolHistoryMessage],
-    *,
-    tools: Sequence[LLMToolDefinition],
-    config: LLMCallConfig,
-) -> AsyncIterator[LLMStreamChunk]:
-    ...
-~~~
-
-**LLMToolHistoryMessage** is role-discriminated and provider-neutral. An
-assistant history row may contain opaque **reasoning**, JSON/empty **content**,
-and native tool calls; a tool row carries the matching call ID and JSON result.
-Only provider adapters translate reasoning into fields such as
-**reasoning_content**.
-
-The provider adapter binds the supplied schemas through the OpenAI-compatible
-native tools transport and consumes the underlying model's async stream. It
-normalizes reasoning deltas, text deltas, indexed tool-call argument fragments,
-usage, and finish state without interpreting resolver semantics. Native tool
-streaming omits JSON-object **response_format** because tool-call arguments are
-the structured action transport.
-
-The resolver integration accepts only
-**LLMCallConfig.thinking.enabled = true** with an enabled supported thinking
-strategy. Existing ordinary LLInterface callers retain their selected thinking
-behavior. Existing normalized non-stream responses continue stripping visible
-thought spans from caller-facing content.
-
-For a provider that requires reasoning replay during tool use, the provider
-adapter serializes the reasoning block from each qualifying assistant
-tool-call turn through the native reasoning field. It omits tool-call-free
-reasoning when the provider ignores it. It never copies a reasoning block into
-ordinary message content. Qwen/Gemma prompt controls remain adapter-private
-transformations on copied provider messages rather than resolver-authored
-session content.
-
-Phase 1 adds no assembled **ainvoke_tools** shortcut. The resolver consumes
-**astream_tools** directly so streamed reasoning, indexed tool calls,
-cancellation, usage, and terminal state remain observable to its loop.
-
-Tool-bound provider sessions use a cache identity that includes the canonical
-tool-schema digest. Existing non-tool model-session caching, JSON-object
-output, JSON-Schema fallback, thinking controls, unload recovery, and response
-normalization retain their current behavior. Stream unload recovery retries
-only when the confirmed unload occurs before the first emitted chunk; once any
-chunk has been yielded, retry is forbidden because it would duplicate or
-corrupt the assembled assistant turn.
-
-## Observability
-
-Phase 1 exposes process-local diagnostics through the public result and an
-optional caller-supplied event observer. Diagnostics include:
-
-- session and child IDs;
-- parent-child lineage;
-- tool schema and skill catalog digests;
-- model step count;
-- stream chunk counts by normalized type and first/terminal chunk elapsed time;
-- reasoning character count and provider reasoning-token usage without thought
-  text;
-- accepted and rejected tool-call counts;
-- tool duration and outcome class;
-- subagent duration and terminal status;
-- estimated request tokens and peak;
-- compaction count;
-- provider usage when available; and
-- final disposition.
-
-Diagnostics exclude prompts, skill bodies, raw tool payloads, credentials,
-absolute private paths, protected trace content, and raw exceptions from
-ordinary public results.
-
-Database event logging and protected LLM trace integration remain part of the
-later workflow-integration plan.
-
-## DeepSeek Harness Influence
-
-The architecture adopts five concrete DeepSeek Harness ideas:
-
-1. One model step plus its tool calls is the loop unit, and model history is
-   derived from an append-only session log. See the
-   [DeepSeek Harness architecture](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/architecture.md)
-   and
-   [agent-loop implementation](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/core/agent-loop/src/agent.ts).
-2. Every adapter exposes a chunk stream, reasoning is a content block distinct
-   from visible text, the loop logs chunks, and one shared assembler produces
-   the assistant turn. See the
-   [DeepSeek LLM streaming contract](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/subsystems/llm-streaming.md)
-   and
-   [DeepSeek provider adapter](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/llm/llm-deepseek/README.md).
-3. Tool schemas, guarded execution, and results are separate from the loop.
-   See the
-   [DeepSeek tool runtime](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/core/tools/README.md).
-4. Skill providers publish a lightweight catalog and one **skill** tool loads
-   the full body on demand. See the
-   [DeepSeek skill subsystem](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/subsystems/skills.md)
-   and
-   [skill-tool implementation](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/skill/tool-skill/src/index.ts).
-5. Subagent delegation is a tool-backed capability that starts a child with a
-   self-contained task and a bounded result. See the
-   [DeepSeek subagent subsystem](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/subsystems/subagent.md)
-   and
-   [subagent tool](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/subagent/tool-subagent/src/index.ts).
-
-DeepSeek's official thinking-mode API requires complete
-**reasoning_content** passback for assistant turns that performed tool calls;
-the adapter preserves required empty-field presence, while tool-call-free
-reasoning may be dropped because the API ignores it. See the
-[DeepSeek thinking-mode tool contract](https://api-docs.deepseek.com/guides/thinking_mode/)
-and the Harness
-[DeepSeek request serializer](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/llm/llm-deepseek/src/serialize.ts).
-DeepSeek Harness represents reasoning separately from text, streams only,
-serializes tool-call-turn reasoning back to the native wire field, and drops
-tool-call-free reasoning to save replay tokens.
-
-Kazusa intentionally uses JSON catalog and instruction envelopes in place of
-DeepSeek's model-facing XML-style catalog frame. Phase 1 also uses one
-in-process same-runtime provider, one foreground child operation, a fixed
-depth of one, and no plugin microkernel. Kazusa retains reasoning only as
-opaque provider replay state; it never promotes thought text into its semantic
-JSON protocol.
-
-## Architectural Invariants
-
-1. Current workflow packages have no dependency on **agentic_resolver** during
-   Phase 1.
-2. The core resolver package has no import dependency on cognition, adapters,
-   delivery, accepted tasks, background work, or database persistence.
-3. Optional integration modules own every downward Kazusa import.
-4. Existing tool implementations remain unchanged during Phase 1.
-5. Every non-empty resolver-authored semantic textual payload parses as one
-   JSON object.
-6. Every model action is a native tool call.
-7. **submit_result** is the only model-selected successful terminal path.
-8. Every model request stays within the effective context ceiling.
-9. Each child uses the same runtime implementation and a fresh session.
-10. A child registry excludes **run_subagent**.
-11. Child permissions equal or narrow the parent's trusted permissions.
-12. The parent receives bounded child results rather than child transcripts.
-13. Evidence remains evidence; later cognition owns character stance and
-    dialog owns visible character wording.
-14. The future big-bang transition requires a separate approved plan.
-15. The standalone resolver route and every child require supported provider
-    thinking to be enabled.
-16. Every resolver model step uses the streaming native-tool interface.
-17. Opaque reasoning remains attached to its assistant turn, is replayed only
-    through the provider adapter, and never becomes a semantic JSON field.
-18. A retained assistant tool-call turn keeps its provider-required reasoning;
-    compaction atomically removes or retains the complete
-    reasoning/call/result exchange.
+
+The runtime validates this envelope before it returns to the model. Tool
+results are evidence, not persona, stance, or final wording.
+
+## Native agent loop
+
+The conceptual loop is:
+
+    create or resume durable session
+    build authorized tool catalog
+    assemble bounded model context
+
+    while step budget remains:
+        request one native call from the resolver model
+        validate name, schema, scope, permission, and budget
+
+        if call is submit_resolution:
+            validate terminal result and evidence references
+            persist terminal event
+            return TaskResolutionResult to the brain
+
+        persist tool/call before dispatch
+        execute the leaf tool
+        persist paired tool/result
+        append bounded result context
+
+        if foreground deadline is reached:
+            checkpoint the same session
+            return the existing deferred result to brain-owned promotion
+
+    submit a typed budget-exhausted failure
+
+The model can revise its search based on evidence. For example, a vague memory
+query may lead to conversation_search, then conversation_list around two
+matches, then person_resolve, then memory_read, before submit_resolution.
+
+The loop has explicit caps for model steps, calls per tool, total tool calls,
+wall time, model tokens, evidence bytes, and repeated equivalent calls.
+Repetition protection reports the observed duplicate to the model once and
+terminates after the configured bound.
+
+## DeepSeek Harness evidence and session contract
+
+This design was checked against the real recorded sessions in the supplied
+DeepSeek Harness copy at C:\workspace\deepseek-harness, commit
+b150a551b8d465e31e418e1b2eaf5e79bbb7d28e.
+
+The principal traces are:
+
+- examples/jsonrpc-agent/tests/snapshots/bash-tool/session.jsonl
+- examples/acp-agent/tests/snapshots/skill-load/session.jsonl
+- examples/headless-agent/tests/snapshots/advanced-toolchain/session.jsonl
+
+Observed trace facts:
+
+| Trace | Recorded behavior |
+| --- | --- |
+| bash-tool | deepseek-official/deepseek-v4-flash emits call_00_Ry17evSfTr0uJnHhg3X93070 in the assistant message; the same ID appears in tool/call and tool/result before the second model step |
+| skill-load | The model calls skill with call_skill_load; the runtime returns the selected full skill body under that ID; the next model step continues after loading |
+| advanced-toolchain | Successive steps select different tools from the request-header catalog, demonstrating that the catalog does not predetermine one fixed branch |
+
+Commit-pinned upstream copies:
+
+- https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/examples/jsonrpc-agent/tests/snapshots/bash-tool/session.jsonl
+- https://github.com/deepseek-ai/deepseek-harness/blob/b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/examples/acp-agent/tests/snapshots/skill-load/session.jsonl
+
+The bash-tool trace records this order:
+
+1. request/header containing the available tool contract;
+2. streamed assistant reasoning and tool-call chunks;
+3. an assembled assistant/message;
+4. a durable tool/call with exact call ID, tool name, and raw arguments;
+5. a tool/result paired by the same call ID;
+6. step/end;
+7. a later model step that produces the final response;
+8. turn/end.
+
+The skill-load trace uses the same native call/result sequence. The model calls
+skill with a name, the runtime returns the complete skill body, and the next
+step continues with the loaded instructions.
+
+The architecture adopts those mechanics, with Kazusa-specific strengthening:
+
+- the authorized tool catalog and its digest are captured at session start;
+- a call is persisted before dispatch;
+- every result is correlated by exact call ID;
+- terminal output is a submit_resolution call rather than free-form prose;
+- foreground/background control stays outside the loop;
+- permissions and target scopes are code-bound;
+- crash state distinguishes a call that was not started from a call whose
+  outcome is unknown.
+
+### Durable session events
+
+The session store is append-only at the event boundary. It records:
+
+- session/created;
+- request/header with objective, trusted scope, model, limits, catalog digest,
+  and skill-catalog digest;
+- assistant/reasoning_chunk where protected diagnostics permit it;
+- assistant/tool_call_chunk;
+- assistant/message;
+- tool/call;
+- tool/result;
+- step/end;
+- session/checkpoint;
+- session/promoted;
+- session/resumed;
+- resolution/submitted;
+- session/failed;
+- session/ended.
+
+Reasoning is diagnostic data with restricted retention. It is not evidence,
+does not enter TaskResolutionResult, and is not replayed as a trusted
+instruction.
+
+The database facade owns an agentic session header plus append-only events.
+The existing task checkpoint stores the agentic session identifier and latest
+committed revision. Existing accepted-task and background records retain their
+scheduling ownership.
+
+### Crash and uncertainty states
+
+Recovery classifies a dispatched call as one of:
+
+- tool_not_started;
+- tool_outcome_unknown;
+- tool_failed;
+- tool_succeeded.
+
+Read-only or manifest-declared idempotent calls may be retried under their
+retry policy. A side-effecting call with an unknown outcome is never retried
+blindly. The runtime uses outcome_verification, returns approval_required or
+needs_user_input when verification cannot settle it, and preserves the
+uncertain event for audit.
+
+## Foreground and background execution
+
+The current calling mechanism is preserved.
+
+### Priority now
+
+1. The action selector emits task_resolution_request with priority now.
+2. The task-resolution service starts or resumes an agentic session.
+3. The loop runs under the brain-owned inline deadline.
+4. A completed session returns the existing resolution result.
+5. If the deadline expires, the same durable session is checkpointed.
+6. Existing deterministic promotion logic promotes that session and returns
+   the current deferred outcome.
+7. The background worker resumes the same session rather than restarting the
+   search.
+
+### Priority background
+
+1. The action selector emits task_resolution_request with priority background.
+2. The brain-owned service creates the accepted task and initial session
+   checkpoint before any resolution tool executes.
+3. Existing queue and worker mechanics run the agentic session.
+4. Completion returns through the existing resume and delivery path.
+
+The resolver sees an execution budget and checkpoint signal. It does not
+select, override, or reinterpret priority.
+
+## Context policy for a local model
+
+The model receives only the context needed for the current decision:
+
+- the brain-supplied objective and trusted scope;
+- current tool manifests or a stable compact catalog;
+- loaded skill instructions;
+- recent native calls and normalized results;
+- a compact evidence ledger with stable evidence IDs;
+- the remaining deterministic budgets;
+- the latest checkpoint summary.
+
+Large conversation turns, memory bodies, pages, media, and code remain in tool
+storage until explicitly read. Results use bounded pages and references.
+
+Compaction is an atomic runtime operation. It produces:
+
+- an untrusted concise session summary;
+- a structured ledger of established facts and source IDs;
+- unresolved questions;
+- attempted queries and their outcomes;
+- active limits and approvals.
+
+The original events remain durable. The summary cannot grant permissions,
+change trusted scope, invent evidence, or replace required source references.
+
+## Skills
+
+### Immediate phase: curated skill loading
+
+Skills enhance the resolver's procedure without replacing tools.
+
+The skill catalog is curated and versioned. The model calls skill by name when
+the objective matches. The runtime returns the selected immutable skill body,
+records its version, and adds it to the bounded context. A session captures a
+skill-catalog digest so a resumed run uses the same versions unless an
+explicit migration is approved.
+
+A skill may teach:
+
+- a reliable sequence for ambiguous memory recall;
+- source-quality and cross-checking practice;
+- repository-specific coding investigation;
+- Chinese localization conventions;
+- recovery from common tool errors.
+
+A skill cannot:
+
+- grant a permission or broaden trusted scope;
+- introduce an undeclared tool;
+- bypass validation, approval, or budgets;
+- claim facts about the user, character, or world;
+- decide foreground/background priority or visible wording.
+
+### Next phase: experience-derived skill development
+
+Past sessions become candidates for skill improvement through an offline,
+auditable pipeline:
+
+    completed sessions
+        -> candidate mining
+        -> SkillCandidate
+        -> knowledge classification
+        -> static validation
+        -> original-session replay
+        -> held-out replay and regression evaluation
+        -> independent or human approval
+        -> immutable catalog version
+        -> future sessions
+
+SkillCandidate contains:
+
+- the recurring task pattern;
+- proposed procedural instructions;
+- supporting session and event IDs;
+- measured success and failure cases;
+- required tools and permissions;
+- expected benefit and regression risks;
+- proposed evaluation cases.
+
+Before promotion, the pipeline classifies extracted material:
+
+- reusable procedure belongs in a skill candidate;
+- factual knowledge belongs in curated knowledge with provenance;
+- user memory or preference belongs in memory through its owning policy;
+- a promise or active commitment belongs in active recall;
+- secrets, transient tool output, and private reasoning are rejected.
+
+The agent may propose a SkillCandidate. It cannot silently activate one.
+Promotion requires static checks, replay on the originating cases, held-out
+cases, safety and permission regression checks, and the configured independent
+or human approval. Activated versions are immutable and reversible by catalog
+selection.
+
+## Kazusa use cases
+
+### 1. Recall a specific event from conversation
+
+User request:
+
+    Do you remember the night I called the blue comet our marker?
+
+Possible resolver loop:
+
+1. conversation_search with the distinctive phrase and a broad authorized
+   time range;
+2. conversation_list around the strongest matches;
+3. person_resolve if pronouns or group identities are ambiguous;
+4. profile_read only if relationship identity is relevant;
+5. submit_resolution with the event, uncertainty, and cited turn IDs.
+
+The model decides whether more digging is useful. Conversation retrieval
+returns evidence; cognition decides how Kazusa emotionally interprets and
+speaks about it.
+
+### 2. Recall a durable preference
+
+User request:
+
+    Which local model did I say I preferred for casual conversation, and why?
+
+Possible loop:
+
+1. memory_search for local-model preference;
+2. memory_read for the selected memory and provenance;
+3. conversation_search against the source period if the reason is incomplete
+   or two memories conflict;
+4. submit_resolution with both the preference and provenance.
+
+### 3. Check an active agreement
+
+User request:
+
+    What did we agree I would finish today?
+
+Possible loop:
+
+1. active_recall for current commitments;
+2. calendar_read for authorized due-time context;
+3. conversation_search if the commitment has conflicting revisions;
+4. submit_resolution with status and source references.
+
+This does not create, edit, or complete the commitment. Those mutations remain
+with the owning brain action and permission path.
+
+### 4. Answer a current technical question
+
+User request:
+
+    What changed in the retail RTX 5090 specification since launch?
+
+Possible loop:
+
+1. web_search restricted toward first-party sources;
+2. web_read the launch and current official specification pages;
+3. calculate if units or deltas need normalization;
+4. submit_resolution with dated sources and discrepancies.
+
+No public_research DAG selects branches behind the call. The resolver makes
+each search/read decision.
+
+### 5. Find who discussed two topics in a group
+
+User request:
+
+    Who in our group talked about RTX 6000 and GLM 5.2, and what did each say?
+
+Possible loop:
+
+1. conversation_search for each topic;
+2. conversation_aggregate over the matched turn IDs;
+3. person_resolve for display identities;
+4. conversation_list around ambiguous statements;
+5. submit_resolution with participant-level evidence.
+
+### 6. Recover from a blocked public source
+
+User request:
+
+    Summarize what that Reddit thread concluded.
+
+Possible loop:
+
+1. web_read the supplied URL;
+2. if blocked, web_search for the same title, authorized mirrors, or primary
+   sources cited by the thread;
+3. read useful alternatives;
+4. submit resolved with explicit source differences, or needs_user_input when
+   the requested content remains unavailable.
+
+The resolver reports the gap rather than manufacturing thread content.
+
+### 7. Investigate a coding task in the background
+
+The brain selects task_resolution_request with priority background for a
+repository investigation.
+
+Possible resolver loop after the existing queue resumes it:
+
+1. load a repository investigation skill;
+2. coding_read the relevant contracts and files;
+3. coding_read diagnostics or allowed tests;
+4. coding_propose a bounded change artifact;
+5. submit_resolution with the proposal, verification, and any required
+   approval.
+
+The brain owns background scheduling and later delivery. A proposal does not
+authorize production modification.
+
+### 8. Apply a curated procedure
+
+User request:
+
+    Localize this architecture note into natural Simplified Chinese.
+
+Possible resolver loop:
+
+1. skill loads the approved Chinese-localization procedure;
+2. transform_text applies the bounded transformation;
+3. submit_resolution returns the artifact and declared terminology choices.
+
+The skill improves technique. transform_text remains the executable
+capability.
+
+## Failure behavior
+
+| Condition | Owner and result |
+| --- | --- |
+| Unknown tool | Runtime rejects call; model receives typed contract error within retry cap |
+| Invalid arguments | Runtime rejects before dispatch; bounded model regeneration |
+| Scope escalation | Runtime rejects; recorded permission failure |
+| Tool timeout | Typed tool_failed result; model may choose another eligible tool |
+| Source unavailable | Model explores alternatives or submits unavailable/needs_user_input |
+| Conflicting evidence | Model reads more sources or submits explicit uncertainty |
+| Repeated equivalent calls | Runtime warns once and terminates at repetition bound |
+| Inline deadline | Runtime checkpoints; brain-owned logic promotes same session |
+| Context limit | Atomic compaction with durable source ledger |
+| Process crash | Replay events; classify pending call outcome before retry |
+| Side-effect outcome unknown | Verify through manifest or request approval/input |
+| Malformed terminal result | Producing model receives bounded regeneration request |
+| Step or cost budget exhausted | Typed failed result with evidence already gathered |
+
+All model-authored contracts pass through the canonical LLM JSON parser where
+the owning stage permits syntax repair. Deterministic repair may normalize
+structure and declared bounds; it does not invent semantic values or override
+model decisions. Invalid terminal semantics follow bounded regeneration and
+then fail closed.
+
+## Cutover and decommission
+
+The implementation must use one canonical contract update across the
+resolution layer.
+
+### Before cutover
+
+1. Approve an implementation plan derived from this architecture.
+2. Inventory every existing resolution-facing interface.
+3. Classify each interface as exposed or excluded.
+4. Define and test all initial tool manifests.
+5. Add durable session/event storage through the database facade.
+6. Implement the native loop behind the existing task-resolution service.
+7. Verify inline, direct-background, promotion, resume, and result projection.
+8. Build replay tests from real Harness-shaped call/result sessions.
+9. Drain active legacy DAG checkpoints; block cutover while any remain.
+
+### Atomic cutover
+
+1. Route task-resolution service execution to the agentic resolver.
+2. Move all required leaf executors to canonical tool manifests.
+3. Remove live task/RAG/complex/web DAG routing.
+4. Remove the four facade adapters and their specialist-selection vocabulary.
+5. Remove legacy graph checkpoint and resume code after the drain gate.
+6. Update callers, tests, ICDs, tracing, and operational runbooks together.
+
+### After cutover
+
+There is one live resolution path. Rollback uses deployment/version rollback
+and compatible durable agentic events; it does not keep a dormant legacy graph
+path in production.
+
+## Acceptance conditions
+
+Architecture implementation is complete only when:
+
+- the action selector and task_resolution_request caller contract is
+  unchanged;
+- foreground/background authority remains with the brain;
+- inline deadline promotion resumes the same agentic session;
+- every eligible resolution-facing interface is exposed or explicitly
+  excluded;
+- no live tool hides a resolver orchestration DAG;
+- the model dynamically chooses successive native tool calls;
+- tool/call is durable before dispatch and tool/result uses the same call ID;
+- terminal output is a validated submit_resolution call;
+- trusted scope and permissions cannot be expanded by model arguments;
+- memory and conversation evidence retains source provenance;
+- RAG evidence is never treated as persona or final stance;
+- cognition and dialog continue to own character judgment and wording;
+- skill loading is native, versioned, and replayable;
+- experience-derived skills require evaluation and approval before activation;
+- the fixed four-facade path and old graph checkpoints are absent after
+  cutover;
+- deterministic replay, crash recovery, permission, deadline, and
+  background-resume tests pass.
+
+## Architectural invariants
+
+1. The brain selects the action; the resolver resolves the objective.
+2. The brain owns foreground/background mode and delivery.
+3. The model chooses tools; deterministic code enforces execution.
+4. All eligible base-level resolution interfaces are tools by default.
+5. Every exclusion is explicit and reviewable.
+6. A tool is a semantic leaf, never a hidden orchestration graph.
+7. Retrieval supplies evidence, not character judgment.
+8. submit_resolution is the only normal semantic terminal.
+9. Every dispatched call has a durable, exactly correlated result or a typed
+   uncertain-outcome state.
+10. Skills teach procedure; they do not grant capability or store personal
+    facts.
+11. Learned skill activation is an offline governed promotion, not an
+    in-session self-modification.
+12. The renewed resolver replaces the conflicting DAG and four-facade design
+    in one resolution-layer cutover.

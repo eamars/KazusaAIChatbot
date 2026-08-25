@@ -409,6 +409,10 @@ def _chat_model_kwargs(
         kwargs["extra_body"] = {
             "chat_template_kwargs": {"enable_thinking": True},
         }
+    if backend.thinking_strategy == "gemma4_disabled":
+        kwargs["extra_body"] = {
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
     if backend.thinking_strategy == "qwen3_enabled":
         qwen_extra_body: dict[str, object] = {
             "chat_template_kwargs": {"enable_thinking": True},
