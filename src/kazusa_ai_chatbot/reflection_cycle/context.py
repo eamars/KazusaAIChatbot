@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TypedDict
 
 from kazusa_ai_chatbot.memory_evolution import (
@@ -52,7 +53,7 @@ async def build_promoted_reflection_context(
 
 
 async def _project_lane(*, memory_type: str, limit: int) -> list[dict]:
-    """Project one reflection-promoted memory lane for prompt use."""
+    """Project one certified reflection-promoted memory lane for prompt use."""
 
     rows = await find_active_memory_units(
         query={
@@ -64,10 +65,41 @@ async def _project_lane(*, memory_type: str, limit: int) -> list[dict]:
     )
     projected: list[dict] = []
     for _, document in rows:
+        if not isinstance(document, Mapping):
+            continue
+        required_fields = {
+            "memory_name",
+            "content",
+            "memory_unit_id",
+            "memory_type",
+            "source_kind",
+            "source_global_user_id",
+            "authority",
+            "status",
+            "privacy_review",
+        }
+        if not required_fields.issubset(document):
+            continue
+        if (
+            document["memory_type"] != memory_type
+            or document["source_kind"] != MemorySourceKind.REFLECTION_INFERRED
+            or document["source_global_user_id"] != ""
+            or document["authority"] != "reflection_promoted"
+            or document["status"] != "active"
+            or not isinstance(document["privacy_review"], Mapping)
+        ):
+            continue
         projected.append({
             "memory_name": str(document["memory_name"]),
             "content": str(document["content"]),
             "memory_type": str(document["memory_type"]),
+            "memory_unit_id": str(document["memory_unit_id"]),
+            "source_kind": str(document["source_kind"]),
+            "source_global_user_id": "",
+            "authority": str(document["authority"]),
+            "status": str(document["status"]),
+            "scope_type": "global",
+            "privacy_review": dict(document["privacy_review"]),
             "updated_at": str(document.get("updated_at", "")),
             "confidence_note": str(document.get("confidence_note", "")),
         })

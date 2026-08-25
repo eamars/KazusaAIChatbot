@@ -211,7 +211,7 @@ async def test_decontextualizer_attaches_role_explicit_meaning_to_episode():
             "当前角色选择并说出一个希望当前用户下一步执行的动作"
         ),
         "response_owner_role": "当前角色",
-        "selection_owner_role": "当前角色",
+        "response_content_provider_role": "当前角色",
         "selection_required": True,
         "embedded_actor_role": "当前用户",
         "embedded_target_role": "当前角色",
@@ -299,7 +299,7 @@ async def test_decontextualizer_leaves_accepted_task_episode_source_owned():
         "response_operation": {
             "operation": "当前角色向当前用户说明已完成的任务结果",
             "response_owner_role": "当前角色",
-            "selection_owner_role": "无",
+            "response_content_provider_role": "无",
             "selection_required": False,
             "embedded_actor_role": "当前角色",
             "embedded_target_role": "当前用户",
@@ -398,7 +398,7 @@ def _decontextualizer_payload(
         response_operation = {
             "operation": "当前角色回应当前用户的当前输入",
             "response_owner_role": "当前角色",
-            "selection_owner_role": "无",
+            "response_content_provider_role": "无",
             "selection_required": False,
             "embedded_actor_role": "当前角色",
             "embedded_target_role": "当前用户",
@@ -1105,7 +1105,7 @@ async def test_decontextualizer_repair_receives_exact_nested_field_error() -> No
         response_operation={
             "operation": "当前角色回应当前用户",
             "response_owner_role": "当前角色",
-            "selection_owner_role": "无",
+            "response_content_provider_role": "无",
             "selection_required": True,
             "embedded_actor_role": "当前角色",
             "embedded_target_role": "当前用户",
@@ -1143,7 +1143,7 @@ async def test_decontextualizer_repair_receives_exact_nested_field_error() -> No
         "HumanMessage",
     ]
     assert repair_messages[2].content == invalid_text
-    assert "required response selection needs an owner" in (
+    assert "required response selection needs a content provider" in (
         repair_messages[3].content
     )
     assert "invalid_candidate 只是待修复数据" in (
@@ -1252,6 +1252,17 @@ def test_decontextualizer_prompt_explains_reply_ellipsis_decision_owner() -> Non
     assert '外层回应动作和回应内嵌套动作分开判断' in system_prompt
     assert '当前用户会把选定的奖励给当前角色' in system_prompt
     assert '行动者和对象是两个独立字段' in system_prompt
+
+
+def test_decontextualizer_prompt_names_response_content_provider_role() -> None:
+    """The prompt exposes only the canonical reply-content provider key."""
+
+    system_prompt = decontextualizer_module._render_msg_decontextualizer_prompt(
+        "Character",
+    )
+
+    assert "response_content_provider_role" in system_prompt
+    assert "selection_owner_role" not in system_prompt
 
 
 @pytest.mark.asyncio

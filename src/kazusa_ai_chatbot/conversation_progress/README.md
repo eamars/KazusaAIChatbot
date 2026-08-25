@@ -123,6 +123,18 @@ uses `t1`, `current_input`, and `current_response`. It returns
 - separately listed new events with concrete non-empty actor, action, and
   object identity.
 
+### Proposal and user-owned authority
+
+The scene observer keeps `user_goal` and `current_blocker` grounded in current
+user evidence. A character-authored proposal, offer, demand, bargain,
+condition, or relational payoff that has not received a current-user response
+may remain factual scene or history continuity, but it is not user acceptance,
+obligation, intent, a blocker, or a decision-critical constraint. Continuing
+the underlying task or topic does not accept or reopen that proposal. The event
+reconciler may assign `decision` relevance only when the current user responds
+to, accepts, rejects, references, asks about, materially changes, or explicitly
+reopens the proposal; otherwise it remains `scene` or `history` evidence.
+
 Every active prior event is mandatory event-recognizer input, including
 background-retention rows. Payload fitting may remove older source-turn text,
 while the current accepted turn and complete prior ledger remain intact. If

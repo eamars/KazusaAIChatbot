@@ -117,7 +117,7 @@ def _decontextualizer_payload(
             "response_operation": {
                 "operation": "当前角色回应当前用户的当前输入",
                 "response_owner_role": "当前角色",
-                "selection_owner_role": "无",
+                "response_content_provider_role": "无",
                 "selection_required": False,
                 "embedded_actor_role": "当前角色",
                 "embedded_target_role": "当前用户",

@@ -28,7 +28,10 @@ from kazusa_ai_chatbot.cognition_core_v3.facade import (
     snapshot_protected_chain_records,
 )
 from kazusa_ai_chatbot.cognition_core_v3.prompt import (
+    BACKGROUND_CONTEXT_GOAL_AUTHORITY_GUIDANCE,
+    CURRENT_OBSERVATION_AUTHORITY_GUIDANCE,
     _project_capabilities,
+    build_canonical_appraisal_question,
     build_canonical_turn_workspace,
     build_turn_workspace_stage_contracts,
 )
@@ -191,6 +194,54 @@ def test_cognition_chain_system_prompts_use_native_chinese() -> None:
     assert "自由填写的语义文本必须使用简体中文" in (
         facade_module._EXACT_JSON_SYSTEM_SUFFIX.replace("\n", "")
     )
+
+
+def test_a1_system_prompt_and_packet_share_current_authority_contract() -> None:
+    """A1 system and packet guidance consume one shared authority contract."""
+
+    payload = _input()
+    workspace = build_canonical_turn_workspace(
+        episode=payload["episode"],
+        scene_context=payload["scene_context"],
+        evidence=payload["evidence"],
+        mutable_state=payload["mutable_state"],
+        character_constraints=payload["character_constraints"],
+        identity_context=payload["character_identity_context"],
+        available_actions=payload["available_actions"],
+        available_resolvers=payload["available_resolver_capabilities"],
+        overused_moves=payload["overused_moves"],
+    )
+    packet = build_canonical_appraisal_question(
+        workspace=workspace,
+        stage_name="A1",
+    )
+    authority_contract = CURRENT_OBSERVATION_AUTHORITY_GUIDANCE.strip()
+
+    assert authority_contract in facade_module._STAGE_SYSTEM_PROMPTS["A1"]
+    assert authority_contract in packet["guidance"]
+    assert facade_module._STAGE_SYSTEM_PROMPTS["A1"].count(
+        authority_contract
+    ) == 1
+    assert packet["guidance"].count(authority_contract) == 1
+
+
+def test_all_stage_system_prompts_share_request_agency_authority_contract() -> None:
+    """Every cognition system prompt consumes one current-observation contract."""
+
+    authority_contract = CURRENT_OBSERVATION_AUTHORITY_GUIDANCE.strip()
+    for stage in ("A1", "A2", "G", "P"):
+        assert facade_module._STAGE_SYSTEM_PROMPTS[stage].count(
+            authority_contract
+        ) == 1
+
+
+def test_goal_and_plan_system_prompts_share_background_goal_authority_contract() -> None:
+    """G and P system prompts consume one shared background-goal contract."""
+
+    authority_contract = BACKGROUND_CONTEXT_GOAL_AUTHORITY_GUIDANCE.strip()
+    for stage in ("G", "P"):
+        system_prompt = facade_module._STAGE_SYSTEM_PROMPTS[stage]
+        assert system_prompt.count(authority_contract) == 1
 
 
 def test_canonical_stage_packets_are_handleless_and_disjoint() -> None:

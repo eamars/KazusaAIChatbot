@@ -205,6 +205,12 @@ stages own semantic routing and candidate generation; deterministic stages own
 target eligibility, source class validation, source refs, write-intent
 validation, persistence, and cache invalidation.
 
+Reflection-derived user and group style writes belong to the
+`reflection_cycle.interaction_style` owner and its database boundary.
+Consolidation retains only the `interaction_style_image` routing and validation
+boundary that its current chat/group target roster actually offers; a
+`scheduled_tick` reflection-style signal is not a consolidation write lane.
+
 ```mermaid
 flowchart TD
     A["call_consolidation_subgraph(state)"] --> B["build_consolidation_origin<br/>deterministic metadata"]
@@ -249,8 +255,8 @@ flowchart TD
     SG2 --> SG3["db_writer<br/>existing memory collection<br/>memory_type=defense_rule"]
 
     M --> IS["interaction_style_image lane"]
-    IS --> IS1["source-bound style payload<br/>reflection/user/group style evidence"]
-    IS1 --> IS2["db_writer<br/>persist user or group/channel style image"]
+    IS --> IS1["source-bound style payload<br/>offered chat/group style evidence"]
+    IS1 --> IS2["consolidation validation boundary<br/>reflection_cycle owns reflection-derived user/group writes"]
 
     M --> SM["shared_memory_promotion lane"]
     SM --> SM1["approved reflection / promotion evidence only"]
@@ -265,6 +271,49 @@ flowchart TD
 
     Y --> Z["Cache2 invalidation<br/>derived from actual writes"]
 ```
+
+### Memory-unit candidate contract
+
+The lane router remains the coarse semantic owner. When either user-memory
+lane is accepted, the existing single extractor call receives one deterministic
+`memory_unit_write_contract` in its prompt payload. The contract carries the
+accepted relevant lanes and the exact candidate types admitted by those lanes:
+
+| Accepted lane | Allowed `unit_type` values |
+| --- | --- |
+| `user_memory_units` | `stable_pattern`, `recent_shift`, `objective_fact`, `milestone` |
+| `active_commitment` | `active_commitment` |
+| both | the ordered union of the two rows |
+| neither | no extractor persistence work |
+
+`active_commitment` records future behavior that the active character has
+explicitly accepted for the current user. A character-authored proposal,
+condition, or demand, user silence, and continuation of an adjacent matter do
+not establish that character-owned commitment. The extractor returns no
+candidate when no allowed durable meaning is present.
+
+The structural validator receives the same allowed type set. An off-contract
+type is logged and dropped as a structural error; independent valid candidates
+remain eligible. This boundary keeps semantic interpretation in the extractor,
+preserves the existing one-attempt call budget, and adds no retry, reroute, or
+semantic postfilter.
+
+### Character self-guidance scope certificate
+
+The lane router remains a coarse semantic owner. For
+`character_self_guidance`, the target-removal review removes the source user,
+addressee, relationship target, and private scene. If the accepted behavior is
+not still accurate and appropriate for the character with people generally, it
+remains scoped or is omitted from this lane.
+
+The existing specialist and reviewer calls independently return the candidate
+meaning plus one closed scope certificate. A learned write requires both
+certificates to report `global`, target-specific meaning removed, and no
+identity or boundary effect. The final reviewer must also report low private
+detail risk and removed user details. Missing, malformed, or disagreeing
+certificates fail closed without rerouting, semantic rewriting, or another
+model call. The persisted `privacy_review` is the final review certificate;
+learned writes do not use a static privacy verdict.
 
 ## Public Interface
 

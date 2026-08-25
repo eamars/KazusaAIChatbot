@@ -2,9 +2,19 @@
 
 from __future__ import annotations
 
+from kazusa_ai_chatbot.cognition_shared import surface_stages
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_generator
 from tests.unit.nodes.dialog_fixtures import build_dialog_state
+
+
+def test_dialog_prompt_uses_shared_visible_content_authority_contract() -> None:
+    """Keep dialog rendering attached to the shared visible-content authority."""
+
+    authority = surface_stages.VISIBLE_CONTENT_AUTHORITY_GUIDANCE
+
+    assert authority
+    assert dialog_module._V2_DIALOG_GENERATOR_PROMPT.count(authority) == 1
 
 
 def test_dialog_agent_exposes_owned_contract() -> None:

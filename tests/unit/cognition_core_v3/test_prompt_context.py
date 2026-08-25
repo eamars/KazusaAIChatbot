@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import re
 
+from kazusa_ai_chatbot.cognition_core_v3 import facade as facade_module
+from kazusa_ai_chatbot.cognition_core_v3 import prompt as prompt_module
 from kazusa_ai_chatbot.cognition_core_v3.prompt import (
     A1_QUESTION_GUIDANCE,
     A2_QUESTION_GUIDANCE,
     APPRAISAL_QUESTION_GUIDANCE,
+    BACKGROUND_CONTEXT_GOAL_AUTHORITY_GUIDANCE,
+    CURRENT_OBSERVATION_AUTHORITY_GUIDANCE,
     GOAL_QUESTION_GUIDANCE,
     ORDINARY_PLAN_GUIDANCE,
+    RECIPIENT_APPLICABILITY_GUIDANCE,
     SELF_PLAN_GUIDANCE,
     build_canonical_appraisal_question,
     build_canonical_goal_question,
@@ -81,6 +86,8 @@ def test_cognition_chain_guidance_uses_native_chinese() -> None:
     for guidance in guidance_values:
         _assert_native_chinese_instruction(guidance)
     assert workspace["orientation"]["operation"] == "回应当前观察"
+    assert "response_content_provider" not in workspace["orientation"]
+    assert "selection_owner" not in workspace["orientation"]
     assert packets["P"]["goal"] == {
         "goal_kind": "open_goal",
         "intent": "理解当前请求",
@@ -464,6 +471,36 @@ def test_goal_guidance_progresses_current_delta_and_preserves_deliberate_reopeni
             assert distinction in packet["guidance"]
 
 
+def test_recipient_scoped_permission_rule_reaches_a2_goal_and_plan() -> None:
+    """A2, G, and P receive the same recipient-applicability boundary."""
+
+    payload = _input()
+    workspace = _workspace(payload, payload["evidence"])
+    a1 = build_canonical_appraisal_question(workspace=workspace, stage_name="A1")
+    a2 = build_canonical_appraisal_question(
+        workspace=workspace,
+        stage_name="A2",
+        accepted_appraisal_summary=[],
+    )
+    goal = build_canonical_goal_question(workspace=workspace, appraisal_summary=[])
+    plan = build_canonical_plan_question(
+        workspace=workspace,
+        goal={
+            "goal_kind": "clarify",
+            "intent": "answer the current observation",
+            "reason": "the current observation needs an answer",
+            "cause_summary": "the current observation",
+        },
+        appraisal_summary=[],
+    )
+
+    normalized_rule = "".join(RECIPIENT_APPLICABILITY_GUIDANCE.split())
+    assert normalized_rule not in "".join(a1["guidance"].split())
+    assert normalized_rule in "".join(a2["guidance"].split())
+    assert normalized_rule in "".join(goal["guidance"].split())
+    assert normalized_rule in "".join(plan["guidance"].split())
+
+
 def test_semantic_progression_context_preserves_all_existing_multi_affect_rows_and_causes() -> None:
     """Adding bounded moves cannot alter any continuation or affect row."""
 
@@ -564,3 +601,246 @@ def test_a1_excludes_conditional_character_context() -> None:
     assert "conditional_character_context" not in packet
     assert "character_context" not in packet
     assert "personality" not in rendered
+
+
+def test_a1_guidance_separates_current_observation_from_stable_direct_facts() -> None:
+    """A1 keeps stable facts outside the current-observation authority lane."""
+
+    payload = _input()
+    timestamp = payload["mutable_state"]["updated_at"]
+    stable_fact = {
+        "evidence_ref": {
+            "source_kind": "promoted_memory",
+            "source_id": "promoted-memory:fact:stable-1",
+            "occurred_at": timestamp,
+            "semantic_summary": "stable background fact",
+        },
+        "semantic_text": "stable background fact",
+        "visible_to": ["q:event_agency"],
+        "authority": "character_world_context",
+        "memory_scope": "shared_character_or_world",
+    }
+    workspace = _workspace(payload, [payload["evidence"][0], stable_fact])
+
+    packet = build_canonical_appraisal_question(
+        workspace=workspace,
+        stage_name="A1",
+    )
+
+    current_text = [
+        row["semantic_text"]
+        for row in packet["current_observation"]["evidence"]
+    ]
+    direct_text = [
+        row["semantic_text"]
+        for row in packet["direct_facts"]["evidence"]
+    ]
+    assert "the current observation" in current_text
+    assert "stable background fact" in direct_text
+    assert "stable background fact" not in current_text
+
+
+def test_goal_and_plan_packets_share_background_goal_authority_contract() -> None:
+    """G and P packets consume one shared background-goal contract."""
+
+    payload = _input()
+    workspace = _workspace(payload, payload["evidence"])
+    authority_contract = BACKGROUND_CONTEXT_GOAL_AUTHORITY_GUIDANCE.strip()
+    goal = build_canonical_goal_question(
+        workspace=workspace,
+        appraisal_summary=[],
+    )
+    plan = build_canonical_plan_question(
+        workspace=workspace,
+        goal={
+            "goal_kind": "clarify",
+            "intent": "answer the current observation",
+            "reason": "the current observation needs an answer",
+            "cause_summary": "the current observation",
+        },
+        appraisal_summary=[],
+    )
+
+    assert goal["guidance"].count(authority_contract) == 1
+    assert plan["guidance"].count(authority_contract) == 1
+
+
+def test_request_agency_authority_contract_reaches_all_cognition_stage_packets() -> None:
+    """Every cognition packet consumes one current-observation authority contract."""
+
+    payload = _input()
+    workspace = _workspace(payload, payload["evidence"])
+    packets = build_turn_workspace_stage_contracts(workspace=workspace)
+    authority_contract = CURRENT_OBSERVATION_AUTHORITY_GUIDANCE.strip()
+
+    for stage in ("A1", "A2", "G", "P"):
+        assert packets[stage]["guidance"].count(authority_contract) == 1
+
+
+def test_request_agency_contract_rejects_circular_restated_evidence() -> None:
+    """The agency contract distinguishes independent facts from restatements."""
+
+    contract = CURRENT_OBSERVATION_AUTHORITY_GUIDANCE
+    required_invariants = (
+        "同一请求的存在或清晰程度",
+        "上游改述",
+        "独立证据",
+        "另行表达的`current_observation`事实",
+    )
+
+    assert all(invariant in contract for invariant in required_invariants)
+
+
+def test_response_content_provider_is_reply_content_fact_across_all_stages() -> None:
+    """Procedural provider metadata stays outside model-facing cognition."""
+
+    payload = _input()
+    workspace = _workspace(payload, payload["evidence"])
+    packets = build_turn_workspace_stage_contracts(workspace=workspace)
+    hidden_fields = (
+        "response_content_provider_role",
+        "response_content_provider",
+    )
+
+    assert all(
+        field not in CURRENT_OBSERVATION_AUTHORITY_GUIDANCE
+        for field in hidden_fields
+    )
+    for stage in ("A1", "A2", "G", "P"):
+        orientation = packets[stage]["orientation"]
+        assert all(field not in orientation for field in hidden_fields)
+        assert all(field not in packets[stage]["guidance"] for field in hidden_fields)
+        assert all(
+            field not in facade_module._STAGE_SYSTEM_PROMPTS[stage]
+            for field in hidden_fields
+        )
+
+
+def test_a2_existential_drive_keeps_character_experience_distinct_from_user_state() -> None:
+    """Existential-drive axes remain character-owned rather than user-owned."""
+
+    contract = getattr(
+        prompt_module,
+        "A2_EXISTENTIAL_DRIVE_EVIDENCE_GUIDANCE",
+        "",
+    ).strip()
+
+    required_invariants = ("existential_drive", "current_observation")
+    assert contract
+    assert all(invariant in contract for invariant in required_invariants)
+    assert A2_QUESTION_GUIDANCE.count(contract) == 1
+    assert facade_module._STAGE_SYSTEM_PROMPTS["A2"].count(contract) == 1
+
+
+def test_g_relational_carriers_separate_character_motive_from_user_relationship_fact() -> None:
+    """G carrier fields keep character motive distinct from user relationship facts."""
+
+    contract = getattr(
+        prompt_module,
+        "G_RELATIONAL_CARRIER_EVIDENCE_GUIDANCE",
+        "",
+    ).strip()
+    required_invariants = (
+        "relational_willingness.reason",
+        "cause_summary",
+        "private_monologue",
+        "current_observation",
+    )
+
+    assert contract
+    assert all(invariant in contract for invariant in required_invariants)
+    assert GOAL_QUESTION_GUIDANCE.count(contract) == 1
+    assert facade_module._STAGE_SYSTEM_PROMPTS["G"].count(contract) == 1
+
+
+def test_request_agency_contract_separates_authorization_from_motivation() -> None:
+    """Authorization scope does not establish motive or broader meaning."""
+
+    contract = CURRENT_OBSERVATION_AUTHORITY_GUIDANCE
+    required_invariants = (
+        "授权只证明",
+        "当前观察所写对象、行动、时间和条件内的许可",
+        "授权本身不证明动机",
+        "上述更广含义",
+    )
+
+    assert all(invariant in contract for invariant in required_invariants)
+
+
+def test_response_content_provider_is_reply_content_source_not_external_agency_transfer() -> None:
+    """Explicit dialog meaning remains the model-facing authority source."""
+
+    contract = CURRENT_OBSERVATION_AUTHORITY_GUIDANCE
+    assert "`current_observation`" in contract
+    assert "response_content_provider_role" not in contract
+    assert "response_content_provider" not in contract
+
+
+def test_a2_system_and_packet_share_relationship_state_evidence_contract() -> None:
+    """A2 packet and system guidance share one relationship evidence owner."""
+
+    contract = getattr(
+        prompt_module,
+        "A2_RELATIONSHIP_STATE_EVIDENCE_GUIDANCE",
+        "",
+    ).strip()
+    required_invariants = (
+        "relationship_social",
+        "当前交互角色或范围许可",
+        "不能改变任何关系轴",
+        "另行表达的`current_observation`关系事实",
+    )
+
+    assert contract
+    assert all(invariant in contract for invariant in required_invariants)
+    assert A2_QUESTION_GUIDANCE.count(contract) == 1
+    assert facade_module._STAGE_SYSTEM_PROMPTS["A2"].count(contract) == 1
+
+
+def test_g_system_and_packet_share_relational_carrier_evidence_contract() -> None:
+    """G packet and system guidance share one relational carrier owner."""
+
+    contract = getattr(
+        prompt_module,
+        "G_RELATIONAL_CARRIER_EVIDENCE_GUIDANCE",
+        "",
+    ).strip()
+    required_invariants = (
+        "relational_willingness",
+        "private_monologue",
+        "当前交互角色或范围许可",
+        "不能成为用户",
+        "另行表达的`current_observation`关系事实",
+    )
+
+    assert contract
+    assert "G_RELATIONAL_CARRIER_EVIDENCE_GUIDANCE" in prompt_module.__all__
+    assert all(invariant in contract for invariant in required_invariants)
+    assert GOAL_QUESTION_GUIDANCE.count(contract) == 1
+    assert facade_module._STAGE_SYSTEM_PROMPTS["G"].count(contract) == 1
+    for stage, guidance in (
+        ("A1", A1_QUESTION_GUIDANCE),
+        ("A2", A2_QUESTION_GUIDANCE),
+        ("P", ORDINARY_PLAN_GUIDANCE),
+    ):
+        assert guidance.count(contract) == 0
+        assert facade_module._STAGE_SYSTEM_PROMPTS[stage].count(contract) == 0
+
+
+def test_g_relational_carrier_does_not_turn_unsupported_user_meaning_into_first_person_feeling() -> None:
+    """Private monologue cannot launder unsupported user relationship meaning."""
+
+    contract = getattr(
+        prompt_module,
+        "G_RELATIONAL_CARRIER_EVIDENCE_GUIDANCE",
+        "",
+    )
+    required_invariants = (
+        "未经当前关系事实支持的用户关系含义",
+        "第一人称感受、内心判断或被动经历",
+        "放入`private_monologue`",
+        "获得依据",
+    )
+
+    assert contract
+    assert all(invariant in contract for invariant in required_invariants)

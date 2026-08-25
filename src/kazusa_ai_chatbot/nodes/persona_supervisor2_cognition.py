@@ -54,7 +54,6 @@ from kazusa_ai_chatbot.cognition_episode import (
     CognitiveEpisodeValidationError,
     GoalContinuationRefV1,
     build_goal_continuation_ref,
-    project_dialog_response_operation,
     project_dialog_role_explicit_content,
     validate_cognitive_episode_v1,
 )
@@ -134,6 +133,10 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition_actions import (
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_memory_lifecycle import (
     has_trusted_active_commitments,
+)
+from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_projection import (
+    classify_projected_memory_row,
+    classify_typed_memory_row,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.time_boundary import (
@@ -431,7 +434,13 @@ def build_cognition_input_from_global_state(
             conversation_progress,
             timestamp,
         ))
-    evidence.extend(_rag_evidence(state.get("rag_result"), timestamp))
+    evidence.extend(
+        _rag_evidence(
+            state.get("rag_result"),
+            timestamp,
+            current_user_id=state["global_user_id"],
+        )
+    )
     evidence.extend(_promoted_reflection_evidence(
         state.get("promoted_reflection_context"),
         timestamp,
@@ -703,7 +712,12 @@ async def call_cognition_subgraph(
     reflection_count = sum(
         1
         for row in cognition_input["evidence"]
-        if row["evidence_ref"]["source_kind"] == "promoted_reflection"
+        if (
+            row["evidence_ref"]["source_kind"] == "promoted_memory"
+            and isinstance(row.get("memory_metadata"), Mapping)
+            and row["memory_metadata"].get("source_kind")
+            == "reflection_inferred"
+        )
     )
     await record_continuity_boundary_event(
         component="persona_supervisor2_cognition",
@@ -1949,7 +1963,12 @@ def _tool_result_evidence_authority(
     return "contextual_fact_only"
 
 
-def _rag_evidence(value: object, occurred_at: str) -> list[dict[str, Any]]:
+def _rag_evidence(
+    value: object,
+    occurred_at: str,
+    *,
+    current_user_id: str,
+) -> list[dict[str, Any]]:
     """Convert public RAG evidence fields to typed cognition evidence."""
 
     if not isinstance(value, Mapping):
@@ -1957,32 +1976,73 @@ def _rag_evidence(value: object, occurred_at: str) -> list[dict[str, Any]]:
     evidence: list[dict[str, Any]] = []
 
     memory_rows = value.get("memory_evidence")
-    for index, row in enumerate(
-        memory_rows if isinstance(memory_rows, list) else [],
-        start=1,
-    ):
+    for row in (memory_rows if isinstance(memory_rows, list) else []):
         if not isinstance(row, Mapping):
             continue
         text = _rag_text(row)
         if not text:
             continue
-
+        memory_lane, _reason = classify_projected_memory_row(
+            row,
+            current_user_id=current_user_id,
+        )
+        if memory_lane not in {
+            "participant_continuity",
+            "conditional_character_guidance",
+            "character_world_context",
+        }:
+            continue
+        lane_marker = {
+            "participant_continuity": "current_user_continuity",
+            "conditional_character_guidance": "self_guidance",
+            "character_world_context": "fact",
+        }[memory_lane]
         memory_scope = (
             "current_user_continuity"
-            if row.get("scope_type") == "user_continuity"
+            if memory_lane == "participant_continuity"
             else "shared_character_or_world"
         )
+        if memory_lane == "participant_continuity":
+            memory_identity = _text(row.get("unit_id"))
+        else:
+            memory_identity = _text(row.get("memory_unit_id"))
+        if not memory_identity:
+            continue
+        if memory_lane == "participant_continuity":
+            memory_metadata: dict[str, Any] = {
+                "stable_id": memory_identity,
+                "unit_type": _text(row.get("unit_type")),
+                "source_kind": _text(row.get("source_kind")),
+                "source_system": _text(row.get("source_system")),
+                "authority": _text(row.get("authority")),
+                "status": _text(row.get("status")),
+                "scope_type": _text(row.get("scope_type")),
+                "scope_global_user_id": _text(
+                    row.get("scope_global_user_id")
+                ),
+                "truth_status": _text(row.get("truth_status")),
+                "origin": _text(row.get("origin")),
+            }
+        else:
+            memory_metadata = {
+                "stable_id": memory_identity,
+                "memory_type": _text(row.get("memory_type")),
+                "source_kind": _text(row.get("source_kind")),
+                "authority": _text(row.get("authority")),
+                "status": _text(row.get("status")),
+                "scope_type": _text(row.get("scope_type")),
+            }
+            privacy_review = row.get("privacy_review")
+            if isinstance(privacy_review, Mapping):
+                memory_metadata["privacy_review"] = dict(privacy_review)
         evidence.append(_build_rag_evidence_row(
             text=text,
             source_kind="promoted_memory",
-            source_id=str(row.get("id", f"memory:{index}")),
+            source_id=f"promoted-memory:{lane_marker}:{memory_identity}",
             occurred_at=occurred_at,
             memory_scope=memory_scope,
-            authority=(
-                "participant_continuity"
-                if memory_scope == "current_user_continuity"
-                else "character_world_context"
-            ),
+            authority=memory_lane,
+            memory_metadata=memory_metadata,
         ))
 
     conversation_items = value.get("conversation_evidence")
@@ -2029,7 +2089,7 @@ def _promoted_reflection_evidence(
     value: object,
     occurred_at: str,
 ) -> list[dict[str, Any]]:
-    """Convert bounded promoted reflection memory into typed cognition evidence."""
+    """Convert certified reflection memory through the canonical RAG contract."""
 
     if not isinstance(value, Mapping):
         return []
@@ -2042,8 +2102,19 @@ def _promoted_reflection_evidence(
         rows = value.get(field_name)
         if not isinstance(rows, list):
             continue
-        for index, row in enumerate(rows[:3], start=1):
+        expected_lane = (
+            "character_world_context"
+            if lane_name == "lore"
+            else "conditional_character_guidance"
+        )
+        for row in rows[:3]:
             if not isinstance(row, Mapping):
+                continue
+            memory_lane, _reason = classify_typed_memory_row(
+                row,
+                current_user_id="",
+            )
+            if memory_lane != expected_lane:
                 continue
             name = _text(row.get("memory_name"))
             content = _text(row.get("content"))
@@ -2052,21 +2123,36 @@ def _promoted_reflection_evidence(
             )
             if not semantic_text:
                 continue
+            memory_identity = _text(row.get("memory_unit_id"))
+            if not memory_identity:
+                continue
             source_timestamp = _reflection_source_timestamp(row)
             if source_timestamp is None:
                 continue
+            lane_marker = (
+                "fact"
+                if memory_lane == "character_world_context"
+                else "self_guidance"
+            )
+            memory_metadata: dict[str, Any] = {
+                "stable_id": memory_identity,
+                "memory_type": _text(row.get("memory_type")),
+                "source_kind": _text(row.get("source_kind")),
+                "authority": _text(row.get("authority")),
+                "status": _text(row.get("status")),
+                "scope_type": "global",
+            }
+            privacy_review = row.get("privacy_review")
+            if isinstance(privacy_review, Mapping):
+                memory_metadata["privacy_review"] = dict(privacy_review)
             evidence.append(_build_rag_evidence_row(
                 text=semantic_text,
-                source_kind="promoted_reflection",
-                source_id=(
-                    f"promoted-reflection:{lane_name}:{index}"
-                ),
+                source_kind="promoted_memory",
+                source_id=f"promoted-memory:{lane_marker}:{memory_identity}",
                 occurred_at=source_timestamp,
-                authority=(
-                    "conditional_character_guidance"
-                    if lane_name == "self_guidance"
-                    else "character_world_context"
-                ),
+                authority=memory_lane,
+                memory_scope="shared_character_or_world",
+                memory_metadata=memory_metadata,
             ))
     return evidence
 
@@ -2105,6 +2191,7 @@ def _build_rag_evidence_row(
     occurred_at: str,
     authority: str,
     memory_scope: str | None = None,
+    memory_metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build one bounded RAG evidence row with registered provenance."""
 
@@ -2122,6 +2209,8 @@ def _build_rag_evidence_row(
     }
     if memory_scope is not None:
         row["memory_scope"] = memory_scope
+    if memory_metadata is not None:
+        row["memory_metadata"] = dict(memory_metadata)
     return row
 
 
@@ -2309,20 +2398,7 @@ def _dialog_semantic_projection_text(
 ) -> str | None:
     """Render one model-owned current-dialog meaning for cognition."""
 
-    role_explicit_content = project_dialog_role_explicit_content(episode)
-    response_operation = project_dialog_response_operation(episode)
-    if response_operation is None:
-        return role_explicit_content
-    projection: dict[str, Any] = {
-        "response_operation": response_operation,
-    }
-    if role_explicit_content is not None:
-        projection["role_explicit_content"] = role_explicit_content
-    return json.dumps(
-        projection,
-        ensure_ascii=False,
-        sort_keys=True,
-    )
+    return project_dialog_role_explicit_content(episode)
 
 
 def _v2_timestamp(value: str) -> str:

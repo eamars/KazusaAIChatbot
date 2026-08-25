@@ -187,6 +187,7 @@ def _project_row(row: dict[str, Any], global_user_id: str) -> dict[str, Any]:
     projected_row = dict(row)
     content = _row_content(projected_row)
     projected_row["content"] = content
+    projected_row["source_kind"] = "user_memory_units"
     projected_row["source_system"] = "user_memory_units"
     projected_row["scope_type"] = "user_continuity"
     projected_row["scope_global_user_id"] = global_user_id

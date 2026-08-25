@@ -17,7 +17,10 @@ adapter/debug client -> brain intake and relevance
 RAG and resolver capabilities return evidence. Cognition owns appraisal,
 character judgment, causal affect, and response intent. Deterministic code owns
 validation, state reduction, permissions, action materialization, persistence,
-and delivery. `dialog_agent.py` owns final visible wording.
+and delivery. `dialog_agent.py` owns final visible wording. Visible relationship
+meaning remains owned by the selected response plan and current observation;
+rewriting an unselected relationship interpretation as a content requirement or
+delivery effect does not turn it into delivery-only context.
 
 ## Module Boundary
 
@@ -72,8 +75,11 @@ stage_0_msg_decontextualizer
 current request, active-character ownership, addressee direction, and named
 participant descriptions. Deterministic code owns validation, state binding,
 permissions, and persistence; cognition owns semantic judgment and response
-intent. A malformed canonical result becomes an operational failure before
-commit.
+intent. The canonical `response_operation` also records
+`response_content_provider_role` for input-unspecified reply content; this
+annotation stays in deterministic validation metadata. The cognition boundary
+projects only `role_explicit_content` into model-facing current-event evidence.
+A malformed canonical result becomes an operational failure before commit.
 
 ## Canonical Cognition Boundary
 
@@ -87,6 +93,33 @@ commit.
 - a bounded semantic scene description;
 - bounded continuity and relationship context; and
 - semantic action and resolver capabilities available to the caller.
+
+Typed persistent-memory evidence is partitioned before it reaches this
+boundary. Current-user continuity is a participant-continuity lane; certified
+learned self-guidance is conditional character context; and certified learned
+facts or eligible curated rows are character/world context. Invalid authority,
+scope, source, status, or privacy metadata is excluded with an inspectable RAG
+diagnostic. Repository row identifiers remain trace-only source references and
+are not projected into model-facing prose or semantic authority.
+
+The boundary uses one canonical raw-to-safe contract. Shared learned rows must
+carry a stable `memory_unit_id`, an allowed `fact` or `defense_rule`, an exact
+authority/source pair, active status, empty source-user metadata, global scope,
+and the complete seven-field learned privacy certificate. Curated seed/manual
+rows use their explicit curated pair. Raw `user_memory_units` rows are
+excluded until the existing user-memory evidence worker supplies explicit
+stable-unit, source, scope, truth, origin, authority, and active-status fields;
+the projection boundary does not reconstruct them from raw writer fields. The
+cognition evidence source id is
+`promoted-memory:<typed-lane>:<stable-id>`; its hidden metadata is validated
+again before the cognition stage, and row-index or unmarked fallbacks are not
+admitted.
+
+Search-driven RAG and bounded promoted-reflection context use the same
+`classify_typed_memory_row` authority classifier and the same canonical
+`promoted-memory:<typed-lane>:<stable-id>` evidence contract. Promoted
+reflection rows that lack a complete certificate are excluded rather than
+entering cognition through a separate legacy path.
 
 The connector keeps scene, relationship, continuity, and capability context
 bounded and caller-owned. Retrieved evidence informs judgment but does not
@@ -167,6 +200,22 @@ social, pacing, and engagement guidance in application order into the bounded
 bounded surface context. Storage identifiers, revisions,
 reflection lineage, and raw channel/user identifiers are excluded.
 
+Visible semantic ownership stays with `response_plan.response_goal` and the
+current visible observation. `active_character_goal.reason`,
+`active_character_goal.cause_summary`, `intention.reason`,
+`relational_willingness`, and the private monologue remain interpretation or
+delivery context. They shape posture—warmth or distance, initiative,
+directness, pacing, confidence, care, and voice—but their presence alone does
+not expand the selected visible semantics or select a visible relationship
+claim, an interpretation of user motive, or a standalone relationship payoff.
+An explicit relationship meaning is visible only when the current observation
+and selected response goal make it part of the current reply. An already-visible
+relationship mode remains continuity unless current input reopens it; semantic
+paraphrase does not select it again. Current relationship refusals, boundary
+changes, acceptance or rejection, and explicit user reopening remain valid
+semantic choices. Dialog remains bound to the selected content plan and
+response goal.
+
 `run_text_surface_planning(...)` projects visible episode content and runs
 exactly one bounded semantic stage. Unified content planning atomically
 returns `content_plan`, `content_requirements`, the exact five-field
@@ -175,6 +224,9 @@ upstream relational decision is carried when present. Deterministic code emits
 an empty `visible_boundaries` list and copies the validated caller-owned
 `addressee_plan`. Content planning receives tempo, linguistic texture, the
 expression-only private monologue, and the authoritative epistemic boundary.
+The epistemic boundary limits assertion strength for selected semantics;
+interpretations, hypotheses, and unknowns it marks are not visible-content
+candidates and cannot independently enter `content_plan` or `dialog`.
 The public text output retains that exact epistemic boundary for dialog but
 does not retain the private monologue. A physical or external effect reaches
 visible wording as completed only from a matching `executed`

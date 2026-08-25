@@ -239,7 +239,7 @@ def apply_semantic_deltas(
         _retain_delta_evidence(target, handles)
         if previous_uncertainty is not None and delta < 0:
             decrease = previous_uncertainty - target["uncertainty"]
-            if target["uncertainty"] <= 20:
+            if decrease > 0 and target["uncertainty"] <= 20:
                 target.update(
                     transition_knowledge_gap(
                         target,

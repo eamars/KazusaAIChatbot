@@ -76,13 +76,13 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
-| [asuna_semantic_authority_and_memory_feedback_consolidated_bugfix_plan_2026-08-24.md](active/bugfix/asuna_semantic_authority_and_memory_feedback_consolidated_bugfix_plan_2026-08-24.md) | Consolidated semantic progression, proposal ownership, commitment admission, cross-user learned-memory authority, audit, and real-LLM sign-off | draft; ready for user review and approval |
 | [epistemic_and_role_provenance_fidelity_bugfix_plan_2026-08-24.md](active/bugfix/epistemic_and_role_provenance_fidelity_bugfix_plan_2026-08-24.md) | Independent unsupported-fact, private-residue, and temporary-role provenance fidelity plan from the 50-turn Asuna run | draft; separate ownership and approval boundary |
 
 ### Completed Bugfix Plans
 
 | Document | Type | Status |
 |---|---|---|
+| [asuna_semantic_authority_and_memory_feedback_consolidated_bugfix_plan_2026-08-24.md](archive/completed/bugfix/asuna_semantic_authority_and_memory_feedback_consolidated_bugfix_plan_2026-08-24.md) | Consolidated semantic progression, proposal ownership, commitment admission, cross-user learned-memory authority, audit, and real-LLM execution record | closed with residual failures on 2026-08-25; execution complete, functional sign-off RED |
 | [resolver_authored_speak_provenance_contract_bugfix_plan_2026-08-24.md](archive/completed/bugfix/resolver_authored_speak_provenance_contract_bugfix_plan_2026-08-24.md) | Resolver-authored pending, user-input, and terminal visible-speak target provenance repair | completed; deterministic and user-approved real-service fallback gates passed on 2026-08-24 |
 | [cognition_v3_consolidation_interaction_subtext_handoff_bugfix_plan_2026-08-23.md](archive/completed/bugfix/cognition_v3_consolidation_interaction_subtext_handoff_bugfix_plan_2026-08-23.md) | Cognition V3 required subjective-state handoff and zero-exception post-turn consolidation repair | completed |
 | [cognition_subjective_continuity_dialog_quality_plan_2026-08-23.md](archive/completed/bugfix/cognition_subjective_continuity_dialog_quality_plan_2026-08-23.md) | First-person cognition continuity, epistemic dialog-boundary, and exact action-authority quality correction | completed |

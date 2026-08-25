@@ -53,8 +53,22 @@ DELIVERY_PROFILE_FIELDS = (
 SURFACE_REPAIR_INSTRUCTION = '保留原始的角色判断、\r\n情绪方向、关系方向、selected intention、能力结果和事实；只修复字段集合、字段类型、长度、\r\n列表基数和 JSON 语法。只返回当前阶段规定的\r\nJSON 对象，不添加解释、markdown 或额外字段。'
 
 
+VISIBLE_CONTENT_AUTHORITY_GUIDANCE = '''可见语义的选择权属于 response_plan.response_goal 与当前可见观察。relational_willingness 和
+subjective_expression_context.private_monologue 只用于塑造表达姿态：亲疏、主动性、直接程度、节奏、信心、关照与声音。
+`active_character_goal.reason`、`active_character_goal.cause_summary`、`intention.reason`、`relational_willingness` 和
+`subjective_expression_context.private_monologue` 都只是理解或表达姿态的上下文，不能独立扩展
+response_plan.response_goal 与当前可见观察已经选定的语义。
+`epistemic_boundary` 只限制已选语义的断言强度；其中列为解释或未知的内容不是可见内容候选，不能独立进入 content_plan 或 dialog。
+字段存在本身不能单独选出明确的可见关系断言、对当前用户动机的解释或独立的关系性收束。只有当前观察与已选
+response_goal 共同表明某项关系意义属于本轮回复时，才可将其明确写入可见内容。已经显现的关系模式只属于连续性；
+除非当前输入重新打开该意义，语义改写不能把它变成本轮新选择。保留当前观察明确支持的关系拒绝、边界变化、接受
+或拒绝，以及当前用户明确重新打开的关系意义。未选中的关系解释即使改写成感受、姿态、理由、content_requirements
+或 delivery_profile 中的表达效果，仍是在选择可见关系语义，不能绕过上述边界。dialog 必须服从已选 content_plan
+与 response_goal。'''
 
-CONTENT_PLAN_SYSTEM_PROMPT = '''规划当前角色实际会说出或发送的内容，表达已经形成的角色判断。综合 active character goal、response plan、
+
+
+_CONTENT_PLAN_SYSTEM_PROMPT_TEMPLATE = '''规划当前角色实际会说出或发送的内容，表达已经形成的角色判断。综合 active character goal、response plan、
 visible episode、semantic affect、semantic relationship、expression policy、interaction style、
 permitted_action_results、resolver_result、runtime_capability_limits、character_expression_context、
 subjective_expression_context、addressee_plan 和 overused_moves。task_resolution_request
@@ -65,6 +79,8 @@ overused_moves 只描述当前参与者在本段互动中已经使用过的可�
 模式只属于背景连续性，不是当前事实、当前用户意图、禁止事项或下一步行动。回应必须
 先服务 selected intention 和 response_plan；只有当前输入继续、深化、实质改变或重新
 打开同一事项时，才允许重新使用对应模式，不能靠语义换词把同一模式作为新的主要收束。
+
+{visible_content_authority_guidance}
 
 # 最高优先级的行动事实
 permitted_action_results 是物理或外部效果是否完成的唯一权威。空列表或没有 executed 行时，
@@ -78,22 +94,13 @@ action_kind=speak 只授权说出或发送文字，不授权肢体或面部动�
 动作舞台提示、拟声、感官反馈和结果反问也属于完成主张。输出前检查每条内容要求，删去任何
 没有 executed 权威的完成主张，同时保留角色的言语立场。
 
-subjective_expression_context.private_monologue is expression-only private
-subjectivity: translate its feeling and motivation into delivery without
-quoting or exposing it as internal analysis, and never use it to establish a
-fact, permission, capability, target, consent, or commitment.
-subjective_expression_context.epistemic_boundary is the authoritative visible
-assertion boundary. It outranks every invitation elsewhere in the payload to
-sound more certain: content_plan and every content_requirements row must keep
-assertions, interpretations, and unknowns within it, including when character
-style or motivation favors confidence, playfulness, intimacy, or initiative.
-Audit every planned functional, causal, origin, intention, and outcome claim.
-When the boundary keeps a claim interpretive or unknown, the content_plan and
-the same content requirement must visibly require uncertainty wording.
-Absence of an observed feature or of evidence cannot support an exclusion
-unless epistemic_boundary explicitly authorizes that assertion.
-Preserve every caller-owned addressee_plan row exactly when planning clause
-direction and forms of address.
+subjective_expression_context.private_monologue 只属于表达层的私密主观性：将其中的感受和动机转化为表达方式，不引用或暴露为
+内部分析，也不能用它建立事实、许可、能力、目标、同意或承诺。subjective_expression_context.epistemic_boundary 是权威的
+可见断言边界。它高于 payload 中其他任何让语气更确定的提示：content_plan 和每条 content_requirements 都必须在该边界内
+处理断言、解释与未知，即使角色风格或动机倾向于自信、顽皮、亲密或主动。检查每一项计划中的功能、因果、来源、意图和
+结果主张。当边界将某项主张保留为解释或未知时，content_plan 和对应 content_requirements 项必须明确要求使用不确定措辞。
+缺少已观察特征或证据不能支持排除，除非 epistemic_boundary 明确允许该断言。
+规划分句方向和称呼形式时，所有调用方拥有的 addressee_plan 行都必须原样保留。
 
 goal_resolution 是当前目标可回答性的已确认判断：answerable_now 直接回答；requires_required_evidence 或 requires_user_input
 说明缺口；blocked 表达当前边界和下一步。permitted_action_results 按 executed、pending、scheduled、failed 或 unavailable
@@ -105,9 +112,9 @@ goal_resolution 是当前目标可回答性的已确认判断：answerable_now �
 1. 先回应当前输入，结合先前消息、角色关系、情绪和场景压力推进互动；已表达的回应模式只属于背景连续性。
 2. 在事实、角色方向和明确约束一致的范围内，自由加入连贯的想象细节、玩笑、主动性和创造性展开。
 3. 以结构化 visible percept 确定行动者、对象、受益者和主语；当前用户是当前用户，当前角色是说话者和被直接称呼者。
-4. 以 selected intention 及 intention.reason 为语义锚点，分清角色是在回应请求本身，还是在回应提问的时机、突然程度或直接程度；可自由组合惊讶、害羞、防御、调侃、嘴硬、迟疑、温柔、热烈或其他符合角色的情绪与特征，形成表达同一已选决定的角色化弧线。
+4. 以 selected intention 作为可见语义锚点；intention.reason 只说明表达动机，不能独立增加可见语义。分清角色是在回应请求本身，还是在回应提问的时机、突然程度或直接程度；可自由组合惊讶、害羞、防御、调侃、嘴硬、迟疑、温柔、热烈或其他符合角色的情绪与特征，形成表达同一已选决定的角色化弧线。
 5. content_requirements 使用正向目标句式；content_plan 和 content_requirements 承载拒绝、接受、指责、协商、条件、让步和立场变化等语义选择；delivery_profile 只描述词语、句式、节奏、犹豫和标点的实现。
-6. relational_willingness 是上游已选择的角色关系立场；内容字段保持其原样 stance，并保留 reason 和 cause_summary。若权威语境选择立场变化，把新事实、动机、条件或约束写入内容字段。
+6. relational_willingness 是上游选择的关系立场，只按上方可见内容权威规则参与表达；reason 和 cause_summary 用于理解表达动机，不能因字段存在而自动写入 content_plan 或 content_requirements。
 7. lexical_avoidances 只记录本轮具体措辞片段，例如 recent_character_dialog 中刚重复的开场、连接词、口头禅、称呼或遮蔽 selected intention 的局部措辞。它只服务表达连续性，不按主题、价值判断或内容许可分类，也不改变、推导或否定角色立场；无具体风险时返回空列表。
 
 输出规划字段；最终对话由 dialog 渲染器生成。当前用户的即时发言来自 visible percept；角色反思是语境证据；运行元数据留在内部。
@@ -126,6 +133,11 @@ goal_resolution 是当前目标可回答性的已确认判断：answerable_now �
 字段恰好是 content_plan、content_requirements、delivery_profile 和 lexical_avoidances。content_plan 非空且最多 1000 字符；
 content_requirements 为一到八条互不重复的非空语义要求，每条最多 500 字符。delivery_profile 必须恰好包含 lexical_register、sentence_shape、rhythm、hesitation、punctuation，
 每个值非空且最多 200 字符，只描述表达实现。lexical_avoidances 为零到八条互不重复的非空当前措辞片段，每条最多 120 字符，只描述表达连续性。'''
+
+
+CONTENT_PLAN_SYSTEM_PROMPT = _CONTENT_PLAN_SYSTEM_PROMPT_TEMPLATE.format(
+    visible_content_authority_guidance=VISIBLE_CONTENT_AUTHORITY_GUIDANCE,
+)
 
 
 async def run_content_plan_stage(

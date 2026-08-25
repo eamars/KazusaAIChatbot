@@ -9,11 +9,12 @@ from time import perf_counter
 import httpx
 import pytest
 
-from tests.cognition_test_helpers import canonical_user_message_episode
 from kazusa_ai_chatbot.config import MSG_DECONTEXTUALIZER_LLM_BASE_URL
-from kazusa_ai_chatbot.nodes import persona_supervisor2_msg_decontextualizer as decontext
+from kazusa_ai_chatbot.nodes import (
+    persona_supervisor2_msg_decontextualizer as decontext,
+)
+from tests.cognition_test_helpers import canonical_user_message_episode
 from tests.llm_trace import write_llm_trace
-
 
 logger = logging.getLogger(__name__)
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
@@ -252,12 +253,71 @@ async def test_live_decontextualizer_resolves_nested_direct_roles(
     assert "current_user" not in response_operation["operation"], trace_payload
     assert "self" not in response_operation["operation"], trace_payload
     assert response_operation["response_owner_role"] == "当前角色", trace_payload
-    assert response_operation["selection_owner_role"] == "当前角色", trace_payload
+    assert response_operation["response_content_provider_role"] == "当前角色", trace_payload
     assert response_operation["selection_required"] is True, trace_payload
     assert response_operation["embedded_actor_role"] == (
         "当前用户"
     ), trace_payload
     assert response_operation["embedded_target_role"] == "当前角色", trace_payload
+
+
+async def test_live_decontextualizer_emits_response_content_provider_contract(
+    ensure_live_llm,
+    monkeypatch,
+) -> None:
+    """The fresh live control emits the canonical provider key and shape."""
+
+    del ensure_live_llm
+    user_input = "请根据给出的条件提供一个明确回答，并说明理由。"
+    state = _base_state(user_input)
+    state["cognitive_episode"] = canonical_user_message_episode(
+        episode_id="provider-contract-live-episode",
+        percept_id="provider-contract-live-percept",
+        storage_timestamp_utc="2026-08-25T12:00:00+00:00",
+        local_time_context={
+            "current_local_datetime": "2026-08-25 12:00",
+            "current_local_weekday": "Tuesday",
+        },
+        user_input=user_input,
+        platform="debug",
+        platform_channel_id="provider-contract-live-private",
+        channel_type="private",
+        platform_message_id="provider-contract-live-message",
+        platform_user_id="identity-user",
+        global_user_id="identity-global-user",
+        user_name="测试用户",
+        debug_modes={},
+        target_addressed_user_ids=[],
+        target_broadcast=False,
+    )
+    state.update({
+        "ambient_logical_turns": [],
+        "channel_type": "private",
+        "channel_name": "provider-contract-live-private",
+    })
+
+    result, trace_payload = await _run_case(
+        monkeypatch,
+        "response_content_provider_contract",
+        state,
+    )
+
+    content = result["cognitive_episode"]["percepts"][0]["content"]
+    response_operation = content["response_operation"]
+    assert set(response_operation) == {
+        "embedded_actor_role",
+        "embedded_target_role",
+        "operation",
+        "response_content_provider_role",
+        "response_owner_role",
+        "selection_required",
+    }, trace_payload
+    assert response_operation["response_content_provider_role"] == "当前角色", (
+        trace_payload
+    )
+    assert "selection_owner_role" not in response_operation, trace_payload
+    assert response_operation["response_owner_role"] == "当前角色", trace_payload
+    assert response_operation["selection_required"] is True, trace_payload
 
 
 async def test_live_decontextualizer_reward_offer_preserves_user_actor_character_target(
@@ -313,7 +373,7 @@ async def test_live_decontextualizer_reward_offer_preserves_user_actor_character
     assert "当前用户" in role_explicit_content, trace_payload
     assert "当前角色" in role_explicit_content, trace_payload
     assert response_operation["response_owner_role"] == "当前角色", trace_payload
-    assert response_operation["selection_owner_role"] == "当前角色", trace_payload
+    assert response_operation["response_content_provider_role"] == "当前角色", trace_payload
     assert response_operation["selection_required"] is True, trace_payload
     assert response_operation["embedded_actor_role"] == "当前用户", trace_payload
     assert response_operation["embedded_target_role"] == "当前角色", trace_payload

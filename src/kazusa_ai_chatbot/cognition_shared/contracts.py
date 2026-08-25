@@ -395,6 +395,7 @@ class CognitionEvidenceV2(TypedDict):
             "shared_character_or_world",
         ]
     ]
+    memory_metadata: NotRequired[dict[str, Any]]
 
 
 class ScheduledAuthorityDetailRefV1(TypedDict):
@@ -2078,6 +2079,220 @@ def _validate_persistent_state(state: Mapping[str, Any]) -> None:
         raise CognitionContractError(str(exc)) from exc
 
 
+_PROMOTED_MEMORY_LANE_MARKERS = frozenset({
+    "current_user_continuity",
+    "self_guidance",
+    "fact",
+})
+_PROMOTED_MEMORY_LEARNED_PAIRS = frozenset({
+    ("conversation_accepted", "conversation_extracted"),
+    ("reflection_promoted", "reflection_inferred"),
+})
+_PROMOTED_MEMORY_CURATED_PAIRS = frozenset({
+    ("seed", "seeded_manual"),
+    ("seed", "external_imported"),
+    ("manual", "seeded_manual"),
+    ("manual", "external_imported"),
+})
+_PROMOTED_MEMORY_PRIVACY_FIELDS = frozenset({
+    "global_applicability",
+    "target_specific_meaning_removed",
+    "affects_identity_or_boundaries",
+    "private_detail_risk",
+    "user_details_removed",
+    "boundary_assessment",
+    "reviewer",
+})
+
+
+def _validate_promoted_memory_privacy_review(value: object) -> None:
+    """Validate the exact learned-memory scope and privacy certificate."""
+
+    if not isinstance(value, Mapping) or set(value) != _PROMOTED_MEMORY_PRIVACY_FIELDS:
+        raise CognitionContractError(
+            "promoted memory privacy review fields are not exact"
+        )
+    if (
+        value.get("global_applicability") != "global"
+        or value.get("target_specific_meaning_removed") is not True
+        or value.get("affects_identity_or_boundaries") is not False
+        or value.get("private_detail_risk") != "low"
+        or value.get("user_details_removed") is not True
+        or not isinstance(value.get("boundary_assessment"), str)
+        or not value["boundary_assessment"].strip()
+        or value.get("reviewer") != "automated_llm"
+    ):
+        raise CognitionContractError(
+            "promoted memory privacy review values are invalid"
+        )
+
+
+def _validate_curated_memory_privacy_review(value: object) -> None:
+    """Validate optional curated privacy fields without learned admission rules."""
+
+    if not isinstance(value, Mapping):
+        raise CognitionContractError(
+            "curated memory privacy review must be an object"
+        )
+    if not set(value).issubset(_PROMOTED_MEMORY_PRIVACY_FIELDS):
+        raise CognitionContractError(
+            "curated memory privacy review fields are invalid"
+        )
+    enum_fields = {
+        "global_applicability": {"global", "scoped", "absent"},
+        "private_detail_risk": {"low", "medium", "high"},
+        "reviewer": {"automated_llm", "human", "seed_tool"},
+    }
+    for field, allowed_values in enum_fields.items():
+        if field in value and value[field] not in allowed_values:
+            raise CognitionContractError(
+                f"curated memory privacy review {field} is invalid"
+            )
+    for field in (
+        "target_specific_meaning_removed",
+        "affects_identity_or_boundaries",
+        "user_details_removed",
+    ):
+        if field in value and not isinstance(value[field], bool):
+            raise CognitionContractError(
+                f"curated memory privacy review {field} is invalid"
+            )
+    if "boundary_assessment" in value and not isinstance(
+        value["boundary_assessment"], str
+    ):
+        raise CognitionContractError(
+            "curated memory privacy review boundary assessment is invalid"
+        )
+
+
+def _validate_promoted_memory_metadata(row: Mapping[str, Any]) -> None:
+    """Validate the hidden canonical metadata behind promoted-memory evidence."""
+
+    source_id = row["evidence_ref"]["source_id"]
+    source_id_parts = source_id.split(":", 2)
+    if (
+        len(source_id_parts) != 3
+        or source_id_parts[0] != "promoted-memory"
+        or source_id_parts[1] not in _PROMOTED_MEMORY_LANE_MARKERS
+        or not source_id_parts[2]
+    ):
+        raise CognitionContractError(
+            "promoted memory evidence requires canonical source id"
+        )
+    lane_marker = source_id_parts[1]
+    stable_id = source_id_parts[2]
+    metadata = row.get("memory_metadata")
+    if not isinstance(metadata, Mapping):
+        raise CognitionContractError("promoted memory metadata is required")
+    if metadata.get("stable_id") != stable_id:
+        raise CognitionContractError(
+            "promoted memory stable id does not match source id"
+        )
+    if row.get("memory_scope") == "current_user_continuity":
+        required = {
+            "stable_id",
+            "unit_type",
+            "source_kind",
+            "source_system",
+            "authority",
+            "status",
+            "scope_type",
+            "scope_global_user_id",
+            "truth_status",
+            "origin",
+        }
+        if set(metadata) != required:
+            raise CognitionContractError(
+                "promoted memory continuity metadata fields are not exact"
+            )
+        if lane_marker != "current_user_continuity":
+            raise CognitionContractError(
+                "promoted memory continuity lane marker is invalid"
+            )
+        if (
+            not isinstance(metadata["unit_type"], str)
+            or not metadata["unit_type"].strip()
+            or metadata["source_kind"] != "user_memory_units"
+            or metadata["source_system"] != "user_memory_units"
+            or metadata["authority"] != "scoped_continuity"
+            or metadata["status"] != "active"
+            or metadata["scope_type"] != "user_continuity"
+            or not isinstance(metadata["scope_global_user_id"], str)
+            or not metadata["scope_global_user_id"].strip()
+            or metadata["truth_status"] != "character_lore_or_interaction_continuity"
+            or metadata["origin"] != "consolidated_interaction"
+        ):
+            raise CognitionContractError(
+                "promoted memory continuity metadata values are invalid"
+            )
+        if row.get("authority") != "participant_continuity":
+            raise CognitionContractError(
+                "promoted memory continuity authority is invalid"
+            )
+        return
+
+    if row.get("memory_scope") != "shared_character_or_world":
+        raise CognitionContractError("promoted memory shared scope is invalid")
+    allowed_keys = {
+        "stable_id",
+        "memory_type",
+        "source_kind",
+        "authority",
+        "status",
+        "scope_type",
+    }
+    metadata_keys = set(metadata)
+    allowed_keys_with_review = {*allowed_keys, "privacy_review"}
+    if metadata_keys != allowed_keys and metadata_keys != allowed_keys_with_review:
+        raise CognitionContractError(
+            "promoted memory shared metadata fields are not exact"
+        )
+    if (
+        metadata.get("memory_type") not in {"fact", "defense_rule"}
+        or not isinstance(metadata.get("source_kind"), str)
+        or not metadata["source_kind"].strip()
+        or not isinstance(metadata.get("authority"), str)
+        or not metadata["authority"].strip()
+        or metadata.get("status") != "active"
+        or metadata.get("scope_type") != "global"
+    ):
+        raise CognitionContractError(
+            "promoted memory shared metadata values are invalid"
+        )
+    authority_source = (metadata["authority"], metadata["source_kind"])
+    if authority_source in _PROMOTED_MEMORY_LEARNED_PAIRS:
+        if "privacy_review" not in metadata:
+            raise CognitionContractError(
+                "promoted memory learned privacy review is required"
+            )
+        _validate_promoted_memory_privacy_review(metadata["privacy_review"])
+    elif authority_source in _PROMOTED_MEMORY_CURATED_PAIRS:
+        if "privacy_review" in metadata:
+            _validate_curated_memory_privacy_review(metadata["privacy_review"])
+    else:
+        raise CognitionContractError(
+            "promoted memory authority and source pair is invalid"
+        )
+    expected_lane = (
+        "fact"
+        if metadata["memory_type"] == "fact"
+        else "self_guidance"
+    )
+    if lane_marker != expected_lane:
+        raise CognitionContractError(
+            "promoted memory lane marker does not match memory type"
+        )
+    expected_authority = (
+        "character_world_context"
+        if expected_lane == "fact"
+        else "conditional_character_guidance"
+    )
+    if row.get("authority") != expected_authority:
+        raise CognitionContractError(
+            "promoted memory authority does not match memory type"
+        )
+
+
 def _validate_evidence_rows(rows: Any) -> None:
     """Validate evidence handles and complete provenance records."""
 
@@ -2098,6 +2313,8 @@ def _validate_evidence_rows(rows: Any) -> None:
             required_row_fields.add("memory_scope")
         if "temporal_provenance" in row:
             required_row_fields.add("temporal_provenance")
+        if "memory_metadata" in row:
+            required_row_fields.add("memory_metadata")
         _require_exact_keys(
             row,
             required_row_fields,
@@ -2131,9 +2348,9 @@ def _validate_evidence_rows(rows: Any) -> None:
         source_kind = row["evidence_ref"]["source_kind"]
         source_id = row["evidence_ref"]["source_id"]
         authority = row["authority"]
-        if authority == "conditional_character_guidance" and (
-            source_kind != "promoted_reflection"
-            or ":self_guidance:" not in source_id
+        if authority == "conditional_character_guidance" and not (
+            source_kind in {"promoted_reflection", "promoted_memory"}
+            and ":self_guidance:" in source_id
         ):
             raise CognitionContractError(
                 "conditional character guidance authority is not scoped"
@@ -2148,6 +2365,8 @@ def _validate_evidence_rows(rows: Any) -> None:
                 raise CognitionContractError(
                     "promoted reflection lore must be character-world context"
                 )
+        if source_kind == "promoted_memory":
+            _validate_promoted_memory_metadata(row)
         if source_kind == "conversation_evidence" and source_id.startswith(
             "conversation-progress-event:"
         ):

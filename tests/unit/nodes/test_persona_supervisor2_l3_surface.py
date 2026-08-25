@@ -15,11 +15,71 @@ from kazusa_ai_chatbot.cognition_shared.contracts import (
     validate_text_surface_input_canonical,
 )
 from kazusa_ai_chatbot.llm_interface import LLMCallConfig, LLMThinkingConfig
+from kazusa_ai_chatbot.nodes import dialog_agent
 from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_surface
 from tests.unit.nodes.surface_fixtures import (
     build_relational_decision,
     build_surface_state,
 )
+
+
+def test_content_plan_prompt_uses_shared_visible_content_authority_contract() -> None:
+    """Keep content planning attached to the shared visible-content authority."""
+
+    authority = surface_stages.VISIBLE_CONTENT_AUTHORITY_GUIDANCE
+
+    assert authority
+    assert surface_stages.CONTENT_PLAN_SYSTEM_PROMPT.count(authority) == 1
+
+
+def test_content_plan_keeps_goal_reason_outside_visible_semantic_authority() -> None:
+    """Interpretation fields cannot become an independent visible semantic source."""
+
+    authority = surface_stages.VISIBLE_CONTENT_AUTHORITY_GUIDANCE
+    for field in (
+        "active_character_goal.reason",
+        "active_character_goal.cause_summary",
+        "intention.reason",
+        "relational_willingness",
+        "private_monologue",
+    ):
+        assert field in authority
+    assert surface_stages.CONTENT_PLAN_SYSTEM_PROMPT.count(authority) == 1
+    assert "intention.reason 为语义锚点" not in (
+        surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
+    )
+
+
+def test_visible_content_authority_keeps_epistemic_examples_outside_content_selection() -> None:
+    """Epistemic interpretations remain bounded context, not content sources."""
+
+    authority = surface_stages.VISIBLE_CONTENT_AUTHORITY_GUIDANCE
+    required_invariants = (
+        "epistemic_boundary",
+        "已选语义的断言强度",
+        "解释或未知的内容不是可见内容候选",
+        "不能独立进入 content_plan 或 dialog",
+    )
+
+    assert all(invariant in authority for invariant in required_invariants)
+    assert surface_stages.CONTENT_PLAN_SYSTEM_PROMPT.count(authority) == 1
+
+
+def test_visible_content_authority_blocks_relationship_meaning_laundering_as_delivery() -> None:
+    """Delivery fields cannot smuggle unselected relationship semantics."""
+
+    authority = surface_stages.VISIBLE_CONTENT_AUTHORITY_GUIDANCE
+    required_invariants = (
+        "未选中的关系解释",
+        "改写成感受、姿态、理由",
+        "content_requirements",
+        "delivery_profile",
+        "不能绕过",
+    )
+
+    assert all(invariant in authority for invariant in required_invariants)
+    assert surface_stages.CONTENT_PLAN_SYSTEM_PROMPT.count(authority) == 1
+    assert dialog_agent._V2_DIALOG_GENERATOR_PROMPT.count(authority) == 1
 
 
 def test_l3_surface_preserves_relational_willingness() -> None:
@@ -230,10 +290,16 @@ async def test_text_surface_uses_one_content_call_and_deterministic_preference_p
     assert [row["trace_id"] for row in trace_rows] == ["surface-trace"]
     assert all(row["status"] == "succeeded" for row in trace_rows)
     assert all(row["parsed_output"] for row in trace_rows)
-    assert "same content requirement" in (
+    assert "content_requirements" in (
         surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
     )
-    assert "cannot support an exclusion" in (
+    assert "epistemic_boundary" in (
+        surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
+    )
+    assert "Preserve every caller-owned addressee_plan row exactly" not in (
+        surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
+    )
+    assert "direction and forms of address" not in (
         surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
     )
     assert "动作舞台提示、拟声、感官反馈和结果反问" in (

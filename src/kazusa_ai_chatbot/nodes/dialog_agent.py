@@ -36,6 +36,9 @@ from kazusa_ai_chatbot.cognition_shared.contracts import (
 from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
     V2_MODEL_TOTAL_ATTEMPTS,
 )
+from kazusa_ai_chatbot.cognition_shared.surface_stages import (
+    VISIBLE_CONTENT_AUTHORITY_GUIDANCE,
+)
 from kazusa_ai_chatbot.config import (
     DIALOG_GENERATOR_LLM_API_KEY,
     DIALOG_GENERATOR_LLM_BASE_URL,
@@ -199,7 +202,7 @@ def _candidate_role_frame(
     return frame
 
 
-_V2_DIALOG_GENERATOR_PROMPT = '''你是当前角色的最终文字渲染器。把 text_surface_output_v2 转化为
+_V2_DIALOG_GENERATOR_PROMPT_TEMPLATE = '''你是当前角色的最终文字渲染器。把 text_surface_output_v2 转化为
 自然、鲜活、有角色辨识度，并且切合当前场景的聊天内容。上游认知负责角色判断；surface planning
 提供语义内容、称呼安排、delivery profile、lexical_avoidances 和 permitted action results。
 
@@ -216,11 +219,13 @@ evidence_handles、prompt_safe_observation_handle 和 remaining_needs 属权威�
 evidence_state=complete 时，只能依据 supplied evidence_excerpts；partial、pending、missing 或
 blocked 时，表达答案缺口、等待状态或 typed blocker，不把 generic semantic_result 当事实。
 
+{visible_content_authority_guidance}
+
 # 渲染步骤
 1. selected_surface_intent 是本轮语义锚点；epistemic_boundary 限定可见断言强度；
 content_plan 和 content_requirements 展开所需事实、
-理由和互动推进。relational_willingness（如果存在）是上游已选择的角色
-关系立场，必须保持其 applicable、stance、reason 和 cause_summary 的原样语义，不重新选择。
+理由和互动推进。relational_willingness（如果存在）是上游已选择的角色关系立场；按上方可见内容权威规则参与表达，
+不重新选择未被当前语义选中的内容。
 以这组权威语义组织对象、事实、行动者、受益者和回应方向。
 2. 先整体阅读 selected_surface_intent、content_plan、content_requirements、
 visible_boundaries、addressee_plan 和 delivery_profile，判断规划中的开场反应指向行动或关系本身，还是指向提问的
@@ -278,6 +283,11 @@ content_plan 中实际呈现的事实选择直接相关来源；回应包含来�
 字段必须恰好是 final_dialog。final_dialog 是由完整可见消息字符串组成的
 非空列表。
 '''
+
+
+_V2_DIALOG_GENERATOR_PROMPT = _V2_DIALOG_GENERATOR_PROMPT_TEMPLATE.format(
+    visible_content_authority_guidance=VISIBLE_CONTENT_AUTHORITY_GUIDANCE,
+)
 
 _dialog_generator_llm = LLInterface()
 _dialog_generator_llm_config = LLMCallConfig(

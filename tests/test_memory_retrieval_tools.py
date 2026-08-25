@@ -11,6 +11,7 @@ from kazusa_ai_chatbot.config import (
     CONVERSATION_SEARCH_MAX_TOP_K,
     RAG_SEARCH_DEFAULT_TOP_K,
 )
+from kazusa_ai_chatbot.memory_evolution.reset import _seed_document
 from kazusa_ai_chatbot.rag.memory_retrieval_tools import (
     conversation_message_payload,
     get_conversation,
@@ -485,3 +486,63 @@ async def test_search_persistent_memory_keyword_uses_shared_default_top_k() -> N
         await search_persistent_memory_keyword.ainvoke({"keyword": "DDR5"})
 
     assert search_memory.await_args.kwargs["limit"] == RAG_SEARCH_DEFAULT_TOP_K
+
+
+@pytest.mark.asyncio
+async def test_persistent_memory_tools_preserve_typed_authority_and_scope_metadata() -> None:
+    """Semantic and keyword memory tools keep typed rows lossless for projection."""
+
+    memory_row = dict(_seed_document(
+        {
+            "memory_name": "typed memory",
+            "content": "A certified typed memory row.",
+            "source_global_user_id": "",
+            "memory_type": "defense_rule",
+            "source_kind": "external_imported",
+            "status": "active",
+            "confidence_note": "test fixture",
+            "expiry_timestamp": None,
+        },
+        storage_timestamp_utc="2026-06-01T00:00:00+00:00",
+        updated_at="2026-06-01T00:00:00+00:00",
+    ))
+    memory_row["_id"] = _FakeObjectId()
+    memory_row["embedding"] = [0.1, 0.2]
+
+    with patch(
+        "kazusa_ai_chatbot.rag.memory_retrieval_tools.search_memory_db",
+        new_callable=AsyncMock,
+        return_value=[(0.85, memory_row)],
+    ) as search_memory:
+        semantic_result = await search_persistent_memory.ainvoke(
+            {"search_query": "typed memory"}
+        )
+        keyword_result = await search_persistent_memory_keyword.ainvoke(
+            {"keyword": "typed"}
+        )
+
+    assert search_memory.await_count == 2
+    expected_fields = (
+        "memory_unit_id",
+        "memory_type",
+        "source_kind",
+        "source_global_user_id",
+        "authority",
+        "status",
+        "privacy_review",
+    )
+    for result in (semantic_result[0], keyword_result[0]):
+        assert result["_id"] == "row-object-id"
+        for field in expected_fields:
+            assert result[field] == memory_row[field]
+            assert field in result
+        for field in (
+            "source_system",
+            "scope_type",
+            "scope_global_user_id",
+            "truth_status",
+            "origin",
+        ):
+            assert field not in result
+        assert "embedding" not in result
+        assert "evidence_refs" not in result

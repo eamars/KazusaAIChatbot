@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 from typing import Any
 
 import pytest
@@ -208,6 +209,28 @@ def test_reflection_roster_prunes_live_chat_character_and_user_lanes() -> None:
     assert roster_lanes == {"shared_memory_promotion"}
 
 
+def test_scheduled_tick_user_roster_excludes_reflection_style_lanes() -> None:
+    """Scheduled user targets keep calendar lanes, not reflection owners."""
+
+    module = _lane_router_module()
+    state = _base_state()
+    state["consolidation_origin"] = {
+        "trigger_source": "scheduled_tick",
+        "current_global_user_id": "global-user-1",
+        "storage_timestamp_utc": "2026-07-03T00:00:00+00:00",
+    }
+    target_plan = build_consolidation_target_plan(state)
+    roster_lanes = {
+        entry["lane"] for entry in module.build_lane_roster(target_plan)
+    }
+
+    assert {"user_memory_units", "active_commitment"}.issubset(
+        roster_lanes
+    )
+    assert "interaction_style_image" not in roster_lanes
+    assert "shared_memory_promotion" not in roster_lanes
+
+
 def test_lane_roster_includes_character_self_guidance_for_chat() -> None:
     """Normal user-message chats can route accepted character self-guidance."""
 
@@ -221,6 +244,50 @@ def test_lane_roster_includes_character_self_guidance_for_chat() -> None:
     assert "character_identity_growth" in roster_lanes
     assert "user_memory_units" in roster_lanes
     assert "active_commitment" in roster_lanes
+
+
+def test_lane_router_distinguishes_global_user_group_and_transient_behavior_rules(
+) -> None:
+    """The coarse roster keeps global, scoped, and transient meanings separate."""
+
+    module = _lane_router_module()
+    target_plan = build_consolidation_target_plan(_base_state())
+    roster = module.build_lane_roster(target_plan)
+    roster_lanes = {entry["lane"] for entry in roster}
+
+    assert {
+        "user_memory_units",
+        "active_commitment",
+        "character_self_guidance",
+    }.issubset(roster_lanes)
+    user_memory_taxonomy = ("持久事实", "偏好", "模式", "变化", "里程碑")
+    assert all(
+        term in module._LANE_DESCRIPTIONS["user_memory_units"]
+        for term in user_memory_taxonomy
+    )
+    assert all(term in module._ROUTER_PROMPT for term in user_memory_taxonomy)
+    group_roster = module.build_lane_roster(
+        _target_plan_for_group_without_user()
+    )
+    assert "interaction_style_image" in {
+        entry["lane"] for entry in group_roster
+    }
+    assert set(module._ROUTER_TASK_KEYS) == {
+        "lane",
+        "reason",
+        "source_keys",
+    }
+    assert set(module.CONSOLIDATION_LANE_NAMES) == EXPECTED_LANES
+
+    captured_case_fragments = (
+        "复读",
+        "猫娘",
+        "接龙",
+        "收到",
+        "阿然",
+    )
+    for fragment in captured_case_fragments:
+        assert fragment not in module._ROUTER_PROMPT
 
 
 def test_relationship_experience_can_route_character_owned_identity() -> None:
@@ -335,6 +402,91 @@ async def test_router_prompt_excludes_repository_refs(
     assert "source_refs" not in human_prompt
     assert "episode-private-root" not in human_prompt
     assert "private-message" not in human_prompt
+
+
+@pytest.mark.asyncio
+async def test_router_prompt_projects_nonempty_source_role_without_remapping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prompt projection preserves source ownership metadata verbatim."""
+
+    module = _lane_router_module()
+    captured_messages: list[Any] = []
+
+    class _Response:
+        content = (
+            '{"lane_tasks":[],"character_operational_state_task":null}'
+        )
+
+    async def _invoke(messages, *, config):
+        del config
+        captured_messages.extend(messages)
+        return _Response()
+
+    monkeypatch.setattr(module._lane_router_llm, "ainvoke", _invoke)
+    state = _base_state()
+    state["consolidation_target_plan"] = build_consolidation_target_plan(state)
+    await module.call_lane_router_llm(
+        state,
+        source_views=[
+            {
+                "source_key": "reflection_user_style_signal",
+                "source_kind": "reflection_run",
+                "summary": "A structured style signal.",
+                "source_role": "user_style_signal",
+                "source_refs": [{"reflection_run_id": "run-private-root"}],
+            },
+            {
+                "source_key": "plain_source",
+                "source_kind": "user_message",
+                "summary": "A plain source.",
+                "source_role": "",
+            },
+        ],
+        roster=module.build_lane_roster(
+            state["consolidation_target_plan"]
+        ),
+    )
+
+    payload = json.loads(str(captured_messages[1].content))
+    projected_views = payload["source_views"]
+    assert projected_views[0]["source_role"] == "user_style_signal"
+    assert "lane" not in projected_views[0]
+    assert "source_role" not in projected_views[1]
+    assert "source_refs" not in str(payload)
+    assert "run-private-root" not in str(payload)
+
+
+def test_router_prompt_declares_target_plan_and_roster_contracts() -> None:
+    """Stable prompt identifiers distinguish eligibility from output words."""
+
+    module = _lane_router_module()
+    prompt = module._ROUTER_PROMPT
+
+    assert "target_plan.write_lanes" in prompt
+    assert "lane_tasks[].lane" in prompt
+    assert "lane_roster[].lane" in prompt
+
+
+def test_router_rejects_write_lane_token_outside_offered_roster() -> None:
+    """Router output accepts only exact values offered by the roster."""
+
+    module = _lane_router_module()
+    roster = [{
+        "lane": "interaction_style_image",
+        "description": "style",
+    }]
+    output = {
+        "lane_tasks": [{
+            "lane": "user_style_image",
+            "reason": "x",
+            "source_keys": [],
+        }],
+        "character_operational_state_task": None,
+    }
+
+    with pytest.raises(ValueError, match="unknown consolidation lane"):
+        module.validate_lane_router_output(output, roster)
 
 
 @pytest.mark.parametrize(

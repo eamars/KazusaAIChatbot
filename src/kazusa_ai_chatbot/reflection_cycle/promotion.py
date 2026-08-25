@@ -10,22 +10,23 @@ from typing import Any, Literal, TypedDict
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from kazusa_ai_chatbot.config import (
-
     CONSOLIDATION_LLM_API_KEY,
     CONSOLIDATION_LLM_BASE_URL,
+    CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
     CONSOLIDATION_LLM_MODEL,
+    CONSOLIDATION_LLM_THINKING_ENABLED,
     REFLECTION_LORE_PROMOTION_ENABLED,
     REFLECTION_SELF_GUIDANCE_PROMOTION_ENABLED,
-    CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
-    CONSOLIDATION_LLM_THINKING_ENABLED,
 )
 from kazusa_ai_chatbot.db import get_character_profile
 from kazusa_ai_chatbot.db.schemas import (
     CharacterReflectionRunDoc,
     ReflectionEpisodeRefDoc,
 )
-from kazusa_ai_chatbot.memory_writer_prompt_projection import (
-    project_reflection_promotion_prompt_payload,
+from kazusa_ai_chatbot.llm_interface import (
+    LLInterface,
+    LLMCallConfig,
+    LLMThinkingConfig,
 )
 from kazusa_ai_chatbot.memory_evolution import (
     EvolvingMemoryDoc,
@@ -42,29 +43,28 @@ from kazusa_ai_chatbot.memory_evolution import (
 from kazusa_ai_chatbot.memory_evolution.identity import (
     deterministic_memory_unit_id,
 )
+from kazusa_ai_chatbot.memory_writer_prompt_projection import (
+    project_reflection_promotion_prompt_payload,
+)
+from kazusa_ai_chatbot.reflection_cycle import repository
 from kazusa_ai_chatbot.reflection_cycle.models import (
-    PromptBuildResult,
     REFLECTION_RUN_KIND_DAILY_GLOBAL_PROMOTION,
     REFLECTION_STATUS_FAILED,
     REFLECTION_STATUS_SKIPPED,
     REFLECTION_STATUS_SUCCEEDED,
+    PromptBuildResult,
     ReflectionPromotionResult,
 )
 from kazusa_ai_chatbot.reflection_cycle.projection import build_prompt_result
 from kazusa_ai_chatbot.time_boundary import format_storage_utc_for_llm
-import kazusa_ai_chatbot.reflection_cycle.repository as repository
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
-
-from kazusa_ai_chatbot.llm_interface import (
-    LLInterface,
-    LLMCallConfig,
-    LLMThinkingConfig,
-)
 logger = logging.getLogger(__name__)
 
-GLOBAL_PROMOTION_PROMPT_VERSION = "reflection_global_promotion_v1"
+GLOBAL_PROMOTION_PROMPT_VERSION = "reflection_global_promotion_v2"
+GLOBAL_PROMOTION_REVIEW_PROMPT_VERSION = "reflection_global_promotion_review_v1"
 GLOBAL_PROMOTION_PROMPT_MAX_CHARS = 25000
+GLOBAL_PROMOTION_REVIEW_PROMPT_MAX_CHARS = 25000
 PROMOTION_LANE_MEMORY_TYPE = {
     "lore": "fact",
     "self_guidance": "defense_rule",
@@ -76,8 +76,17 @@ PROMOTION_DUPLICATE_REPLACEMENT_ERROR = "replacement memory_unit_id already exis
 PROMOTION_MAX_CHANNEL_CARDS = 25
 PROMOTION_MAX_EVIDENCE_CARDS = 40
 PROMOTION_MAX_CHANNEL_CARD_CHARS = 600
-PROMOTION_MAX_EVIDENCE_CARD_CHARS = 360
+# The canonical repository envelope is 462 characters with readable fields
+# empty, leaving 178 characters for bounded readable evidence.
+PROMOTION_MAX_EVIDENCE_CARD_CHARS = 640
+# The independent reviewer receives only a bounded, lane-matched evidence set.
+PROMOTION_MAX_REVIEW_EVIDENCE_CARDS = 8
 GLOBAL_PROMOTION_ATTEMPT_LIMIT = 3
+PROMOTION_MUTATING_ACTIONS = frozenset({
+    "promote_new",
+    "supersede",
+    "merge",
+})
 _PROMOTION_DECISION_KEYS = frozenset({
     "lane",
     "decision",
@@ -91,6 +100,39 @@ _PROMOTION_DECISION_KEYS = frozenset({
     "boundary_assessment",
     "privacy_review",
     "evidence_refs",
+})
+_PROMOTER_PRIVACY_REVIEW_KEYS = frozenset({
+    "global_applicability",
+    "target_specific_meaning_removed",
+    "affects_identity_or_boundaries",
+    "private_detail_risk",
+    "user_details_removed",
+    "boundary_assessment",
+    "reviewer",
+})
+_PROMOTION_REVIEW_KEYS = frozenset({
+    "selected_candidate_id",
+    "decision",
+    "global_applicability",
+    "target_specific_meaning_removed",
+    "affects_identity_or_boundaries",
+    "private_detail_risk",
+    "user_details_removed",
+    "reason",
+})
+_PROMOTION_REVIEW_DECISIONS = frozenset({"accept", "reject"})
+_PROMOTION_REVIEW_REASON_MAX_CHARS = 500
+_CARD_READABLE_TEXT_KEYS = frozenset({
+    "active_character_utterance",
+    "day_summary",
+    "sanitized_observation",
+})
+_CARD_READABLE_LIST_KEYS = frozenset({
+    "conversation_quality_patterns",
+    "cross_hour_topics",
+    "privacy_risk_labels",
+    "source_privacy_notes",
+    "validation_warning_labels",
 })
 
 
@@ -112,11 +154,33 @@ class GlobalPromotionContractError(RuntimeError):
         self.validation_errors = list(validation_errors)
 
 
+class GlobalPromotionReviewContractError(RuntimeError):
+    """Raised when the one-shot independent review is structurally invalid."""
+
+    def __init__(self, validation_errors: list[str]) -> None:
+        super().__init__(
+            "global promotion review contract failed: "
+            + "; ".join(validation_errors)
+        )
+        self.validation_errors = list(validation_errors)
+
+
 class ReflectionBoundaryAssessment(TypedDict):
     """Boundary review emitted by the global promotion prompt."""
 
     verdict: Literal["acceptable", "needs_human_review", "blocked"]
     affects_identity_or_boundaries: bool
+    reason: str
+
+
+class ReflectionScopeCertificate(TypedDict):
+    """Six-field independent scope and privacy certificate."""
+
+    global_applicability: Literal["global", "scoped", "absent"]
+    target_specific_meaning_removed: bool
+    affects_identity_or_boundaries: bool
+    private_detail_risk: Literal["low", "medium", "high"]
+    user_details_removed: bool
     reason: str
 
 
@@ -135,6 +199,10 @@ class ReflectionPromotionDecision(TypedDict, total=False):
     boundary_assessment: ReflectionBoundaryAssessment
     privacy_review: MemoryPrivacyReview
     evidence_refs: list[MemoryEvidenceRef]
+    promoter_privacy_review: MemoryPrivacyReview
+    reviewer_privacy_review: ReflectionScopeCertificate
+    review_decision: Literal["accept", "reject", "not_requested"]
+    review_admitted: bool
 
 
 class ChannelDailySynthesisCard(TypedDict):
@@ -164,7 +232,8 @@ class ReflectionEvidenceCard(TypedDict, total=False):
     active_character_utterance: str
     sanitized_observation: str
     supports: list[Literal["lore", "self_guidance"]]
-    private_detail_risk: Literal["low", "medium", "high"]
+    source_privacy_notes: list[str]
+    private_detail_risk: Literal["low", "medium", "high", "unreviewed"]
 
 
 class PromotionLimits(TypedDict):
@@ -186,6 +255,15 @@ class GlobalPromotionPromptPayload(TypedDict):
     review_questions: list[str]
 
 
+class PromotionReviewPromptPayload(TypedDict):
+    """Prompt payload for the independent candidate review stage."""
+
+    evaluation_mode: Literal["daily_global_promotion_review"]
+    character_local_date: str
+    candidates: list[dict[str, str]]
+    evidence_cards: list[ReflectionEvidenceCard]
+
+
 GLOBAL_PROMOTION_SYSTEM_PROMPT = '''\
 # 任务
 你负责审阅每日频道反思，只输出可验证、去隐私、可长期使用的全局晋升决定。
@@ -194,7 +272,7 @@ GLOBAL_PROMOTION_SYSTEM_PROMPT = '''\
 在 lore 与 self_guidance 两个通道中，各最多选择一条高信号内容；没有足够证据时输出 no_action 或 reject。
 
 # 语言政策
-JSON key 和枚举值必须保持英文。你新生成的自由文本字段必须使用简体中文。证据片段保持原文。
+JSON 字段名和枚举值必须保持英文。你新生成的自由文本字段必须使用简体中文。证据片段保持原文。
 
 # 记忆视角契约
 - 本契约适用于你生成的可长期保存的 `sanitized_memory_name` 与 `sanitized_content`。
@@ -214,10 +292,12 @@ JSON key 和枚举值必须保持英文。你新生成的自由文本字段必�
 1. 检查 channel_daily_syntheses，只把它当作压缩后的反思证据。
 2. 检查 evidence_cards，确认是否有 source_utterance 支持 `{character_name}` 说过或同意过的内容。
 3. 排除用户事实、用户偏好、关系承诺、健康信息、私密身份信息。
-4. 分别判断 lore 与 self_guidance 是否有 high signal。
+   先查看 source_privacy_notes；private_detail_risk 为 unreviewed 表示来源评估缺失，
+   不得把它当作 low。只有经过当前审阅确认后，才可给出写入结论。
+4. 分别判断 lore 与 self_guidance 是否有高信号。
 5. 如果证据 private_detail_risk 是 high，必须输出 reject，并让 privacy_review.private_detail_risk 保持 high。
 6. evidence_refs.reflection_run_id 只能来自 evidence_cards.source_reflection_run_ids；不要使用 daily_run_id。
-7. 输出 promotion_decisions；不要输出数据库字段、Mongo 查询、embedding、source_global_user_id。
+7. 输出 promotion_decisions；不要输出数据库字段、数据库查询、向量、source_global_user_id。
 
 # 输入格式
 {{
@@ -225,8 +305,8 @@ JSON key 和枚举值必须保持英文。你新生成的自由文本字段必�
   "character_local_date": "YYYY-MM-DD",
   "channel_daily_syntheses": [
     {{
-      "daily_run_id": "reflection run id",
-      "scope_ref": "scope_x",
+      "daily_run_id": "反思运行标识",
+      "scope_ref": "范围标识",
       "channel_type": "private|group|system|unknown",
       "character_local_date": "YYYY-MM-DD",
       "confidence": "low|medium|high",
@@ -239,16 +319,17 @@ JSON key 和枚举值必须保持英文。你新生成的自由文本字段必�
   ],
   "evidence_cards": [
     {{
-      "evidence_card_id": "card id",
-      "source_reflection_run_ids": ["run id"],
-      "scope_ref": "scope_x",
+      "evidence_card_id": "证据卡标识",
+      "source_reflection_run_ids": ["反思运行标识"],
+      "scope_ref": "范围标识",
       "channel_type": "private|group|system|unknown",
       "character_local_date": "YYYY-MM-DD",
-      "captured_at": "YYYY-MM-DD HH:MM evidence label",
+      "captured_at": "YYYY-MM-DD HH:MM 证据标签",
       "source_utterance": "{character_name} 原文片段",
       "sanitized_observation": "去身份化观察",
       "supports": ["lore", "self_guidance"],
-      "private_detail_risk": "low|medium|high"
+      "source_privacy_notes": ["来源隐私说明"],
+      "private_detail_risk": "low|medium|high|unreviewed"
     }}
   ],
   "promotion_limits": {{
@@ -279,6 +360,9 @@ ReflectionPromotionDecision 字段：
     "reason": "理由"
   }},
   "privacy_review": {{
+    "global_applicability": "global|scoped|absent",
+    "target_specific_meaning_removed": true,
+    "affects_identity_or_boundaries": false,
     "private_detail_risk": "low|medium|high",
     "user_details_removed": true,
     "boundary_assessment": "边界摘要",
@@ -286,22 +370,81 @@ ReflectionPromotionDecision 字段：
   }},
   "evidence_refs": [
     {{
-      "reflection_run_id": "source run id",
-      "scope_ref": "scope_x",
-      "captured_at": "YYYY-MM-DD HH:MM evidence label",
+      "reflection_run_id": "来源运行标识",
+      "scope_ref": "范围标识",
+      "captured_at": "YYYY-MM-DD HH:MM 证据标签",
       "source": "reflection_cycle"
     }}
   ]
 }}
 
 # 禁止事项
-不要编造证据。不要从用户发言改写成 `{character_name}` 的长期规则。不要把 reject/no_action 改成 promote。
-不要输出 source_global_user_id、Mongo 查询字段、embedding、原始 transcript、用户身份、用户承诺、健康细节或私密关系事实。
+不要编造证据。不要从用户发言改写成 `{character_name}` 的长期规则。不要把 reject/no_action 改成 promote_new。
+不要输出 source_global_user_id、数据库查询字段、向量、原始记录、用户身份、用户承诺、健康细节或私密关系事实。
+privacy_review 必须完整返回 global_applicability、target_specific_meaning_removed、
+affects_identity_or_boundaries、private_detail_risk、user_details_removed、
+boundary_assessment 和 reviewer；这些字段必须与 boundary_assessment 保持一致。
+'''
+
+GLOBAL_PROMOTION_REVIEW_SYSTEM_PROMPT = '''\
+# 任务
+你负责独立审阅已经提出的全局晋升候选项。你只能判断每个候选项是否可接受及其范围和隐私证书，
+不得改写候选项的名称、内容、通道、类型、权威或证据。
+
+# 独立性
+候选项只包含待审阅的精确含义和稳定标识。不要寻找或推测提出阶段的判断；只依据候选项、来源证据
+和 source_privacy_notes 独立判断。source_privacy_notes 为空或 private_detail_risk 为 unreviewed
+时，表示来源评估未完成，不等于 low。
+
+# 审阅步骤
+1. 对每个 selected_candidate_id 恰好返回一条审阅结果。
+2. 移除来源用户、被称呼对象、关系对象和私密场景后，判断候选含义是否仍对角色与一般他人准确且适合。
+3. 只有含义在移除特定对象后仍然成立时，才使用 global 并将 target_specific_meaning_removed 设为 true。
+4. 任何身份、权限、同意或边界影响都要求 affects_identity_or_boundaries 为 true，并拒绝该候选项。
+5. 只有不必要的用户细节已移除且当前审阅风险为 low 时，才可 accept；否则使用 reject。
+
+# 输出格式
+只返回合法 JSON，顶层只能有 reviews：
+{{
+  "reviews": [
+    {{
+      "selected_candidate_id": "候选项中的稳定标识",
+      "decision": "accept|reject",
+      "global_applicability": "global|scoped|absent",
+      "target_specific_meaning_removed": true,
+      "affects_identity_or_boundaries": false,
+      "private_detail_risk": "low|medium|high",
+      "user_details_removed": true,
+      "reason": "有边界的独立审阅理由"
+    }}
+  ]
+}}
+
+# 禁止事项
+不要输出候选项未提供的名称、内容、通道、类型、权威、协议或证据。不要输出提出阶段的
+privacy_review、boundary_assessment、global_applicability 或其他范围判断。不要输出数据库字段、
+数据库查询、向量、source_global_user_id、原始记录、用户身份、用户承诺或敏感隐私信息。
 '''
 _llm_interface = LLInterface()
 _global_promotion_llm = LLInterface()
+_global_promotion_review_llm = LLInterface()
 _global_promotion_llm_config = LLMCallConfig(
     stage_name=__name__,
+    route_name="CONSOLIDATION_LLM",
+    base_url=CONSOLIDATION_LLM_BASE_URL,
+    api_key=CONSOLIDATION_LLM_API_KEY,
+    model=CONSOLIDATION_LLM_MODEL,
+    temperature=0.2,
+    top_p=0.8,
+    top_k=None,
+    max_completion_tokens=CONSOLIDATION_LLM_MAX_COMPLETION_TOKENS,
+    presence_penalty=None,
+    thinking=LLMThinkingConfig(
+        enabled=CONSOLIDATION_LLM_THINKING_ENABLED,
+    ),
+)
+_global_promotion_review_llm_config = LLMCallConfig(
+    stage_name=f"{__name__}.review",
     route_name="CONSOLIDATION_LLM",
     base_url=CONSOLIDATION_LLM_BASE_URL,
     api_key=CONSOLIDATION_LLM_API_KEY,
@@ -330,7 +473,25 @@ async def run_global_promotion_llm(
     raw_output = str(response.content)
     parsed = parse_llm_json_output(raw_output)
     if not isinstance(parsed, dict):
-        raise ValueError("global promotion output must be a JSON object")
+        raise TypeError("global promotion output must be a JSON object")
+    return_value = dict(parsed)
+    return return_value
+
+
+async def run_global_promotion_review_llm(
+    *,
+    prompt: PromptBuildResult,
+) -> dict[str, Any]:
+    """Run the one-shot independent scope/privacy review LLM."""
+
+    response = await _global_promotion_review_llm.ainvoke([
+        SystemMessage(content=prompt.system_prompt),
+        HumanMessage(content=prompt.human_prompt),
+    ], config=_global_promotion_review_llm_config)
+    raw_output = str(response.content)
+    parsed = parse_llm_json_output(raw_output)
+    if not isinstance(parsed, dict):
+        raise TypeError("global promotion review output must be a JSON object")
     return_value = dict(parsed)
     return return_value
 
@@ -376,6 +537,274 @@ async def _run_validated_global_promotion_llm(
     )
 
 
+async def _review_promotion_candidates(
+    *,
+    decisions: list[ReflectionPromotionDecision],
+    payload: GlobalPromotionPromptPayload,
+) -> tuple[list[ReflectionPromotionDecision], list[str]]:
+    """Review mutating promoter candidates once before similarity or writes."""
+
+    normalized_decisions = [dict(decision) for decision in decisions]
+    candidates = [
+        decision
+        for decision in normalized_decisions
+        if decision.get("decision") in PROMOTION_MUTATING_ACTIONS
+    ]
+    if not candidates:
+        return_value = (normalized_decisions, [])
+        return return_value
+
+    review_payload = _promotion_review_payload(candidates, payload)
+    review_prompt = build_global_promotion_review_prompt(review_payload)
+    parsed_review = await run_global_promotion_review_llm(prompt=review_prompt)
+    review_errors = _promotion_review_contract_errors(
+        parsed_review,
+        candidates,
+    )
+    if review_errors:
+        raise GlobalPromotionReviewContractError(review_errors)
+
+    reviews = parsed_review["reviews"]
+    reviews_by_candidate_id = {
+        str(review["selected_candidate_id"]): review
+        for review in reviews
+    }
+    reviewed_decisions: list[ReflectionPromotionDecision] = []
+    for decision in normalized_decisions:
+        if decision.get("decision") not in PROMOTION_MUTATING_ACTIONS:
+            reviewed_decisions.append(decision)
+            continue
+        candidate_id = str(decision["selected_candidate_id"])
+        review = reviews_by_candidate_id[candidate_id]
+        reviewer_certificate = _reviewer_certificate_from_review(review)
+        promoter_certificate = dict(decision["privacy_review"])
+        decision["promoter_privacy_review"] = promoter_certificate
+        decision["reviewer_privacy_review"] = reviewer_certificate
+        decision["review_decision"] = review["decision"]
+        decision["review_admitted"] = _review_admits_write(
+            promoter_certificate=promoter_certificate,
+            reviewer_certificate=reviewer_certificate,
+            review_decision=str(review["decision"]),
+        )
+        decision["privacy_review"] = _privacy_review_from_certificate(
+            reviewer_certificate,
+        )
+        reviewed_decisions.append(decision)
+    result = (reviewed_decisions, list(review_prompt.validation_warnings))
+    return result
+
+
+def _promotion_review_payload(
+    candidates: list[ReflectionPromotionDecision],
+    payload: GlobalPromotionPromptPayload,
+) -> PromotionReviewPromptPayload:
+    """Project candidate meaning and source evidence without promoter judgments."""
+
+    candidate_payload = [
+        {
+            "selected_candidate_id": str(decision["selected_candidate_id"]),
+            "lane": str(decision["lane"]),
+            "memory_type": str(decision["memory_type"]),
+            "sanitized_memory_name": str(decision["sanitized_memory_name"]),
+            "sanitized_content": str(decision["sanitized_content"]),
+        }
+        for decision in candidates
+    ]
+    candidate_lanes = {
+        str(candidate.get("lane", ""))
+        for candidate in candidates
+    }
+    evidence_cards: list[ReflectionEvidenceCard] = []
+    seen_card_ids: set[str] = set()
+    source_cards = payload["evidence_cards"]
+    ordered_lanes = list(dict.fromkeys(
+        str(candidate.get("lane", ""))
+        for candidate in candidates
+    ))
+    selected_source_indexes: set[int] = set()
+    for lane in ordered_lanes:
+        for source_index, card in enumerate(source_cards):
+            supports = card.get("supports", [])
+            card_id = str(card.get("evidence_card_id", "") or "")
+            if (
+                not isinstance(supports, list)
+                or lane not in {str(value) for value in supports}
+                or (card_id and card_id in seen_card_ids)
+            ):
+                continue
+            evidence_cards.append(
+                _cap_serialized_card(
+                    dict(card),
+                    PROMOTION_MAX_EVIDENCE_CARD_CHARS,
+                ),
+            )
+            selected_source_indexes.add(source_index)
+            if card_id:
+                seen_card_ids.add(card_id)
+            break
+    for source_index, card in enumerate(source_cards):
+        if source_index in selected_source_indexes:
+            continue
+        supports = card.get("supports", [])
+        if not isinstance(supports, list):
+            continue
+        if not candidate_lanes.intersection(str(lane) for lane in supports):
+            continue
+        card_id = str(card.get("evidence_card_id", "") or "")
+        if card_id and card_id in seen_card_ids:
+            continue
+        bounded_card = _cap_serialized_card(
+            dict(card),
+            PROMOTION_MAX_EVIDENCE_CARD_CHARS,
+        )
+        evidence_cards.append(bounded_card)
+        if card_id:
+            seen_card_ids.add(card_id)
+        if len(evidence_cards) >= PROMOTION_MAX_REVIEW_EVIDENCE_CARDS:
+            break
+    review_payload: PromotionReviewPromptPayload = {
+        "evaluation_mode": "daily_global_promotion_review",
+        "character_local_date": payload["character_local_date"],
+        "candidates": candidate_payload,
+        "evidence_cards": evidence_cards,
+    }
+    return review_payload
+
+
+def _promotion_review_contract_errors(
+    parsed_review: Mapping[str, Any],
+    candidates: list[ReflectionPromotionDecision],
+) -> list[str]:
+    """Validate exact one-to-one reviewer coverage and certificate shape."""
+
+    errors: list[str] = []
+    if set(parsed_review) != {"reviews"}:
+        return ["review output must contain exactly reviews"]
+    raw_reviews = parsed_review.get("reviews")
+    if not isinstance(raw_reviews, list):
+        return ["reviews must be a list"]
+    expected_ids = {
+        str(candidate["selected_candidate_id"])
+        for candidate in candidates
+    }
+    if len(raw_reviews) != len(expected_ids):
+        errors.append("review coverage must match every mutating candidate")
+    observed_ids: list[str] = []
+    for index, raw_review in enumerate(raw_reviews):
+        if not isinstance(raw_review, Mapping):
+            errors.append(f"review[{index}] must be an object")
+            continue
+        if set(raw_review) != _PROMOTION_REVIEW_KEYS:
+            errors.append(f"review[{index}] has an invalid key set")
+            continue
+        candidate_id = raw_review.get("selected_candidate_id")
+        if not isinstance(candidate_id, str) or not candidate_id.strip():
+            errors.append(f"review[{index}] selected_candidate_id is required")
+            continue
+        observed_ids.append(candidate_id)
+        if candidate_id not in expected_ids:
+            errors.append(f"review[{index}] references an unknown candidate")
+        if raw_review.get("decision") not in _PROMOTION_REVIEW_DECISIONS:
+            errors.append(f"review[{index}] has an invalid decision")
+        global_applicability = raw_review.get("global_applicability")
+        if global_applicability not in {"global", "scoped", "absent"}:
+            errors.append(f"review[{index}] has an invalid applicability")
+        for field_name in (
+            "target_specific_meaning_removed",
+            "affects_identity_or_boundaries",
+            "user_details_removed",
+        ):
+            if not isinstance(raw_review.get(field_name), bool):
+                errors.append(f"review[{index}] {field_name} must be boolean")
+        if raw_review.get("private_detail_risk") not in {
+            "low",
+            "medium",
+            "high",
+        }:
+            errors.append(f"review[{index}] has an invalid privacy risk")
+        reason = raw_review.get("reason")
+        if (
+            not isinstance(reason, str)
+            or not reason.strip()
+            or len(reason) > _PROMOTION_REVIEW_REASON_MAX_CHARS
+        ):
+            errors.append(f"review[{index}] reason is invalid")
+    if len(observed_ids) != len(set(observed_ids)):
+        errors.append("review candidate ids must be unique")
+    if set(observed_ids) != expected_ids:
+        errors.append("review candidate ids must cover exactly the candidates")
+    return errors
+
+
+def _reviewer_certificate_from_review(
+    review: Mapping[str, Any],
+) -> ReflectionScopeCertificate:
+    """Extract the six validated reviewer certificate fields."""
+
+    certificate: ReflectionScopeCertificate = {
+        "global_applicability": review["global_applicability"],
+        "target_specific_meaning_removed": review[
+            "target_specific_meaning_removed"
+        ],
+        "affects_identity_or_boundaries": review[
+            "affects_identity_or_boundaries"
+        ],
+        "private_detail_risk": review["private_detail_risk"],
+        "user_details_removed": review["user_details_removed"],
+        "reason": review["reason"],
+    }
+    return certificate
+
+
+def _review_admits_write(
+    *,
+    promoter_certificate: Mapping[str, Any],
+    reviewer_certificate: Mapping[str, Any],
+    review_decision: str,
+) -> bool:
+    """Return whether both certificates independently admit one write."""
+
+    promoter_scope_ok = (
+        promoter_certificate.get("global_applicability") == "global"
+        and promoter_certificate.get("target_specific_meaning_removed") is True
+        and promoter_certificate.get("affects_identity_or_boundaries") is False
+    )
+    reviewer_scope_ok = (
+        reviewer_certificate.get("global_applicability") == "global"
+        and reviewer_certificate.get("target_specific_meaning_removed") is True
+        and reviewer_certificate.get("affects_identity_or_boundaries") is False
+        and reviewer_certificate.get("private_detail_risk") == "low"
+        and reviewer_certificate.get("user_details_removed") is True
+    )
+    return_value = (
+        review_decision == "accept"
+        and promoter_scope_ok
+        and reviewer_scope_ok
+    )
+    return return_value
+
+
+def _privacy_review_from_certificate(
+    certificate: ReflectionScopeCertificate,
+) -> MemoryPrivacyReview:
+    """Map the actual final reviewer certificate to the memory contract."""
+
+    privacy_review: MemoryPrivacyReview = {
+        "global_applicability": certificate["global_applicability"],
+        "target_specific_meaning_removed": certificate[
+            "target_specific_meaning_removed"
+        ],
+        "affects_identity_or_boundaries": certificate[
+            "affects_identity_or_boundaries"
+        ],
+        "private_detail_risk": certificate["private_detail_risk"],
+        "user_details_removed": certificate["user_details_removed"],
+        "boundary_assessment": certificate["reason"],
+        "reviewer": "automated_llm",
+    }
+    return privacy_review
+
+
 def build_global_promotion_prompt(
     payload: GlobalPromotionPromptPayload,
     *,
@@ -393,6 +822,19 @@ def build_global_promotion_prompt(
         ),
         human_payload=projected_payload,
         max_prompt_chars=GLOBAL_PROMOTION_PROMPT_MAX_CHARS,
+    )
+    return prompt
+
+
+def build_global_promotion_review_prompt(
+    payload: PromotionReviewPromptPayload,
+) -> PromptBuildResult:
+    """Build the independent candidate scope/privacy review prompt."""
+
+    prompt = build_prompt_result(
+        system_prompt=GLOBAL_PROMOTION_REVIEW_SYSTEM_PROMPT,
+        human_payload=payload,
+        max_prompt_chars=GLOBAL_PROMOTION_REVIEW_PROMPT_MAX_CHARS,
     )
     return prompt
 
@@ -479,7 +921,7 @@ async def _run_global_reflection_promotion(
             daily_docs=daily_docs,
             character_local_date=character_local_date,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - payload construction fails closed
         failed_result = await _fail_global_promotion(
             result=result,
             character_local_date=character_local_date,
@@ -538,7 +980,7 @@ async def _run_global_reflection_promotion(
             prompt=prompt,
             payload=payload,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - promoter failure fails closed
         attempt_count = int(getattr(exc, "attempt_count", 1))
         failed_result = await _fail_global_promotion(
             result=result,
@@ -549,10 +991,33 @@ async def _run_global_reflection_promotion(
             exc=exc,
         )
         return failed_result
+    try:
+        decisions, review_warnings = await _review_promotion_candidates(
+            decisions=decisions,
+            payload=payload,
+        )
+    except Exception as exc:  # noqa: BLE001 - reviewer failure fails closed
+        failed_result = await _fail_global_promotion(
+            result=result,
+            character_local_date=character_local_date,
+            source_run_ids=source_run_ids,
+            source_episode_refs=source_episode_refs,
+            attempt_count=attempt_count,
+            exc=exc,
+            output=parsed_output,
+            promotion_decisions=[dict(decision) for decision in decisions],
+            validation_warnings=(
+                payload_warnings
+                + list(prompt.validation_warnings)
+                + contract_warnings
+            ),
+        )
+        return failed_result
     validation_warnings = (
         payload_warnings
         + list(prompt.validation_warnings)
         + contract_warnings
+        + review_warnings
     )
     result.promotion_decisions = [dict(decision) for decision in decisions]
 
@@ -626,7 +1091,7 @@ async def _run_global_reflection_promotion(
         result.validation_warnings.append(result.defer_reason)
         logger.exception(
             "Reflection promotion failed during write phase: "
-            f"character_local_date={character_local_date} error={exc}"
+            f"character_local_date={character_local_date}, error={exc}"
         )
         failed_run = await _persist_global_run(
             character_local_date=character_local_date,
@@ -694,6 +1159,9 @@ async def _fail_global_promotion(
     source_episode_refs: list[ReflectionEpisodeRefDoc],
     attempt_count: int,
     exc: Exception,
+    output: dict[str, Any] | None = None,
+    promotion_decisions: list[dict[str, Any]] | None = None,
+    validation_warnings: list[str] | None = None,
 ) -> ReflectionPromotionResult:
     """Record one failed promotion unit after preparation or LLM failure."""
 
@@ -707,11 +1175,11 @@ async def _fail_global_promotion(
         character_local_date=character_local_date,
         source_run_ids=source_run_ids,
         source_episode_refs=source_episode_refs,
-        output={"promotion_decisions": []},
-        promotion_decisions=[],
+        output=output or {"promotion_decisions": []},
+        promotion_decisions=promotion_decisions or [],
         status=REFLECTION_STATUS_FAILED,
         attempt_count=attempt_count,
-        validation_warnings=[result.defer_reason],
+        validation_warnings=(validation_warnings or []) + [result.defer_reason],
         error=result.defer_reason,
     )
     result.run_ids.append(str(failed_run["run_id"]))
@@ -826,6 +1294,94 @@ def _promotion_decisions_from_output(
     return decisions
 
 
+def _boundary_assessment_contract_errors(
+    index: int,
+    boundary_assessment: Mapping[str, Any],
+) -> list[str]:
+    """Validate the promoter boundary assessment without semantic repair."""
+
+    errors: list[str] = []
+    expected_keys = {
+        "verdict",
+        "affects_identity_or_boundaries",
+        "reason",
+    }
+    if set(boundary_assessment) != expected_keys:
+        errors.append(
+            f"decision[{index}] boundary_assessment has an invalid key set"
+        )
+        return errors
+    if boundary_assessment.get("verdict") not in {
+        "acceptable",
+        "needs_human_review",
+        "blocked",
+    }:
+        errors.append(f"decision[{index}] boundary verdict is invalid")
+    if not isinstance(
+        boundary_assessment.get("affects_identity_or_boundaries"),
+        bool,
+    ):
+        errors.append(
+            f"decision[{index}] boundary effect must be boolean"
+        )
+    reason = boundary_assessment.get("reason")
+    if not isinstance(reason, str) or not reason.strip():
+        errors.append(f"decision[{index}] boundary reason is required")
+    return errors
+
+
+def _promoter_privacy_review_contract_errors(
+    index: int,
+    privacy_review: Mapping[str, Any],
+    boundary_assessment: Mapping[str, Any] | None,
+) -> list[str]:
+    """Validate the promoter's exact learned-memory privacy certificate."""
+
+    errors: list[str] = []
+    if set(privacy_review) != _PROMOTER_PRIVACY_REVIEW_KEYS:
+        errors.append(
+            f"decision[{index}] privacy_review has an invalid key set"
+        )
+        return errors
+    if privacy_review.get("global_applicability") not in {
+        "global",
+        "scoped",
+        "absent",
+    }:
+        errors.append(f"decision[{index}] privacy applicability is invalid")
+    for field_name in (
+        "target_specific_meaning_removed",
+        "affects_identity_or_boundaries",
+        "user_details_removed",
+    ):
+        if not isinstance(privacy_review.get(field_name), bool):
+            errors.append(f"decision[{index}] privacy {field_name} must be boolean")
+    if privacy_review.get("private_detail_risk") not in {
+        "low",
+        "medium",
+        "high",
+    }:
+        errors.append(f"decision[{index}] privacy risk is invalid")
+    boundary_summary = privacy_review.get("boundary_assessment")
+    if not isinstance(boundary_summary, str) or not boundary_summary.strip():
+        errors.append(f"decision[{index}] privacy boundary assessment is required")
+    if privacy_review.get("reviewer") != "automated_llm":
+        errors.append(f"decision[{index}] privacy reviewer must be automated_llm")
+    if (
+        isinstance(boundary_assessment, Mapping)
+        and isinstance(
+            boundary_assessment.get("affects_identity_or_boundaries"),
+            bool,
+        )
+        and privacy_review.get("affects_identity_or_boundaries")
+        != boundary_assessment.get("affects_identity_or_boundaries")
+    ):
+        errors.append(
+            f"decision[{index}] privacy and boundary effects disagree"
+        )
+    return errors
+
+
 def _global_promotion_contract_errors(
     parsed_output: Mapping[str, Any],
 ) -> list[str]:
@@ -880,13 +1436,30 @@ def _global_promotion_contract_errors(
                 errors.append(
                     f"decision[{index}] {field_name} must be text"
                 )
-        if not isinstance(raw_decision.get("boundary_assessment"), Mapping):
+        boundary_assessment = raw_decision.get("boundary_assessment")
+        if not isinstance(boundary_assessment, Mapping):
             errors.append(
                 f"decision[{index}] boundary_assessment must be an object"
             )
-        if not isinstance(raw_decision.get("privacy_review"), Mapping):
+        else:
+            errors.extend(
+                _boundary_assessment_contract_errors(
+                    index,
+                    boundary_assessment,
+                )
+            )
+        privacy_review = raw_decision.get("privacy_review")
+        if not isinstance(privacy_review, Mapping):
             errors.append(
                 f"decision[{index}] privacy_review must be an object"
+            )
+        else:
+            errors.extend(
+                _promoter_privacy_review_contract_errors(
+                    index,
+                    privacy_review,
+                    boundary_assessment,
+                )
             )
         if not isinstance(raw_decision.get("evidence_refs"), list):
             errors.append(
@@ -986,6 +1559,27 @@ def _validate_promote_decision(
     if not isinstance(privacy_review, dict):
         warnings.append(f"decision[{index}] privacy_review is required")
     else:
+        promoter_privacy_errors = _promoter_privacy_review_contract_errors(
+            index,
+            privacy_review,
+            decision.get("boundary_assessment"),
+        )
+        warnings.extend(promoter_privacy_errors)
+        if promoter_privacy_errors:
+            return_value = warnings
+            return return_value
+        if privacy_review.get("global_applicability") != "global":
+            warnings.append(
+                f"decision[{index}] global applicability blocks write"
+            )
+        if privacy_review.get("target_specific_meaning_removed") is not True:
+            warnings.append(
+                f"decision[{index}] target-specific meaning remains"
+            )
+        if privacy_review.get("affects_identity_or_boundaries") is not False:
+            warnings.append(
+                f"decision[{index}] identity or boundary effect blocks write"
+            )
         if privacy_review.get("user_details_removed") is not True:
             warnings.append(f"decision[{index}] user details must be removed")
         private_risk = privacy_review.get("private_detail_risk")
@@ -1044,6 +1638,15 @@ async def _write_validated_promotion_decisions(
             logger.info(
                 "Reflection promotion no-write decision: "
                 f"lane={lane} decision={decision.get('decision')}"
+            )
+            continue
+        if decision.get("review_admitted") is not True:
+            warnings.append(
+                f"independent review did not admit candidate: lane={lane}"
+            )
+            logger.info(
+                "Reflection promotion reviewer blocked candidate: "
+                f"lane={lane} review_decision={decision.get('review_decision')}"
             )
             continue
         decision_warnings = _validate_promote_decision(index, decision)
@@ -1302,9 +1905,10 @@ def _memory_document_for_decision(
     )
     source_lineages = list(dict.fromkeys(source_lineage_ids))
     lineage_id = memory_unit_id
-    if mutation_action == "supersede" and source_lineages:
-        lineage_id = source_lineages[0]
-    elif mutation_action == "merge" and len(source_lineages) == 1:
+    if (
+        (mutation_action == "supersede" and source_lineages)
+        or (mutation_action == "merge" and len(source_lineages) == 1)
+    ):
         lineage_id = source_lineages[0]
     privacy_review: MemoryPrivacyReview = dict(decision["privacy_review"])
     privacy_review["reviewer"] = "automated_llm"
@@ -1450,6 +2054,11 @@ def _evidence_cards_from_hourly_doc(
         max_items=2,
         max_chars=120,
     )
+    source_privacy_notes = _compact_text_items(
+        output.get("privacy_notes"),
+        max_items=2,
+        max_chars=48,
+    )
     topic_summary = str(output.get("topic_summary", "") or "")
     cards: list[ReflectionEvidenceCard] = []
     scope = hourly_doc["scope"]
@@ -1475,10 +2084,22 @@ def _evidence_cards_from_hourly_doc(
         "active_character_utterance": _preview_text(lead_utterance, 180),
         "sanitized_observation": _preview_text(observation, 180),
         "supports": ["lore", "self_guidance"],
-        "private_detail_risk": "low",
+        "source_privacy_notes": source_privacy_notes,
+        "private_detail_risk": _source_privacy_risk(output),
     }
     cards.append(_cap_serialized_card(card, PROMOTION_MAX_EVIDENCE_CARD_CHARS))
     return cards
+
+
+def _source_privacy_risk(output: Mapping[str, Any]) -> str:
+    """Return an explicit source risk or preserve an unresolved assessment."""
+
+    risk = output.get("private_detail_risk")
+    if risk in {"low", "medium", "high"}:
+        return_value = str(risk)
+        return return_value
+    return_value = "unreviewed"
+    return return_value
 
 
 def _compact_text_items(
@@ -1516,20 +2137,66 @@ def _cap_serialized_card(
     card: dict[str, Any],
     max_chars: int,
 ) -> dict[str, Any]:
-    """Trim long text fields until the serialized card fits the cap."""
+    """Bound declared readable fields while preserving envelope semantics.
+
+    Identity, provenance, enum, and permission fields are never shortened. A
+    caller-owned envelope that cannot fit through its readable fields fails
+    closed instead of returning a card over the declared serialized cap.
+    """
+
+    if not isinstance(card, dict):
+        raise TypeError("card must be a dictionary")
+    if isinstance(max_chars, bool) or not isinstance(max_chars, int):
+        raise TypeError("max_chars must be an integer")
+    if max_chars <= 0:
+        raise ValueError("max_chars must be positive")
 
     capped = dict(card)
-    while len(json.dumps(capped, ensure_ascii=False, sort_keys=True)) > max_chars:
+    while True:
+        serialized_length = len(
+            json.dumps(capped, ensure_ascii=False, sort_keys=True),
+        )
+        if serialized_length <= max_chars:
+            return capped
+
         longest_key = ""
+        longest_index = -1
         longest_value = ""
         for key, value in capped.items():
-            if isinstance(value, str) and len(value) > len(longest_value):
+            if (
+                isinstance(value, str)
+                and key in _CARD_READABLE_TEXT_KEYS
+                and len(value) > len(longest_value)
+            ):
                 longest_key = key
+                longest_index = -1
                 longest_value = value
-        if not longest_key or len(longest_value) <= 40:
-            break
-        capped[longest_key] = _preview_text(longest_value, len(longest_value) - 20)
-    return capped
+            elif isinstance(value, list) and key in _CARD_READABLE_LIST_KEYS:
+                for index, item in enumerate(value):
+                    if isinstance(item, str) and len(item) > len(longest_value):
+                        longest_key = key
+                        longest_index = index
+                        longest_value = item
+
+        if not longest_key:
+            raise ValueError(
+                "card cannot fit within serialized cap without changing "
+                "identity/provenance/enums",
+            )
+
+        target_chars = max(0, len(longest_value) - 20)
+        if target_chars <= 3:
+            bounded_value = ""
+        else:
+            bounded_value = _preview_text(longest_value, target_chars)
+        if bounded_value == longest_value:
+            bounded_value = ""
+        if longest_index >= 0:
+            bounded_items = list(capped[longest_key])
+            bounded_items[longest_index] = bounded_value
+            capped[longest_key] = bounded_items
+        else:
+            capped[longest_key] = bounded_value
 
 
 def _preview_text(value: str, max_chars: int) -> str:

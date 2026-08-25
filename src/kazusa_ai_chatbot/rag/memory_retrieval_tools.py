@@ -1,5 +1,6 @@
 import re
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from langchain_core.tools import tool
 
@@ -18,6 +19,58 @@ from kazusa_ai_chatbot.utils import (
 )
 
 _CQ_WIRE_SEGMENT_RE = re.compile(r"\[CQ:[^\]]*\]")
+_PERSISTENT_MEMORY_TYPED_FIELDS = (
+    "unit_id",
+    "unit_type",
+    "global_user_id",
+    "memory_unit_id",
+    "memory_type",
+    "source_kind",
+    "source_system",
+    "source_global_user_id",
+    "scope_type",
+    "scope_global_user_id",
+    "authority",
+    "truth_status",
+    "origin",
+    "status",
+    "privacy_review",
+)
+
+
+def _persistent_memory_payload(
+    memory: Mapping[str, Any],
+    *,
+    score: float | None = None,
+) -> dict[str, Any]:
+    """Project one memory row while retaining typed authority provenance.
+
+    The repository identifier is retained as a string for trace projection.
+    Embeddings, evidence references, and other storage-only fields remain
+    outside the tool result.
+    """
+
+    payload: dict[str, Any] = {}
+    for field in (
+        "memory_name",
+        "content",
+        "timestamp",
+        "source_global_user_id",
+        "memory_type",
+        "source_kind",
+        "status",
+    ):
+        if field in memory:
+            payload[field] = memory[field]
+    raw_row_id = memory.get("_id")
+    if raw_row_id is not None:
+        payload["_id"] = str(raw_row_id)
+    for field in _PERSISTENT_MEMORY_TYPED_FIELDS:
+        if field in memory:
+            payload[field] = memory[field]
+    if score is not None:
+        payload["cosine_similarity"] = score
+    return payload
 
 
 def _message_body_text(message: dict) -> str:
@@ -280,14 +333,7 @@ async def search_persistent_memory_keyword(
         memory_type=None,
     )
     return_value = [
-        {
-            "memory_name": mem.get("memory_name", ""),
-            "content": mem.get("content", ""),
-            "timestamp": mem.get("timestamp", ""),
-            "source_global_user_id": mem.get("source_global_user_id", ""),
-            "memory_type": mem.get("memory_type", ""),
-            "status": mem.get("status", ""),
-        }
+        _persistent_memory_payload(mem)
         for _, mem in results
     ]
     return return_value
@@ -380,18 +426,10 @@ async def search_persistent_memory(
 
     # Rebuild return format to remove unwanted columns
     return_list = []
-    for (score, memory) in results:
-        return_list.append({
-            "memory_name": memory.get("memory_name", ""),
-            "content": memory["content"],
-            "timestamp": memory["timestamp"],
-            "source_global_user_id": memory.get("source_global_user_id", ""),
-            "memory_type": memory.get("memory_type", ""),
-            "source_kind": memory.get("source_kind", ""),
-            "status": memory.get("status", ""),
-            "confidence_note": memory.get("confidence_note", ""),
-            "expiry_timestamp": memory.get("expiry_timestamp"),
-            "cosine_similarity": score,
-        })
+    for score, memory in results:
+        payload = _persistent_memory_payload(memory, score=score)
+        payload["confidence_note"] = memory.get("confidence_note", "")
+        payload["expiry_timestamp"] = memory.get("expiry_timestamp")
+        return_list.append(payload)
 
     return return_list

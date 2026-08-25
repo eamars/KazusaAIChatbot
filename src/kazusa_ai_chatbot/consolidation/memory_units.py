@@ -62,8 +62,51 @@ VALID_EXTRACTED_USER_MEMORY_UNIT_TYPES = {
     UserMemoryUnitType.MILESTONE,
     UserMemoryUnitType.ACTIVE_COMMITMENT,
 }
+_MEMORY_UNIT_WRITE_LANE_UNIT_TYPES = {
+    "user_memory_units": (
+        UserMemoryUnitType.STABLE_PATTERN,
+        UserMemoryUnitType.RECENT_SHIFT,
+        UserMemoryUnitType.OBJECTIVE_FACT,
+        UserMemoryUnitType.MILESTONE,
+    ),
+    "active_commitment": (UserMemoryUnitType.ACTIVE_COMMITMENT,),
+}
+_MEMORY_UNIT_WRITE_LANES = (
+    "user_memory_units",
+    "active_commitment",
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _memory_unit_write_contract(state: ConsolidatorState) -> dict:
+    """Build the ordered contract from router-approved consolidation lanes.
+
+    Args:
+        state: Consolidator state carrying the router-approved write lanes.
+
+    Returns:
+        Code-owned enabled-lane and allowed-unit-type lists in contract order.
+    """
+
+    enabled_lanes = state.get("enabled_consolidation_write_lanes", [])
+    if not isinstance(enabled_lanes, (list, tuple, set)):
+        enabled_lanes = []
+
+    accepted_lanes = [
+        lane for lane in _MEMORY_UNIT_WRITE_LANES if lane in enabled_lanes
+    ]
+    allowed_unit_types: list[str] = []
+    for lane in accepted_lanes:
+        for unit_type in _MEMORY_UNIT_WRITE_LANE_UNIT_TYPES[lane]:
+            if unit_type not in allowed_unit_types:
+                allowed_unit_types.append(unit_type)
+
+    return_value = {
+        "enabled_lanes": accepted_lanes,
+        "allowed_unit_types": allowed_unit_types,
+    }
+    return return_value
 
 
 def _json_payload(state: ConsolidatorState) -> dict:
@@ -106,6 +149,7 @@ def _json_payload(state: ConsolidatorState) -> dict:
         "subjective_appraisal_evidence": project_tool_result_for_llm(
             state["subjective_appraisals"]
         ),
+        "memory_unit_write_contract": _memory_unit_write_contract(state),
     }
     return return_value
 
@@ -210,7 +254,11 @@ def _candidate_source_refs(candidate: dict) -> list[dict]:
     return return_value
 
 
-def _candidate_validation_errors(candidate: dict) -> list[str]:
+def _candidate_validation_errors(
+    candidate: dict,
+    *,
+    allowed_unit_types: set[str],
+) -> list[str]:
     """Return structural errors for an extractor-authored memory unit.
 
     Args:
@@ -222,7 +270,7 @@ def _candidate_validation_errors(candidate: dict) -> list[str]:
 
     errors: list[str] = []
     unit_type = text_or_empty(candidate.get("unit_type"))
-    if unit_type not in VALID_EXTRACTED_USER_MEMORY_UNIT_TYPES:
+    if unit_type not in allowed_unit_types:
         errors.append(f"invalid unit_type: {unit_type!r}")
 
     for field in ("fact", "subjective_appraisal", "relationship_signal"):
@@ -239,6 +287,8 @@ def _candidate_validation_errors(candidate: dict) -> list[str]:
 def _validated_candidates(
     result: dict,
     default_source_refs: list[dict] | None = None,
+    *,
+    allowed_unit_types: set[str],
 ) -> tuple[list[dict], list[dict]]:
     """Split extractor output into usable candidates and validation errors.
 
@@ -275,7 +325,10 @@ def _validated_candidates(
         candidate, lifecycle_errors = _normalize_candidate_lifecycle_fields(
             candidate
         )
-        candidate_errors = _candidate_validation_errors(candidate)
+        candidate_errors = _candidate_validation_errors(
+            candidate,
+            allowed_unit_types=allowed_unit_types,
+        )
         candidate_errors.extend(lifecycle_errors)
         if candidate_errors:
             validation_errors.append({
@@ -293,10 +346,13 @@ def _validated_candidates(
 def _valid_candidates(
     result: dict,
     default_source_refs: list[dict] | None = None,
+    *,
+    allowed_unit_types: set[str],
 ) -> list[dict]:
     candidates, validation_errors = _validated_candidates(
         result,
         default_source_refs=default_source_refs,
+        allowed_unit_types=allowed_unit_types,
     )
     if validation_errors:
         logger.warning(f"memory-unit extractor dropped invalid candidates: {validation_errors}")
@@ -547,12 +603,12 @@ def _stability_payload(
 
 _EXTRACTOR_PROMPT = '''\
 # 任务
-你从本轮 consolidation 输入中提取新的、可长期保存的 user memory unit，供 `{character_name}` 以后与该用户互动时使用。
+你从本轮持久化整理输入中提取新的、可长期保存的用户记忆单元，供 `{character_name}` 以后与该用户互动时使用。
 你只提取候选记忆，不判断 create、merge 或 evolve。
 如果本轮没有值得长期保存的新内容，返回空的 `memory_units`。
 
 # 语言政策
-- JSON key、结构化枚举值、ID、URL、代码、命令和模型标签保持原样。
+- JSON 字段、结构化枚举值、ID、URL、代码、命令和模型标签保持原样。
 - `unit_type`、`evidence_refs.source` 等枚举字段必须保持输出格式指定的英文值。
 - 由你新生成的自由文本字段 `fact`、`subjective_appraisal`、`relationship_signal` 必须使用简体中文。
 - 用户原文、引用文本、专有名词、标题、外部证据原句只有在必须精确保留时才保持原语言。
@@ -560,21 +616,24 @@ _EXTRACTOR_PROMPT = '''\
 - 不添加翻译、双语复写或括号解释，除非源文本本身已经包含。
 
 # 证据读取与身份
-1. 先读 `timestamp`，它是本轮 consolidation 的本地时间。
+1. 先读 `timestamp`，它是本轮持久化整理的本地时间。
 2. 读 `consolidation_origin.trigger_source`。它只能是 `user_message`、`internal_thought`、`self_cognition`、`scheduled_tick` 或 `tool_result`。`user_message` 表示本轮由用户消息触发；`internal_thought` 表示由已发出的后续行动接力触发；`self_cognition` 表示由有观察依据的空闲认知触发；`scheduled_tick` 表示由已认领的到期计划触发；`tool_result` 表示由已完成的工具结果触发。
 3. 再读 `chat_history_recent`。每行格式为 `[时间] 说话人: 内容`；用行首说话人判断每条消息是谁说的；消息里的“我”必须按原说话人理解。
 4. 读 `decontextualized_input`、`final_dialog`、`logical_stance`、`character_intent`，确认本轮发生了什么，以及 `{character_name}` 是否真的接受了某个后续行为。
 5. 当 trigger_source 是 `user_message` 时，`decontextualized_input` 是用户本轮表达；当 trigger_source 是 `internal_thought`、`self_cognition` 或 `scheduled_tick` 时，它是有依据的内部触发文本，不是用户原话；当 trigger_source 是 `tool_result` 时，它是工具结果及原始目标的去上下文化摘要。
-6. `final_dialog` 在 `user_message` 和允许交付的 `tool_result` 中是可见回复，在 `internal_thought`、`self_cognition` 和 `scheduled_tick` 中是私有或 preview finalization。
+6. `final_dialog` 在 `user_message` 和允许交付的 `tool_result` 中是可见回复，在 `internal_thought`、`self_cognition` 和 `scheduled_tick` 中是私有或预览整理结果。
 7. `new_facts_evidence` 和 `future_promises_evidence` 是上游证据提示，不是必须照抄的输出。
 8. `internal_monologue`、`emotional_appraisal`、`interaction_subtext`、`subjective_appraisal_evidence` 只用于理解 `{character_name}` 如何看待已确认事实，不可单独当作用户事实。
-9. 对照 `rag_user_memory_unit_candidates`。只有本轮带来新事实、更清楚的细节或新的未来互动含义时，才生成 memory_unit。
+9. 对照 `rag_user_memory_unit_candidates`。只有本轮带来新事实、更清楚的细节或新的未来互动含义时，才生成记忆单元。
+10. `memory_unit_write_contract` 是本轮路由已经批准的写入范围。只输出 `allowed_unit_types` 中的 `unit_type`，不要扩大、改写或替换该范围；列表为空时返回空 `memory_units`。
 
 # 候选记忆准入
 - 只保存具体事件、决定、偏好、承诺、可复用行为模式或重要转折。
 - 不保存单纯语气、一次性心情、普通寒暄、重复旧记忆或只描述最新消息态度的内容。
-- 一个具体事件只生成一个 memory_unit。
+- 一个具体事件只生成一个记忆单元。
 - 用户提出请求并且 `{character_name}` 接受后续遵守时，这是一个 `active_commitment`，不要拆成“用户偏好”和“接受回应”两条。
+- `active_commitment` 只记录当前角色已经明确接受、并准备面向当前用户持续执行的未来行为。
+- 角色单方面提出的要求、条件或互动安排，以及当前用户未作回应、仅继续相邻事项的内容，不能单独建立 `active_commitment`；没有允许类型对应的可保存证据时返回空 `memory_units`。
 - 当 `future_promises_evidence` 与用户本轮请求或偏好指向同一个后续行为时，只生成一条 `active_commitment`；不要再为同一请求另建 `objective_fact`。
 - 如果证据中有多个可长期保存的主题，只有在它们有不同的未来互动含义时才分成多条。
 - 用户明确说明某个项目名、代号、标题或外部名称属于用户自己时，优先直接记录用户事实；只在该对比本身会影响未来互动时，才保留它不是指向 `{character_name}` 的说明。
@@ -585,7 +644,7 @@ _EXTRACTOR_PROMPT = '''\
 - 能确定日期但没有具体时刻的 `active_commitment`，`due_at` 使用该本地日期的 `00:00`，格式必须是 `YYYY-MM-DD HH:MM`。
 - 能确定具体执行时间的 `active_commitment`，`due_at` 使用本地 `YYYY-MM-DD HH:MM`。
 - 无到期日的持续规则、长期偏好或稳定事实可以省略 `due_at`。
-- 如果一个时间性承诺只能看到 `下次`、`之后`、`回头`、`later`、`next time` 这类相对说法，且输入不足以确定具体日期、时间或当前状态，不输出该 memory_unit。
+- 如果一个时间性承诺只能看到“下次”“之后”“回头”这类相对说法，且输入不足以确定具体日期、时间或当前状态，不输出该 memory_unit。
 - `due_at` 只能填写精确 `YYYY-MM-DD HH:MM`；无法得到这种精确值时省略该字段。
 
 # unit_type 判定
@@ -624,19 +683,23 @@ _EXTRACTOR_PROMPT = '''\
 5. 对带时间条件的候选先确定绝对日期或日期时间；无法确定且会影响活跃承诺有效性的候选直接删除。
 6. 写 `fact`、`subjective_appraisal`、`relationship_signal`，保持同一条记忆的三个互补面。
 # 输入格式
-human payload 是以下 JSON：
+HumanMessage 是以下 JSON：
 {{
-    "timestamp": "本轮 consolidation 的本地时间，YYYY-MM-DD HH:MM",
+    "timestamp": "本轮持久化整理的本地时间，YYYY-MM-DD HH:MM",
+    "memory_unit_write_contract": {{
+        "enabled_lanes": ["..."],
+        "allowed_unit_types": ["..."]
+    }},
     "global_user_id": "稳定用户 UUID",
     "user_name": "当前用户显示名",
     "consolidation_origin": {{
-        "episode_id": "string",
+        "episode_id": "文本标识",
         "trigger_source": "user_message | internal_thought | self_cognition | scheduled_tick | tool_result",
         "input_sources": ["..."],
-        "output_mode": "string"
+        "output_mode": "文本标识"
     }},
     "decontextualized_input": "用户本轮消息或内部思考触发文本经去上下文化后的内容",
-    "final_dialog": ["{character_name} 本轮最终回复片段或私有 finalization"],
+    "final_dialog": ["{character_name} 本轮最终回复片段或私有预览整理结果"],
     "internal_monologue": "{character_name} 的认知阶段内部独白",
     "emotional_appraisal": "{character_name} 的主观情绪评估",
     "interaction_subtext": "{character_name} 读到的互动潜台词",
@@ -646,9 +709,9 @@ human payload 是以下 JSON：
     "rag_user_memory_unit_candidates": [
         {{"unit_id": "...", "unit_type": "...", "dedup_key": "...", "fact": "...", "subjective_appraisal": "...", "relationship_signal": "...", "updated_at": "可选本地 YYYY-MM-DD HH:MM"}}
     ],
-    "new_facts_evidence": [{{"fact": "lane specialist output"}}],
-    "future_promises_evidence": [{{"action": "future promise or scheduled action", "due_time": "可选本地 YYYY-MM-DD HH:MM"}}],
-    "subjective_appraisal_evidence": ["relationship/appraisal evidence text"]
+    "new_facts_evidence": [{{"fact": "通道专项处理器输出"}}],
+    "future_promises_evidence": [{{"action": "未来承诺或计划行动", "due_time": "可选本地 YYYY-MM-DD HH:MM"}}],
+    "subjective_appraisal_evidence": ["关系或主观评估依据文本"]
 }}
 
 # 输出格式
@@ -665,6 +728,7 @@ human payload 是以下 JSON：
         }}
     ]
 }}
+只输出 `memory_unit_write_contract.allowed_unit_types` 中的 `unit_type`；当该列表为空或没有允许的可保存内容时，`memory_units` 必须为空数组。
 '''
 _llm_interface = LLInterface()
 _extractor_llm = LLInterface()
@@ -698,6 +762,12 @@ async def extract_memory_unit_candidates(state: ConsolidatorState) -> list[dict]
         Structurally valid candidate memory units.
     """
 
+    write_contract = _memory_unit_write_contract(state)
+    allowed_unit_types = set(write_contract["allowed_unit_types"])
+    if not allowed_unit_types:
+        return_value: list[dict] = []
+        return return_value
+
     character_name = state["character_profile"]["name"]
     system_prompt = SystemMessage(
         content=_EXTRACTOR_PROMPT.format(character_name=character_name),
@@ -720,69 +790,70 @@ async def extract_memory_unit_candidates(state: ConsolidatorState) -> list[dict]
     candidates = _valid_candidates(
         result,
         default_source_refs=default_source_refs,
+        allowed_unit_types=allowed_unit_types,
     )
     return candidates
 
 
 _MERGE_JUDGE_PROMPT = """\
-You judge whether one new memory unit matches existing candidate units.
+你判断一个新的记忆单元是否与现有候选记忆单元匹配。
 
-# Role
-You are the memory-unit merge judge. You only decide create, merge, or evolve.
+# 角色
+你是记忆单元合并判断器，只判断 create、merge 或 evolve。
 
 # 语言政策
-- 除结构化枚举值、schema key、ID、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。
+- 除结构化枚举值、输出结构字段、ID、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。
 - `decision`、`candidate_id`、`cluster_id` 等结构化字段必须保持输出格式指定的值和原始 ID。
 - 用户原文、引用文本、专有名词、标题、别名、外部证据原句在需要精确保留时保持原语言；不要为了统一语言而改写。
 - 不要添加翻译、双语复写或括号内解释，除非源文本本身已经包含。
 
-# Rules
-- create: no existing candidate captures the same memory.
-- merge: same durable memory; wording can be compacted.
-- evolve: same memory cluster, but the new event changes the relationship meaning.
-- cluster_id must be empty for create.
-- cluster_id must be copied exactly from the provided candidates for merge/evolve.
-- Do not rewrite memory text.
+# 规则
+- create：没有现有候选项记录相同的记忆。
+- merge：是同一条可持久化记忆；可以压缩措辞。
+- evolve：属于同一记忆簇，但新事件改变了关系含义。
+- create 时 `cluster_id` 必须为空。
+- merge 或 evolve 时，必须从所提供的候选项逐字复制 `cluster_id`。
+- 不要改写记忆文本。
 
-# Generation Procedure
-1. Read new_memory_unit.fact and decide what specific memory it is trying to preserve.
-2. Compare it with each candidate_clusters item by event meaning, not by wording similarity alone.
-3. Choose create if no existing unit captures the same durable memory.
-4. Choose merge if the existing unit already captures the same memory and the new candidate mainly repeats or adds wording/detail.
-5. Choose evolve if the existing unit is the same memory cluster but the new candidate changes the fact's relationship meaning, scope, or durability.
-6. For merge or evolve, copy cluster_id exactly from the selected candidate_clusters item.
-7. For create, set cluster_id to an empty string.
-8. Do not invent a cluster_id, do not choose a cluster outside the provided list, and do not rewrite the memory text.
+# 生成步骤
+1. 阅读 `new_memory_unit.fact`，判断它要保留的具体记忆。
+2. 按事件含义比较它与每个 `candidate_clusters` 项，不要只按措辞相似度比较。
+3. 如果没有现有单元记录相同的可持久化记忆，选择 create。
+4. 如果现有单元已经记录相同记忆，而新候选项主要是重复或补充措辞/细节，选择 merge。
+5. 如果现有单元属于同一记忆簇，但新候选项改变了事实的关系含义、适用范围或持久性，选择 evolve。
+6. 对于 merge 或 evolve，逐字复制选定 `candidate_clusters` 项的 `cluster_id`。
+7. 对于 create，将 `cluster_id` 设为空字符串。
+8. 不要臆造 `cluster_id`，不要选择所提供列表之外的簇，也不要改写记忆文本。
 
-# Input Format
+# 输入格式
 {
     "new_memory_unit": {
-        "candidate_id": "candidate id",
+        "candidate_id": "候选项标识",
         "unit_type": "stable_pattern | recent_shift | objective_fact | milestone | active_commitment",
-        "fact": "new candidate fact",
-        "subjective_appraisal": "new candidate appraisal",
-        "relationship_signal": "new candidate relationship signal",
-        "due_at": "optional local YYYY-MM-DD HH:MM for active commitments with a known due date",
-        "evidence_refs": [{"source": "chat", "timestamp": "optional local YYYY-MM-DD HH:MM timestamp", "message_id": "optional platform message id"}]
+        "fact": "候选项的新事实",
+        "subjective_appraisal": "候选项的新主观评估",
+        "relationship_signal": "候选项的新关系信号",
+        "due_at": "已知到期日的 active_commitment 可填写本地 YYYY-MM-DD HH:MM",
+        "evidence_refs": [{"source": "chat", "timestamp": "可选本地 YYYY-MM-DD HH:MM 时间戳", "message_id": "可选平台消息标识"}]
     },
     "candidate_clusters": [
         {
-            "unit_id": "existing unit id",
-            "unit_type": "existing unit type",
-            "fact": "existing fact",
-            "subjective_appraisal": "existing appraisal",
-            "relationship_signal": "existing relationship signal",
-            "updated_at": "optional local YYYY-MM-DD HH:MM timestamp"
+            "unit_id": "现有单元标识",
+            "unit_type": "现有单元类型",
+            "fact": "现有事实",
+            "subjective_appraisal": "现有主观评估",
+            "relationship_signal": "现有关系信号",
+            "updated_at": "可选本地 YYYY-MM-DD HH:MM 时间戳"
         }
     ]
 }
 
-# Output Format
+# 输出格式
 {
-    "candidate_id": "candidate id copied from input",
+    "candidate_id": "从输入复制的候选项标识",
     "decision": "create | merge | evolve",
-    "cluster_id": "existing unit_id for merge/evolve, or empty string for create",
-    "reason": "short semantic reason"
+    "cluster_id": "merge/evolve 使用的现有 unit_id，或 create 使用的空字符串",
+    "reason": "简短的语义理由"
 }
 """
 _merge_judge_llm_config = LLMCallConfig(
@@ -831,23 +902,23 @@ async def _judge_memory_unit_merge(candidate: dict, candidate_clusters: list[dic
 
 
 _REWRITE_PROMPT = """\
-You rewrite one existing memory unit using one new candidate.
+你使用一个新候选项改写一个现有记忆单元。
 
-# Role
-You are the memory-unit rewrite stage. You update only the semantic text fields.
+# 角色
+你是记忆单元改写阶段，只更新语义文本字段。
 
 # 语言政策
-- 除结构化枚举值、schema key、ID、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。
+- 除结构化枚举值、输出结构字段、ID、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。
 - 用户原文、引用文本、专有名词、标题、别名、外部证据原句在需要精确保留时保持原语言；不要为了统一语言而改写。
 - 不要添加翻译、双语复写或括号内解释，除非源文本本身已经包含。
 
-# Rules
-- Update only the three semantic fields.
-- Preserve concrete event detail.
-- For merge, compact repeated evidence without losing the event anchor.
-- For evolve, explicitly update the relationship meaning.
-- Do not change the merge/evolve decision.
-- If the new candidate includes `due_at`, preserve the absolute due date in the rewritten semantic text and do not reintroduce relative date words such as `明天`.
+# 规则
+- 只更新三个语义字段。
+- 保留具体事件细节。
+- 对于 merge，在不丢失事件锚点的前提下压缩重复证据。
+- 对于 evolve，明确更新关系含义。
+- 不要改变 merge/evolve 决策。
+- 如果新候选项包含 `due_at`，在改写后的语义文本中保留绝对到期日期，不要重新引入“明天”之类的相对日期说法。
 
 # 记忆视角契约
 - 本契约适用于你生成的可长期保存的 JSON 记忆字段：fact、subjective_appraisal、relationship_signal。
@@ -863,41 +934,42 @@ You are the memory-unit rewrite stage. You update only the semantic text fields.
 - 不要把说话人标签、显示名称、泛称或 assistant 等机器标签写成记忆主体；需要命名时只能用 `{character_name}`。
 - 当需要说明某个名称、项目代号或称呼不属于 `{character_name}` 时，写作“不是指向 `{character_name}` 的名称/称呼”，不要使用泛称。
 - 所有“无关/不是/并非”的对象都必须写成 `{character_name}` 或省略，不允许用泛称代替。
-# Generation Procedure
-1. Read decision.decision first. Treat it as fixed.
-2. If decision is merge, compact repeated information from the existing unit and new candidate into one clearer memory.
-3. If decision is evolve, preserve the older memory and update the fact/appraisal/signal to reflect the new development.
-4. Keep the fact field concrete and event-based. Do not turn it into a mood summary.
-5. Keep subjective_appraisal as {character_name}'s third-person interpretation. Do not force the name into every field. If the field needs to name `{character_name}` or replace a polluted actor label, copy the full exact name `{character_name}`.
-6. Keep relationship_signal about future interaction.
-7. Do not output structural IDs; the caller already owns persistence IDs.
-8. Output only the three updated semantic fields.
 
-# Input Format
+# 生成步骤
+1. 先阅读 `decision.decision`，并将其视为固定值。
+2. 如果决策是 merge，将现有单元和新候选项中的重复信息压缩成一条更清晰的记忆。
+3. 如果决策是 evolve，保留旧记忆，并更新 fact、subjective_appraisal、relationship_signal 以反映新的发展。
+4. 保持 `fact` 字段具体且以事件为中心，不要把它变成情绪总结。
+5. 将 `subjective_appraisal` 保持为 {character_name} 的第三人称理解，不要强迫每个字段都写出名称。如果字段需要命名 `{character_name}` 或替换受污染的说话人标签，复制完整准确的 `{character_name}`。
+6. 让 `relationship_signal` 表达未来互动。
+7. 不要输出结构化 ID；持久化 ID 由调用方负责。
+8. 只输出更新后的三个语义字段。
+
+# 输入格式
 {{
-    "existing_unit_id": "stored unit id selected by the merge judge",
+    "existing_unit_id": "合并判断器选定的已存单元标识",
     "new_memory_unit": {{
-        "candidate_id": "candidate id",
-        "unit_type": "candidate unit type",
-        "fact": "new candidate fact",
-        "subjective_appraisal": "new candidate appraisal",
-        "relationship_signal": "new candidate relationship signal",
-        "due_at": "optional local YYYY-MM-DD HH:MM for active commitments with a known due date",
-        "evidence_refs": [{{"source": "chat", "timestamp": "optional local YYYY-MM-DD HH:MM timestamp", "message_id": "optional platform message id"}}]
+        "candidate_id": "候选项标识",
+        "unit_type": "候选项类型",
+        "fact": "候选项的新事实",
+        "subjective_appraisal": "候选项的新主观评估",
+        "relationship_signal": "候选项的新关系信号",
+        "due_at": "已知到期日的 active_commitment 可填写本地 YYYY-MM-DD HH:MM",
+        "evidence_refs": [{{"source": "chat", "timestamp": "可选本地 YYYY-MM-DD HH:MM 时间戳", "message_id": "可选平台消息标识"}}]
     }},
     "decision": {{
-        "candidate_id": "candidate id",
+        "candidate_id": "候选项标识",
         "decision": "merge | evolve",
-        "cluster_id": "stored unit id",
-        "reason": "merge judge reason"
+        "cluster_id": "已存单元标识",
+        "reason": "合并判断器给出的理由"
     }}
 }}
 
-# Output Format
+# 输出格式
 {{
-    "fact": "updated compact fact",
-    "subjective_appraisal": "updated third-person subjective appraisal using the exact {character_name} string when naming {character_name}",
-    "relationship_signal": "updated future interaction signal"
+    "fact": "更新后的精简事实",
+    "subjective_appraisal": "更新后的第三人称主观评估；命名 {character_name} 时使用其完整字符串",
+    "relationship_signal": "更新后的未来互动信号"
 }}
 """
 _rewrite_llm_config = LLMCallConfig(
@@ -957,47 +1029,47 @@ async def _rewrite_memory_unit(
 
 
 _STABILITY_PROMPT = """\
-You decide whether an interaction-pattern memory remains recent or is stable.
+你判断一条互动模式记忆应保持 recent 还是 stable。
 
-# Role
-You are the memory-unit stability judge. You only choose recent or stable for interaction-pattern units.
+# 角色
+你是记忆单元稳定性判断器，只为互动模式单元选择 recent 或 stable。
 
 # 语言政策
-- 除结构化枚举值、schema key、ID、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。
+- 除结构化枚举值、输出结构字段、ID、URL、代码、命令、模型标签等必须保持原样的内容外，所有由你新生成的内部自由文本字段都必须使用简体中文。
 - `window`、`unit_id` 等结构化字段必须保持输出格式指定的英文枚举值和原始 ID。
 - 用户原文、引用文本、专有名词、标题、别名、外部证据原句在需要精确保留时保持原语言；不要为了统一语言而改写。
 - 不要添加翻译、双语复写或括号内解释，除非源文本本身已经包含。
 
-# Rules
-- Use count, session spread, and recency only as evidence.
-- Do not promote a single noisy session just because it repeated several times.
-- stable means this should be treated as a durable pattern.
-- recent means this is still an active shift or unresolved local pattern.
+# 规则
+- 只把次数、会话分布和新近程度作为证据。
+- 不要仅因某个嘈杂会话重复了几次，就提升它的稳定性。
+- stable 表示应将其视为持久模式。
+- recent 表示它仍是活跃变化或尚未解决的局部模式。
 
-# Generation Procedure
-1. Read stability_evidence before deciding. Treat occurrence_count_label and session_spread.spread_label as evidence explanations.
-2. Choose stable when the memory looks durable across sessions, days, or repeated meaningful examples.
-3. Choose recent when the memory is new, single-session, unresolved, or could still change soon.
-4. Do not choose stable only because occurrence_count is greater than one; check whether the examples represent a real durable pattern.
-5. Do not choose recent only because the event happened today; recent examples can still confirm a stable pattern.
-6. Copy unit_id exactly from input and provide a short reason based on the evidence.
+# 生成步骤
+1. 决策前先阅读 `stability_evidence`，将 `occurrence_count_label` 和 `session_spread.spread_label` 视为证据说明。
+2. 当该记忆看起来跨会话、跨日期或跨多个有意义的重复示例都能持久存在时，选择 stable。
+3. 当该记忆是新出现的、仅来自单个会话、尚未解决或近期仍可能改变时，选择 recent。
+4. 不要仅因 `occurrence_count` 大于一就选择 stable；检查示例是否确实代表持久模式。
+5. 不要仅因事件发生在今天就选择 recent；近期示例也可以确认稳定模式。
+6. 从输入逐字复制 `unit_id`，并根据证据提供简短理由。
 
-# Input Format
+# 输入格式
 {
-    "unit_id": "stored unit id being classified",
+    "unit_id": "正在分类的已存单元标识",
     "candidate": {
-        "candidate_id": "candidate id",
+        "candidate_id": "候选项标识",
         "unit_type": "stable_pattern | recent_shift",
-        "fact": "candidate fact",
-        "subjective_appraisal": "candidate appraisal",
-        "relationship_signal": "candidate relationship signal",
-        "evidence_refs": [{"source": "chat", "timestamp": "optional local YYYY-MM-DD HH:MM timestamp", "message_id": "optional platform message id"}]
+        "fact": "候选项事实",
+        "subjective_appraisal": "候选项主观评估",
+        "relationship_signal": "候选项关系信号",
+        "evidence_refs": [{"source": "chat", "timestamp": "可选本地 YYYY-MM-DD HH:MM 时间戳", "message_id": "可选平台消息标识"}]
     },
     "merge_result": {
-        "candidate_id": "candidate id",
+        "candidate_id": "候选项标识",
         "decision": "create | merge | evolve",
-        "cluster_id": "stored unit id or empty string",
-        "reason": "merge judge reason"
+        "cluster_id": "已存单元标识或空字符串",
+        "reason": "合并判断器给出的理由"
     },
     "stability_evidence": {
         "occurrence_count": 3,
@@ -1011,19 +1083,19 @@ You are the memory-unit stability judge. You only choose recent or stable for in
             "timestamps": ["YYYY-MM-DD"]
         },
         "recency": {
-            "current_turn_timestamp": "local YYYY-MM-DD HH:MM timestamp",
-            "existing_updated_at": "optional local YYYY-MM-DD HH:MM timestamp",
-            "existing_last_seen_at": "optional local YYYY-MM-DD HH:MM timestamp"
+            "current_turn_timestamp": "本地 YYYY-MM-DD HH:MM 时间戳",
+            "existing_updated_at": "可选本地 YYYY-MM-DD HH:MM 时间戳",
+            "existing_last_seen_at": "可选本地 YYYY-MM-DD HH:MM 时间戳"
         },
-        "recent_examples": [{"source": "existing_unit|new_candidate", "fact": "example fact", "updated_at": "optional local YYYY-MM-DD HH:MM timestamp"}]
+        "recent_examples": [{"source": "existing_unit|new_candidate", "fact": "示例事实", "updated_at": "可选本地 YYYY-MM-DD HH:MM 时间戳"}]
     }
 }
 
-# Output Format
+# 输出格式
 {
-    "unit_id": "unit id copied from input",
+    "unit_id": "从输入复制的单元标识",
     "window": "recent | stable",
-    "reason": "short semantic reason"
+    "reason": "简短的语义理由"
 }
 """
 _stability_llm_config = LLMCallConfig(

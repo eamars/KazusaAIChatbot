@@ -87,6 +87,27 @@ timestamps. Source ids and raw refs stay in `supervisor_trace` or helper
 payloads for debugging, not in the primary evidence text consumed by
 cognition.
 
+Persistent-memory rows retain their typed authority metadata through retrieval.
+The projection boundary partitions rows by that metadata before formatting:
+exact current-user continuity becomes `participant_continuity`; a certified
+learned `defense_rule` becomes `conditional_character_guidance`; and a
+certified learned `fact` or eligible curated row becomes
+`character_world_context`. Learned rows require their canonical authority and
+source pair, active status, empty source user, global scope, and complete
+privacy/scope certificate. Unsupported, mixed, scoped-learned, or incomplete
+typed rows are omitted with a trace diagnostic rather than inferred from
+content. Repository `_id` values remain string trace references only and are
+never used as prompt authority. The raw shared-memory writer contract is
+`memory_unit_id`/`memory_type` plus the authority/source pair, active status,
+an empty `source_global_user_id`, and the exact seven-field learned certificate;
+curated seed/manual rows use their separate canonical pair and do not borrow
+the learned certificate. Raw `user_memory_units` writer rows are not admitted
+at this boundary; the existing user-memory evidence worker must provide the
+explicit source, scope, authority, truth, origin, stable-unit, and active
+status fields before current-user continuity can be projected. The resulting
+public shared entry carries only the global scope marker; the cognition row
+retains the stable typed metadata in a non-prose contract field.
+
 ## Prompt-Facing Safety Sanitization Policy
 
 RAG safety checks protect the cognition prompt from raw storage, adapter, and
@@ -545,11 +566,13 @@ projection layer applies a hybrid policy:
 When the source is `user_memory_units`, projected evidence preserves:
 
 - `source_system="user_memory_units"`,
+- `source_kind="user_memory_units"`,
 - `scope_type="user_continuity"`,
 - `scope_global_user_id=<current global_user_id>`,
-- `authority="scoped_continuity"` unless the stored row already provides a stronger value,
-- `truth_status="character_lore_or_interaction_continuity"` unless the stored row already provides a stronger value,
-- `origin="consolidated_interaction"` unless the stored row already provides a stronger value.
+- `authority="scoped_continuity"`,
+- `truth_status="character_lore_or_interaction_continuity"`,
+- `origin="consolidated_interaction"`, and
+- the writer's stable `unit_id` and `unit_type`.
 
 This keeps current-user private continuity distinct from shared/global durable memory and lets the consolidator reuse the exact surfaced units instead of creating duplicates.
 

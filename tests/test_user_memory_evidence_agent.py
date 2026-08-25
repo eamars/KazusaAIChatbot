@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from kazusa_ai_chatbot.db.user_memory_units import build_user_memory_unit_doc
 from kazusa_ai_chatbot.rag.memory_evidence.workers import user_memory as module
 from kazusa_ai_chatbot.rag.memory_evidence.workers.user_memory import (
     UserMemoryEvidenceAgent,
@@ -32,16 +33,44 @@ def _memory_row(unit_id: str, fact: str, **overrides: object) -> dict[str, objec
 
 
 def test_user_memory_project_row_preserves_contextual_fields() -> None:
-    row = _memory_row(
-        "unit-mac",
-        "用户正在考虑购买 Mac Studio，主要用于 AI 模型运行。",
-        subjective_appraisal=(
-            "杏山千纱认真给出了 M2 Ultra 版的推荐并提示内存带宽瓶颈。"
-        ),
-        relationship_signal="后续提及硬件选购时可关联此推荐细节。",
-    )
+    row = dict(build_user_memory_unit_doc(
+        "user-1",
+        {
+            "unit_id": "unit-mac",
+            "unit_type": "objective_fact",
+            "fact": "用户正在考虑购买 Mac Studio，主要用于 AI 模型运行。",
+            "subjective_appraisal": (
+                "杏山千纱认真给出了 M2 Ultra 版的推荐并提示内存带宽瓶颈。"
+            ),
+            "relationship_signal": "后续提及硬件选购时可关联此推荐细节。",
+        },
+        storage_timestamp_utc="2026-05-03T00:00:00+00:00",
+        unit_id="unit-mac",
+    ))
 
     projected = module._project_row(row, "user-1")
+
+    assert {
+        "unit_id": projected["unit_id"],
+        "unit_type": projected["unit_type"],
+        "source_kind": projected["source_kind"],
+        "source_system": projected["source_system"],
+        "scope_type": projected["scope_type"],
+        "scope_global_user_id": projected["scope_global_user_id"],
+        "authority": projected["authority"],
+        "truth_status": projected["truth_status"],
+        "origin": projected["origin"],
+    } == {
+        "unit_id": "unit-mac",
+        "unit_type": "objective_fact",
+        "source_kind": "user_memory_units",
+        "source_system": "user_memory_units",
+        "scope_type": "user_continuity",
+        "scope_global_user_id": "user-1",
+        "authority": "scoped_continuity",
+        "truth_status": "character_lore_or_interaction_continuity",
+        "origin": "consolidated_interaction",
+    }
 
     content = projected["content"]
     assert "Mac Studio" in content
@@ -159,6 +188,7 @@ async def test_user_memory_evidence_exact_cjk_term_uses_scoped_keyword(monkeypat
             "relationship_signal": "Kazusa signal for 冰淇淋摊老板是千纱的初中学姐，千纱每次去都能蹭到双倍抹茶酱。",
             "content": expected_content,
             "updated_at": "2026-05-03T00:00:00+00:00",
+            "source_kind": "user_memory_units",
             "source_system": "user_memory_units",
             "scope_type": "user_continuity",
             "scope_global_user_id": "user-1",

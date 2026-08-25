@@ -174,6 +174,32 @@ def test_scene_prompt_defines_paraphrased_visible_move_repetition_without_future
     assert '不得把重复模式改写成下一轮应该说什么' in prompt
 
 
+def test_recorder_prompts_keep_unanswered_character_proposal_out_of_user_owned_decision_state() -> None:
+    """Guard the prompt boundary without coupling to its prose."""
+
+    scene_prompt = recorder.render_scene_recorder_prompt()
+    event_prompt = recorder.render_event_recorder_prompt()
+
+    for field_name in ('user_goal', 'current_blocker'):
+        assert f'`{field_name}`' in scene_prompt
+    for relevance_name in ('decision', 'scene', 'history'):
+        assert f'`{relevance_name}`' in event_prompt
+
+    captured_dialog_fragments = (
+        '我最近工作有点乱，你会怎么帮我排第一步？',
+        '我已经列出今天的报告、待回邮件和下周会议材料，先处理哪一项？',
+        '好，我接受这个交换。那你先帮我排今天的任务，奖励我之后再准备。',
+        '我可以帮你理顺，但你要准备一份奖励作为交换。',
+        'R1_unanswered_character_proposal',
+        'R2_explicit_user_response',
+    )
+    rendered_prompts = f'{scene_prompt}\n{event_prompt}'
+    assert all(
+        fragment not in rendered_prompts
+        for fragment in captured_dialog_fragments
+    )
+
+
 def test_recorder_payload_preserves_identity_and_semantic_clock() -> None:
     """Give both owners safe speaker identity and temporal context."""
 

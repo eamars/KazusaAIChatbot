@@ -312,7 +312,7 @@ class DialogResponseOperation(TypedDict):
 
     operation: str
     response_owner_role: ResponseOperationRole
-    selection_owner_role: ResponseOperationRole
+    response_content_provider_role: ResponseOperationRole
     selection_required: bool
     embedded_actor_role: ResponseOperationRole
     embedded_target_role: ResponseOperationRole
@@ -1334,7 +1334,7 @@ def validate_dialog_response_operation(
         )
     role_fields = (
         "response_owner_role",
-        "selection_owner_role",
+        "response_content_provider_role",
         "embedded_actor_role",
         "embedded_target_role",
     )
@@ -1343,14 +1343,19 @@ def validate_dialog_response_operation(
             raise CognitiveEpisodeValidationError(
                 f"response operation {field_name} is invalid"
             )
-    if selection_required and value["selection_owner_role"] == NO_ROLE:
+    if (
+        selection_required
+        and value["response_content_provider_role"] == NO_ROLE
+    ):
         raise CognitiveEpisodeValidationError(
-            "required response selection needs an owner"
+            "required response selection needs a content provider"
         )
     return {
         "operation": normalized_operation,
         "response_owner_role": value["response_owner_role"],
-        "selection_owner_role": value["selection_owner_role"],
+        "response_content_provider_role": value[
+            "response_content_provider_role"
+        ],
         "selection_required": selection_required,
         "embedded_actor_role": value["embedded_actor_role"],
         "embedded_target_role": value["embedded_target_role"],
@@ -1364,16 +1369,16 @@ def validate_selected_response_operation(
     """Validate a selected operation against the episode input authority.
 
     The selected operation may supply the concrete operation text and resolve
-    an input actor or target that was explicitly left ungrounded. Response and
-    selection ownership, the selection flag, and every known actor or target
-    role remain fixed by the episode operation.
+    an input actor or target that was explicitly left ungrounded. Response
+    ownership, the response-content provider role, the selection flag, and
+    every known actor or target role remain fixed by the episode operation.
     """
 
     validated_input = validate_dialog_response_operation(input_operation)
     validated_selected = validate_dialog_response_operation(value)
     fixed_fields = (
         "response_owner_role",
-        "selection_owner_role",
+        "response_content_provider_role",
         "selection_required",
     )
     for field_name in fixed_fields:

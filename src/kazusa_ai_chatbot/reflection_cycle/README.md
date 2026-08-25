@@ -192,14 +192,38 @@ Global promotion lives in `promotion.py` as a separate LLM block:
 
 ```text
 GLOBAL_PROMOTION_PROMPT_VERSION
+GLOBAL_PROMOTION_REVIEW_PROMPT_VERSION
 GLOBAL_PROMOTION_SYSTEM_PROMPT
+GLOBAL_PROMOTION_REVIEW_SYSTEM_PROMPT
 _global_promotion_llm_config
+_global_promotion_review_llm_config
 run_global_promotion_llm
+run_global_promotion_review_llm
 ```
 
-The promotion prompt consumes compact `daily_channel` cards and bounded
-evidence cards. It outputs `promotion_decisions` only. Deterministic validators
-and similarity resolution decide whether memory APIs are called.
+The v2 promoter consumes compact `daily_channel` cards and bounded evidence
+cards. Each evidence card is capped at 640 serialized characters while keeping
+its identity, provenance, lane enums, and bounded source privacy notes. The
+canonical envelope measures 462 characters with readable fields empty, leaving
+178 characters for bounded readable evidence. Its
+`privacy_review` is a complete promoter-owned scope/privacy certificate; source
+evidence with missing privacy assessment is represented as `unreviewed`, never
+as automatically low risk. The promoter remains the proposal owner and its
+existing bounded replacement loop remains in force.
+
+Validated mutating candidates (`promote_new`, `supersede`, or `merge`) are
+passed as one batch to one independent background reviewer call. The reviewer
+receives candidate meaning and bounded source evidence, without the promoter's
+scope, boundary, or privacy verdict. It returns exactly one accept/reject
+certificate per candidate and has no fields that can rewrite candidate meaning
+or provenance. Missing, duplicate, unknown, malformed, or conflicting review
+coverage fails closed before similarity search or memory mutation; a batch
+with no mutating candidates makes zero reviewer calls. A write requires the
+promoter and reviewer certificates to agree on global applicability, target
+removal, and absence of identity/boundary impact, with the final reviewer
+certificate reporting low private-detail risk and removed user details. The
+reviewer receives at most eight lane-matched evidence cards, so this background
+review remains within its prompt budget without dropping candidate meaning.
 
 ## Interaction Style Images
 
@@ -238,9 +262,16 @@ Promotion constructs `EvolvingMemoryDoc` directly with:
 - empty `source_global_user_id`
 - `memory_type="fact"` for `lore`
 - `memory_type="defense_rule"` for `self_guidance`
-- evidence refs and privacy review populated before the memory call
+- repository-owned evidence refs and the final independent reviewer privacy
+  certificate populated before the memory call
 
 The legacy memory compatibility path is not part of this interface.
+
+The promoter's certificate and the independent reviewer certificate, review
+disposition, and bounded validation warnings remain in the auditable global
+promotion run. Identity, permission, consent, or boundary meaning is rejected
+from this write owner and remains with the character identity-growth owner; it
+is never rerouted to self-guidance. Reviewer rejection also produces no write.
 
 Similarity decisions must use returned score tuples from
 `find_active_memory_units`. If scores are missing, malformed, or unavailable,
@@ -436,9 +467,13 @@ Allowed shape:
 
 Context rows come from active Stage 1b memory units with
 `source_kind="reflection_inferred"` and the lane memory type. The projection
-caps each lane before cognition. Raw hourly outputs, raw transcripts, full run
-documents, unpromoted candidates, source message refs, user ids, and private
-details are forbidden.
+caps each lane before cognition and retains the bounded typed certificate:
+`memory_unit_id`, `memory_type`, `source_kind`, empty
+`source_global_user_id`, `authority`, active `status`, `scope_type="global"`,
+and the exact `privacy_review`. Raw hourly outputs, raw transcripts, full run
+documents, unpromoted candidates, embeddings, evidence/source-message refs,
+and raw reflection content are forbidden. Rows without the required typed
+certificate are excluded at the cognition boundary.
 
 ## Logging
 

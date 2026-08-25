@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import logging
+from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -13,6 +16,7 @@ from kazusa_ai_chatbot.memory_evolution.models import (
     MemoryStatus,
 )
 from kazusa_ai_chatbot.reflection_cycle import promotion as promotion_module
+from kazusa_ai_chatbot.reflection_cycle import repository, selector
 
 
 @pytest.fixture(autouse=True)
@@ -23,6 +27,29 @@ def _mock_character_profile(monkeypatch) -> None:
         promotion_module,
         "get_character_profile",
         AsyncMock(return_value={"name": "杏山千纱 (Kyōyama Kazusa)"}),
+    )
+
+
+@pytest.fixture(autouse=True)
+def _mock_promotion_review(monkeypatch) -> None:
+    """Give deterministic promotion runs an independent accepted review."""
+
+    async def _review(prompt):
+        payload = json.loads(prompt.human_prompt)
+        reviews = [
+            {
+                "selected_candidate_id": candidate["selected_candidate_id"],
+                "decision": "accept",
+                **_review_certificate(),
+            }
+            for candidate in payload["candidates"]
+        ]
+        return {"reviews": reviews}
+
+    monkeypatch.setattr(
+        promotion_module,
+        "run_global_promotion_review_llm",
+        _review,
     )
 
 
@@ -63,6 +90,9 @@ def test_promotion_validation_rejects_private_or_boundary_unsafe_rows() -> None:
 
     unsafe = _decision("lore")
     unsafe["privacy_review"] = {
+        "global_applicability": "global",
+        "target_specific_meaning_removed": True,
+        "affects_identity_or_boundaries": True,
         "private_detail_risk": "high",
         "user_details_removed": False,
         "boundary_assessment": "unsafe",
@@ -81,15 +111,602 @@ def test_promotion_validation_rejects_private_or_boundary_unsafe_rows() -> None:
     assert any("boundary verdict" in warning for warning in warnings)
 
 
-def test_evidence_cards_preserve_low_privacy_risk_for_negated_notes() -> None:
-    """Evidence card privacy risk should not be keyword-classified in code."""
+def test_promotion_evidence_carries_source_privacy_notes_without_assuming_low_risk() -> None:
+    """Missing source privacy assessment remains explicitly unreviewed."""
 
     hourly_doc = _hourly_doc()
-    hourly_doc["output"]["privacy_notes"] = ['无明显隐私风险']
+    hourly_doc["output"]["privacy_notes"] = ["来源隐私评估未确定"]
 
     cards = promotion_module._evidence_cards_from_hourly_doc(hourly_doc)
 
-    assert cards[0]["private_detail_risk"] == "low"
+    assert cards[0]["private_detail_risk"] == "unreviewed"
+    assert cards[0]["source_privacy_notes"] == ["来源隐私评估未确定"]
+
+
+def test_hourly_evidence_cards_respect_serialized_cap_and_preserve_privacy_evidence() -> None:
+    """Hourly cards stay bounded without discarding source privacy evidence."""
+
+    for privacy_notes in (
+        [],
+        ["来源隐私评估未确定"],
+        ["来源隐私说明-" + ("x" * 120)] * 3,
+    ):
+        hourly_doc = _canonical_max_hourly_doc()
+        hourly_doc["output"]["privacy_notes"] = privacy_notes
+
+        cards = promotion_module._evidence_cards_from_hourly_doc(hourly_doc)
+
+        assert cards
+        card = cards[0]
+        serialized_card = json.dumps(
+            card,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        assert len(serialized_card) <= (
+            promotion_module.PROMOTION_MAX_EVIDENCE_CARD_CHARS
+        )
+        source_run_id = hourly_doc["run_id"]
+        assert card["evidence_card_id"] == f"evidence_{source_run_id}"
+        assert card["source_reflection_run_ids"] == [source_run_id]
+        assert card["scope_ref"] == hourly_doc["scope"]["scope_ref"]
+        assert card["channel_type"] == "group"
+        assert card["supports"] == ["lore", "self_guidance"]
+        if privacy_notes:
+            assert card["source_privacy_notes"]
+            assert any(
+                len(note.replace("...", "")) >= 4
+                for note in card["source_privacy_notes"]
+            )
+
+
+def test_channel_cards_respect_serialized_cap_for_readable_fields() -> None:
+    """The shared card cap also covers daily-channel readable fields."""
+
+    daily_doc = _daily_doc()
+    daily_doc["output"]["day_summary"] = "摘要" * 300
+    daily_doc["output"]["cross_hour_topics"] = ["主题" * 60] * 3
+    daily_doc["output"]["conversation_quality_patterns"] = [
+        "模式" * 60
+    ] * 3
+    daily_doc["output"]["privacy_risks"] = ["风险" * 60] * 3
+    daily_doc["validation_warnings"] = ["警告" * 60] * 3
+
+    cards = promotion_module._channel_daily_cards([daily_doc])
+
+    assert cards
+    card = cards[0]
+    assert len(json.dumps(card, ensure_ascii=False, sort_keys=True)) <= (
+        promotion_module.PROMOTION_MAX_CHANNEL_CARD_CHARS
+    )
+    assert card["daily_run_id"] == daily_doc["run_id"]
+    assert card["confidence"] == "high"
+    assert card["day_summary"]
+    assert card["cross_hour_topics"]
+
+
+def test_oversized_untrimmable_card_fails_closed() -> None:
+    """An envelope that cannot fit without changing identity fails closed."""
+
+    oversized_card = {
+        "evidence_card_id": "evidence_" + ("x" * 800),
+        "source_reflection_run_ids": ["reflection_run_1"],
+        "scope_ref": "scope_1",
+        "channel_type": "group",
+        "character_local_date": "2026-05-04",
+        "captured_at": "2026-05-04 22:00",
+        "active_character_utterance": "可读文本",
+        "sanitized_observation": "可读观察",
+        "supports": ["lore", "self_guidance"],
+        "source_privacy_notes": ["来源说明"],
+        "private_detail_risk": "unreviewed",
+    }
+
+    with pytest.raises(ValueError, match="cannot fit"):
+        promotion_module._cap_serialized_card(
+            oversized_card,
+            promotion_module.PROMOTION_MAX_EVIDENCE_CARD_CHARS,
+        )
+
+
+@pytest.mark.asyncio
+async def test_live_harness_persists_artifact_before_review_error(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """The live harness writes raw stages before propagating review errors."""
+
+    from tests import test_reflection_cycle_stage1c_promotion_live_llm as live_module
+
+    promoter_response = SimpleNamespace(
+        content=json.dumps(
+            {"promotion_decisions": [_decision("lore")]},
+            ensure_ascii=False,
+        ),
+    )
+    reviewer_response = SimpleNamespace(
+        content=json.dumps({"reviews": []}, ensure_ascii=False),
+    )
+    monkeypatch.setattr(
+        live_module._llm_interface,
+        "ainvoke",
+        AsyncMock(return_value=promoter_response),
+    )
+    monkeypatch.setattr(
+        promotion_module._global_promotion_review_llm,
+        "ainvoke",
+        AsyncMock(return_value=reviewer_response),
+    )
+    captured: dict[str, Any] = {}
+
+    def _write_trace(test_name, case_id, payload):
+        captured["test_name"] = test_name
+        captured["case_id"] = case_id
+        captured["payload"] = payload
+        trace_path = tmp_path / "malformed-review.json"
+        trace_path.write_text(
+            json.dumps(payload, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        return trace_path
+
+    monkeypatch.setattr(live_module, "write_llm_trace", _write_trace)
+
+    with pytest.raises(promotion_module.GlobalPromotionReviewContractError):
+        await live_module._run_case(
+            "harness_malformed_review",
+            _promotion_payload(),
+        )
+
+    artifact = captured["payload"]
+    assert artifact["rendered_prompt"]
+    assert artifact["promoter_prompt"]["system_prompt"] == (
+        artifact["rendered_prompt"]
+    )
+    assert artifact["promoter_prompt"]["human_prompt"]
+    assert artifact["input_payload"]["evidence_cards"]
+    assert artifact["raw_output"]
+    assert artifact["parsed_output"]["promotion_decisions"]
+    assert artifact["review_raw_output"]
+    assert artifact["review_output"] == {"reviews": []}
+    assert artifact["review_call_count"] == 1
+    assert artifact["final_exception"]["type"] == (
+        "GlobalPromotionReviewContractError"
+    )
+    assert artifact["final_exception"]["stage"] == "review_contract"
+    assert (tmp_path / "malformed-review.json").exists()
+
+
+def test_reviewer_prompt_max_shape_stays_within_budget_without_truncation_warning() -> None:
+    """The independent reviewer receives bounded, lane-matched evidence."""
+
+    payload = _promotion_payload()
+    evidence_cards = []
+    for index in range(promotion_module.PROMOTION_MAX_EVIDENCE_CARDS):
+        scope_ref = selector.build_scope_ref(
+            "qq",
+            f"review-channel-{index}",
+            "group",
+        )
+        source_run_id = repository.hourly_run_id(
+            scope_ref=scope_ref,
+            hour_start=(
+                f"2026-05-{4 + index // 24:02d}T"
+                f"{index % 24:02d}:00:00+00:00"
+            ),
+        )
+        evidence_cards.append(
+            {
+                "evidence_card_id": f"evidence_{source_run_id}",
+                "source_reflection_run_ids": [source_run_id],
+                "scope_ref": scope_ref,
+                "channel_type": "group",
+                "character_local_date": "2026-05-04",
+                "captured_at": "2026-05-04 22:00",
+                "active_character_utterance": "u" * 180,
+                "sanitized_observation": "o" * 180,
+                "supports": ["lore", "self_guidance"],
+                "source_privacy_notes": ["p" * 120] * 3,
+                "private_detail_risk": "unreviewed",
+            },
+        )
+    payload["evidence_cards"] = evidence_cards
+    candidates = []
+    for index, lane in enumerate(("lore", "self_guidance")):
+        decision = _decision(lane)
+        decision["selected_candidate_id"] = f"candidate-{index}"
+        decision["sanitized_memory_name"] = "n" * 300
+        decision["sanitized_content"] = "m" * 1000
+        candidates.append(decision)
+
+    review_payload = promotion_module._promotion_review_payload(
+        candidates,
+        payload,
+    )
+    review_prompt = promotion_module.build_global_promotion_review_prompt(
+        review_payload,
+    )
+
+    assert review_prompt.prompt_chars <= (
+        promotion_module.GLOBAL_PROMOTION_REVIEW_PROMPT_MAX_CHARS
+    )
+    assert review_prompt.validation_warnings == []
+    assert len(review_payload["evidence_cards"]) <= (
+        promotion_module.PROMOTION_MAX_REVIEW_EVIDENCE_CARDS
+    )
+    assert all(
+        set(card["supports"]) & {"lore", "self_guidance"}
+        for card in review_payload["evidence_cards"]
+    )
+    assert {"lore", "self_guidance"} <= {
+        lane
+        for card in review_payload["evidence_cards"]
+        for lane in card["supports"]
+    }
+    assert [
+        candidate["sanitized_content"]
+        for candidate in review_payload["candidates"]
+    ] == ["m" * 1000, "m" * 1000]
+
+
+@pytest.mark.asyncio
+async def test_reflection_memory_write_requires_independent_global_scope_review(
+    monkeypatch,
+) -> None:
+    """A promoter certificate alone cannot admit a global memory write."""
+
+    decision = _decision("self_guidance")
+    reviewer_certificate = _review_certificate(
+        target_specific_meaning_removed=False,
+    )
+
+    async def _review_llm(prompt):
+        payload = json.loads(prompt.human_prompt)
+        candidate_id = payload["candidates"][0]["selected_candidate_id"]
+        return {
+            "reviews": [{
+                "selected_candidate_id": candidate_id,
+                "decision": "reject",
+                **reviewer_certificate,
+            }],
+        }
+
+    monkeypatch.setattr(
+        promotion_module,
+        "run_global_promotion_review_llm",
+        _review_llm,
+    )
+
+    reviewed, warnings = await promotion_module._review_promotion_candidates(
+        decisions=[decision],
+        payload=_promotion_payload(),
+    )
+
+    assert warnings == []
+    assert reviewed[0]["review_decision"] == "reject"
+    assert reviewed[0]["review_admitted"] is False
+    assert reviewed[0]["privacy_review"]["global_applicability"] == "global"
+    assert reviewed[0]["reviewer_privacy_review"] == reviewer_certificate
+
+
+@pytest.mark.asyncio
+async def test_identity_or_boundary_candidate_never_writes_self_guidance(
+    monkeypatch,
+) -> None:
+    """Reviewer identity or boundary scope blocks self-guidance persistence."""
+
+    decision = _decision("self_guidance")
+    reviewer_certificate = _review_certificate(
+        affects_identity_or_boundaries=True,
+    )
+
+    async def _review_llm(prompt):
+        payload = json.loads(prompt.human_prompt)
+        candidate_id = payload["candidates"][0]["selected_candidate_id"]
+        return {
+            "reviews": [{
+                "selected_candidate_id": candidate_id,
+                "decision": "accept",
+                **reviewer_certificate,
+            }],
+        }
+
+    monkeypatch.setattr(
+        promotion_module,
+        "run_global_promotion_review_llm",
+        _review_llm,
+    )
+    insert_mock = AsyncMock()
+    monkeypatch.setattr(promotion_module, "insert_memory_unit", insert_mock)
+
+    reviewed, warnings = await promotion_module._review_promotion_candidates(
+        decisions=[decision],
+        payload=_promotion_payload(),
+    )
+    write_result = await promotion_module._write_validated_promotion_decisions(
+        decisions=reviewed,
+        character_local_date="2026-05-04",
+        global_run_id="global-run-1",
+    )
+
+    assert warnings == []
+    assert write_result["mutations"] == []
+    assert reviewed[0]["review_decision"] == "accept"
+    assert reviewed[0]["review_admitted"] is False
+    insert_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_promotion_review_is_candidate_gated_and_batched(monkeypatch) -> None:
+    """The reviewer runs once for mutating candidates and zero times otherwise."""
+
+    review_calls = 0
+
+    async def _review_llm(prompt):
+        nonlocal review_calls
+        review_calls += 1
+        payload = json.loads(prompt.human_prompt)
+        return {
+            "reviews": [
+                {
+                    "selected_candidate_id": candidate[
+                        "selected_candidate_id"
+                    ],
+                    "decision": "accept",
+                    **_review_certificate(),
+                }
+                for candidate in payload["candidates"]
+            ],
+        }
+
+    monkeypatch.setattr(
+        promotion_module,
+        "run_global_promotion_review_llm",
+        _review_llm,
+    )
+
+    no_write_decisions = [_decision("lore")]
+    no_write_decisions[0]["decision"] = "no_action"
+    reviewed_no_write, no_write_warnings = (
+        await promotion_module._review_promotion_candidates(
+            decisions=no_write_decisions,
+            payload=_promotion_payload(),
+        )
+    )
+    assert review_calls == 0
+    assert no_write_warnings == []
+    assert reviewed_no_write[0]["decision"] == "no_action"
+
+    second_decision = _decision("self_guidance")
+    second_decision["selected_candidate_id"] = "candidate-2"
+    reviewed, warnings = await promotion_module._review_promotion_candidates(
+        decisions=[_decision("lore"), second_decision],
+        payload=_promotion_payload(),
+    )
+    assert review_calls == 1
+    assert warnings == []
+    assert all(decision["review_admitted"] for decision in reviewed)
+
+
+@pytest.mark.asyncio
+async def test_promotion_reviewer_input_excludes_promoter_certificate_and_rewrite_fields(
+    monkeypatch,
+) -> None:
+    """Independent review receives meaning and evidence without judgments."""
+
+    captured: dict[str, Any] = {}
+
+    async def _review_llm(prompt):
+        captured["payload"] = json.loads(prompt.human_prompt)
+        candidate_id = captured["payload"]["candidates"][0][
+            "selected_candidate_id"
+        ]
+        return {
+            "reviews": [{
+                "selected_candidate_id": candidate_id,
+                "decision": "accept",
+                **_review_certificate(),
+            }],
+        }
+
+    monkeypatch.setattr(
+        promotion_module,
+        "run_global_promotion_review_llm",
+        _review_llm,
+    )
+    decision = _decision("lore")
+    original_meaning = {
+        key: decision[key]
+        for key in (
+            "lane",
+            "memory_type",
+            "sanitized_memory_name",
+            "sanitized_content",
+        )
+    }
+
+    reviewed, warnings = await promotion_module._review_promotion_candidates(
+        decisions=[decision],
+        payload=_promotion_payload(),
+    )
+
+    candidate_payload = captured["payload"]["candidates"][0]
+    assert set(candidate_payload) == {
+        "selected_candidate_id",
+        "lane",
+        "memory_type",
+        "sanitized_memory_name",
+        "sanitized_content",
+    }
+    serialized_payload = json.dumps(captured["payload"], ensure_ascii=False)
+    assert "privacy_review" not in serialized_payload
+    assert "boundary_assessment" not in serialized_payload
+    assert "global_applicability" not in serialized_payload
+    assert warnings == []
+    assert {
+        key: reviewed[0][key]
+        for key in original_meaning
+    } == original_meaning
+
+
+def test_promotion_review_contract_rejects_rewrite_fields_and_unknown_ids() -> None:
+    """The closed reviewer response cannot rewrite or add candidates."""
+
+    candidate = _decision("lore")
+    review = {
+        "selected_candidate_id": candidate["selected_candidate_id"],
+        "decision": "accept",
+        **_review_certificate(),
+        "sanitized_content": "rewritten content",
+    }
+
+    errors = promotion_module._promotion_review_contract_errors(
+        {"reviews": [review]},
+        [candidate],
+    )
+
+    assert any("invalid key set" in error for error in errors)
+
+
+@pytest.mark.asyncio
+async def test_malformed_promotion_review_fails_closed_before_similarity_or_write(
+    monkeypatch,
+) -> None:
+    """Malformed review coverage blocks similarity search and persistence."""
+
+    persisted: list[dict[str, Any]] = []
+
+    async def _upsert(document):
+        persisted.append(document)
+
+    monkeypatch.setattr(
+        promotion_module.repository,
+        "daily_channel_runs",
+        AsyncMock(return_value=[_daily_doc()]),
+    )
+    monkeypatch.setattr(
+        promotion_module.repository,
+        "reflection_run_by_id",
+        AsyncMock(return_value=_hourly_doc()),
+    )
+    monkeypatch.setattr(
+        promotion_module,
+        "run_global_promotion_llm",
+        AsyncMock(return_value={"promotion_decisions": [_decision("lore")]}),
+    )
+    reviewer_mock = AsyncMock(return_value={"reviews": []})
+    monkeypatch.setattr(
+        promotion_module,
+        "run_global_promotion_review_llm",
+        reviewer_mock,
+    )
+    find_mock = AsyncMock(return_value=[])
+    insert_mock = AsyncMock()
+    monkeypatch.setattr(promotion_module, "find_active_memory_units", find_mock)
+    monkeypatch.setattr(promotion_module, "insert_memory_unit", insert_mock)
+    monkeypatch.setattr(promotion_module.repository, "upsert_run", _upsert)
+
+    result = await promotion_module.run_global_reflection_promotion(
+        character_local_date="2026-05-04",
+        dry_run=False,
+        enable_memory_writes=True,
+    )
+
+    assert result.failed_count == 1
+    reviewer_mock.assert_awaited_once()
+    find_mock.assert_not_awaited()
+    insert_mock.assert_not_awaited()
+    assert persisted[-1]["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_promotion_persists_actual_reviewer_certificate_and_audit(
+    monkeypatch,
+) -> None:
+    """Writes store reviewer evidence while retaining both audit certificates."""
+
+    decision = _decision("lore")
+    reviewer_certificate = _review_certificate(
+        reason="最终审阅确认候选含义已去除特定对象影响。",
+    )
+    persisted: list[dict[str, Any]] = []
+    captured_docs: list[dict[str, Any]] = []
+
+    async def _review_llm(prompt):
+        payload = json.loads(prompt.human_prompt)
+        return {
+            "reviews": [{
+                "selected_candidate_id": payload["candidates"][0][
+                    "selected_candidate_id"
+                ],
+                "decision": "accept",
+                **reviewer_certificate,
+            }],
+        }
+
+    async def _upsert(document):
+        persisted.append(document)
+
+    async def _insert(*, document):
+        captured_docs.append(document)
+        return _stored_memory_unit("reviewed-unit")
+
+    monkeypatch.setattr(
+        promotion_module.repository,
+        "daily_channel_runs",
+        AsyncMock(return_value=[_daily_doc()]),
+    )
+    monkeypatch.setattr(
+        promotion_module.repository,
+        "reflection_run_by_id",
+        AsyncMock(return_value=_hourly_doc()),
+    )
+    monkeypatch.setattr(
+        promotion_module,
+        "run_global_promotion_llm",
+        AsyncMock(return_value={"promotion_decisions": [decision]}),
+    )
+    monkeypatch.setattr(
+        promotion_module,
+        "run_global_promotion_review_llm",
+        _review_llm,
+    )
+    monkeypatch.setattr(
+        promotion_module,
+        "find_active_memory_units",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(promotion_module, "insert_memory_unit", _insert)
+    monkeypatch.setattr(promotion_module.repository, "upsert_run", _upsert)
+
+    result = await promotion_module.run_global_reflection_promotion(
+        character_local_date="2026-05-04",
+        dry_run=False,
+        enable_memory_writes=True,
+    )
+
+    assert result.succeeded_count == 1
+    assert captured_docs[0]["privacy_review"]["boundary_assessment"] == (
+        reviewer_certificate["reason"]
+    )
+    final_decision = persisted[-1]["promotion_decisions"][0]
+    assert final_decision["promoter_privacy_review"][
+        "global_applicability"
+    ] == "global"
+    assert final_decision["reviewer_privacy_review"] == reviewer_certificate
+    assert final_decision["review_decision"] == "accept"
+
+
+def test_global_promotion_prompt_version_cuts_over_to_independent_review() -> None:
+    """The canonical version identifies the new promoter/reviewer contract."""
+
+    assert promotion_module.GLOBAL_PROMOTION_PROMPT_VERSION != (
+        "reflection_global_promotion_v1"
+    )
+    assert promotion_module.GLOBAL_PROMOTION_PROMPT_VERSION.endswith("_v2")
+    assert promotion_module.GLOBAL_PROMOTION_REVIEW_PROMPT_VERSION.endswith(
+        "_v1"
+    )
 
 
 @pytest.mark.asyncio
@@ -967,6 +1584,9 @@ def _decision(lane: str) -> promotion_module.ReflectionPromotionDecision:
             "reason": "不涉及身份或亲密边界。",
         },
         "privacy_review": {
+            "global_applicability": "global",
+            "target_specific_meaning_removed": True,
+            "affects_identity_or_boundaries": False,
             "private_detail_risk": "low",
             "user_details_removed": True,
             "boundary_assessment": "可接受。",
@@ -982,6 +1602,21 @@ def _decision(lane: str) -> promotion_module.ReflectionPromotionDecision:
         ],
     }
     return decision
+
+
+def _review_certificate(**overrides: Any) -> dict[str, Any]:
+    """Build an independent reviewer certificate fixture."""
+
+    certificate: dict[str, Any] = {
+        "global_applicability": "global",
+        "target_specific_meaning_removed": True,
+        "affects_identity_or_boundaries": False,
+        "private_detail_risk": "low",
+        "user_details_removed": True,
+        "reason": "独立审阅确认范围与隐私条件满足。",
+    }
+    certificate.update(overrides)
+    return certificate
 
 
 def _daily_doc() -> dict:
@@ -1051,6 +1686,32 @@ def _hourly_doc() -> dict:
         "created_at": "2026-05-04T10:00:00+00:00",
         "updated_at": "2026-05-04T10:00:00+00:00",
     }
+    return doc
+
+
+def _canonical_max_hourly_doc() -> dict:
+    """Build a canonical-shape hourly document at readable-field maxima."""
+
+    scope_ref = selector.build_scope_ref(
+        "qq",
+        "canonical-channel-480386272",
+        "group",
+    )
+    run_id = repository.hourly_run_id(
+        scope_ref=scope_ref,
+        hour_start="2026-05-04T10:00:00+00:00",
+    )
+    doc = _hourly_doc()
+    doc["run_id"] = run_id
+    doc["scope"]["scope_ref"] = scope_ref
+    doc["scope"]["platform_channel_id"] = "canonical-channel-480386272"
+    doc["output"]["topic_summary"] = "主题" * 90
+    doc["output"]["conversation_quality_feedback"] = [
+        "反馈" * 60,
+        "质量" * 60,
+    ]
+    doc["output"]["active_character_utterances"] = ["发言" * 90]
+    doc["output"]["privacy_notes"] = ["隐私说明" * 60] * 3
     return doc
 
 

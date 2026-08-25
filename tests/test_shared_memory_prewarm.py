@@ -7,12 +7,16 @@ from typing import Any
 import pytest
 from openai import OpenAIError
 
-from tests.cognition_test_helpers import canonical_user_message_episode
 from kazusa_ai_chatbot.cognition_resolver import capabilities
+from kazusa_ai_chatbot.db.user_memory_units import build_user_memory_unit_doc
+from kazusa_ai_chatbot.rag.memory_evidence.workers.user_memory import (
+    _project_row,
+)
 from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
     empty_user_memory_context,
 )
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
+from tests.cognition_test_helpers import canonical_user_message_episode
 
 
 def _minimal_persona_state() -> dict[str, Any]:
@@ -100,6 +104,71 @@ def _empty_result() -> dict[str, Any]:
     return rag_result
 
 
+def _typed_shared_rows() -> list[dict[str, Any]]:
+    """Build mixed certified shared rows for the prewarm authority gate."""
+
+    certificate = {
+        "global_applicability": "global",
+        "target_specific_meaning_removed": True,
+        "affects_identity_or_boundaries": False,
+        "private_detail_risk": "low",
+        "user_details_removed": True,
+    }
+    return [
+        {
+            "_id": "prewarm-fact-row",
+            "memory_unit_id": "prewarm-fact-unit",
+            "memory_name": "fact",
+            "content": "A prewarm world fact.",
+            "memory_type": "fact",
+            "source_kind": "conversation_extracted",
+            "source_global_user_id": "",
+            "authority": "conversation_accepted",
+            "status": "active",
+            "privacy_review": {
+                **certificate,
+                "boundary_assessment": "deidentified global meaning",
+                "reviewer": "automated_llm",
+            },
+        },
+        {
+            "_id": "prewarm-guidance-row",
+            "memory_unit_id": "prewarm-guidance-unit",
+            "memory_name": "defense_rule",
+            "content": "A prewarm self-guidance rule.",
+            "memory_type": "defense_rule",
+            "source_kind": "reflection_inferred",
+            "source_global_user_id": "",
+            "authority": "reflection_promoted",
+            "status": "active",
+            "privacy_review": {
+                **certificate,
+                "boundary_assessment": "deidentified global meaning",
+                "reviewer": "automated_llm",
+            },
+        },
+    ]
+
+
+def _user_memory_writer_row(*, user_id: str, unit_id: str) -> dict[str, Any]:
+    """Build one current-user row through the production writer shape."""
+
+    writer_row = dict(build_user_memory_unit_doc(
+        user_id,
+        {
+            "unit_id": unit_id,
+            "unit_type": "objective_fact",
+            "fact": "Private current-user continuity must not prewarm.",
+            "subjective_appraisal": "A scoped continuity note.",
+            "relationship_signal": "Keep it participant-scoped.",
+        },
+        storage_timestamp_utc="2026-05-24T07:41:21+00:00",
+        unit_id=unit_id,
+    ))
+    projected_row = _project_row(writer_row, user_id)
+    return projected_row
+
+
 def _patch_persistent_memory_worker(
     monkeypatch: pytest.MonkeyPatch,
     result: dict[str, Any] | BaseException,
@@ -169,10 +238,7 @@ async def test_first_cycle_prewarm_uses_shared_persistent_memory_worker(
         monkeypatch,
         {
             "resolved": True,
-            "result": [{
-                "content": "Shared policy: respond lightly to image-only turns.",
-                "source_system": "memory",
-            }],
+            "result": [_typed_shared_rows()[0]],
             "attempts": 1,
         },
     )
@@ -193,7 +259,7 @@ async def test_first_cycle_prewarm_uses_shared_persistent_memory_worker(
     assert context["character_profile"]["name"] == "Kazusa"
     assert rag_result["answer"] == ""
     assert rag_result["user_memory_unit_candidates"] == []
-    assert "Shared policy: respond lightly to image-only turns." in repr(
+    assert "A prewarm world fact." in repr(
         rag_result["memory_evidence"]
     )
 
@@ -351,22 +417,29 @@ async def test_first_cycle_prewarm_projects_memory_without_answer_or_user_units(
 ) -> None:
     """Only accepted shared-memory rows should reach projected memory evidence."""
 
+    private_user_row = _user_memory_writer_row(
+        user_id="user-1",
+        unit_id="private-unit",
+    )
+    private_user_row.update({
+        "source_system": "user_memory_units",
+        "source_kind": "user_memory_units",
+        "scope_type": "user_continuity",
+        "scope_global_user_id": "user-1",
+        "authority": "scoped_continuity",
+        "truth_status": "character_lore_or_interaction_continuity",
+        "origin": "consolidated_interaction",
+    })
     calls = _patch_persistent_memory_worker(
         monkeypatch,
         {
             "resolved": True,
             "result": [
                 {
+                    **_typed_shared_rows()[0],
                     "content": "Shared nonverbal input policy.",
-                    "source_system": "memory",
-                    "timestamp": "2026-05-24T07:41:21+00:00",
                 },
-                {
-                    "content": "Private current-user continuity must not prewarm.",
-                    "source_system": "user_memory_units",
-                    "scope_type": "user_continuity",
-                    "scope_global_user_id": "user-1",
-                },
+                private_user_row,
             ],
             "attempts": 1,
         },
@@ -462,3 +535,34 @@ async def test_first_cycle_prewarm_returns_empty_without_shared_evidence_or_fail
     )
 
     assert failed == _empty_result()
+
+
+@pytest.mark.asyncio
+async def test_first_cycle_prewarm_preserves_self_guidance_conditional_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prewarm uses the same typed partition as normal shared-memory recall."""
+
+    calls = _patch_persistent_memory_worker(
+        monkeypatch,
+        {
+            "resolved": True,
+            "result": _typed_shared_rows(),
+            "attempts": 1,
+        },
+    )
+
+    rag_result = await capabilities.run_first_cycle_shared_memory_prewarm(
+        _minimal_persona_state(),
+    )
+
+    assert len(calls) == 1
+    entries = rag_result["memory_evidence"]
+    assert [entry["memory_type"] for entry in entries] == [
+        "fact",
+        "defense_rule",
+    ]
+    assert entries[1]["authority"] == "reflection_promoted"
+    assert entries[1]["source_kind"] == "reflection_inferred"
+    assert "A prewarm self-guidance rule." in entries[1]["content"]
+    assert rag_result["user_memory_unit_candidates"] == []

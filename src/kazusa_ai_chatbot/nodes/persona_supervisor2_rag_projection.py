@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Mapping
 from typing import Any
 
 from kazusa_ai_chatbot.config import RAG_SEARCH_SELECTED_SUMMARY_LIMIT
@@ -21,6 +22,60 @@ _SLOT_REF_RE = re.compile(r"slot\s+(\d+)", flags=re.IGNORECASE)
 _MAX_RECALL_EVIDENCE = 3
 _MAX_CONVERSATION_EVIDENCE_ITEMS = RAG_SEARCH_SELECTED_SUMMARY_LIMIT
 _MAX_SAFETY_RECOVERY_INCIDENTS = 20
+_LEARNED_MEMORY_AUTHORITY_SOURCE_PAIRS = frozenset({
+    ("conversation_accepted", "conversation_extracted"),
+    ("reflection_promoted", "reflection_inferred"),
+})
+_CURATED_MEMORY_AUTHORITY_SOURCE_PAIRS = frozenset({
+    ("seed", "seeded_manual"),
+    ("seed", "external_imported"),
+    ("manual", "seeded_manual"),
+    ("manual", "external_imported"),
+})
+_PRIVACY_REVIEW_FIELDS = frozenset({
+    "global_applicability",
+    "target_specific_meaning_removed",
+    "affects_identity_or_boundaries",
+    "private_detail_risk",
+    "user_details_removed",
+    "boundary_assessment",
+    "reviewer",
+})
+_MEMORY_METADATA_FIELDS = (
+    "unit_id",
+    "unit_type",
+    "memory_unit_id",
+    "memory_type",
+    "source_kind",
+    "source_system",
+    "source_global_user_id",
+    "scope_type",
+    "scope_global_user_id",
+    "authority",
+    "truth_status",
+    "origin",
+    "status",
+    "privacy_review",
+)
+_SHARED_MEMORY_REQUIRED_FIELDS = frozenset({
+    "memory_unit_id",
+    "memory_type",
+    "source_kind",
+    "source_global_user_id",
+    "authority",
+    "status",
+})
+_CURRENT_USER_REQUIRED_FIELDS = frozenset({
+    "source_system",
+    "unit_id",
+    "unit_type",
+    "status",
+    "scope_type",
+    "scope_global_user_id",
+    "authority",
+    "truth_status",
+    "origin",
+})
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +208,287 @@ def _scoped_user_memory_rows(
     return scoped_rows
 
 
+def _memory_privacy_certificate_is_complete(row: Mapping[str, Any]) -> bool:
+    """Require the exact certificate needed for a learned global memory row."""
+
+    review = row.get("privacy_review")
+    if not isinstance(review, Mapping):
+        return False
+    if set(review) != _PRIVACY_REVIEW_FIELDS:
+        return False
+    return (
+        review.get("global_applicability") == "global"
+        and review.get("target_specific_meaning_removed") is True
+        and review.get("affects_identity_or_boundaries") is False
+        and review.get("private_detail_risk") == "low"
+        and review.get("user_details_removed") is True
+        and isinstance(review.get("boundary_assessment"), str)
+        and bool(review["boundary_assessment"].strip())
+        and review.get("reviewer") == "automated_llm"
+    )
+
+
+def _classify_current_user_memory_row(
+    row: Mapping[str, Any],
+    *,
+    current_user_id: str,
+) -> tuple[str | None, str]:
+    """Validate one canonical current-user continuity row."""
+
+    if not _CURRENT_USER_REQUIRED_FIELDS.issubset(row):
+        return None, "current-user memory metadata is incomplete"
+    if not text_or_empty(row.get("unit_id")) or not text_or_empty(
+        row.get("unit_type")
+    ):
+        return None, "current-user memory stable unit metadata is incomplete"
+    if row.get("source_system") != "user_memory_units":
+        return None, "current-user memory source system is invalid"
+    if row.get("source_kind") != "user_memory_units":
+        return None, "current-user memory source kind is invalid"
+    if row.get("scope_type") != "user_continuity":
+        return None, "current-user memory scope type is invalid"
+    if row.get("scope_global_user_id") != current_user_id:
+        return None, "user memory scope does not match current user"
+    if row.get("authority") != "scoped_continuity":
+        return None, "current-user memory authority is invalid"
+    if row.get("truth_status") != "character_lore_or_interaction_continuity":
+        return None, "current-user memory truth status is invalid"
+    if row.get("origin") != "consolidated_interaction":
+        return None, "current-user memory origin is invalid"
+    if row.get("status") != "active":
+        return None, "user memory row is not active"
+    return "participant_continuity", "exact current-user continuity"
+
+
+def _shared_scope_is_consistent(row: Mapping[str, Any]) -> bool:
+    """Return whether optional shared-row scope metadata is non-contradictory."""
+
+    source_system = row.get("source_system")
+    if source_system is not None and source_system not in {"", "memory"}:
+        return False
+    scope_type = row.get("scope_type")
+    if scope_type is not None and scope_type != "global":
+        return False
+    scope_user_id = row.get("scope_global_user_id")
+    return scope_user_id is None or scope_user_id == ""
+
+
+def _classify_shared_memory_row(
+    row: Mapping[str, Any],
+) -> tuple[str | None, str]:
+    """Validate one raw shared-memory row and map its authority lane."""
+
+    if not _SHARED_MEMORY_REQUIRED_FIELDS.issubset(row):
+        return None, "learned memory metadata is incomplete"
+    if not text_or_empty(row.get("memory_unit_id")):
+        return None, "shared memory stable unit id is incomplete"
+    if row.get("memory_type") not in {"fact", "defense_rule"}:
+        return None, "memory type is unsupported"
+    if not isinstance(row.get("source_global_user_id"), str):
+        return None, "shared memory source user metadata is invalid"
+    if row.get("source_global_user_id") != "":
+        return None, "learned memory has a source user"
+    if row.get("status") != "active":
+        return None, "learned memory status is not active"
+    if not _shared_scope_is_consistent(row):
+        return None, "learned memory has non-global scope"
+
+    authority_source = (
+        text_or_empty(row.get("authority")),
+        text_or_empty(row.get("source_kind")),
+    )
+    if authority_source in _CURATED_MEMORY_AUTHORITY_SOURCE_PAIRS:
+        if "privacy_review" in row and not (
+            _curated_memory_privacy_review_is_structural(
+                row["privacy_review"]
+            )
+        ):
+            return None, "curated memory privacy review is malformed"
+        return "character_world_context" if row["memory_type"] == "fact" else (
+            "conditional_character_guidance"
+        ), "validated curated memory"
+    if authority_source not in _LEARNED_MEMORY_AUTHORITY_SOURCE_PAIRS:
+        return None, "memory authority and source pair is unsupported"
+    if not _memory_privacy_certificate_is_complete(row):
+        return None, "learned memory certificate is incomplete"
+    lane = (
+        "conditional_character_guidance"
+        if row["memory_type"] == "defense_rule"
+        else "character_world_context"
+    )
+    return lane, "validated learned global memory"
+
+
+def classify_typed_memory_row(
+    row: Mapping[str, Any],
+    *,
+    current_user_id: str,
+) -> tuple[str | None, str]:
+    """Map typed memory metadata to one cognition-owned authority lane.
+
+    The mapping reads storage metadata only. Missing or contradictory learned
+    metadata is rejected with a diagnostic reason instead of being inferred
+    from memory text.
+    """
+
+    if (
+        row.get("source_system") == "user_memory_units"
+        or any(
+            field in row
+            for field in ("unit_id", "unit_type", "global_user_id")
+        )
+    ):
+        return _classify_current_user_memory_row(
+            row,
+            current_user_id=current_user_id,
+        )
+    return _classify_shared_memory_row(row)
+
+
+def classify_projected_memory_row(
+    row: Mapping[str, Any],
+    *,
+    current_user_id: str,
+) -> tuple[str | None, str]:
+    """Validate one canonical safe memory-evidence entry."""
+
+    if row.get("source_system") == "user_memory_units":
+        return _classify_current_user_memory_row(
+            row,
+            current_user_id=current_user_id,
+        )
+    return _classify_projected_shared_memory_row(row)
+
+
+def _classify_projected_shared_memory_row(
+    row: Mapping[str, Any],
+) -> tuple[str | None, str]:
+    """Validate shared metadata after prompt-safety projection."""
+
+    required = {
+        "memory_unit_id",
+        "memory_type",
+        "source_kind",
+        "authority",
+        "status",
+        "scope_type",
+    }
+    if not required.issubset(row):
+        return None, "projected shared memory metadata is incomplete"
+    if not text_or_empty(row.get("memory_unit_id")):
+        return None, "projected shared memory stable unit id is incomplete"
+    if row.get("memory_type") not in {"fact", "defense_rule"}:
+        return None, "projected memory type is unsupported"
+    if row.get("status") != "active" or row.get("scope_type") != "global":
+        return None, "projected shared memory scope or status is invalid"
+    if "source_global_user_id" in row:
+        return None, "projected shared memory exposes source user metadata"
+    authority_source = (
+        text_or_empty(row.get("authority")),
+        text_or_empty(row.get("source_kind")),
+    )
+    if authority_source in _CURATED_MEMORY_AUTHORITY_SOURCE_PAIRS:
+        if "privacy_review" in row and not (
+            _curated_memory_privacy_review_is_structural(
+                row["privacy_review"]
+            )
+        ):
+            return None, "projected curated memory privacy review is malformed"
+        lane = (
+            "character_world_context"
+            if row["memory_type"] == "fact"
+            else "conditional_character_guidance"
+        )
+        return lane, "validated projected curated memory"
+    if authority_source not in _LEARNED_MEMORY_AUTHORITY_SOURCE_PAIRS:
+        return None, "projected memory authority and source pair is unsupported"
+    if not _memory_privacy_certificate_is_complete(row):
+        return None, "projected learned memory certificate is incomplete"
+    lane = (
+        "conditional_character_guidance"
+        if row["memory_type"] == "defense_rule"
+        else "character_world_context"
+    )
+    return lane, "validated projected learned global memory"
+
+
+def _curated_memory_privacy_review_is_structural(value: object) -> bool:
+    """Validate optional curated privacy fields without learned semantics."""
+
+    if not isinstance(value, Mapping):
+        return False
+    if not set(value).issubset(_PRIVACY_REVIEW_FIELDS):
+        return False
+    enum_fields = {
+        "global_applicability": {"global", "scoped", "absent"},
+        "private_detail_risk": {"low", "medium", "high"},
+        "reviewer": {"automated_llm", "human", "seed_tool"},
+    }
+    for field, allowed_values in enum_fields.items():
+        if field in value and value[field] not in allowed_values:
+            return False
+    for field in (
+        "target_specific_meaning_removed",
+        "affects_identity_or_boundaries",
+        "user_details_removed",
+    ):
+        if field in value and not isinstance(value[field], bool):
+            return False
+    return "boundary_assessment" not in value or isinstance(
+        value["boundary_assessment"], str
+    )
+
+
+def _partition_typed_memory_rows(
+    rows: list[dict[str, Any]],
+    *,
+    current_user_id: str,
+) -> tuple[list[tuple[str, list[dict[str, Any]]]], list[dict[str, str]]]:
+    """Partition memory rows by typed metadata before public formatting."""
+
+    grouped: list[tuple[tuple[object, ...], str, list[dict[str, Any]]]] = []
+    diagnostics: list[dict[str, str]] = []
+    for raw_row in rows:
+        if not isinstance(raw_row, Mapping):
+            diagnostics.append({"reason": "memory row is not a mapping"})
+            continue
+        lane, reason = classify_typed_memory_row(
+            raw_row,
+            current_user_id=current_user_id,
+        )
+        row_id = _source_ref_value(raw_row, "_id") or _source_ref_value(
+            raw_row,
+            "memory_unit_id",
+        ) or _source_ref_value(raw_row, "unit_id")
+        if lane is None:
+            diagnostic = {"reason": reason}
+            if row_id:
+                diagnostic["source_id"] = row_id
+            diagnostics.append(diagnostic)
+            continue
+
+        grouping_key = (
+            lane,
+            *(
+                text_or_empty(raw_row.get(field))
+                for field in _MEMORY_METADATA_FIELDS
+            ),
+            repr(raw_row.get("privacy_review")),
+        )
+        for existing_key, existing_lane, existing_rows in grouped:
+            if existing_key == grouping_key:
+                existing_rows.append(dict(raw_row))
+                break
+        else:
+            grouped.append((grouping_key, lane, [dict(raw_row)]))
+
+    partitions = [
+        (lane, partition_rows)
+        for _key, lane, partition_rows in grouped
+    ]
+    return partitions, diagnostics
+
+
 def _append_user_memory_unit_candidates(
     existing_candidates: list[dict[str, Any]],
     new_candidates: list[dict[str, Any]],
@@ -240,6 +576,16 @@ def _memory_evidence_items(
         if not isinstance(row, dict):
             continue
         content = text_or_empty(row.get("content"))
+        if not content:
+            content = "；".join(
+                text_or_empty(row.get(field))
+                for field in (
+                    "fact",
+                    "subjective_appraisal",
+                    "relationship_signal",
+                )
+                if text_or_empty(row.get(field))
+            )
         if not content:
             continue
         clipped_content = _clip_text(content, limit=evidence_char_limit)
@@ -361,9 +707,14 @@ def _source_refs_from_rows(rows: list[Any]) -> list[dict[str, str]]:
         "platform_message_id",
         "_id",
         "unit_id",
-        "source",
-        "source_system",
+        "unit_type",
+        "memory_unit_id",
+        "memory_type",
+        "source_kind",
+        "authority",
+        "status",
         "timestamp",
+        "updated_at",
         "evidence_time",
     )
     for row in rows:
@@ -447,10 +798,10 @@ def _memory_evidence_entry(
     *,
     summary: str,
     rows: list[dict[str, Any]],
-    current_user_id: str,
+    lane: str,
     evidence_char_limit: int,
 ) -> dict[str, Any]:
-    """Project one memory-evidence item and preserve scoped continuity metadata."""
+    """Project one validated partition into one canonical safe entry."""
     evidence_items = _memory_evidence_items(
         rows,
         evidence_char_limit=evidence_char_limit,
@@ -464,22 +815,35 @@ def _memory_evidence_entry(
             ),
         ),
     }
-    scoped_rows = _scoped_user_memory_rows(rows, current_user_id=current_user_id)
-    if not scoped_rows:
-        return entry
-
-    scoped_row = scoped_rows[0]
-    for field in (
-        "source_system",
-        "scope_type",
-        "scope_global_user_id",
-        "authority",
-        "truth_status",
-        "origin",
-    ):
-        value = text_or_empty(scoped_row.get(field))
-        if value:
-            entry[field] = value
+    metadata_row = rows[0] if rows else {}
+    if lane == "participant_continuity":
+        public_fields = (
+            "unit_id",
+            "unit_type",
+            "source_system",
+            "source_kind",
+            "scope_type",
+            "scope_global_user_id",
+            "authority",
+            "truth_status",
+            "origin",
+            "status",
+        )
+    else:
+        public_fields = (
+            "memory_unit_id",
+            "memory_type",
+            "source_kind",
+            "authority",
+            "status",
+        )
+        entry["scope_type"] = "global"
+    for field in public_fields:
+        if field in metadata_row and metadata_row[field] is not None:
+            entry[field] = metadata_row[field]
+    privacy_review = metadata_row.get("privacy_review")
+    if isinstance(privacy_review, Mapping):
+        entry["privacy_review"] = dict(privacy_review)
     return entry
 
 
@@ -695,18 +1059,30 @@ def project_known_facts(
                 if isinstance(row, dict)
             ]
             _attach_source_refs(dispatched_entry, memory_rows)
-            memory_evidence.append(
-                _memory_evidence_entry(
-                    summary=summary,
-                    rows=memory_rows,
-                    current_user_id=current_user_id,
-                    evidence_char_limit=evidence_char_limit,
+            partitions, diagnostics = _partition_typed_memory_rows(
+                memory_rows,
+                current_user_id=current_user_id,
+            )
+            if diagnostics:
+                dispatched_entry["projection_diagnostics"] = diagnostics
+            for _lane, partition_rows in partitions:
+                memory_evidence.append(
+                    _memory_evidence_entry(
+                        summary=summary,
+                        rows=partition_rows,
+                        lane=_lane,
+                        evidence_char_limit=evidence_char_limit,
+                    )
                 )
-            )
-            rag_result["user_memory_unit_candidates"] = _append_user_memory_unit_candidates(
-                rag_result["user_memory_unit_candidates"],
-                _scoped_user_memory_rows(memory_rows, current_user_id=current_user_id),
-            )
+                rag_result["user_memory_unit_candidates"] = (
+                    _append_user_memory_unit_candidates(
+                        rag_result["user_memory_unit_candidates"],
+                        _scoped_user_memory_rows(
+                            partition_rows,
+                            current_user_id=current_user_id,
+                        ),
+                    )
+                )
             continue
 
         if agent == "person_context_agent":
@@ -768,14 +1144,21 @@ def project_known_facts(
                 if isinstance(row, dict)
             ]
             _attach_source_refs(dispatched_entry, memory_rows)
-            memory_evidence.append(
-                _memory_evidence_entry(
-                    summary=summary,
-                    rows=memory_rows,
-                    current_user_id=current_user_id,
-                    evidence_char_limit=evidence_char_limit,
-                )
+            partitions, diagnostics = _partition_typed_memory_rows(
+                memory_rows,
+                current_user_id=current_user_id,
             )
+            if diagnostics:
+                dispatched_entry["projection_diagnostics"] = diagnostics
+            for _lane, partition_rows in partitions:
+                memory_evidence.append(
+                    _memory_evidence_entry(
+                        summary=summary,
+                        rows=partition_rows,
+                        lane=_lane,
+                        evidence_char_limit=evidence_char_limit,
+                    )
+                )
             continue
 
         if agent == "recall_agent":

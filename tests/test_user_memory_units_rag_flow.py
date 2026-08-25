@@ -75,7 +75,10 @@ def test_valid_candidates_drops_incomplete_memory_unit_rows(caplog) -> None:
         ],
     }
 
-    candidates = memory_units_module._valid_candidates(result)
+    candidates = memory_units_module._valid_candidates(
+        result,
+        allowed_unit_types=memory_units_module.VALID_EXTRACTED_USER_MEMORY_UNIT_TYPES,
+    )
 
     assert [candidate["candidate_id"] for candidate in candidates] == ["valid-candidate"]
     assert "missing-appraisal" in caplog.text
@@ -102,7 +105,10 @@ def test_valid_candidates_normalizes_extractor_due_at() -> None:
         ],
     }
 
-    candidates = memory_units_module._valid_candidates(result)
+    candidates = memory_units_module._valid_candidates(
+        result,
+        allowed_unit_types=memory_units_module.VALID_EXTRACTED_USER_MEMORY_UNIT_TYPES,
+    )
 
     assert candidates[0]["due_at"] == "2026-05-06T12:00:00+00:00"
 
@@ -113,6 +119,137 @@ def test_extractor_prompt_requires_unresolved_relative_commitment_omission() -> 
     assert "不把未解析的相对时间当作当前或未来事实保存" in prompt
     assert "不输出该 memory_unit" in prompt
     assert "无法确定且会影响活跃承诺有效性的候选直接删除" in prompt
+
+
+def _extractor_payload_state(enabled_lanes: list[str]) -> dict:
+    turn_clock = build_turn_clock("2026-04-29 00:00:00")
+    return {
+        "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+        "local_time_context": turn_clock["local_time_context"],
+        "global_user_id": "user-1",
+        "user_name": "User",
+        "consolidation_origin": {
+            "episode_id": "episode-1",
+            "trigger_source": "user_message",
+            "input_sources": ["dialog_text"],
+            "output_mode": "visible_reply",
+            "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+            "platform": "debug",
+            "platform_channel_id": "channel-1",
+            "channel_type": "private",
+            "platform_message_id": "message-1",
+            "active_turn_platform_message_ids": ["message-1"],
+            "active_turn_conversation_row_ids": ["row-1"],
+            "current_platform_user_id": "platform-user-1",
+            "current_global_user_id": "user-1",
+            "current_display_name": "User",
+        },
+        "decontextualized_input": "A concrete user observation.",
+        "final_dialog": ["A bounded response."],
+        "internal_monologue": "The character considers the evidence.",
+        "emotional_appraisal": "The character is attentive.",
+        "interaction_subtext": "The user expects grounded continuity.",
+        "logical_stance": "CONFIRM",
+        "character_intent": "PROVIDE",
+        "chat_history_recent": [],
+        "rag_result": {"user_memory_unit_candidates": []},
+        "new_facts": [],
+        "future_promises": [],
+        "subjective_appraisals": [],
+        "enabled_consolidation_write_lanes": enabled_lanes,
+    }
+
+
+def test_extractor_contract_limits_candidate_types_to_router_enabled_lanes() -> None:
+    expected_contracts = [
+        (
+            ["user_memory_units"],
+            [
+                "stable_pattern",
+                "recent_shift",
+                "objective_fact",
+                "milestone",
+            ],
+        ),
+        (["active_commitment"], ["active_commitment"]),
+        (
+            ["user_memory_units", "active_commitment"],
+            [
+                "stable_pattern",
+                "recent_shift",
+                "objective_fact",
+                "milestone",
+                "active_commitment",
+            ],
+        ),
+        ([], []),
+    ]
+
+    for enabled_lanes, allowed_unit_types in expected_contracts:
+        payload = memory_units_module._json_payload(
+            _extractor_payload_state(enabled_lanes),
+        )
+
+        assert payload["memory_unit_write_contract"] == {
+            "enabled_lanes": enabled_lanes,
+            "allowed_unit_types": allowed_unit_types,
+        }
+
+
+def test_valid_candidates_rejects_active_commitment_outside_enabled_lane(
+    caplog,
+) -> None:
+    caplog.set_level("WARNING", logger=memory_units_module.__name__)
+    result = {
+        "memory_units": [
+            {
+                "candidate_id": "off-contract-commitment",
+                "unit_type": UserMemoryUnitType.ACTIVE_COMMITMENT,
+                "fact": "An unadmitted candidate type.",
+                "subjective_appraisal": "The candidate is outside the route.",
+                "relationship_signal": "The route must keep sibling candidates.",
+                "source_refs": [{"source": "chat"}],
+            },
+            {
+                "candidate_id": "valid-objective-fact",
+                "unit_type": UserMemoryUnitType.OBJECTIVE_FACT,
+                "fact": "A structurally valid candidate.",
+                "subjective_appraisal": "The candidate has required fields.",
+                "relationship_signal": "The candidate remains eligible.",
+                "source_refs": [{"source": "chat"}],
+            },
+        ],
+    }
+
+    candidates = memory_units_module._valid_candidates(
+        result,
+        allowed_unit_types={UserMemoryUnitType.OBJECTIVE_FACT},
+    )
+
+    assert [candidate["candidate_id"] for candidate in candidates] == [
+        "valid-objective-fact"
+    ]
+    assert "off-contract-commitment" in caplog.text
+    assert "invalid unit_type" in caplog.text
+
+
+def test_extractor_prompt_requires_character_owned_acceptance_and_rejects_silence() -> None:
+    prompt = memory_units_module._EXTRACTOR_PROMPT
+
+    assert "memory_unit_write_contract" in prompt
+    assert "enabled_lanes" in prompt
+    assert "allowed_unit_types" in prompt
+    assert '"memory_units"' in prompt
+    assert '"unit_type"' in prompt
+
+    captured_dialog_fragments = (
+        "我可以帮你理顺，但你要准备一份奖励作为交换。",
+        "我已经列出今天的报告、待回邮件和下周会议材料，先处理哪一项？",
+        "好，我接受这个交换。那你先帮我排今天的任务，奖励我之后再准备。",
+    )
+    assert all(fragment not in prompt for fragment in captured_dialog_fragments)
+    assert "test_live_extractor_does_not_invent_commitment" not in prompt
+    assert "test_live_extractor_preserves_explicit_character_owned_commitment" not in prompt
 
 
 @pytest.mark.asyncio

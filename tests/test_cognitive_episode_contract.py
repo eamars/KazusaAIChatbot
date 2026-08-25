@@ -216,7 +216,7 @@ def test_dialog_semantic_projection_is_model_owned() -> None:
     response_operation = {
         "operation": "Choose one next action for the current user.",
         "response_owner_role": "当前角色",
-        "selection_owner_role": "当前角色",
+        "response_content_provider_role": "当前角色",
         "selection_required": True,
         "embedded_actor_role": "当前用户",
         "embedded_target_role": "当前角色",
@@ -231,6 +231,40 @@ def test_dialog_semantic_projection_is_model_owned() -> None:
     dialog_content = projected["percepts"][0]["content"]
     assert dialog_content["role_explicit_content"] == role_content
     assert dialog_content["response_operation"] == response_operation
+
+
+def test_dialog_response_operation_uses_response_content_provider_role() -> None:
+    """The response operation uses the canonical provider-role field."""
+
+    response_operation = {
+        "operation": "当前角色回应当前用户的当前输入",
+        "response_owner_role": "当前角色",
+        "response_content_provider_role": "当前角色",
+        "selection_required": False,
+        "embedded_actor_role": "当前角色",
+        "embedded_target_role": "当前用户",
+    }
+
+    projected = cognition_episode_module.attach_dialog_semantic_projection(
+        _valid_episode(),
+        "当前用户向当前角色发送当前输入。",
+        response_operation,
+    )
+
+    assert projected["percepts"][0]["content"]["response_operation"] == (
+        response_operation
+    )
+
+    retired_operation = dict(response_operation)
+    retired_operation["selection_owner_role"] = retired_operation.pop(
+        "response_content_provider_role"
+    )
+    with pytest.raises(CognitiveEpisodeValidationError):
+        cognition_episode_module.attach_dialog_semantic_projection(
+            _valid_episode(),
+            "当前用户向当前角色发送当前输入。",
+            retired_operation,
+        )
 
 
 def test_validate_rejects_empty_percepts() -> None:

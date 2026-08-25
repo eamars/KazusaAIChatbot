@@ -366,7 +366,9 @@ preserved by seed reset.
 
 Future promotion callers provide evidence and privacy review metadata beside
 the memory document. The repository stores these fields as caller-supplied
-metadata.
+metadata. Learned character self-guidance writes carry the final independent
+scope certificate in the same review object; seed and curated knowledge may
+continue using their existing optional review fields.
 
 ```python
 {
@@ -389,6 +391,9 @@ metadata.
         }
     ],
     "privacy_review": {
+        "global_applicability": "global|scoped|absent",
+        "target_specific_meaning_removed": bool,
+        "affects_identity_or_boundaries": bool,
         "private_detail_risk": "low|medium|high",
         "user_details_removed": bool,
         "boundary_assessment": str,

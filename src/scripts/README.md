@@ -30,6 +30,7 @@ availability.
 | `drop_legacy_rag_collections.py` | `python scripts/drop_legacy_rag_collections.py` | One-shot cleanup for legacy RAG collections (`rag_cache_index`, `rag_metadata_index`). |
 | `ensure_vector_search_indexes.py` | `python -m scripts.ensure_vector_search_indexes` | Inspect and optionally recreate approved vector-search indexes. |
 | `export_character_state.py` | `python -m scripts.export_character_state` / `export-character-state` | Export singleton character state JSON. |
+| `audit_character_memory_scope.py` | `python -m scripts.audit_character_memory_scope --output <path>` | Read-only UTF-8 audit of active learned-memory scope certificates and exact reject manifest. |
 | `export_chat_history.py` | `python -m scripts.export_chat_history <channel-id>` / `export-chat-history` | Export conversation history rows for a channel with optional time filters. |
 | `export_collection.py` | `python -m scripts.export_collection <collection>` / `export-collection` | Export arbitrary collection rows by filter, sort, and limit. |
 | `export_dialog_trace_review_input.py` | `python -m scripts.export_dialog_trace_review_input --dialog-text <text>` | Export compact review input for one dialog's protected LLM trace. |
@@ -52,6 +53,7 @@ availability.
 | `profile_rag_retrieval.py` | `python -m scripts.profile_rag_retrieval` | Generate RAG retrieval profile cases for tuning and validation. |
 | `reembed_text_vector_embeddings.py` | `python -m scripts.reembed_text_vector_embeddings` | Replay text embedding generation for documents or collections. |
 | `reset_memory_lore.py` | `python -m scripts.reset_memory_lore --dry-run|--apply` | Reset and regenerate shared memory lore under operator control. |
+| `repair_character_memory_scope.py` | `python -m scripts.repair_character_memory_scope --manifest <path> --backup <path> --output <path>` | UTF-8, backup-first lifecycle rejection after all-row hash, provenance, status, and certificate preflight, followed by cache verification and re-audit. |
 | `run_reflection_cycle.py` | `python -m scripts.run_reflection_cycle hourly|daily|promote` | Run production reflection worker modes with dry-run support. |
 | `run_character_identity_growth.py` | `python -m scripts.run_character_identity_growth [--character-local-date YYYY-MM-DD] [--apply --enable-revision-writes]` | Evaluate daily root-linked reflection evidence; defaults to read-only and requires both apply gates for revision writes. |
 | `run_reflection_cycle_readonly.py` | `python -m scripts.run_reflection_cycle_readonly --lookback-hours 24` | Read-only reflection-cycle evaluator for diagnostics. |

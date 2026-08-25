@@ -84,6 +84,9 @@ class MemoryEvidenceRef(TypedDict, total=False):
 class MemoryPrivacyReview(TypedDict, total=False):
     """Privacy review summary attached to a shared memory unit."""
 
+    global_applicability: Literal["global", "scoped", "absent"]
+    target_specific_meaning_removed: bool
+    affects_identity_or_boundaries: bool
     private_detail_risk: Literal["low", "medium", "high"]
     user_details_removed: bool
     boundary_assessment: str

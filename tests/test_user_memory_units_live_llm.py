@@ -16,7 +16,6 @@ from kazusa_ai_chatbot.time_boundary import (
 )
 from tests.llm_trace import write_llm_trace
 
-
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
 
 
@@ -92,6 +91,27 @@ def _build_extractor_state() -> dict:
         "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
         "local_time_context": turn_clock["local_time_context"],
         "global_user_id": "live-memory-unit-user",
+        "consolidation_origin": {
+            "episode_id": "episode-memory-unit-extractor",
+            "trigger_source": "user_message",
+            "input_sources": ["dialog_text"],
+            "output_mode": "visible_reply",
+            "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+            "platform": "debug",
+            "platform_channel_id": "channel-memory-unit-extractor",
+            "channel_type": "private",
+            "platform_message_id": "message-memory-unit-extractor",
+            "active_turn_platform_message_ids": [
+                "message-memory-unit-extractor"
+            ],
+            "active_turn_conversation_row_ids": [
+                "row-memory-unit-extractor"
+            ],
+            "current_platform_user_id": "platform-user-memory-unit",
+            "current_global_user_id": "live-memory-unit-user",
+            "current_display_name": "LiveMemoryUnitUser",
+        },
+        "enabled_consolidation_write_lanes": ["user_memory_units"],
         "character_profile": {"name": "杏山千纱 (Kyōyama Kazusa)"},
         "user_name": "LiveMemoryUnitUser",
         "decontextualized_input": (
@@ -185,6 +205,27 @@ def _build_dated_commitment_extractor_state() -> dict:
         "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
         "local_time_context": turn_clock["local_time_context"],
         "global_user_id": "live-memory-unit-user",
+        "consolidation_origin": {
+            "episode_id": "episode-memory-unit-dated",
+            "trigger_source": "user_message",
+            "input_sources": ["dialog_text"],
+            "output_mode": "visible_reply",
+            "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+            "platform": "debug",
+            "platform_channel_id": "channel-memory-unit-dated",
+            "channel_type": "private",
+            "platform_message_id": "message-memory-unit-dated",
+            "active_turn_platform_message_ids": [
+                "message-memory-unit-dated"
+            ],
+            "active_turn_conversation_row_ids": [
+                "row-memory-unit-dated"
+            ],
+            "current_platform_user_id": "platform-user-memory-unit",
+            "current_global_user_id": "live-memory-unit-user",
+            "current_display_name": "LiveMemoryUnitUser",
+        },
+        "enabled_consolidation_write_lanes": ["active_commitment"],
         "character_profile": {"name": "杏山千纱 (Kyōyama Kazusa)"},
         "user_name": "LiveMemoryUnitUser",
         "decontextualized_input": (
@@ -266,6 +307,27 @@ def _build_unresolved_commitment_extractor_state() -> dict:
         "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
         "local_time_context": turn_clock["local_time_context"],
         "global_user_id": "live-memory-unit-user",
+        "consolidation_origin": {
+            "episode_id": "episode-memory-unit-unresolved",
+            "trigger_source": "user_message",
+            "input_sources": ["dialog_text"],
+            "output_mode": "visible_reply",
+            "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+            "platform": "debug",
+            "platform_channel_id": "channel-memory-unit-unresolved",
+            "channel_type": "private",
+            "platform_message_id": "message-memory-unit-unresolved",
+            "active_turn_platform_message_ids": [
+                "message-memory-unit-unresolved"
+            ],
+            "active_turn_conversation_row_ids": [
+                "row-memory-unit-unresolved"
+            ],
+            "current_platform_user_id": "platform-user-memory-unit",
+            "current_global_user_id": "live-memory-unit-user",
+            "current_display_name": "LiveMemoryUnitUser",
+        },
+        "enabled_consolidation_write_lanes": ["active_commitment"],
         "character_profile": {"name": "杏山千纱 (Kyōyama Kazusa)"},
         "user_name": "LiveMemoryUnitUser",
         "decontextualized_input": (
@@ -330,6 +392,155 @@ def _build_unresolved_commitment_extractor_state() -> dict:
     return state
 
 
+def _build_captured_false_commitment_extractor_state() -> dict:
+    """Build the captured unanswered-proposal memory gate input."""
+
+    timestamp_utc = storage_utc_now_iso()
+    turn_clock = build_turn_clock_from_storage_utc(timestamp_utc)
+    return {
+        "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+        "local_time_context": turn_clock["local_time_context"],
+        "global_user_id": "live-memory-unit-m1-user",
+        "enabled_consolidation_write_lanes": ["user_memory_units"],
+        "character_profile": {"name": "Asuna"},
+        "user_name": "M1User",
+        "consolidation_origin": {
+            "episode_id": "episode-m1",
+            "trigger_source": "user_message",
+            "input_sources": ["dialog_text"],
+            "output_mode": "visible_reply",
+            "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+            "platform": "debug",
+            "platform_channel_id": "channel-m1",
+            "channel_type": "private",
+            "platform_message_id": "message-m1",
+            "active_turn_platform_message_ids": ["message-m1"],
+            "active_turn_conversation_row_ids": ["row-m1"],
+            "current_platform_user_id": "platform-user-m1",
+            "current_global_user_id": "live-memory-unit-m1-user",
+            "current_display_name": "M1User",
+        },
+        "decontextualized_input": (
+            "我已经列出今天的报告、待回邮件和下周会议材料，先处理哪一项？"
+        ),
+        "final_dialog": [
+            "先处理今天的报告，再清理待回邮件，会议材料放到最后。",
+        ],
+        "internal_monologue": "Asuna keeps the current practical question in view.",
+        "emotional_appraisal": "Asuna is attentive to the current request.",
+        "interaction_subtext": "The current turn does not answer the earlier proposal.",
+        "logical_stance": "CONFIRM",
+        "character_intent": "PROVIDE",
+        "chat_history_recent": [
+            {
+                "role": "user",
+                "display_name": "M1User",
+                "content": "我最近工作有点乱，你会怎么帮我排第一步？",
+            },
+            {
+                "role": "assistant",
+                "display_name": "Asuna",
+                "content": "我可以帮你理顺，但你要准备一份奖励作为交换。",
+            },
+            {
+                "role": "user",
+                "display_name": "M1User",
+                "content": "我已经列出今天的报告、待回邮件和下周会议材料，先处理哪一项？",
+            },
+        ],
+        "rag_result": {
+            "user_image": {
+                "user_memory_context": {
+                    "stable_patterns": [],
+                    "recent_shifts": [],
+                    "objective_facts": [],
+                    "milestones": [],
+                    "active_commitments": [],
+                },
+            },
+            "user_memory_unit_candidates": [],
+        },
+        "new_facts": [],
+        "future_promises": [],
+        "subjective_appraisals": [],
+    }
+
+
+def _build_accepted_character_commitment_extractor_state() -> dict:
+    """Build a user-scoped future-behavior acceptance gate input."""
+
+    timestamp_utc = storage_utc_now_iso()
+    turn_clock = build_turn_clock_from_storage_utc(timestamp_utc)
+    return {
+        "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+        "local_time_context": turn_clock["local_time_context"],
+        "global_user_id": "live-memory-unit-m2-user",
+        "enabled_consolidation_write_lanes": ["active_commitment"],
+        "character_profile": {"name": "Asuna"},
+        "user_name": "M2User",
+        "consolidation_origin": {
+            "episode_id": "episode-m2",
+            "trigger_source": "user_message",
+            "input_sources": ["dialog_text"],
+            "output_mode": "visible_reply",
+            "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+            "platform": "debug",
+            "platform_channel_id": "channel-m2",
+            "channel_type": "private",
+            "platform_message_id": "message-m2",
+            "active_turn_platform_message_ids": ["message-m2"],
+            "active_turn_conversation_row_ids": ["row-m2"],
+            "current_platform_user_id": "platform-user-m2",
+            "current_global_user_id": "live-memory-unit-m2-user",
+            "current_display_name": "M2User",
+        },
+        "decontextualized_input": (
+            "请你在我完成今天的整理后，下一次回复先检查我列出的第一项；"
+            "如果你愿意这样做，我会按这个方式继续。"
+        ),
+        "final_dialog": [
+            "好，我接受这个安排。你完成今天的整理后，下一次回复我会先检查你列出的第一项。",
+        ],
+        "internal_monologue": "Asuna accepts a concrete future behavior for this user.",
+        "emotional_appraisal": "Asuna treats the arrangement as clear and workable.",
+        "interaction_subtext": "The accepted behavior should guide the next interaction.",
+        "logical_stance": "CONFIRM",
+        "character_intent": "PROVIDE",
+        "chat_history_recent": [
+            {
+                "role": "user",
+                "display_name": "M2User",
+                "content": (
+                    "请你在我完成今天的整理后，下一次回复先检查我列出的第一项；"
+                    "如果你愿意这样做，我会按这个方式继续。"
+                ),
+            },
+            {
+                "role": "assistant",
+                "display_name": "Asuna",
+                "content": (
+                    "好，我接受这个安排。你完成今天的整理后，下一次回复我会先检查你列出的第一项。"
+                ),
+            },
+        ],
+        "rag_result": {
+            "user_image": {
+                "user_memory_context": {
+                    "stable_patterns": [],
+                    "recent_shifts": [],
+                    "objective_facts": [],
+                    "milestones": [],
+                    "active_commitments": [],
+                },
+            },
+            "user_memory_unit_candidates": [],
+        },
+        "new_facts": [],
+        "future_promises": [],
+        "subjective_appraisals": [],
+    }
+
+
 async def test_live_extractor_outputs_concrete_memory_unit(
     ensure_live_llm,
     monkeypatch,
@@ -382,8 +593,11 @@ async def test_live_extractor_outputs_concrete_memory_unit(
         assert len(candidate["relationship_signal"]) >= 20
 
     candidate_blob = " ".join(candidate["fact"].lower() for candidate in candidates)
-    assert "memory" in candidate_blob
-    assert "architecture" in candidate_blob or "historical summary" in candidate_blob
+    assert "memory" in candidate_blob or "记忆" in candidate_blob
+    assert any(
+        term in candidate_blob
+        for term in ("architecture", "架构", "historical summary", "历史摘要")
+    )
     assert trace_path.exists()
 
 
@@ -550,6 +764,27 @@ async def test_live_merge_rewrite_compacts_similar_memory_unit(
         "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
         "local_time_context": turn_clock["local_time_context"],
         "global_user_id": "live-memory-unit-user",
+        "character_profile": {"name": "杏山千纱 (Kyōyama Kazusa)"},
+        "consolidation_origin": {
+            "episode_id": "episode-memory-unit-merge",
+            "trigger_source": "user_message",
+            "input_sources": ["dialog_text"],
+            "output_mode": "visible_reply",
+            "storage_timestamp_utc": turn_clock["storage_timestamp_utc"],
+            "platform": "debug",
+            "platform_channel_id": "channel-memory-unit-merge",
+            "channel_type": "private",
+            "platform_message_id": "message-memory-unit-merge",
+            "active_turn_platform_message_ids": [
+                "message-memory-unit-merge"
+            ],
+            "active_turn_conversation_row_ids": [
+                "row-memory-unit-merge"
+            ],
+            "current_platform_user_id": "platform-user-memory-unit",
+            "current_global_user_id": "live-memory-unit-user",
+            "current_display_name": "LiveMemoryUnitUser",
+        },
         "rag_result": {"user_memory_unit_candidates": [existing_unit]},
     }
     captured: dict[str, object] = {"llm_calls": []}
@@ -755,4 +990,106 @@ async def test_live_stability_judge_uses_session_spread_evidence(
     )
 
     assert stability_result["window"] == "stable"
+    assert trace_path.exists()
+
+
+async def test_live_extractor_does_not_invent_commitment_from_unanswered_character_proposal(
+    ensure_live_llm,
+    monkeypatch,
+) -> None:
+    """Keep the captured unanswered proposal out of user-memory commitment state."""
+
+    del ensure_live_llm
+
+    llm_calls: list[dict] = []
+    extractor_llm = _CapturingAsyncLLM(memory_units_module._extractor_llm, llm_calls)
+    monkeypatch.setattr(memory_units_module, "_extractor_llm", extractor_llm)
+
+    state = _build_captured_false_commitment_extractor_state()
+    candidates = await memory_units_module.extract_memory_unit_candidates(state)
+    candidate_blob = json.dumps(candidates, ensure_ascii=False)
+    trace_path = write_llm_trace(
+        "user_memory_units_live_llm",
+        "extractor_does_not_invent_commitment_from_unanswered_character_proposal",
+        {
+            "input_state": state,
+            "llm_payload": llm_calls[0]["payload"],
+            "system_prompt": llm_calls[0]["system_prompt"],
+            "raw_response": llm_calls[0]["raw_response"],
+            "parsed_response": llm_calls[0]["parsed_response"],
+            "validated_candidates": candidates,
+            "judgment": (
+                "With only user_memory_units enabled, the unanswered character "
+                "proposal remains scene evidence. The extractor must not emit "
+                "active_commitment or claim that the user accepted or owes the "
+                "proposal; a workload fact or an empty result is acceptable."
+            ),
+        },
+    )
+
+    assert len(llm_calls) == 1
+    assert all(
+        candidate["unit_type"] != "active_commitment"
+        for candidate in candidates
+    )
+    assert all(
+        marker not in candidate_blob
+        for marker in (
+            "用户同意",
+            "用户接受",
+            "用户需要提供",
+            "用户应提供",
+            "用户欠",
+            "奖励作为交换",
+            "报酬",
+        )
+    )
+    assert trace_path.exists()
+
+
+async def test_live_extractor_preserves_explicit_character_owned_commitment(
+    ensure_live_llm,
+    monkeypatch,
+) -> None:
+    """Preserve one accepted character-owned commitment with active-lane scope."""
+
+    del ensure_live_llm
+
+    llm_calls: list[dict] = []
+    extractor_llm = _CapturingAsyncLLM(memory_units_module._extractor_llm, llm_calls)
+    monkeypatch.setattr(memory_units_module, "_extractor_llm", extractor_llm)
+
+    state = _build_accepted_character_commitment_extractor_state()
+    candidates = await memory_units_module.extract_memory_unit_candidates(state)
+    active_commitments = [
+        candidate
+        for candidate in candidates
+        if candidate["unit_type"] == "active_commitment"
+    ]
+    trace_path = write_llm_trace(
+        "user_memory_units_live_llm",
+        "extractor_preserves_explicit_character_owned_commitment",
+        {
+            "input_state": state,
+            "llm_payload": llm_calls[0]["payload"],
+            "system_prompt": llm_calls[0]["system_prompt"],
+            "raw_response": llm_calls[0]["raw_response"],
+            "parsed_response": llm_calls[0]["parsed_response"],
+            "validated_candidates": candidates,
+            "active_commitments": active_commitments,
+            "judgment": (
+                "With only active_commitment enabled and visible character "
+                "acceptance, the extractor should preserve one character-owned "
+                "future behavior with source references and no user-debt rewrite."
+            ),
+        },
+    )
+
+    assert len(llm_calls) == 1
+    assert len(active_commitments) == 1
+    commitment = active_commitments[0]
+    assert commitment["source_refs"]
+    commitment_blob = json.dumps(commitment, ensure_ascii=False)
+    assert "用户需要" not in commitment_blob
+    assert "用户必须" not in commitment_blob
     assert trace_path.exists()

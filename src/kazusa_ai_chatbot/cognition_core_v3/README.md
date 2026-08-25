@@ -23,6 +23,75 @@ The dynamic packets use five explicit authority lanes:
 - `continuation_state`: active causes and genuinely unresolved cross-turn
   goals after stale ordinary-response cutover.
 
+`current_observation` is the authority for current user action, intent,
+acceptance, permission, and current response target. `direct_facts` are stable
+background evidence and cannot establish those current facts by themselves.
+`CURRENT_OBSERVATION_AUTHORITY_GUIDANCE` is the single exported contract for
+this boundary; each A1, A2, G, and ordinary P system instruction and dynamic
+packet guidance composes the same constant once so the model-facing layers
+cannot drift.
+A bounded cognitive or verbal contribution request establishes only the
+requested contribution and current interaction role; it does not transfer
+scope-external choice, action, or continuing control. The existence or clarity
+of the same request, the invitation to contribute, and upstream restatement
+are not independent evidence for surrendered agency, inability, dependence,
+trust or relationship change, or continuing authority. Those meanings require
+a separately expressed `current_observation` fact. Explicit authorization
+proves only permission within the object, action, time, and conditions stated
+by the current observation; authorization itself does not establish motive or
+any broader meaning listed above.
+`response_operation.response_content_provider_role` remains deterministic
+episode metadata for response validation. Cognition projects only
+`role_explicit_content` into model-facing current-event evidence, so procedural
+response mechanics cannot become semantic evidence or an orientation field.
+`A2_RELATIONSHIP_STATE_EVIDENCE_GUIDANCE` is the single A2 contract for
+relationship-state evidence: a current interaction role or scoped permission
+does not by itself change relationship axes or establish dependence, trust, or
+closeness. Those meanings require a separately expressed relationship fact in
+`current_observation`; otherwise A2 keeps stable axes or marks the family
+inapplicable while summarizing the interaction factually.
+`A2_EXISTENTIAL_DRIVE_EVIDENCE_GUIDANCE` keeps every `existential_drive`
+summary, cause, and axis about the character's own experience. User ability,
+agency, and need are evidence context rather than the subject of character-
+owned axes; unsupported surrender, dependence, or trust is not inferred.
+`G_RELATIONAL_CARRIER_EVIDENCE_GUIDANCE` is the single G contract for
+relational carriers: `relational_willingness` and `private_monologue` may
+express the character's grounded willingness, feeling, motive, and response to
+the current contribution, while a current interaction role or scoped
+permission is not evidence of the user's dependence, trust, closeness,
+relationship state, or motive. Without a separate relationship fact in
+`current_observation`, G does not add relationship meaning to the user. Writing
+unsupported user relationship meaning as a first-person feeling, inner
+judgment, or passive experience still adds a relationship fact about the user;
+placing it in `private_monologue` does not provide evidence.
+`relational_willingness.reason` records the character's own motive and stance;
+`cause_summary` cites current facts; and `private_monologue` expresses the
+character's own experience. An ordinary contribution may motivate
+characterful help, while user trust, dependence, need, ability, or surrendered
+agency requires a separately expressed `current_observation` fact.
+`BACKGROUND_CONTEXT_GOAL_AUTHORITY_GUIDANCE` is the corresponding single
+contract for G/P: background lanes may shape interpretation and characterful
+expression, but they enter `active_character_goal` or `response_goal` only
+when `current_observation` makes that meaning part of the current request,
+decision, or unresolved matter.
+
+Promoted-memory cognition rows carry deterministic lane-bearing source ids.
+Only the typed self-guidance marker may enter
+`conditional_character_context`; typed facts enter `direct_facts` as
+`character_world_context`, while exact current-user continuity remains
+`participant_continuity`. The contract rejects unsupported or contradictory
+authority markers before a model stage can consume them.
+
+Each promoted-memory evidence row also carries a hidden, validated metadata
+certificate. Its stable id must match
+`promoted-memory:<typed-lane>:<stable-id>`, its type/source/authority/status
+must match the lane, and learned shared rows must retain the exact seven-field
+scope/privacy certificate. Current-user continuity retains `unit_type`,
+explicit source metadata, and its canonical user scope; shared rows expose
+only the global scope marker to the
+prompt-facing projection. Missing, untyped, contradictory, or unmarked rows
+are excluded before stage prompts are built.
+
 A1 receives the current observation, direct facts, and causal continuation
 pressure for `event_agency`, `goal_threat_outcome`, and
 `epistemic_comparison_memory`; conditional character context is absent. A2
@@ -48,6 +117,11 @@ Reselection is grounded when the current user responds to, accepts, rejects,
 references, asks about, materially changes, or explicitly reopens that move.
 Character tendency may shape voice and stance after the current semantic delta
 is selected, but it cannot replace that delta as the primary goal.
+
+Public visibility establishes what was said, by whom, and to whom. Consent,
+permission, promise, relationship, or role addressed to one participant does
+not transfer to another participant merely because both participants saw the
+same material.
 
 G returns exactly one meaningful active-character goal, relational
 willingness, and a bounded first-person `private_monologue` connecting current

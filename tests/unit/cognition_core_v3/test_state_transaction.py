@@ -126,6 +126,46 @@ def test_repeated_answerable_turns_do_not_accumulate_transient_events_or_goals()
     validate_cognition_state(state)
 
 
+def test_zero_clamped_gap_decrease_does_not_terminalize_before_same_episode_recurrence() -> None:
+    payload = _input()
+    first_state, _transitions, first_receipts, _provenance = bind_axis_changes(
+        payload,
+        (
+            _appraisal(
+                "epistemic_comparison_memory",
+                "uncertainty",
+                shift="strong_decrease",
+            ),
+        ),
+    )
+    validate_cognition_state(first_state)
+    first_gap = first_state["knowledge_gaps"]
+    assert len(first_gap) == 1
+    assert first_gap[0]["status"] == "open"
+    assert first_gap[0]["uncertainty"] == 0
+    assert first_receipts[0]["applied_targets"][0]["applied_delta"] == 0
+
+    repeated_payload = dict(payload)
+    repeated_payload["mutable_state"] = first_state
+    second_state, _transitions, second_receipts, _provenance = bind_axis_changes(
+        repeated_payload,
+        (
+            _appraisal(
+                "epistemic_comparison_memory",
+                "uncertainty",
+                shift="strong_increase",
+            ),
+        ),
+    )
+    validate_cognition_state(second_state)
+    second_gap = second_state["knowledge_gaps"]
+    assert len(second_gap) == 1
+    assert second_gap[0]["entity_id"] == first_gap[0]["entity_id"]
+    assert second_gap[0]["status"] == "open"
+    assert second_gap[0]["uncertainty"] == 40
+    assert second_receipts[0]["applied_targets"][0]["applied_delta"] == 40
+
+
 def test_stale_response_goal_cutover_preserves_active_causes_and_other_goals() -> None:
     """Canonical cutover removes only stale ordinary-response goals."""
 

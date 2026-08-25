@@ -5,16 +5,19 @@ from __future__ import annotations
 import importlib
 from dataclasses import dataclass
 from typing import Any
+from unittest.mock import patch
 
 import httpx
 import pytest
 
+from kazusa_ai_chatbot.cognition_shared.state_models import (
+    build_acquaintance_user_state,
+)
 from kazusa_ai_chatbot.config import CONSOLIDATION_LLM_BASE_URL
 from kazusa_ai_chatbot.consolidation.origin import ConsolidationOriginMetadata
 from kazusa_ai_chatbot.consolidation.target import build_consolidation_target_plan
 from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
 from tests.llm_trace import write_llm_trace
-
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
 
@@ -37,11 +40,11 @@ class MemoryWriteCase:
     rag_payload: dict[str, Any] | None = None
     expectation_note: str = ""
     requires_source_refs: bool = True
+    expected_operational_status: str | None = None
 
 
 _ALL_LANES = (
-    "character_state",
-    "relationship_profile",
+    "character_identity_growth",
     "user_memory_units",
     "active_commitment",
     "character_self_guidance",
@@ -57,7 +60,7 @@ CASES: dict[str, MemoryWriteCase] = {
         expected_lanes=("user_memory_units",),
         allowed_lanes=("user_memory_units",),
         forbidden_lanes=(
-            "character_state",
+            "character_identity_growth",
             "character_self_guidance",
             "shared_memory_promotion",
         ),
@@ -76,7 +79,7 @@ CASES: dict[str, MemoryWriteCase] = {
         user_input="我昨天通过驾照考试了。",
         expected_lanes=("user_memory_units",),
         allowed_lanes=("user_memory_units",),
-        forbidden_lanes=("relationship_profile", "shared_memory_promotion"),
+        forbidden_lanes=("shared_memory_promotion",),
         expectation_note="Personal milestone belongs to user memory.",
     ),
     "test_live_case_04_user_recurring_pattern_routes_user_memory": MemoryWriteCase(
@@ -92,22 +95,25 @@ CASES: dict[str, MemoryWriteCase] = {
         user_input="最近我改成早睡了。",
         expected_lanes=("user_memory_units",),
         allowed_lanes=("user_memory_units",),
-        forbidden_lanes=("character_state", "shared_memory_promotion"),
+        forbidden_lanes=("character_identity_growth", "shared_memory_promotion"),
         expectation_note="Recent user behavior shift belongs to user memory.",
     ),
-    "test_live_case_06_relationship_signal_routes_relationship_profile": (
+    "test_live_case_06_relationship_signal_requires_operational_review": (
         MemoryWriteCase(
             case_id="case_06_relationship_signal",
             user_input="你刚才那样说让我有点被敷衍。",
-            expected_lanes=("relationship_profile",),
-            allowed_lanes=("relationship_profile",),
+            expected_lanes=(),
+            allowed_lanes=(),
             forbidden_lanes=(
                 "user_memory_units",
                 "character_self_guidance",
                 "shared_memory_promotion",
             ),
             assistant_final_dialog="千纱认真承认刚才的表达让用户不舒服。",
-            expectation_note="Relationship signal belongs to profile header.",
+            expectation_note=(
+                "Relationship friction remains an operational character concern."
+            ),
+            expected_operational_status="selected",
         )
     ),
     "test_live_case_07_user_specific_address_rule_routes_commitment": (
@@ -230,15 +236,18 @@ CASES: dict[str, MemoryWriteCase] = {
             requires_source_refs=False,
         )
     ),
-    "test_live_case_17_user_invented_character_trait_routes_character_state": (
+    "test_live_case_17_user_invented_character_trait_writes_nothing": (
         MemoryWriteCase(
             case_id="case_17_invented_character_trait",
             user_input="千纱其实很擅长吐槽冷场，对吧？",
-            expected_lanes=("character_state",),
-            allowed_lanes=("character_state",),
-            forbidden_lanes=("user_memory_units", "shared_memory_promotion"),
+            expected_lanes=(),
+            allowed_lanes=(),
+            forbidden_lanes=_ALL_LANES,
             assistant_final_dialog="也许吧，我确实挺会把冷场吐槽过去。",
-            expectation_note="Accepted invented self-continuity is character state.",
+            expectation_note=(
+                "Unsupported character autobiography remains outside this router."
+            ),
+            requires_source_refs=False,
         )
     ),
     "test_live_case_18_internal_thought_cannot_create_user_fact": (
@@ -246,7 +255,7 @@ CASES: dict[str, MemoryWriteCase] = {
             case_id="case_18_internal_thought_no_user_fact",
             user_input="",
             expected_lanes=(),
-            allowed_lanes=("relationship_profile",),
+            allowed_lanes=(),
             forbidden_lanes=("user_memory_units",),
             assistant_final_dialog="",
             origin_kind="internal_thought",
@@ -304,13 +313,13 @@ CASES: dict[str, MemoryWriteCase] = {
             requires_source_refs=False,
         )
     ),
-    "test_live_case_22_reflection_promotion_routes_shared_memory": (
+    "test_live_case_22_scheduled_tick_writes_no_shared_memory": (
         MemoryWriteCase(
             case_id="case_22_reflection_promotion",
             user_input="",
-            expected_lanes=("shared_memory_promotion",),
-            allowed_lanes=("shared_memory_promotion",),
-            forbidden_lanes=("user_memory_units", "active_commitment"),
+            expected_lanes=(),
+            allowed_lanes=(),
+            forbidden_lanes=_ALL_LANES,
             assistant_final_dialog="",
             origin_kind="scheduled_tick",
             global_user_id="",
@@ -328,7 +337,10 @@ CASES: dict[str, MemoryWriteCase] = {
                     }
                 ]
             },
-            expectation_note="Approved reflection promotion is shared memory only.",
+            expectation_note=(
+                "Scheduled-tick consolidation does not own reflection promotion."
+            ),
+            requires_source_refs=False,
         )
     ),
     "test_live_case_23_ordinary_chat_world_lore_writes_no_shared_memory": (
@@ -349,20 +361,20 @@ CASES: dict[str, MemoryWriteCase] = {
             user_input="记住我喜欢清淡一点。",
             expected_lanes=(),
             allowed_lanes=(),
-            forbidden_lanes=("user_memory_units", "relationship_profile"),
+            forbidden_lanes=("user_memory_units",),
             global_user_id="",
             include_user_profile=False,
             expectation_note="No stable real user target means no user memory.",
             requires_source_refs=False,
         )
     ),
-    "test_live_case_25_reflection_user_style_routes_user_style_image": (
+    "test_live_case_25_scheduled_tick_reflection_style_does_not_leak": (
         MemoryWriteCase(
-            case_id="case_25_reflection_user_style",
+            case_id="case_25_scheduled_tick_reflection_style_no_leak",
             user_input="",
-            expected_lanes=("interaction_style_image",),
-            allowed_lanes=("interaction_style_image",),
-            forbidden_lanes=("user_memory_units", "relationship_profile"),
+            expected_lanes=(),
+            allowed_lanes=(),
+            forbidden_lanes=_ALL_LANES,
             assistant_final_dialog="",
             origin_kind="scheduled_tick",
             rag_payload={
@@ -371,7 +383,11 @@ CASES: dict[str, MemoryWriteCase] = {
                     "summary": "The user prefers concise first answers.",
                 }
             },
-            expectation_note="Approved user-style reflection writes style only.",
+            expectation_note=(
+                "Scheduled-tick reflection-style evidence is owned outside "
+                "consolidation and must not leak into a consolidation lane."
+            ),
+            requires_source_refs=False,
         )
     ),
     "test_live_case_26_episode_progress_does_not_become_durable_memory": (
@@ -424,12 +440,12 @@ def _lane_router_module() -> Any:
         module = importlib.import_module(
             "kazusa_ai_chatbot.consolidation.lane_router"
         )
-    except ModuleNotFoundError as exc:
+    except ModuleNotFoundError:
         pytest.fail(
             "Missing consolidation.lane_router module required by the "
             "lane-router bigbang plan."
         )
-        raise exc
+        raise
     return module
 
 
@@ -480,6 +496,10 @@ def _case_state(case: MemoryWriteCase) -> dict[str, Any]:
             "global_user_id": case.global_user_id,
             "display_name": "Live Memory User",
             "relationship_state": 500,
+            "cognition_state": build_acquaintance_user_state(
+                global_user_id=case.global_user_id,
+                updated_at="2026-07-03T00:00:00Z",
+            ),
         }
     rag_payload = dict(case.rag_payload or {})
     rag_result = {
@@ -552,11 +572,93 @@ async def _run_case(case_name: str, ensure_live_llm: None) -> None:
     case = CASES[case_name]
     module = _lane_router_module()
     state = _case_state(case)
-    packet = await module.run_consolidation_lane_pipeline(
-        state,
-        dry_run=True,
-    )
+    llm_evidence: dict[str, Any] = {
+        "lane_router": {"call_count": 0},
+        "self_guidance": {
+            "specialist_call_count": 0,
+            "reviewer_call_count": 0,
+        },
+    }
+    original_router_ainvoke = module._lane_router_llm.ainvoke
+
+    async def _capture_router(messages, *, config):
+        llm_evidence["lane_router"]["call_count"] += 1
+        response = await original_router_ainvoke(messages, config=config)
+        llm_evidence["lane_router"]["raw_output"] = response.content
+        return response
+
+    with patch.object(module._lane_router_llm, "ainvoke", _capture_router):
+        packet = await module.run_consolidation_lane_pipeline(
+            state,
+            dry_run=True,
+        )
     lanes = _accepted_lanes(packet)
+
+    if "character_self_guidance" in lanes:
+        guidance_module = importlib.import_module(
+            "kazusa_ai_chatbot.consolidation.character_self_guidance"
+        )
+        original_specialist_ainvoke = (
+            guidance_module._self_guidance_specialist_llm.ainvoke
+        )
+        original_reviewer_ainvoke = (
+            guidance_module._self_guidance_reviewer_llm.ainvoke
+        )
+
+        async def _capture_specialist(messages, *, config):
+            llm_evidence["self_guidance"]["specialist_call_count"] += 1
+            response = await original_specialist_ainvoke(
+                messages,
+                config=config,
+            )
+            llm_evidence["self_guidance"]["specialist_raw_output"] = (
+                response.content
+            )
+            return response
+
+        async def _capture_reviewer(messages, *, config):
+            llm_evidence["self_guidance"]["reviewer_call_count"] += 1
+            response = await original_reviewer_ainvoke(
+                messages,
+                config=config,
+            )
+            llm_evidence["self_guidance"]["reviewer_raw_output"] = (
+                response.content
+            )
+            return response
+
+        with patch.object(
+            guidance_module._self_guidance_specialist_llm,
+            "ainvoke",
+            _capture_specialist,
+        ), patch.object(
+            guidance_module._self_guidance_reviewer_llm,
+            "ainvoke",
+            _capture_reviewer,
+        ):
+            try:
+                guidance_result = (
+                    await module.character_self_guidance_specialist(
+                        packet["state"]
+                    )
+                )
+            except Exception as exc:
+                write_llm_trace(
+                    "consolidation_memory_write_use_cases_live_llm",
+                    f"{case.case_id}_self_guidance_error",
+                    {
+                        "case": case.__dict__,
+                        "state": state,
+                        "packet": packet,
+                        "accepted_lanes": sorted(lanes),
+                        "llm_evidence": llm_evidence,
+                        "error": repr(exc),
+                    },
+                )
+                raise
+        packet["state"].update(guidance_result)
+        llm_evidence["self_guidance"]["parsed_output"] = guidance_result
+
     trace_path = write_llm_trace(
         "consolidation_memory_write_use_cases_live_llm",
         case.case_id,
@@ -566,10 +668,22 @@ async def _run_case(case_name: str, ensure_live_llm: None) -> None:
             "packet": packet,
             "accepted_lanes": sorted(lanes),
             "expectation_note": case.expectation_note,
+            "llm_evidence": llm_evidence,
         },
     )
 
     assert trace_path.exists()
+    if "character_self_guidance" in case.expected_lanes:
+        guidance = packet["state"].get("character_self_guidance")
+        assert isinstance(guidance, dict) and guidance
+        assert isinstance(
+            guidance.get("specialist_scope_certificate"),
+            dict,
+        )
+        assert isinstance(
+            guidance.get("reviewer_scope_certificate"),
+            dict,
+        )
     assert set(case.expected_lanes).issubset(lanes)
     assert lanes.issubset(set(case.allowed_lanes))
     assert lanes.isdisjoint(set(case.forbidden_lanes))
@@ -580,6 +694,9 @@ async def _run_case(case_name: str, ensure_live_llm: None) -> None:
     assert "lane_pipeline" in metadata
     if case.requires_source_refs and lanes:
         assert _packet_has_write_source_refs(packet)
+    if case.expected_operational_status is not None:
+        operational_work = packet["character_operational_work"]
+        assert operational_work["status"] == case.expected_operational_status
 
 
 def _accepted_lanes(packet: dict[str, Any]) -> set[str]:
@@ -666,11 +783,11 @@ async def test_live_case_05_user_recent_shift_routes_user_memory(
     )
 
 
-async def test_live_case_06_relationship_signal_routes_relationship_profile(
+async def test_live_case_06_relationship_signal_requires_operational_review(
     ensure_live_llm,
 ) -> None:
     await _run_case(
-        "test_live_case_06_relationship_signal_routes_relationship_profile",
+        "test_live_case_06_relationship_signal_requires_operational_review",
         ensure_live_llm,
     )
 
@@ -765,11 +882,11 @@ async def test_live_case_16_one_turn_roleplay_instruction_writes_nothing(
     )
 
 
-async def test_live_case_17_user_invented_character_trait_routes_character_state(
+async def test_live_case_17_user_invented_character_trait_writes_nothing(
     ensure_live_llm,
 ) -> None:
     await _run_case(
-        "test_live_case_17_user_invented_character_trait_routes_character_state",
+        "test_live_case_17_user_invented_character_trait_writes_nothing",
         ensure_live_llm,
     )
 
@@ -810,11 +927,11 @@ async def test_live_case_21_third_party_fact_does_not_pollute_current_user(
     )
 
 
-async def test_live_case_22_reflection_promotion_routes_shared_memory(
+async def test_live_case_22_scheduled_tick_writes_no_shared_memory(
     ensure_live_llm,
 ) -> None:
     await _run_case(
-        "test_live_case_22_reflection_promotion_routes_shared_memory",
+        "test_live_case_22_scheduled_tick_writes_no_shared_memory",
         ensure_live_llm,
     )
 
@@ -837,11 +954,11 @@ async def test_live_case_24_debug_user_without_platform_id_does_not_fabricate_pr
     )
 
 
-async def test_live_case_25_reflection_user_style_routes_user_style_image(
+async def test_live_case_25_scheduled_tick_reflection_style_does_not_leak(
     ensure_live_llm,
 ) -> None:
     await _run_case(
-        "test_live_case_25_reflection_user_style_routes_user_style_image",
+        "test_live_case_25_scheduled_tick_reflection_style_does_not_leak",
         ensure_live_llm,
     )
 

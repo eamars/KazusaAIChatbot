@@ -41,15 +41,20 @@ from kazusa_ai_chatbot.cognition_core_v3.diagnostics import (
     snapshot_protected_chain_records,  # noqa: F401
 )
 from kazusa_ai_chatbot.cognition_core_v3.prompt import (
+    A2_EXISTENTIAL_DRIVE_EVIDENCE_GUIDANCE,
+    A2_RELATIONSHIP_STATE_EVIDENCE_GUIDANCE,
+    BACKGROUND_CONTEXT_GOAL_AUTHORITY_GUIDANCE,
+    CURRENT_OBSERVATION_AUTHORITY_GUIDANCE,
+    G_RELATIONAL_CARRIER_EVIDENCE_GUIDANCE,
     build_canonical_appraisal_question,
     build_canonical_goal_question,
     build_canonical_plan_question,
     build_canonical_turn_workspace,
 )
 from kazusa_ai_chatbot.cognition_shared.contracts import (
-    CognitionContractError,
     GOAL_RESOLUTION_VALUES,
     SELF_COGNITION_RESPONSE_DECISION_VALUES,
+    CognitionContractError,
     is_targetless_group_self_cognition_episode,
     validate_overused_moves,
 )
@@ -80,21 +85,29 @@ _STAGE_SYSTEM_PROMPTS = {
 使用三个面向客观情境的评估类别，判断当前观察对当前角色意味着什么。
 
 # 证据边界
-`current_observation` 和 `direct_facts` 可以用于确认当下发生了什么。
+{current_observation_authority}
 `continuation_state` 只提供仍在起作用的因果压力。输入不会提供角色身份、
 习惯、反思倾向或 `participant_continuity`，因为这些信息不能证明当前世界中的
 事实。当前用户明确纠正自己的意思或感受时，把这项纠正当作当前观察；纠正本身
-不是相反意思的证据。''',
+不是相反意思的证据。'''.format(
+        current_observation_authority=CURRENT_OBSERVATION_AUTHORITY_GUIDANCE,
+    ),
     "A2": '''# 任务
 根据已接受的 A1 语义，使用关系与社会判断、道德身份、存在性驱力三个评估类别
 作出判断。
 
 # 证据边界
-`current_observation` 和 `direct_facts` 可以用于确认事实。
+{current_observation_authority}
 `participant_continuity` 只描述此前参与者、行为及结果，不能证明新的行为、
 同意、承诺、许可或当前意图。`conditional_character_context` 只可影响当前角色的
 判断、边界、动机和情绪解释。`overused_moves` 只描述此前已经发生的可见回应模式，
-不表示当前事实、用户意图、禁止事项或下一步行动。''',
+不表示当前事实、用户意图、禁止事项或下一步行动。
+{existential_drive_evidence}
+{relationship_state_evidence}'''.format(
+        current_observation_authority=CURRENT_OBSERVATION_AUTHORITY_GUIDANCE,
+        existential_drive_evidence=A2_EXISTENTIAL_DRIVE_EVIDENCE_GUIDANCE,
+        relationship_state_evidence=A2_RELATIONSHIP_STATE_EVIDENCE_GUIDANCE,
+    ),
     "G": '''# 任务
 选择一个有意义的当前角色目标、一项关系互动意愿记录，以及一段简洁的第一人称
 `private_monologue`。
@@ -103,12 +116,19 @@ _STAGE_SYSTEM_PROMPTS = {
 `private_monologue` 要连接角色此刻的感受、造成这种感受的具体原因，以及角色眼下
 想保护、揭示、回避或追求的事。它不能用于确认事实、许可、能力、目标对象或状态
 变化。先根据当前观察的新增加、改变、纠正、询问或未解决内容选择目标；已表达的回应
-模式只能作为背景，除非当前用户继续、深化、实质改变或重新打开同一事项。''',
+模式只能作为背景，除非当前用户继续、深化、实质改变或重新打开同一事项。
+{current_observation_authority}
+{background_goal_authority}
+{relational_carrier_evidence}'''.format(
+        current_observation_authority=CURRENT_OBSERVATION_AUTHORITY_GUIDANCE,
+        background_goal_authority=BACKGROUND_CONTEXT_GOAL_AUTHORITY_GUIDANCE,
+        relational_carrier_evidence=G_RELATIONAL_CARRIER_EVIDENCE_GUIDANCE,
+    ),
     "P": '''# 任务
 确定当前角色的回应目标和 `epistemic_boundary`，并且只选择输入中提供的能力。
 
 # 断言边界
-`current_observation` 和 `direct_facts` 限定可以作出的断言。
+{current_observation_authority}
 `participant_continuity` 只支持对先前参与者、行为及结果的描述。
 `epistemic_boundary` 必须说明可见措辞可以断言什么、哪些内容只能作为解释，以及
 哪些内容仍然未知。每一项未被观察到的功能、原因、来源、意图或结果，都只能作为
@@ -119,9 +139,13 @@ _STAGE_SYSTEM_PROMPTS = {
 语境影响表达。当前用户明确纠正自己的意思或感受时，把这项纠正当作当前观察；纠正
 本身不是相反意思的证据。已表达的回应模式只能作为背景连续性，不能成为未重新选择的
 主要关系回报。
+{background_goal_authority}
 
 # 输出边界
-只返回 `output_contract` 指定的字段。不得把任何输入权威通道名称写入输出对象。''',
+只返回 `output_contract` 指定的字段。不得把任何输入权威通道名称写入输出对象。'''.format(
+        current_observation_authority=CURRENT_OBSERVATION_AUTHORITY_GUIDANCE,
+        background_goal_authority=BACKGROUND_CONTEXT_GOAL_AUTHORITY_GUIDANCE,
+    ),
 }
 
 _EXACT_JSON_SYSTEM_SUFFIX = '''# 输出约束

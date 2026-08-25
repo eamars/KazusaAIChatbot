@@ -629,7 +629,7 @@ _MSG_DECONTEXTUALIZER_PROMPT = '''\
 - 字面名字、URL、文件名、引用文本和专有名词是锚点，按原文保留。
 - `referents` 记录影响理解的原文指代短语，以及当前问题里必须按人理解的可见参与者字面名称；无此类内容时输出 `[]`。
 - `role_explicit_content` 是独立的下游语义投影。自由文本统一使用中文称谓 `当前用户` 和 `当前角色` 区分直接对话参与者，并明确保留嵌套分句里的行动者、动作、对象、受益者、否定、情态和问句或请求方向。它不改变 `output` 的自然表达。
-- `response_operation` 只描述本轮要求谁回应、谁作出所需选择，以及回应内动作的行动者和对象。四个角色字段的枚举值只使用“当前角色”“当前用户”“其他参与者”“无”；`operation` 自由文本使用这些中文称谓或自然中文称谓。
+- `response_operation` 只描述本轮要求谁回应、谁提供所需的回复内容，以及回应内动作的行动者和对象。四个角色字段的枚举值只使用“当前角色”“当前用户”“其他参与者”“无”；`operation` 自由文本使用这些中文称谓或自然中文称谓。
 
 # 核心转换
 - 普通完整句保持原句；省略句只补全离开上下文后会缺失的主体、对象或选择项。
@@ -663,10 +663,10 @@ _MSG_DECONTEXTUALIZER_PROMPT = '''\
 6. 做一致性检查：同一 `user_input` 里指向同一已解析实体的文本片段全部使用同一实体名；`output` 中被改写的文本片段与 `referents` 中 `status="resolved"` 的条目保持一致。
 7. 若本轮有明确群聊指向对象，最后从左到右扫描 `output`；当前用户直接表达中剩余的「你 / 你的 / 你自己」按群聊指向对象处理。
 8. 单独生成 `role_explicit_content`：保持同一语义结构，把当前发言人写成 `当前用户`，把当前直接对话角色写成 `当前角色`，并逐层保留嵌套分句中谁想、让、问、说或请求谁做什么。
-9. 单独生成 `response_operation`：`response_owner_role` 是本轮应回应的角色。`selection_required` 不取决于原文是否出现“选择”：当回应需要某个角色提供输入中尚未指定的答案、判断、愿望、偏好、猜测、决定或指令时为 true，`selection_owner_role` 是拥有该内容的角色；内容已由输入明确指定时为 false。`embedded_actor_role` 和 `embedded_target_role` 保留回应内容中动作的行动者与对象。字段只描述原意，不替角色作出选择。
+9. 单独生成 `response_operation`：`response_owner_role` 是本轮应回应的角色。`selection_required` 不取决于原文是否出现“选择”：当回应需要某个角色提供输入中尚未指定的答案、判断、愿望、偏好、猜测、决定或指令时为 true，`response_content_provider_role` 标记提供该回复内容的角色；内容已由输入明确指定时为 false。`embedded_actor_role` 和 `embedded_target_role` 保留回应内容中动作的行动者与对象。字段只描述原意，不替角色作出选择。
 `embedded_actor_role` 不是当前发言人的固定别名，而是每个嵌套动作在语义中的实际行动者。当前用户直接说“你做不好 / 你不配生气 / 你闭嘴听着”时，这些动作的主体是当前角色；当前用户直接说“我会继续骂你”时，行动者是当前用户、对象是当前角色。先按动作主语归属，再决定回应所有者。
 `role_explicit_content` 与 `response_operation` 必须描述同一组角色方向：如果前者写成“当前用户继续辱骂当前角色”，后者的 `embedded_actor_role` 必须是“当前用户”、`embedded_target_role` 必须是“当前角色”；不能因为本轮由当前角色回应，就把回应内动作的行动者和对象对调。
-- 外层回应动作和回应内嵌套动作分开判断。例如“当前用户问当前角色想要什么奖励，当前用户会把选定的奖励给当前角色”时，回应与选择所有者都是当前角色，但奖励动作的 `embedded_actor_role` 是“当前用户”、`embedded_target_role` 是“当前角色”；不能因为回应由当前角色发出就把奖励动作改成当前角色施予当前用户。
+- 外层回应动作和回应内嵌套动作分开判断。例如“当前用户问当前角色想要什么奖励，当前用户会把选定的奖励给当前角色”时，回应与回复内容提供角色都是当前角色，但奖励动作的 `embedded_actor_role` 是“当前用户”、`embedded_target_role` 是“当前角色”；不能因为回应由当前角色发出就把奖励动作改成当前角色施予当前用户。
 - 如果输入只要求当前角色决定接下来聊什么，没有指定一个嵌套动作，仍可令 `selection_required=true`，但 `embedded_actor_role` 和 `embedded_target_role` 都必须是“无”。不要从“决定”“告诉”或“请你选”这些外层回应词推断嵌套动作。
 - 只有一端在原意中明确时，另一端保留“无”；行动者和对象是两个独立字段，不因一端为“无”而强行补齐或拒绝该组合。
 - 回顾型问句中，“当前用户刚才说 / 提到 / 告诉”的被回忆事实来源属于当前用户；当前角色负责回忆并回答。此时 `response_owner_role` 为“当前角色”，该嵌套陈述动作的 `embedded_actor_role` 为“当前用户”。句子直接称呼当前角色时，`embedded_target_role` 为“当前角色”；受话对象在原意中保持省略时，`embedded_target_role` 为“无”。“当前用户询问当前角色关于当前用户之前提到的门禁卡存放位置”对应的行动者是“当前用户”，不是“当前角色”。
@@ -703,7 +703,7 @@ _MSG_DECONTEXTUALIZER_PROMPT = '''\
     "response_operation": {{
         "operation": "本轮要求的回应操作",
         "response_owner_role": "当前角色 | 当前用户 | 其他参与者 | 无",
-        "selection_owner_role": "当前角色 | 当前用户 | 其他参与者 | 无",
+        "response_content_provider_role": "当前角色 | 当前用户 | 其他参与者 | 无",
         "selection_required": true,
         "embedded_actor_role": "当前角色 | 当前用户 | 其他参与者 | 无",
         "embedded_target_role": "当前角色 | 当前用户 | 其他参与者 | 无"
@@ -718,7 +718,7 @@ _MSG_DECONTEXTUALIZER_PROMPT = '''\
 `status="resolved"` 表示对象能从 `user_input`、`prompt_message_context`、`reply_context` 或 `chat_history` 的桥接证据确定，包括 `reply_context.reply_excerpt`；它不要求 `output` 一定改写。若对象是 `scene_participant_bindings` 中的第三方，必须填写对应 `participant_handle`；未知 handle、显示名与 handle 不一致、或 unresolved 行填写 handle 都是 contract 错误。`status="unresolved"` 只在这些桥接字段都没有可识别对象时使用。
 `is_modified` 表示 `output` 是否不同于原句。`referents` 必须每次输出。`referent_role` 只允许 `subject`、`object`、`time`；`status` 只允许 `resolved` 或 `unresolved`。
 `role_explicit_content` 必须每次输出，控制在 1000 字符以内。它只消除角色代词歧义，不回答问题、不选择角色立场，也不增删原意；它是中文自由文本。
-`response_operation` 必须每次输出且字段完整。`operation` 控制在 500 字符以内；它只标注原输入要求的回应与选择所有权，不生成回应内容，并保持中文自由文本。四个角色字段只使用中文角色枚举。
+`response_operation` 必须每次输出且字段完整。`operation` 控制在 500 字符以内；它只标注原输入要求的回应与回复内容提供角色，不生成回应内容，并保持中文自由文本。四个角色字段只使用中文角色枚举。
 '''
 
 

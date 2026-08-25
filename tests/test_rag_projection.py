@@ -2,12 +2,175 @@
 
 from __future__ import annotations
 
-import pytest
-
 import json
 import logging
 
-from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_projection import project_known_facts
+from kazusa_ai_chatbot.cognition_shared.contracts import (
+    _validate_evidence_rows,
+)
+from kazusa_ai_chatbot.consolidation.character_self_guidance import (
+    _memory_document as _conversation_memory_document,
+)
+from kazusa_ai_chatbot.db.user_memory_units import (
+    build_user_memory_unit_doc,
+)
+from kazusa_ai_chatbot.memory_evolution.reset import _seed_document
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import _rag_evidence
+from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_projection import (
+    classify_typed_memory_row,
+    project_known_facts,
+)
+from kazusa_ai_chatbot.rag.evidence_formatting import (
+    recover_public_rag_evidence_prompt_safe,
+)
+from kazusa_ai_chatbot.rag.memory_evidence.workers.user_memory import (
+    _project_row,
+)
+from kazusa_ai_chatbot.reflection_cycle.promotion import (
+    _memory_document_for_decision,
+)
+
+
+def _typed_shared_memory_row(
+    *,
+    row_id: str,
+    memory_unit_id: str,
+    memory_type: str,
+    source_kind: str,
+    authority: str,
+    content: str,
+) -> dict[str, object]:
+    """Build one complete learned-memory row in the writer's raw shape."""
+
+    return {
+        "_id": row_id,
+        "memory_unit_id": memory_unit_id,
+        "memory_name": memory_type,
+        "content": content,
+        "timestamp": "2026-06-01T00:00:00+00:00",
+        "memory_type": memory_type,
+        "source_kind": source_kind,
+        "source_global_user_id": "",
+        "authority": authority,
+        "status": "active",
+        "privacy_review": {
+            "global_applicability": "global",
+            "target_specific_meaning_removed": True,
+            "affects_identity_or_boundaries": False,
+            "private_detail_risk": "low",
+            "user_details_removed": True,
+            "boundary_assessment": "deidentified global meaning",
+            "reviewer": "automated_llm",
+        },
+    }
+
+
+def _user_memory_writer_row(
+    *,
+    user_id: str,
+    unit_id: str,
+    fact: str = "A current-user continuity fact.",
+    storage_timestamp_utc: str = "2026-06-01T00:00:00+00:00",
+) -> dict[str, object]:
+    """Build a current-user row through the production user-memory writer."""
+
+    writer_row = dict(build_user_memory_unit_doc(
+        user_id,
+        {
+            "unit_id": unit_id,
+            "unit_type": "objective_fact",
+            "fact": fact,
+            "subjective_appraisal": "A bounded continuity appraisal.",
+            "relationship_signal": "A bounded continuity signal.",
+        },
+        storage_timestamp_utc=storage_timestamp_utc,
+        unit_id=unit_id,
+    ))
+    projected_row = _project_row(writer_row, user_id)
+    return projected_row
+
+
+def _learned_privacy_review() -> dict[str, object]:
+    """Build the complete certificate emitted by learned-memory writers."""
+
+    return {
+        "global_applicability": "global",
+        "target_specific_meaning_removed": True,
+        "affects_identity_or_boundaries": False,
+        "private_detail_risk": "low",
+        "user_details_removed": True,
+        "boundary_assessment": "deidentified global meaning",
+        "reviewer": "automated_llm",
+    }
+
+
+def _canonical_shared_writer_row(
+    *,
+    row_id: str,
+    memory_unit_id: str,
+    memory_type: str,
+    source_kind: str,
+    authority: str,
+    content: str,
+) -> dict[str, object]:
+    """Build a shared row through its canonical production writer."""
+
+    if authority == "conversation_accepted":
+        row = _conversation_memory_document(
+            memory_name=memory_type,
+            content=content,
+            source_refs=[{"conversation_history_id": row_id}],
+            storage_timestamp_utc="2026-06-01T00:00:00+00:00",
+            reviewer_certificate={
+                **_learned_privacy_review(),
+                "reason": "deidentified global meaning",
+            },
+        )
+    elif authority == "reflection_promoted":
+        lane = "lore" if memory_type == "fact" else "self_guidance"
+        row = _memory_document_for_decision(
+            decision={
+                "lane": lane,
+                "sanitized_memory_name": memory_type,
+                "sanitized_content": content,
+                "privacy_review": _learned_privacy_review(),
+                "evidence_refs": [{"reflection_run_id": row_id}],
+            },
+            character_local_date="2026-06-01",
+            global_run_id=row_id,
+            source_unit_ids=[],
+            source_lineage_ids=[],
+            mutation_action="insert",
+        )
+    elif authority == "seed":
+        row = _seed_document(
+            {
+                "memory_name": memory_type,
+                "content": content,
+                "source_global_user_id": "",
+                "memory_type": memory_type,
+                "source_kind": source_kind,
+                "status": "active",
+                "confidence_note": "test fixture",
+                "expiry_timestamp": None,
+            },
+            storage_timestamp_utc="2026-06-01T00:00:00+00:00",
+            updated_at="2026-06-01T00:00:00+00:00",
+        )
+    else:
+        row = _typed_shared_memory_row(
+            row_id=row_id,
+            memory_unit_id=memory_unit_id,
+            memory_type=memory_type,
+            source_kind=source_kind,
+            authority=authority,
+            content=content,
+        )
+    row = dict(row)
+    row["_id"] = row_id
+    if row.get("memory_unit_id") != memory_unit_id:
+        row["memory_unit_id"] = memory_unit_id
+    return row
 
 
 def _assert_ordered_evidence_block(text: str) -> None:
@@ -128,7 +291,14 @@ def test_project_known_facts_groups_summarized_evidence() -> None:
                 "agent": "persistent_memory_search_agent",
                 "resolved": True,
                 "summary": "memory summary",
-                "raw_result": [{"content": "A" * 20}],
+                "raw_result": [_typed_shared_memory_row(
+                    row_id="grouped-memory-row",
+                    memory_unit_id="grouped-memory-unit",
+                    memory_type="fact",
+                    source_kind="conversation_extracted",
+                    authority="conversation_accepted",
+                    content="A" * 20,
+                )],
             },
             {
                 "slot": "conversation",
@@ -196,16 +366,18 @@ def test_project_known_facts_does_not_stringify_malformed_fact_values() -> None:
     assert "{'bad':" not in rendered
     assert result["supervisor_trace"]["dispatched"] == [
         {"slot": "", "agent": "user_lookup_agent", "resolved": True},
-        {"slot": "memory", "agent": "persistent_memory_search_agent", "resolved": True},
+        {
+            "slot": "memory",
+            "agent": "persistent_memory_search_agent",
+            "resolved": True,
+            "projection_diagnostics": [
+                {"reason": "learned memory metadata is incomplete"}
+            ],
+        },
         {"slot": "web", "agent": "web_agent3", "resolved": True},
     ]
     assert result["third_party_profiles"] == []
-    assert result["memory_evidence"] == [
-            {
-                "summary": '结论：memory summary',
-                "content": '不确定性：没有可用于提示的记忆证据。',
-            }
-        ]
+    assert result["memory_evidence"] == []
     assert result["external_evidence"] == [{"summary": "web summary", "content": "", "url": ""}]
 
 
@@ -386,9 +558,18 @@ def test_project_known_facts_maps_top_level_capability_payloads() -> None:
                 "summary": "memory summary",
                 "raw_result": {
                     "projection_payload": {
-                        "memory_rows": [
-                            {"content": "official address is 123 Example Street"}
-                        ],
+                            "memory_rows": [
+                                _typed_shared_memory_row(
+                                    row_id="capability-memory-row",
+                                    memory_unit_id="capability-memory-unit",
+                                    memory_type="fact",
+                                    source_kind="seeded_manual",
+                                    authority="seed",
+                                    content=(
+                                        "official address is 123 Example Street"
+                                    ),
+                                )
+                            ],
                     }
                 },
             },
@@ -614,8 +795,22 @@ def test_project_known_facts_drops_unsafe_memory_line() -> None:
                 "raw_result": {
                     "projection_payload": {
                         "memory_rows": [
-                            {"content": "[CQ:image,file=abc]"},
-                            {"content": "User prefers tea."},
+                            _typed_shared_memory_row(
+                                row_id="unsafe-memory-row",
+                                memory_unit_id="unsafe-memory-unit",
+                                memory_type="fact",
+                                source_kind="seeded_manual",
+                                authority="seed",
+                                content="[CQ:image,file=abc]",
+                            ),
+                            _typed_shared_memory_row(
+                                row_id="safe-memory-row",
+                                memory_unit_id="safe-memory-unit",
+                                memory_type="fact",
+                                source_kind="seeded_manual",
+                                authority="seed",
+                                content="User prefers tea.",
+                            ),
                         ],
                     }
                 },
@@ -692,26 +887,25 @@ def test_project_known_facts_preserves_scoped_user_memory_metadata_and_candidate
                 "raw_result": {
                     "projection_payload": {
                         "memory_rows": [
-                            {
-                                "unit_id": "unit-7",
-                                "unit_type": "objective_fact",
-                                "fact": "冰淇淋摊老板是千纱的初中学姐。",
-                                "subjective_appraisal": "Kazusa treats this as shared private continuity.",
-                                "relationship_signal": "Preserve the lore with this user.",
-                                "content": "冰淇淋摊老板是千纱的初中学姐。",
-                                "updated_at": "2026-05-03T00:00:00+00:00",
-                                "source_system": "user_memory_units",
-                                "scope_type": "user_continuity",
-                                "scope_global_user_id": "user-1",
-                                "authority": "scoped_continuity",
-                                "truth_status": "character_lore_or_interaction_continuity",
-                                "origin": "consolidated_interaction",
-                            },
-                            {
-                                "memory_name": "active-character-official-address",
-                                "content": "The active character's official address is 123 Example Street.",
-                                "source_kind": "seeded_manual",
-                            },
+                            _user_memory_writer_row(
+                                user_id="user-1",
+                                unit_id="unit-7",
+                                fact="冰淇淋摊老板是千纱的初中学姐。",
+                                storage_timestamp_utc=(
+                                    "2026-05-03T00:00:00+00:00"
+                                ),
+                            ),
+                            _typed_shared_memory_row(
+                                row_id="curated-address-row",
+                                memory_unit_id="curated-address-unit",
+                                memory_type="fact",
+                                source_kind="seeded_manual",
+                                authority="seed",
+                                content=(
+                                    "The active character's official address "
+                                    "is 123 Example Street."
+                                ),
+                            ),
                         ],
                     }
                 },
@@ -721,35 +915,26 @@ def test_project_known_facts_preserves_scoped_user_memory_metadata_and_candidate
         character_user_id="character-1",
     )
 
-    assert len(result["memory_evidence"]) == 1
+    assert len(result["memory_evidence"]) == 2
     entry = result["memory_evidence"][0]
     assert entry["summary"] == '结论：scoped continuity summary'
     assert entry["content"].startswith('上下文：')
     assert "冰淇淋摊老板是千纱的初中学姐。" in entry["content"]
-    assert "The active character's official address is 123 Example Street." in entry["content"]
     assert entry["source_system"] == "user_memory_units"
     assert entry["scope_type"] == "user_continuity"
     assert entry["scope_global_user_id"] == "user-1"
     assert entry["authority"] == "scoped_continuity"
     assert entry["truth_status"] == "character_lore_or_interaction_continuity"
     assert entry["origin"] == "consolidated_interaction"
-    assert result["user_memory_unit_candidates"] == [
-        {
-            "unit_id": "unit-7",
-            "unit_type": "objective_fact",
-            "fact": "冰淇淋摊老板是千纱的初中学姐。",
-            "subjective_appraisal": "Kazusa treats this as shared private continuity.",
-            "relationship_signal": "Preserve the lore with this user.",
-            "content": "冰淇淋摊老板是千纱的初中学姐。",
-            "updated_at": "2026-05-03T00:00:00+00:00",
-            "source_system": "user_memory_units",
-            "scope_type": "user_continuity",
-            "scope_global_user_id": "user-1",
-            "authority": "scoped_continuity",
-            "truth_status": "character_lore_or_interaction_continuity",
-            "origin": "consolidated_interaction",
-        }
-    ]
+    curated_entry = result["memory_evidence"][1]
+    assert "The active character's official address is 123 Example Street." in curated_entry["content"]
+    assert curated_entry["source_kind"] == "seeded_manual"
+    candidate = result["user_memory_unit_candidates"][0]
+    assert candidate["unit_id"] == "unit-7"
+    assert candidate["global_user_id"] == "user-1"
+    assert candidate["unit_type"] == "objective_fact"
+    assert candidate["fact"] == "冰淇淋摊老板是千纱的初中学姐。"
+    assert candidate["status"] == "active"
 
 
 def test_project_known_facts_skips_unresolved_top_level_payload() -> None:
@@ -886,11 +1071,14 @@ def test_project_known_facts_projects_formatted_memory_evidence() -> None:
                 "raw_result": {
                     "projection_payload": {
                         "memory_rows": [
-                            {
-                                "content": "User prefers tea during late sessions.",
-                                "updated_at": "2026-05-01T12:34:56.789000+00:00",
-                                "source_system": "user_memory_units",
-                            }
+                            _user_memory_writer_row(
+                                user_id="user-1",
+                                unit_id="formatted-unit",
+                                fact="User prefers tea during late sessions.",
+                                storage_timestamp_utc=(
+                                    "2026-05-01T12:34:56.789000+00:00"
+                                ),
+                            )
                         ],
                     }
                 },
@@ -1246,15 +1434,14 @@ def test_project_known_facts_does_not_present_scope_global_user_id_as_evidence_c
                 "raw_result": {
                     "projection_payload": {
                         "memory_rows": [
-                            {
-                                "content": (
+                            _user_memory_writer_row(
+                                user_id="user-1",
+                                unit_id="scope-safe-unit",
+                                fact=(
                                     'scope_global_user_id=user-1: '
                                     'prefers jasmine tea in the evening.'
                                 ),
-                                "source_system": "user_memory_units",
-                                "scope_type": "user_continuity",
-                                "scope_global_user_id": "user-1",
-                            },
+                            ),
                         ],
                     }
                 },
@@ -1273,3 +1460,203 @@ def test_project_known_facts_does_not_present_scope_global_user_id_as_evidence_c
     assert "=user-1" not in summary_text
     assert "=user-1" not in content_text
     assert "jasmine tea" in content_text
+
+
+def test_shared_memory_projection_partitions_fact_and_self_guidance_with_typed_metadata() -> None:
+    """Writer-shaped rows retain typed authority through cognition safely."""
+
+    fact_row = _canonical_shared_writer_row(
+        row_id="fact-row-1",
+        memory_unit_id="fact-unit-1",
+        memory_type="fact",
+        source_kind="reflection_inferred",
+        authority="reflection_promoted",
+        content="A validated world fact.",
+    )
+    self_guidance_row = _canonical_shared_writer_row(
+        row_id="guidance-row-1",
+        memory_unit_id="guidance-unit-1",
+        memory_type="defense_rule",
+        source_kind="conversation_extracted",
+        authority="conversation_accepted",
+        content="A certified character guidance rule.",
+    )
+    curated_fact = _canonical_shared_writer_row(
+        row_id="curated-fact-row",
+        memory_unit_id="curated-fact-unit",
+        memory_type="fact",
+        source_kind="seeded_manual",
+        authority="seed",
+        content="A curated world fact.",
+    )
+    curated_external = _canonical_shared_writer_row(
+        row_id="curated-external-row",
+        memory_unit_id="curated-external-unit",
+        memory_type="fact",
+        source_kind="external_imported",
+        authority="seed",
+        content="A curated imported fact.",
+    )
+    curated_defense = _typed_shared_memory_row(
+        row_id="curated-defense-row",
+        memory_unit_id="curated-defense-unit",
+        memory_type="defense_rule",
+        source_kind="external_imported",
+        authority="manual",
+        content="A curated defense rule.",
+    )
+    current_user_row = _user_memory_writer_row(
+        user_id="user-1",
+        unit_id="current-user-unit",
+    )
+    raw_user_row = dict(build_user_memory_unit_doc(
+        "user-1",
+        {
+            "unit_id": "raw-user-unit",
+            "unit_type": "objective_fact",
+            "fact": "An unprojected current-user row.",
+            "subjective_appraisal": "An unprojected appraisal.",
+            "relationship_signal": "An unprojected signal.",
+        },
+        storage_timestamp_utc="2026-06-01T00:00:00+00:00",
+        unit_id="raw-user-unit",
+    ))
+    other_user_row = _user_memory_writer_row(
+        user_id="user-2",
+        unit_id="other-user-unit",
+    )
+    incomplete_certificate = _typed_shared_memory_row(
+        row_id="incomplete-row",
+        memory_unit_id="incomplete-unit",
+        memory_type="fact",
+        source_kind="conversation_extracted",
+        authority="conversation_accepted",
+        content="An incomplete learned row.",
+    )
+    del incomplete_certificate["privacy_review"]["boundary_assessment"]
+    untyped_row = {
+        "_id": "untyped-row",
+        "memory_type": "fact",
+        "content": "An untyped row.",
+    }
+    rows = [
+        fact_row,
+        self_guidance_row,
+        curated_fact,
+        curated_external,
+        curated_defense,
+        current_user_row,
+        raw_user_row,
+        other_user_row,
+        incomplete_certificate,
+        untyped_row,
+    ]
+
+    assert classify_typed_memory_row(
+        fact_row,
+        current_user_id="user-1",
+    ) == ("character_world_context", "validated learned global memory")
+    assert classify_typed_memory_row(
+        current_user_row,
+        current_user_id="user-1",
+    )[0] == "participant_continuity"
+    assert classify_typed_memory_row(
+        other_user_row,
+        current_user_id="user-1",
+    )[0] is None
+    assert classify_typed_memory_row(
+        raw_user_row,
+        current_user_id="user-1",
+    )[0] is None
+
+    result = project_known_facts(
+        [
+            {
+                "slot": "memory",
+                "agent": "persistent_memory_search_agent",
+                "resolved": True,
+                "summary": "typed shared memory",
+                "raw_result": rows,
+            }
+        ],
+        current_user_id="user-1",
+        character_user_id="character-1",
+    )
+
+    entries = result["memory_evidence"]
+    assert [entry.get("memory_type", entry.get("unit_type")) for entry in entries] == [
+        "fact",
+        "defense_rule",
+        "fact",
+        "fact",
+        "defense_rule",
+        "objective_fact",
+    ]
+    assert [entry["authority"] for entry in entries] == [
+        "reflection_promoted",
+        "conversation_accepted",
+        "seed",
+        "seed",
+        "manual",
+        "scoped_continuity",
+    ]
+    assert entries[0]["scope_type"] == "global"
+    assert entries[1]["privacy_review"] == self_guidance_row["privacy_review"]
+    assert entries[5]["scope_global_user_id"] == "user-1"
+    assert "source_global_user_id" not in repr(entries)
+    assert "A validated world fact." in entries[0]["content"]
+    assert "A certified character guidance rule." in entries[1]["content"]
+    assert "A curated imported fact." in entries[3]["content"]
+
+    safe_result, incidents = recover_public_rag_evidence_prompt_safe(result)
+    assert incidents == []
+    cognition_rows = _rag_evidence(
+        safe_result,
+        "2026-06-08T00:00:00Z",
+        current_user_id="user-1",
+    )
+    for index, row in enumerate(cognition_rows, start=1):
+        row["evidence_handle"] = f"e{index}"
+    _validate_evidence_rows(cognition_rows)
+    assert [row["authority"] for row in cognition_rows] == [
+        "character_world_context",
+        "conditional_character_guidance",
+        "character_world_context",
+        "character_world_context",
+        "conditional_character_guidance",
+        "participant_continuity",
+    ]
+    assert cognition_rows[1]["evidence_ref"]["source_id"] == (
+        "promoted-memory:self_guidance:guidance-unit-1"
+    )
+    assert cognition_rows[5]["evidence_ref"]["source_id"] == (
+        "promoted-memory:current_user_continuity:current-user-unit"
+    )
+    assert cognition_rows[5]["memory_metadata"]["unit_type"] == (
+        "objective_fact"
+    )
+    assert cognition_rows[5]["memory_metadata"]["scope_global_user_id"] == (
+        "user-1"
+    )
+    diagnostics = result["supervisor_trace"]["dispatched"][0][
+        "projection_diagnostics"
+    ]
+    assert {item["source_id"] for item in diagnostics} == {
+        "other-user-unit",
+        "raw-user-unit",
+        "incomplete-row",
+        "untyped-row",
+    }
+
+    public_payload = {
+        key: value
+        for key, value in result.items()
+        if key != "supervisor_trace"
+    }
+    assert "fact-row-1" not in repr(public_payload)
+    assert "guidance-row-1" not in repr(public_payload)
+    trace = repr(result["supervisor_trace"])
+    assert "fact-row-1" in trace
+    assert "guidance-row-1" in trace
+    assert "source_global_user_id" not in trace
+    assert "privacy_review" not in trace

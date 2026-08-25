@@ -27,21 +27,48 @@ from kazusa_ai_chatbot.cognition_shared.state_projection import (
     project_relationship_axis,
 )
 
+CURRENT_OBSERVATION_AUTHORITY_GUIDANCE = '''`current_observation` 是用户行动、意图、接受、许可和回应对象的直接依据；`direct_facts` 仅为稳定背景事实，不能单独建立这些当前事实。
+有限的认知或言语贡献请求只建立所请求的贡献和当前交互角色，不会单独转移更广泛的选择权、行动权或持续控制权。同一请求的存在或清晰程度、角色受邀贡献及其上游改述，都不是放弃自主选择、缺乏能力、依赖、信任变化或关系变化、持续控制权的独立证据；这些含义须有另行表达的`current_observation`事实支持。
+授权只证明当前观察所写对象、行动、时间和条件内的许可；授权本身不证明动机或上述更广含义。'''
+A2_RELATIONSHIP_STATE_EVIDENCE_GUIDANCE = '''`relationship_social` 必须区分当前交互角色或范围许可与用户—角色关系状态；角色或许可本身只建立当前范围，不能改变任何关系轴，也不能证明依赖、信任或亲近。只有另行表达的`current_observation`关系事实才支持这些含义；没有这类事实时使用`applicable=false`或保持既有轴，并仅作事实性的交互摘要。若存在独立关系事实，仍按语义判断。'''
+A2_EXISTENTIAL_DRIVE_EVIDENCE_GUIDANCE = '''`existential_drive` 的摘要、原因和轴变化都描述当前角色自身的体验；用户能力、能动性和需要只是证据上下文，不是角色所属轴的主体。没有独立当前事实时，不能推断用户放弃自主、依赖或信任。'''
 A1_QUESTION_GUIDANCE = '''
 按固定位置返回 A1 的三个评估类别：事件与行为归因、目标与威胁结果、认知比较或
 记忆。以开放的语义判断和具体原因作为主要内容；`axis_changes` 只是可选的从属
-证据。`current_observation` 和 `direct_facts` 可以用于确认当下发生了什么。
+证据。{current_observation_authority}
 `continuation_state` 只提供仍在起作用的因果压力。
 当前用户明确纠正自己的意思时，把这项纠正当作当前观察；纠正本身不是相反意思的证据。
 只有新的当下证据支持不确定或不同判断时，才保留相应的不确定性。
+'''.format(
+    current_observation_authority=CURRENT_OBSERVATION_AUTHORITY_GUIDANCE,
+)
+RECIPIENT_APPLICABILITY_GUIDANCE = '''公共可见性只能证明说了什么、由谁说、说给谁；面向某一参与者的同意、许可、承诺、
+关系或角色，不会因为另一参与者也看见就转移给另一参与者。
 '''
+BACKGROUND_CONTEXT_GOAL_AUTHORITY_GUIDANCE = '''`direct_facts`、`conditional_character_context` 和关系解释可以影响理解、`private_monologue`、`relational_willingness` 以及角色化表达；
+只有当 `current_observation` 使这类背景意义成为当前请求、决策或未解决事项的一部分时，才可以把它纳入 `active_character_goal` 或 `response_goal`；
+否则，背景意义不能另行产生或追加当前回应目标。'''
+G_RELATIONAL_CARRIER_EVIDENCE_GUIDANCE = '''`relational_willingness` 与 `private_monologue` 可以表达角色自身有依据的互动意愿、感受和动机，也可以说明角色对当前贡献或选择的回应；
+`relational_willingness.reason` 只能记录角色自身的动机与立场；`cause_summary` 只能引用当前事实；`private_monologue` 只能表达角色自身的体验。
+当前交互角色或范围许可本身只属于当前范围，不能成为用户依赖、信任、亲近、关系状态或用户动机的依据。
+普通贡献可以成为角色化帮助的动机；用户信任、依赖、需要、能力或放弃自主，须有另行表达的`current_observation`事实，不能从角色载体或回复内容提供角色推断。
+把未经当前关系事实支持的用户关系含义写成第一人称感受、内心判断或被动经历，仍是在给用户补写关系事实，不能因放入`private_monologue`而获得依据。
+除非有另行表达的`current_observation`关系事实，否则不要把关系意义添加给用户；若存在独立关系事实，仍按语义判断。'''
 A2_QUESTION_GUIDANCE = '''
 按固定位置返回 A2 的三个评估类别：关系与社会判断、道德身份、存在性驱力。以开放
 的语义判断和具体原因作为主要内容；`axis_changes` 只是可选的从属证据。
+{current_observation_authority}
 `participant_continuity` 只描述此前参与者、行为及结果。
 `conditional_character_context` 可以影响角色判断和边界，但不能用于确认当前事实、
 同意、承诺、许可、能力或当前用户的意图。
-'''
+{existential_drive_evidence}
+{relationship_state_evidence}
+{recipient_applicability}'''.format(
+    current_observation_authority=CURRENT_OBSERVATION_AUTHORITY_GUIDANCE,
+    existential_drive_evidence=A2_EXISTENTIAL_DRIVE_EVIDENCE_GUIDANCE,
+    relationship_state_evidence=A2_RELATIONSHIP_STATE_EVIDENCE_GUIDANCE,
+    recipient_applicability=RECIPIENT_APPLICABILITY_GUIDANCE,
+)
 APPRAISAL_QUESTION_GUIDANCE = '''
 返回一个 JSON 对象，并且严格包含本阶段要求的固定评估类别位置。每个位置都要保留
 开放的 `semantic_summary` 和具体的 `cause_summary`。`axis_changes` 只是可选的
@@ -60,7 +87,15 @@ GOAL_QUESTION_GUIDANCE = '''
 角色尚未得到回应的提议只能作为参与者连续性，不能当作当前用户的意图、接受、承诺或必须追求的当前目标。
 只有当前用户回应、接受、拒绝、提及、询问、实质改变或明确重新打开该回应事项时，才可以再次选择它。
 角色倾向可以影响语气和立场，但不能取代当前语义增量成为主要目标。
-'''
+{current_observation_authority}
+{background_goal_authority}
+{relational_carrier_evidence}
+{recipient_applicability}'''.format(
+    current_observation_authority=CURRENT_OBSERVATION_AUTHORITY_GUIDANCE,
+    background_goal_authority=BACKGROUND_CONTEXT_GOAL_AUTHORITY_GUIDANCE,
+    relational_carrier_evidence=G_RELATIONAL_CARRIER_EVIDENCE_GUIDANCE,
+    recipient_applicability=RECIPIENT_APPLICABILITY_GUIDANCE,
+)
 ORDINARY_PLAN_GUIDANCE = '''
 返回一份由当前角色拥有的回应计划。`response_goal` 描述可见对话的意图；
 `action_requests` 和 `resolver_requests` 只能使用输入中提供的语义能力。
@@ -78,7 +113,13 @@ ORDINARY_PLAN_GUIDANCE = '''
 角色尚未得到回应的提议只能作为参与者连续性，不能当作当前用户的意图、接受、承诺或必须追求的当前目标。
 只有当前用户回应、接受、拒绝、提及、询问、实质改变或明确重新打开该回应事项时，才可以再次选择它。
 角色倾向可以影响语气和立场，但不能取代当前语义增量成为主要目标。
-'''
+{current_observation_authority}
+{background_goal_authority}
+{recipient_applicability}'''.format(
+    current_observation_authority=CURRENT_OBSERVATION_AUTHORITY_GUIDANCE,
+    background_goal_authority=BACKGROUND_CONTEXT_GOAL_AUTHORITY_GUIDANCE,
+    recipient_applicability=RECIPIENT_APPLICABILITY_GUIDANCE,
+)
 SELF_PLAN_GUIDANCE = '''
 返回独立的自我认知回应契约。根据输入中有依据的参与语境，判断角色应保持沉默还是
 提出一项可见回复，并为任何可见措辞明确断言边界。
@@ -847,7 +888,6 @@ def build_canonical_turn_workspace(
             row["dialogue_role_binding"] = dict(role_bindings[0])
     orientation = {
         "response_owner": _role(scene_context.get("character_role", "active_character")),
-        "selection_owner": _role(scene_context.get("character_role", "active_character")),
         "current_user": _role(scene_context.get("current_user_role", "current_user")),
         "operation": _safe_text(
             str(scene_context.get("operation", "回应当前观察")),
@@ -1160,8 +1200,14 @@ def semantic_role_summary(
 
 __all__ = [
     "A1_QUESTION_GUIDANCE",
+    "A2_EXISTENTIAL_DRIVE_EVIDENCE_GUIDANCE",
     "A2_QUESTION_GUIDANCE",
+    "A2_RELATIONSHIP_STATE_EVIDENCE_GUIDANCE",
     "APPRAISAL_QUESTION_GUIDANCE",
+    "BACKGROUND_CONTEXT_GOAL_AUTHORITY_GUIDANCE",
+    "CURRENT_OBSERVATION_AUTHORITY_GUIDANCE",
+    "G_RELATIONAL_CARRIER_EVIDENCE_GUIDANCE",
+    "RECIPIENT_APPLICABILITY_GUIDANCE",
     "PromptContractError",
     "build_canonical_appraisal_question",
     "build_canonical_goal_question",

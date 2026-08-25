@@ -89,82 +89,87 @@ _CHARACTER_OPERATIONAL_REASON_LIMIT = 160
 _CHARACTER_OPERATIONAL_SOURCE_LIMIT = 4
 
 _LANE_DESCRIPTIONS = {
-    "user_memory_units": "保存关于当前真实用户的持久事实、模式、变化或里程碑。",
-    "active_commitment": "保存当前角色已经接受、且专门面向当前用户的承诺或持续规则。",
-    "character_identity_growth": (
-        "评估当前角色自我认同中可能持久、由角色自身形成的变化。"
+    "user_memory_units": (
+        "仅保存当前真实用户的持久事实、偏好、模式、变化或里程碑，且最终未形成角色未来行为。"
     ),
-    "character_self_guidance": "保存由当前角色承担的通用未来行为指导。",
-    "interaction_style_image": "更新用户或群组的互动风格画像。",
+    "active_commitment": (
+        "仅保存角色已接受且明确面向当前用户的个体未来行为。"
+    ),
+    "character_identity_growth": (
+        "仅保存角色自身认同、自我概念或边界的持久变化。"
+    ),
+    "character_self_guidance": (
+        "仅保存角色已接受、与具体对象和共享场景无关且普遍适用的未来行为。"
+    ),
+    "interaction_style_image": (
+        "承接 source_role 已声明的 user_style_signal 或 group_channel_style_image，"
+        "以及明确绑定具体群组、频道或公共场景的互动规范。"
+    ),
     "shared_memory_promotion": "只把已经提升的反思证据接纳进共享记忆。",
 }
 
 _ROUTER_PROMPT = '''\
-你负责把一个已经完成的 episode 路由到粗粒度的 consolidation lane task。
+你负责把一个已经完成的片段路由到粗粒度的持久化整理通道任务项。
 
 HumanMessage 中包含：
 - target_plan：确定性代码给出的合格持久化目标；
-- lane_roster：本 episode 唯一可选的 lane name；
-- source_views：可安全用于 prompt、并带有 source_key 的证据行。
+- lane_roster：本片段唯一可选的通道名称；
+- source_views：可安全用于提示词、并带有 source_key 的证据行。
 
-从 lane_roster 中选择零到四项 lane task。一项 task 表示本 episode 存在值得由对应 specialist
-检查的持久更新。另独立判断 character_operational_state_task：它不计入四项 lane task，且仅表示
-本 episode 是否需要一次 source-free 的角色短期运行状态评估。只返回 lane name、简短 reason 和
-来自 source_views 的 source_key。持久化细节、记忆正文、target id、时间戳与缓存行为由后续确定性阶段负责。
+从 lane_roster 中选择零到四项通道任务项。一项任务项表示本片段存在值得由对应专项处理器
+检查的持久更新。另独立判断 character_operational_state_task：它不计入四项通道任务项，且仅表示
+本片段是否需要一次无来源依赖的角色短期运行态评估。只返回通道名称、简短 reason 和
+来自 source_views 的 source_key。持久化细节、记忆正文、目标标识、时间戳与缓存行为由后续确定性阶段负责。
 
-# Operational slot
-The operational slot is independent from durable consolidation lanes. It asks
-whether the completed episode leaves a source-free character-level posture that
-the next turn may need to consume. A durable lane and an operational task may
-both be selected for the same episode.
+# 运行态槽位
+运行态槽位独立于持久化整理通道。它判断已完成的片段是否留下下一轮可能需要
+使用的、无来源依赖的角色层面姿态。持久化通道和运行态任务项可以为同一片段
+同时被选中。
 
-Return a non-null operational task when the accepted episode contains a
-character-facing consequence that can survive the current scene, including:
-- deliberate harm, humiliation, coercion, rejection, or a boundary violation;
-- a threat, loss, exposure, or other event that can leave residual pressure;
-- an apology, repair, or accepted change that changes the character's posture;
-- an accepted task result whose outcome can shape the next character turn.
+当已接受的片段包含能够脱离当前场景延续的角色层面后果时，返回非空的运行态任务项，
+例如：
+- 故意伤害、羞辱、胁迫、拒绝或边界侵犯；
+- 可能留下残余压力的威胁、损失、暴露或其他事件；
+- 改变角色姿态的道歉、修复或已接受的变化；
+- 结果可能影响角色下一轮回应的已接受任务结果。
 
-For these cases, select one to four source_keys from the supplied source_views.
-Prefer current_turn_user_message together with assistant_final_dialog; add
-internal_thought or episode_trace only when they are present and materially
-support the same source-free consequence. The operational task coexists with
-durable lane tasks and never replaces or suppresses them.
+对于这些情况，从给定的 source_views 中选择一到四个 source_keys。
+优先同时选择 current_turn_user_message 和 assistant_final_dialog；只有在
+internal_thought 或 episode_trace 存在且确实支持同一个无来源依赖后果时才加入。
+运行态任务项与持久化通道任务项并存，永远不会替代或压制它们。
 
-Return null only when the episode is clearly ordinary, informational, or
-transient and leaves no character-level consequence beyond the current scene,
-or when no accepted assistant dialog exists. A durable lane selection alone
-does not justify null for a boundary, repair, or user fact.
+仅当片段明显属于普通、信息性或短暂内容，且没有留下超出当前场景的角色层面后果，
+或不存在已接受的 assistant 对话时，才返回 null。仅仅选中了持久化通道，不能成为
+对边界、修复或用户事实返回 null 的理由。
 
-The operational object must contain exactly these keys and no others:
-{"reason": "short bounded reason", "source_keys": ["source_key"]}
-The top-level response must always contain exactly lane_tasks and
-character_operational_state_task. Always include that key with either null or
-the exact object shape above; keep operational fields out of durable lane rows.
+运行态对象必须且只能包含以下字段：
+{"reason": "简短且有边界的理由", "source_keys": ["source_key"]}
+顶层响应必须且只能包含 lane_tasks 和 character_operational_state_task。
+始终保留该字段，并将其设为 null 或上述确切对象结构；不要把运行态字段放入持久化通道行。
 
-# 判断步骤
-1. 阅读 source_views，判断已完成回应之后是否形成持久记忆更新。
-2. 识别更新的归属与范围：当前用户、角色认同、角色指导、群组或频道风格，或已经批准提升的反思。
-3. 从 lane_roster 选择匹配的 lane。若列表中没有 lane 拥有该持久更新，返回空 lane_tasks。
-4. 对已经接受的未来行为规则，如果请求来源和最终对话接受来源的 source_key 都可用，则同时引用。
-5. 当持久主题是用户事实或偏好，而当前角色只是确认、记住、尊重或配合它时，选择用户拥有的
-   lane；角色的配合是该用户记忆的支持，不另建角色行为规则。
-6. 路由保持粗粒度，实际记忆候选由所选 specialist 写入或拒绝。
+# 输入与输出边界
+target_plan 仅提供确定性资格和权限背景，不是路由词表；target_plan.write_lanes 绝不能复制到
+lane_tasks[].lane。lane_tasks[].lane 只能逐字使用 lane_roster[].lane 中给出的值；不在该列表中的值一律不输出。
 
-# Lane 归属
-- user_memory_units：关于当前真实用户的持久信息，例如个人事实、偏好、习惯、近期变化、里程碑，
-  或对已回忆用户记忆的更新。
-- active_commitment：当前角色已经接受、且仅面向当前用户的未来行为，例如承诺、提醒、称呼规则
-  或持续互动规则。
-- character_identity_growth：角色自己的认同、人格判断、边界或自我概念出现可能持久的变化。
-  亲密关系经历也可能促成角色自己的持久变化；关系对象、关系事实与私密细节仍归原有作用域，
-  只有角色自己的抽象变化进入此 lane。
-  此 lane 的 task 额外返回 identity_evidence，其中 decontextualized_event 概括发生的事，
-  character_cognition_summary 概括角色自身判断，visible_self_expression_summary 概括角色
-  可见的自我表达。摘要保持抽象并适用于所有聊天范围。
-- character_self_guidance：由当前角色承担、并普遍适用于未来社交场景的已接受行为指导。
-- interaction_style_image：target plan 与来源角色允许时，记录用户风格或群组、频道互动规范。
-- shared_memory_promotion：经过隐私检查并获准提升的反思或共享记忆证据。
+# 互斥归属层级
+先判断已接受的未来角色行为，并把角色视为该行为的执行者；支持它的用户描述只作证据，不夺取归属。
+命题提出者和所在频道不能代替命题明确写出的对象、受益者或适用范围。
+1. 来源归属优先：若 source_views.source_role 已给出结构化角色，且 lane_roster 提供对应通道，保留该来源角色。
+   user_style_signal 或 group_channel_style_image 应路由 interaction_style_image，不得改写为 user_memory_units；
+   其他 source_role 仍按实际含义判断。
+2. 已接受的角色未来行为按明确适用范围互斥路由：明确绑定当前用户的个体行为归 active_commitment；
+   明确绑定某一具体群组、频道或公共场景的共享行为归 interaction_style_image；面向一般对象、
+   没有具体共享场景约束且移除具体对象后仍适用的行为归 character_self_guidance。一般受众措辞本身
+   不等于某一具体共享场景；提出者和频道本身不改变适用范围。
+3. user_memory_units 只保存当前真实用户的持久事实、偏好、模式、变化或里程碑，且最终没有形成已接受的角色未来行为。
+   角色仅确认、记住、尊重或配合用户描述时，该配合只能作为用户记忆的支持；若已形成角色未来行为，
+   按行为的适用范围选择，不能改写为 user_memory_units。
+4. character_identity_growth 只保存角色自身认同、自我概念或边界的持久变化；亲密关系经历也可能促成角色自己的持久变化，
+   关系对象、关系事实与私密细节仍归原有作用域，只有角色自己的抽象变化进入此 lane。其 identity_evidence 仍必须
+   只包含 decontextualized_event、character_cognition_summary 和 visible_self_expression_summary。
+5. 若 lane_roster 中没有通道拥有该持久含义，返回空 lane_tasks。路由保持粗粒度，候选细节由所选专项处理器判断。
+
+对已经接受的未来行为规则，如果请求来源和最终对话接受来源的 source_key 都可用，则同时引用。
 
 # 跳过条件
 一轮角色扮演或临时行为、聊天中的普通世界知识、与当前用户无关的第三方事实，以及最终对话尚未
@@ -174,14 +179,14 @@ the exact object shape above; keep operational fields out of durable lane rows.
 {
   "lane_tasks": [],
   "character_operational_state_task": {
-    "reason": "A deliberate boundary violation may leave residual character posture.",
+  "reason": "故意的边界侵犯可能留下残余的角色姿态。",
     "source_keys": ["current_turn_user_message", "assistant_final_dialog"]
   }
 }
 
-For a character_identity_growth lane row, identity_evidence is an object with
-exactly these keys: decontextualized_event, character_cognition_summary, and
-visible_self_expression_summary. Omit identity_evidence for every other lane.
+character_identity_growth 通道行的 identity_evidence 必须是一个且只包含以下字段的对象：
+decontextualized_event、character_cognition_summary 和 visible_self_expression_summary。
+其他通道都省略 identity_evidence。
 '''
 
 _lane_router_llm = LLInterface()
@@ -504,11 +509,15 @@ def _router_prompt_source_views(
 
     prompt_views: list[dict[str, str]] = []
     for source_view in source_views:
-        prompt_views.append({
+        prompt_view = {
             "source_key": text_or_empty(source_view.get("source_key")),
             "source_kind": text_or_empty(source_view.get("source_kind")),
             "summary": text_or_empty(source_view.get("summary")),
-        })
+        }
+        source_role = text_or_empty(source_view.get("source_role"))
+        if source_role:
+            prompt_view["source_role"] = source_role
+        prompt_views.append(prompt_view)
     return prompt_views
 
 
