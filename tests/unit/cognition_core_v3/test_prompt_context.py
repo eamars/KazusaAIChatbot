@@ -96,6 +96,32 @@ def test_cognition_chain_guidance_uses_native_chinese() -> None:
     }
 
 
+def test_ordinary_plan_declares_response_goal_text_contract() -> None:
+    """Keep the model-facing P schema aligned with deterministic validation."""
+
+    payload = _input()
+    workspace = _workspace(payload, payload["evidence"])
+    packet = build_canonical_plan_question(
+        workspace=workspace,
+        goal={
+            "goal_kind": "clarify",
+            "intent": "answer the current observation",
+            "reason": "the current observation needs an answer",
+            "cause_summary": "the current observation",
+        },
+        appraisal_summary=[],
+    )
+
+    assert packet["output_contract"]["response_goal"] == {
+        "type": "string",
+        "minimum_characters": 1,
+        "maximum_characters": 2000,
+    }
+    assert "`response_goal` 的值必须是一个非空的简体中文字符串" in (
+        facade_module._STAGE_SYSTEM_PROMPTS["P"]
+    )
+
+
 def test_stage_context_preserves_identity_relationship_and_emotion_cause() -> None:
     payload = _input()
     payload["character_operational_context"] = {

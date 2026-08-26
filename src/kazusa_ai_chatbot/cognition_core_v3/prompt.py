@@ -1114,6 +1114,11 @@ def build_canonical_plan_question(
             ],
             "additionalProperties": False,
             "goal_resolution_values": sorted(GOAL_RESOLUTION_VALUES),
+            "response_goal": {
+                "type": "string",
+                "minimum_characters": 1,
+                "maximum_characters": 2000,
+            },
             "action_request_fields": ["action_kind", "decision", "detail", "reason"],
             "action_request_item_bounds": {"minimum": 0, "maximum": 3},
             "response_goal_action_reservation": 1,

@@ -142,6 +142,7 @@ _STAGE_SYSTEM_PROMPTS = {
 {background_goal_authority}
 
 # 输出边界
+`response_goal` 的值必须是一个非空的简体中文字符串，用一句话概括下游可见对话的目标。
 只返回 `output_contract` 指定的字段。不得把任何输入权威通道名称写入输出对象。'''.format(
         current_observation_authority=CURRENT_OBSERVATION_AUTHORITY_GUIDANCE,
         background_goal_authority=BACKGROUND_CONTEXT_GOAL_AUTHORITY_GUIDANCE,
