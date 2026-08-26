@@ -49,6 +49,36 @@ class _FakeJudgeLLM:
 
 
 @pytest.mark.asyncio
+async def test_persistent_memory_generator_falls_back_to_task_query(
+    monkeypatch,
+) -> None:
+    """A missing generator query should use the existing task slot text."""
+
+    class _MissingQueryLLM:
+        async def ainvoke(
+            self,
+            messages: list[object],
+            *,
+            config=None,
+        ) -> _FakeResponse:
+            return _FakeResponse('{"top_k": 20}')
+
+    monkeypatch.setattr(
+        persistent_memory_search_agent,
+        "_generator_llm",
+        _MissingQueryLLM(),
+    )
+
+    result = await persistent_memory_search_agent._generator(
+        "#napcat",
+        {"known_facts": []},
+        "",
+    )
+
+    assert result == {"search_query": "#napcat", "top_k": 20}
+
+
+@pytest.mark.asyncio
 async def test_conversation_search_tool_fuses_semantic_and_keyword_rows(
     monkeypatch,
 ) -> None:

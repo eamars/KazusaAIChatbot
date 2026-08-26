@@ -373,6 +373,14 @@ async def _generator(task: str, context: dict[str, Any], feedback: str) -> dict[
         return_value = {}
         return return_value
     return_value = _normalize_args(result)
+    if "search_query" not in return_value:
+        fallback_query = text_or_empty(task)
+        if fallback_query:
+            return_value["search_query"] = fallback_query
+            logger.warning(
+                "persistent memory generator omitted search_query; "
+                "used the non-empty task as the specialist query"
+            )
     return return_value
 
 
