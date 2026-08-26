@@ -261,7 +261,7 @@ async def test_repository_operational_panels_accept_console_utc_offset() -> None
     character_panel = _project_character_operational_posture(
         build_character_production_state(updated_at=updated_at),
         effective_at="2026-07-27T00:00:01+00:00",
-        latest_context_consumption=None,
+        latest_context_section=None,
     )
     relationship_panel = _project_relationship_operational_panel(
         build_acquaintance_user_state(
@@ -277,6 +277,44 @@ async def test_repository_operational_panels_accept_console_utc_offset() -> None
     )
     assert relationship_panel["status"] == "available"
     assert relationship_panel["items"][0]["relationship_freshness"]
+
+
+@pytest.mark.asyncio
+async def test_character_posture_consumes_canonical_context_observation_section() -> None:
+    """Character posture should carry one already-safe canonical context section."""
+
+    from control_console.repository import _project_character_operational_posture
+    from kazusa_ai_chatbot.brain_service.cognition_observation_contracts import (
+        CognitionObservationSectionV1,
+    )
+    from kazusa_ai_chatbot.cognition_shared.state_models import (
+        build_character_production_state,
+    )
+
+    section = CognitionObservationSectionV1.model_validate({
+        "section_id": "reasoning.context_consumption",
+        "label": "Context consumption",
+        "category": "context",
+        "presentation": "records",
+        "status": "completed",
+        "summary": "One context source is available.",
+        "fields": [
+            {"key": "overall_status", "label": "Overall status", "value": "completed"},
+            {"key": "consumer_count", "label": "Consumer count", "value": 1},
+        ],
+        "records": [],
+        "reported_record_count": 0,
+        "displayed_record_count": 0,
+        "truncated": False,
+    })
+    panel = _project_character_operational_posture(
+        build_character_production_state(updated_at="2026-07-27T00:00:00Z"),
+        effective_at="2026-07-27T00:00:01+00:00",
+        latest_context_section=section,
+    )
+
+    assert panel["status"] == "available"
+    assert panel["items"][0]["latest_context"] == section.model_dump(mode="json")
 
 
 @pytest.mark.asyncio

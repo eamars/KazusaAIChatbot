@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -107,6 +106,233 @@ def _client_with_login(tmp_path, *, supervisor=None):
     assert login.status_code == 200
     payload = login.json()
     return client, payload
+
+
+def test_debug_api_wraps_canonical_observation_without_reprojection(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Debug API should preserve Brain observation data inside one view envelope."""
+
+    from control_console import app as app_module
+    from control_console.kazusa_client import KazusaDebugChatResult
+    from tests.test_control_console_contracts import _canonical_live_observation
+
+    class FakeKazusaClient:
+        def __init__(self, **kwargs) -> None:
+            _ = kwargs
+
+        async def send_debug_chat(self, request):
+            _ = request
+            from kazusa_ai_chatbot.brain_service.cognition_observation_contracts import (
+                CognitionRunObservationV1,
+            )
+
+            observation = CognitionRunObservationV1.model_validate(
+                _canonical_live_observation(run_id="debug-api-run")
+            )
+            return KazusaDebugChatResult(
+                response_payload={
+                    "messages": [{"text": "safe reply"}],
+                    "delivery_tracking_id": "tracking-debug-api",
+                    "trace_id": "trace-debug-api",
+                },
+                cognition_observation=observation,
+            )
+
+    monkeypatch.setattr(app_module, "KazusaClient", FakeKazusaClient)
+    client, login_payload = _client_with_login(
+        tmp_path,
+        supervisor=_SyncBrainRunningSupervisor(),
+    )
+    response = client.post(
+        "/api/debug-chat",
+        headers={
+            login_payload["csrf_header_name"]: login_payload["csrf_token"],
+        },
+        json={
+            "channel_id": "debug",
+            "user_id": "operator",
+            "user_display_name": "Operator",
+            "message_text": "hello",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["cognition_observation"]["view_kind"] == "debug_latest"
+    assert payload["cognition_observation"]["availability"] == "available"
+    assert payload["cognition_observation"]["observation"]["correlation"][
+        "run_id"
+    ] == "debug-api-run"
+    assert "cognition_graph" not in payload
+    assert payload["response"]["messages"] == [{"text": "safe reply"}]
+
+
+def test_latest_and_debug_protocol_errors_map_to_exact_view_availability(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Protocol errors should become invalid envelopes without raw exception text."""
+
+    import httpx
+
+    from control_console import app as app_module
+    from control_console.kazusa_client import CognitionObservationProtocolError
+
+    class FakeKazusaClient:
+        def __init__(self, **kwargs) -> None:
+            _ = kwargs
+
+        async def get_health(self) -> dict:
+            return {"status": "healthy"}
+
+        async def get_runtime_status(self) -> dict:
+            return {"status": "running"}
+
+        async def get_latest_cognition_graph(self):
+            raise CognitionObservationProtocolError("observation_contract_invalid")
+
+        async def get_latest_self_cognition_graph(self):
+            raise httpx.ConnectError("private raw endpoint text")
+
+        async def send_debug_chat(self, request):
+            _ = request
+            raise CognitionObservationProtocolError("observation_contract_invalid")
+
+    monkeypatch.setattr(app_module, "KazusaClient", FakeKazusaClient)
+    client, login_payload = _client_with_login(
+        tmp_path,
+        supervisor=_SyncBrainRunningSupervisor(),
+    )
+
+    bootstrap = client.get("/api/bootstrap")
+    assert bootstrap.status_code == 200
+    bootstrap_payload = bootstrap.json()
+    latest = bootstrap_payload["latest_cognition_observation"]
+    self_latest = bootstrap_payload["latest_self_cognition_observation"]
+    assert latest["availability"] == "invalid"
+    assert latest["reason_code"] == "observation_contract_invalid"
+    assert latest["observation"] is None
+    assert self_latest["availability"] == "unavailable"
+    assert self_latest["reason_code"] == "brain_unavailable"
+    assert "private raw endpoint text" not in repr(bootstrap_payload)
+
+    debug = client.post(
+        "/api/debug-chat",
+        headers={
+            login_payload["csrf_header_name"]: login_payload["csrf_token"],
+        },
+        json={
+            "channel_id": "debug",
+            "user_id": "operator",
+            "user_display_name": "Operator",
+            "message_text": "hello",
+        },
+    )
+    assert debug.status_code == 200
+    debug_payload = debug.json()
+    assert debug_payload["cognition_observation"]["availability"] == "invalid"
+    assert debug_payload["cognition_observation"]["reason_code"] == (
+        "observation_contract_invalid"
+    )
+    assert debug_payload["cognition_observation"]["observation"] is None
+    assert "observation_contract_invalid" in repr(debug_payload)
+
+
+def test_cognition_observation_renderer_uses_contract_labels_and_shared_detail_layout(
+    tmp_path,
+) -> None:
+    """Static rendering should use producer labels and shared section layout."""
+
+    client, _ = _client_with_login(
+        tmp_path,
+        supervisor=_StaticStoppedSupervisor(),
+    )
+    script = client.get("/static/console.js")
+    stylesheet = client.get("/static/console.css")
+
+    assert script.status_code == 200
+    assert stylesheet.status_code == 200
+    for required_token in (
+        "latestCognitionObservationView",
+        "latestSelfCognitionObservationView",
+        "debugCognitionObservationView",
+        "observationFromView",
+        "section_refs",
+        "reported_record_count",
+        "displayed_record_count",
+        "data-section-id",
+    ):
+        assert required_token in script.text
+    for required_class in (
+        ".observation-section",
+        ".observation-section-header",
+        ".observation-counts",
+        ".observation-omission",
+    ):
+        assert required_class in stylesheet.text
+    assert "COGNITION_GRAPH_DETAIL_KEYS" not in script.text
+    assert "l2.reasoning" not in script.text
+    assert "first-semantic" not in script.text
+
+
+def test_renderer_accepts_unknown_producer_section_without_js_catalog(tmp_path) -> None:
+    """The renderer should resolve any producer section by its wire metadata."""
+
+    client, _ = _client_with_login(
+        tmp_path,
+        supervisor=_StaticStoppedSupervisor(),
+    )
+    script = client.get("/static/console.js")
+
+    assert script.status_code == 200
+    assert "section.section_id" in script.text
+    assert "section.label" in script.text
+    assert "section.fields" in script.text
+    assert "section.records" in script.text
+    assert "section_refs" in script.text
+    assert "cognition.appraisals" not in script.text
+    assert "reasoning.context_consumption" not in script.text
+
+
+def test_debug_loading_and_error_states_are_separate_from_cognition_graph(tmp_path) -> None:
+    """Debug loading/errors should use banners and never fabricate graph nodes."""
+
+    client, _ = _client_with_login(
+        tmp_path,
+        supervisor=_StaticStoppedSupervisor(),
+    )
+    script = client.get("/static/console.js")
+    index = client.get("/")
+
+    assert script.status_code == 200
+    assert index.status_code == 200
+    assert "#ui-notice" in script.text
+    assert 'id="ui-notice"' in index.text
+    assert "status-running" not in script.text
+    assert "not_reported_cognition_graph" not in script.text
+    renderer_start = script.text.index("function renderCognitionGraph")
+    renderer_end = script.text.index(
+        "function graphObservationModel",
+        renderer_start,
+    )
+    generic_renderer = script.text[renderer_start:renderer_end]
+    assert "debugRequestInFlight" not in generic_renderer
+    assert "debugObservationError" not in generic_renderer
+    overview_start = script.text.index("function renderOverview")
+    overview_end = script.text.index(
+        "async function refreshOverview",
+        overview_start,
+    )
+    overview_renderer = script.text[overview_start:overview_end]
+    assert "panelItems(panels.cognition_observations)" in overview_renderer
+    assert "item?.observation_kind === observationKind" in overview_renderer
+    assert '"conversation"' in overview_renderer
+    assert '"self_cognition"' in overview_renderer
+    assert "overview.latest_cognition_observation" not in overview_renderer
+    assert "overview.latest_self_cognition_observation" not in overview_renderer
+    assert "!state.latestSelfCognitionObservationView" in overview_renderer
 
 
 def test_static_shell_favicon_and_generic_lookup_outputs(
@@ -388,31 +614,25 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert "function renderCognitionGraph" in script.text
     assert "function renderOverviewCognitionGraph" in script.text
     assert "function renderDebugCognitionGraph" in script.text
-    assert "function cognitionGraphModel" in script.text
-    assert "function cognitionGraphCurrentNode" in script.text
-    assert "function cognitionGraphInspectorMarkup" in script.text
-    assert '["public_group_scene", "Public group scene"]' in script.text
-    assert script.text.index(
-        '["conversation_progress", "Conversation progress"]'
-    ) < script.text.index(
-        '["public_group_scene", "Public group scene"]'
-    )
-    assert "function setCognitionGraphPinnedNode" in script.text
-    assert "GRAPH_STALE_AFTER_MS = 10000" in script.text
-    assert "Return to current" in script.text
-    assert "data-graph-current-node-id" in script.text
-    assert "data-graph-selected-node-id" in script.text
+    assert "function renderObservationSections" in script.text
+    assert "function observationFromView" in script.text
+    assert "latestCognitionObservationView" in script.text
+    assert "latestSelfCognitionObservationView" in script.text
+    assert "debugCognitionObservationView" in script.text
+    assert "section_refs" in script.text
+    assert "data-section-id" in script.text
+    assert "reported_record_count" in script.text
+    assert "displayed_record_count" in script.text
     assert "graph-inspector" in script.text
     assert "graph-run-summary" in script.text
-    assert "function cognitionGraphStageGroups" in script.text
-    assert "function cognitionGraphStageGroupMarkup" in script.text
-    assert "function cognitionGraphConnectorMarkup" in script.text
-    assert "graph-stage-rail" in script.text
-    assert "graph-stage-group" in script.text
-    assert "graph-connector" in script.text
-    assert "graph-lane-row" not in script.text
-    assert "graph-edge-layer" not in script.text
-    assert "drawCognitionGraphEdges" not in script.text
+    assert "COGNITION_GRAPH_DETAIL_KEYS" not in script.text
+    assert "[\"public_group_scene\", \"Public group scene\"]" not in script.text
+    assert "[\"conversation_progress\", \"Conversation progress\"]" not in script.text
+    assert "l2.reasoning" not in script.text
+    assert "cognitionGraphInspectorRows" not in script.text
+    assert "cognitionGraphFirstSemanticValue" not in script.text
+    assert "pendingDebugCognitionGraph" not in script.text
+    assert "failedDebugCognitionGraph" not in script.text
     assert "is-current" in script.text
     assert "control.cognition_graph_invalidated" in script.text
     assert "function openServiceConfig" in script.text
@@ -459,6 +679,10 @@ def test_static_shell_favicon_and_generic_lookup_outputs(
     assert ".graph-stage-group" in stylesheet.text
     assert ".graph-connector" in stylesheet.text
     assert ".graph-branch-stack" in stylesheet.text
+    assert ".observation-section" in stylesheet.text
+    assert ".observation-section-header" in stylesheet.text
+    assert ".observation-counts" in stylesheet.text
+    assert ".observation-omission" in stylesheet.text
     assert ".graph-lane-row" not in stylesheet.text
     assert "min-width: max-content" not in stylesheet.text
     assert ".graph-edge-layer" not in stylesheet.text
@@ -856,7 +1080,10 @@ def test_web_api_outputs_for_logs_events_audit_character_and_debug_error(
     assert failing_debug.status_code == 200
     payload = failing_debug.json()
     assert payload["brain_available"] is False
-    assert payload["error"]["code"] == "brain_unavailable"
+    observation_view = payload["cognition_observation"]
+    assert observation_view["availability"] == "unavailable"
+    assert observation_view["reason_code"] == "debug_request_failed"
+    assert observation_view["observation"] is None
 
 
 def test_audit_api_collapses_actions_and_summarizes_views(tmp_path) -> None:

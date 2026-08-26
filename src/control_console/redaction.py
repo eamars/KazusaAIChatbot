@@ -6,6 +6,12 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from pydantic import ValidationError
+
+from kazusa_ai_chatbot.brain_service.cognition_observation_contracts import (
+    CognitionRunObservationV1,
+)
+
 REDACTED = "[redacted]"
 MAX_SAFE_TEXT_CHARS = 800
 CHARACTER_OPERATIONAL_STATE_VIEW_SCHEMA = (
@@ -15,7 +21,6 @@ CHARACTER_OPERATIONAL_CONTEXT_SCHEMA = "character_operational_context.v1"
 RELATIONSHIP_OPERATIONAL_CONTEXT_SCHEMA = (
     "relationship_operational_context.v1"
 )
-COGNITION_CONTEXT_CONSUMPTION_SCHEMA = "cognition_context_consumption.v1"
 SENSITIVE_KEY_PARTS = (
     "api_key",
     "apikey",
@@ -86,27 +91,18 @@ _RELATIONSHIP_AXIS_FIELDS = (
 _STYLE_SOURCE_NAMES = ("user", "group_channel")
 _STYLE_ROLES = ("relevance", "cognition", "surface")
 _STYLE_STATUSES = frozenset({"active", "empty", "missing", "failed"})
-_CONTEXT_STATUSES = frozenset({
-    "available",
-    "partial",
-    "not_reported",
-    "unavailable",
-    "stale",
-    "degraded",
-})
-_CONSUMPTION_STAGE_NAMES = ("settled_relevance", "cognition", "surface")
-_STAGE_HEALTH_FIELDS = (
-    "input_validation",
-    "deterministic_preliminary",
-    "semantic_appraisal",
-    "final_reduction",
-    "branch_cognition",
-    "action_planning",
-)
 
 
 def redact_mapping(source: Mapping[str, Any]) -> dict[str, Any]:
     """Return a recursively redacted copy of a mapping."""
+
+    if source.get("schema_version") == "cognition_run_observation.v1":
+        try:
+            observation = CognitionRunObservationV1.model_validate(source)
+        except ValidationError:
+            pass
+        else:
+            return observation.model_dump(mode="json")
 
     redacted: dict[str, Any] = {}
     for key, value in source.items():
@@ -274,156 +270,6 @@ def redact_interaction_style_projections(
         if projected_sources:
             projections[consumer_role] = projected_sources
     return projections
-
-
-def redact_context_consumption(source: Mapping[str, Any]) -> dict[str, Any]:
-    """Project exact public graph consumption without private source material."""
-
-    if source.get("schema_version") != COGNITION_CONTEXT_CONSUMPTION_SCHEMA:
-        return {}
-    raw_status = source.get("status")
-    status = raw_status if isinstance(raw_status, str) else "not_reported"
-    if status not in _CONTEXT_STATUSES:
-        status = "not_reported"
-    result: dict[str, Any] = {
-        "schema_version": COGNITION_CONTEXT_CONSUMPTION_SCHEMA,
-        "status": status,
-    }
-    for stage_name in _CONSUMPTION_STAGE_NAMES:
-        raw_stage = source.get(stage_name)
-        result[stage_name] = _redact_context_stage(raw_stage)
-    result["health"] = _redact_context_health(source.get("health"))
-    return result
-
-
-def redact_latest_context_consumption(
-    source: Mapping[str, Any],
-) -> dict[str, Any]:
-    """Allowlist graph availability metadata for the character posture panel."""
-
-    raw_status = source.get("status")
-    status = raw_status if isinstance(raw_status, str) else "not_reported"
-    if status not in _CONTEXT_STATUSES:
-        status = "not_reported"
-    result: dict[str, Any] = {"status": status}
-    result.update(_public_text_fields(
-        source,
-        ("run_id", "generated_at", "reason_code"),
-        maximum=160,
-    ))
-    raw_context = source.get("context")
-    if isinstance(raw_context, Mapping):
-        context = redact_context_consumption(raw_context)
-        if context:
-            result["context"] = context
-    return result
-
-
-def _redact_context_stage(value: Any) -> dict[str, Any]:
-    """Return one exact consumer stage using only declared public fields."""
-
-    if not isinstance(value, Mapping):
-        return {}
-    result: dict[str, Any] = {}
-    character_context = value.get("character_operational_context")
-    if isinstance(character_context, Mapping):
-        projected_character = redact_character_operational_context(
-            character_context,
-        )
-        if projected_character:
-            result["character_operational_context"] = projected_character
-    relationship_context = value.get("relationship_context")
-    if isinstance(relationship_context, Mapping):
-        projected_relationship = redact_operational_relationship_context(
-            relationship_context,
-        )
-        if projected_relationship:
-            result["relationship_context"] = projected_relationship
-    style = value.get("style")
-    if isinstance(style, Mapping):
-        projected_style = redact_interaction_style_projections(style)
-        if projected_style:
-            result["style"] = projected_style
-    group_action = value.get("group_engagement_action_context")
-    if isinstance(group_action, Mapping):
-        action_context = _public_style_guidance(
-            group_action.get("engagement_guidelines"),
-            limit=3,
-        )
-        confidence = _public_text(group_action.get("confidence"), maximum=80)
-        if action_context or confidence:
-            result["group_engagement_action_context"] = {
-                "engagement_guidelines": action_context,
-                "confidence": confidence,
-            }
-    return result
-
-
-def _redact_context_health(value: Any) -> dict[str, Any]:
-    """Expose bounded health codes without raw exceptions or identifiers."""
-
-    if not isinstance(value, Mapping):
-        return {}
-    result: dict[str, Any] = {}
-    predecessor = value.get("predecessor")
-    if isinstance(predecessor, Mapping):
-        projected_predecessor: dict[str, Any] = {}
-        status = _public_text(predecessor.get("status"), maximum=40)
-        if status in {"healthy", "degraded"}:
-            projected_predecessor["status"] = status
-        for field_name in (
-            "watermark",
-            "awaited_count",
-            "timed_out_count",
-            "wait_ms",
-        ):
-            value_at_field = _public_non_negative_int(
-                predecessor.get(field_name),
-            )
-            if value_at_field is not None:
-                projected_predecessor[field_name] = value_at_field
-        if projected_predecessor:
-            result["predecessor"] = projected_predecessor
-    stage_status = value.get("stage_status")
-    if isinstance(stage_status, Mapping):
-        projected_status = {
-            field_name: status
-            for field_name in _STAGE_HEALTH_FIELDS
-            if (
-                status := _public_text(
-                    stage_status.get(field_name),
-                    maximum=40,
-                )
-            )
-        }
-        if projected_status:
-            result["stage_status"] = projected_status
-    attempts = value.get("attempts")
-    if isinstance(attempts, Sequence) and not isinstance(attempts, str):
-        projected_attempts: list[dict[str, Any]] = []
-        for raw_attempt in attempts[:8]:
-            if not isinstance(raw_attempt, Mapping):
-                continue
-            attempt = _public_text_fields(
-                raw_attempt,
-                ("stage", "error_code", "final_status"),
-                maximum=80,
-            )
-            attempt_count = _public_non_negative_int(
-                raw_attempt.get("attempt_count"),
-            )
-            if attempt_count is not None:
-                attempt["attempt_count"] = attempt_count
-            if attempt:
-                projected_attempts.append(attempt)
-        if projected_attempts:
-            result["attempts"] = projected_attempts
-    receipt = value.get("operational_receipt")
-    if isinstance(receipt, Mapping):
-        projected_receipt = _public_operational_receipt(receipt)
-        if projected_receipt:
-            result["operational_receipt"] = projected_receipt
-    return result
 
 
 def _public_operational_receipt(source: Mapping[str, Any]) -> dict[str, Any]:

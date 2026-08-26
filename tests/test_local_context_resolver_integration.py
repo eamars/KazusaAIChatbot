@@ -105,7 +105,23 @@ async def test_first_cycle_prewarm_uses_memory_worker_without_full_resolver(
                 "result": [
                     {
                         "content": "Shared memory evidence from prewarm.",
-                        "source_system": "memory",
+                        "memory_unit_id": "local-context-shared-unit",
+                        "memory_name": "fact",
+                        "memory_type": "fact",
+                        "source_kind": "conversation_extracted",
+                        "source_global_user_id": "",
+                        "authority": "conversation_accepted",
+                        "status": "active",
+                        "scope_type": "global",
+                        "privacy_review": {
+                            "global_applicability": "global",
+                            "target_specific_meaning_removed": True,
+                            "affects_identity_or_boundaries": False,
+                            "private_detail_risk": "low",
+                            "user_details_removed": True,
+                            "boundary_assessment": "deidentified global meaning",
+                            "reviewer": "automated_llm",
+                        },
                     },
                     {
                         "content": "Scoped user memory must not enter prewarm.",
@@ -130,10 +146,13 @@ async def test_first_cycle_prewarm_uses_memory_worker_without_full_resolver(
         raising=False,
     )
 
-    rag_result = await capabilities.run_first_cycle_shared_memory_prewarm(
+    outcome = await capabilities.run_first_cycle_shared_memory_prewarm(
         _persona_state(),
     )
 
+    assert outcome["status"] == "completed"
+    assert outcome["reason_code"] == "shared_memory_ready"
+    rag_result = outcome["rag_result"]
     assert rag_result["answer"] == ""
     assert "Shared memory evidence from prewarm." in repr(
         rag_result["memory_evidence"]

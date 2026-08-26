@@ -40,12 +40,13 @@ preserving the functional gates in this document. It does not reopen the Plan
 ## Fixed Execution Ownership
 
 This coarse draft authorizes planning only. Its post-Plan 1 refinement requires
-explicit user approval and `in_progress` status before production execution.
+explicit user approval and `in_progress` status before the first Phase 1 test
+edit.
 
 | Role | Fixed owner | Responsibility |
 |---|---|---|
 | Architecture and closure | Parent agent | Owns tool-boundary decisions, scope, consolidated material review, gate interpretation, status, and closure |
-| Implementation and verification | The persistent `/root/dsh_implementation_worker` subagent on `gpt-5.6-luna`, `max` reasoning, normal execution speed | Owns all production/test edits, builds, tool fixtures, test execution, remediation, and pre-handoff self-review |
+| Implementation and verification | The persistent `/root/dsh_implementation_worker` subagent on `gpt-5.6-luna`, `max` reasoning, normal execution speed | Owns all production, test, fixture, and product-documentation edits, builds, test execution, remediation, and pre-handoff self-review |
 
 Work remains one plan at a time, reuses the Plan 1 worker, and uses no
 additional production worker. The parent remains read-only for production
@@ -67,6 +68,42 @@ Evidence remains proportionate: working-tree status, owned paths, final diff,
 exact commands/results, live-case inspection, and gate decisions. Runtime
 catalog, scope, audience, policy, and evidence fingerprints remain functional
 requirements. General workspace or artifact hashing remains outside scope.
+
+## Mandatory Implementation Order
+
+The post-Plan 1 refinement freezes the complete production/documentation
+change radius and exact source-to-test matrix before implementation begins.
+Execution then follows these three blocking phases across every capability
+family and work block:
+
+1. **Tests first.** Create, replace, modify, or delete every planned direct
+   tool test, multi-step standalone test, coding-authority test, fixture, live
+   case, adversarial case, static ownership check, test configuration entry,
+   and source-to-test manifest row before changing production code. Attempt
+   discovery and collection for the entire frozen matrix. A collection or
+   execution failure may cross the Phase 1 gate only when its recorded cause
+   is the planned absence of a new or changed production symbol; syntax,
+   fixture, node-ID, and unrelated collection defects are resolved within
+   Phase 1. The Phase 1 evidence contains the complete test diff, exact node
+   inventory, and expected red results mapped to the missing production
+   behavior.
+2. **Production changes second.** After the Phase 1 gate passes, implement the
+   tool gateway, leaf capabilities, DSH coding composition, authority policy,
+   runtime/configuration/dependency changes, and all other plan-owned
+   production work. Run the Phase 1 tests throughout implementation. Code is
+   ready for documentation when the production diff is complete, builds and
+   lint pass, and every applicable non-documentation deterministic,
+   cross-process, live-DB, live-LLM, and standalone behavior gate is green.
+3. **Documentation last.** After the code-ready gate passes, update the exact
+   architecture, subsystem ICD, operator, install, and usage documentation
+   paths frozen by the refined plan. Then run documentation assertions,
+   link/static checks, and the final mapped verification suite.
+
+Production and documentation paths remain at the captured execution baseline
+during Phase 1. Documentation paths remain at that baseline during Phase 2.
+A phase advances only after its evidence and exit gate are recorded. A newly
+discovered production change-radius expansion returns execution to Phase 1 so
+its tests are implemented before the additional production work proceeds.
 
 ## Capability Direction
 
@@ -133,6 +170,10 @@ on resume. A write with unknown outcome is verified or escalated rather than
 blindly repeated.
 
 ## Work Blocks And Effort Gates
+
+These blocks are functional scope groupings. Their test and fixture portions
+execute in Phase 1, their production portions execute in Phase 2, and their
+documentation portions execute in Phase 3 under the mandatory order above.
 
 | Block | Relative effort | Work | Independent completion gate |
 |---|---|---|---|

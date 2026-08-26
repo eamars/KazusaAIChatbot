@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from copy import deepcopy
-from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import sys
+from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
 from uuid import uuid4
 
@@ -15,6 +15,7 @@ import pytest
 from fastapi import BackgroundTasks
 
 from kazusa_ai_chatbot import service as brain_service
+from kazusa_ai_chatbot.brain_service import CognitionRunObservationV1
 from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
@@ -181,38 +182,95 @@ def _character_state(
     return state
 
 
-def _graph_node(graph: dict[str, Any], node_id: str) -> dict[str, Any]:
-    """Return one required node from a service cognition graph."""
+def _observation(graph: object) -> CognitionRunObservationV1:
+    """Validate one live Brain observation at the typed boundary."""
 
-    for node in graph["nodes"]:
-        if node["id"] == node_id:
+    try:
+        observation = CognitionRunObservationV1.model_validate(graph)
+    except (TypeError, ValueError) as exc:
+        raise AssertionError("live turn has an invalid observation") from exc
+    if observation.run_kind != "live_turn":
+        raise AssertionError("live turn observation has the wrong run kind")
+    return observation
+
+
+def _observation_node(
+    observation: CognitionRunObservationV1,
+    node_id: str,
+):
+    """Return one required canonical observation node."""
+
+    for node in observation.nodes:
+        if node.node_id == node_id:
             return node
-    raise AssertionError(f"cognition graph is missing node {node_id}")
+    raise AssertionError(f"observation is missing node {node_id}")
 
 
-def _decision_signature(graph: dict[str, Any]) -> dict[str, object]:
-    """Project the decision-bearing graph rows used by the behavior review."""
+def _observation_section(
+    observation: CognitionRunObservationV1,
+    section_id: str,
+):
+    """Return one required canonical observation section."""
 
-    signature = {
-        node_id: _graph_node(graph, node_id)["detail"]
-        for node_id in (
-            "l1.relevance",
-            "l2.reasoning",
-            "v2.appraisal",
-            "v2.collapse",
-        )
-    }
+    for section in observation.sections:
+        if section.section_id == section_id:
+            return section
+    raise AssertionError(f"observation is missing section {section_id}")
+
+
+def _section_values(section) -> dict[str, object]:
+    """Convert ordered section fields to a test-only lookup mapping."""
+
+    return {field.key: field.value for field in section.fields}
+
+
+def _decision_signature(graph: object) -> dict[str, object]:
+    """Project canonical decision-bearing nodes and their section values."""
+
+    observation = _observation(graph)
+    node_ids = (
+        "decision.response",
+        "cognition.meaning",
+        "cognition.goal",
+        "cognition.response",
+    )
+    signature: dict[str, object] = {}
+    for node_id in node_ids:
+        node = _observation_node(observation, node_id)
+        signature[node_id] = {
+            "status": node.status,
+            "summary": node.summary,
+            "sections": {
+                section_id: _section_values(
+                    _observation_section(observation, section_id),
+                )
+                for section_id in node.section_refs
+            },
+        }
     return signature
 
 
-def _context_consumption(graph: dict[str, Any]) -> dict[str, Any]:
-    """Return the exact context-consumption record emitted by the service."""
+def _context_consumption(graph: object) -> dict[str, Any]:
+    """Return canonical context-consumption records for behavior evidence."""
 
-    reasoning = _graph_node(graph, "l2.reasoning")
-    consumption = reasoning["detail"]["context_consumption"]
-    if consumption["schema_version"] != "cognition_context_consumption.v1":
-        raise AssertionError("context consumption schema is invalid")
-    return consumption
+    observation = _observation(graph)
+    reasoning = _observation_node(observation, "reasoning.context")
+    if "reasoning.context_consumption" not in reasoning.section_refs:
+        raise AssertionError("reasoning node lacks context section")
+    section = _observation_section(
+        observation,
+        "reasoning.context_consumption",
+    )
+    records = [
+        {field.key: field.value for field in record.fields}
+        for record in section.records
+    ]
+    return {
+        "status": section.status,
+        "overall_status": _section_values(section).get("overall_status"),
+        "consumer_count": _section_values(section).get("consumer_count"),
+        "records": records,
+    }
 
 
 async def _wait_for_receipt(delivery_tracking_id: str) -> dict[str, Any]:
@@ -329,9 +387,7 @@ async def _run_controlled_pair(
                 identity=identity,
                 message=message,
             )
-            graph = response.cognition_graph
-            if not isinstance(graph, dict):
-                raise AssertionError("controlled turn has no cognition graph")
+            graph = _observation(response.cognition_graph)
             consumption = _context_consumption(graph)
             branches[branch] = {
                 "seed": seed,
@@ -499,9 +555,7 @@ async def _run_offence_pair(
                 identity=probe_identity,
                 message=probe_message,
             )
-            probe_graph = probe_response.cognition_graph
-            if not isinstance(probe_graph, dict):
-                raise AssertionError("offence probe has no cognition graph")
+            probe_graph = _observation(probe_response.cognition_graph)
             branches[branch] = {
                 "source_message": source_messages[branch],
                 "source_response": source_response.model_dump(),

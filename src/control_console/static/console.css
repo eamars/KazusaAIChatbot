@@ -308,6 +308,24 @@ body[data-auth-state="authenticated"] #login-form { display: none; }
 .graph-inspector-empty { margin: 0; border: 1px dashed var(--line-strong); border-radius: var(--radius-card); color: var(--muted); padding: 12px; font-size: 13px; line-height: 1.45; }
 .graph-inspector-actions { display: flex; justify-content: flex-end; min-height: 0; }
 .graph-empty { margin: 0; min-height: 168px; display: grid; place-items: center; border: 1px dashed var(--line-strong); border-radius: var(--radius-card); color: var(--muted); text-align: center; padding: 18px; font-size: 13px; }
+.observation-section { display: grid; gap: 8px; min-width: 0; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--panel-soft); }
+.observation-section.status-failed { border-color: color-mix(in srgb, var(--danger) 38%, var(--line-strong)); }
+.observation-section.status-partial { border-color: color-mix(in srgb, var(--warn) 38%, var(--line-strong)); }
+.observation-section-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; min-width: 0; }
+.observation-section-header > div { display: grid; gap: 3px; min-width: 0; }
+.observation-section-header strong { overflow-wrap: anywhere; font-size: 13px; }
+.observation-section-header span { color: var(--muted); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+.observation-counts { display: flex; flex-wrap: wrap; gap: 6px; color: var(--muted); font-size: 11px; }
+.observation-counts > span { padding: 2px 6px; border: 1px solid var(--line); border-radius: 9999px; }
+.observation-omission { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 38%, var(--line)) !important; }
+.observation-fields, .observation-records { display: grid; gap: 6px; min-width: 0; }
+.observation-field-row { display: grid; grid-template-columns: minmax(90px, 0.55fr) minmax(0, 1fr); gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); min-width: 0; }
+.observation-field-row span { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.observation-field-row strong { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; font-size: 12px; font-weight: 500; }
+.observation-record { display: grid; gap: 2px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); min-width: 0; }
+.observation-record-header { display: grid; gap: 2px; padding-bottom: 4px; }
+.observation-record-header strong { overflow-wrap: anywhere; font-size: 12px; }
+.observation-record-header span { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
 .dialog-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; justify-items: end; background: color-mix(in srgb, var(--ink) 24%, transparent); padding: 14px; isolation: isolate; }
 .dialog-backdrop[hidden] { display: none; }
 .dialog-panel { width: min(720px, 100%); max-height: calc(100vh - 28px); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius-card); overflow: hidden; box-shadow: 0 20px 60px color-mix(in srgb, var(--ink) 18%, transparent); }

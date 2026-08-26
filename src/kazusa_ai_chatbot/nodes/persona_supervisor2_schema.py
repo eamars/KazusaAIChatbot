@@ -7,6 +7,15 @@ from kazusa_ai_chatbot.action_spec.results import (
     SurfaceOutputV1,
 )
 from kazusa_ai_chatbot.cognition_episode import CognitiveEpisodeV1
+from kazusa_ai_chatbot.cognition_resolver.contracts import (
+    ResolverCapabilityRequestV1,
+    ResolverCycleStateV1,
+    ResolverCycleTraceV1,
+    ResolverGoalProgressV1,
+    ResolverPendingResolutionV1,
+    ResolverPendingResumeV1,
+    SharedMemoryPrewarmOutcomeV1,
+)
 from kazusa_ai_chatbot.cognition_shared.contracts import (
     GoalResolutionV2,
     SceneContextV2,
@@ -15,29 +24,22 @@ from kazusa_ai_chatbot.cognition_shared.contracts import (
     TextSurfaceOutputV2,
     VisualSurfaceOutputV2,
 )
-from kazusa_ai_chatbot.cognition_resolver.contracts import (
-    ResolverCapabilityRequestV1,
-    ResolverCycleStateV1,
-    ResolverCycleTraceV1,
-    ResolverGoalProgressV1,
-    ResolverPendingResolutionV1,
-    ResolverPendingResumeV1,
-)
 from kazusa_ai_chatbot.conversation_progress import (
     ConversationLogicalTurnV1,
     ConversationProgressLoadDiagnosticsV2,
     ConversationProgressPromptV2,
     ConversationProgressSourceRefV2,
     ConversationProgressStateV2,
+    GroupSceneContextV1,
 )
+from kazusa_ai_chatbot.db import CharacterProfileDoc, UserProfileDoc
+from kazusa_ai_chatbot.message_envelope import PromptMessageContext
 from kazusa_ai_chatbot.state import (
     DebugModes,
     MultiMediaDoc,
     ReplyContext,
     keep_false,
 )
-from kazusa_ai_chatbot.db import CharacterProfileDoc, UserProfileDoc
-from kazusa_ai_chatbot.message_envelope import PromptMessageContext
 from kazusa_ai_chatbot.time_boundary import LocalTimeContextDoc
 
 ReferentRole = Literal["subject", "object", "time"]
@@ -111,6 +113,13 @@ class GlobalPersonaState(TypedDict):
     conversation_progress_diagnostics: NotRequired[
         ConversationProgressLoadDiagnosticsV2
     ]
+    public_group_scene_projection_status: NotRequired[
+        Literal["completed", "skipped", "failed"]
+    ]
+    public_group_scene_projection_reason: NotRequired[
+        Literal["available", "not_group", "projection_unavailable"]
+    ]
+    public_group_scene_context: NotRequired[GroupSceneContextV1]
     promoted_reflection_context: NotRequired[dict]
     internal_monologue_residue_context: NotRequired[str]
     past_dialog_cognition_context: NotRequired[str]
@@ -132,6 +141,7 @@ class GlobalPersonaState(TypedDict):
 
     # RAG output
     rag_result: dict
+    shared_memory_prewarm_outcome: NotRequired[SharedMemoryPrewarmOutcomeV1]
 
     # Cognition resolver output and recurrence context
     resolver_observations: NotRequired[list[dict]]
@@ -208,6 +218,13 @@ class CognitionState(TypedDict):
     channel_topic: str
     conversation_progress: NotRequired[ConversationProgressPromptV2]
     public_group_scene: str
+    public_group_scene_projection_status: NotRequired[
+        Literal["completed", "skipped", "failed"]
+    ]
+    public_group_scene_projection_reason: NotRequired[
+        Literal["available", "not_group", "projection_unavailable"]
+    ]
+    public_group_scene_context: NotRequired[GroupSceneContextV1]
     ambient_logical_turns: NotRequired[list[ConversationLogicalTurnV1]]
     interaction_logical_turns: NotRequired[list[ConversationLogicalTurnV1]]
     conversation_progress_diagnostics: NotRequired[
@@ -227,6 +244,7 @@ class CognitionState(TypedDict):
     decontextualized_input: str
     referents: list[ReferentResolution]
     rag_result: dict
+    shared_memory_prewarm_outcome: NotRequired[SharedMemoryPrewarmOutcomeV1]
 
     resolver_state: NotRequired[ResolverCycleStateV1]
     resolver_context: NotRequired[str]

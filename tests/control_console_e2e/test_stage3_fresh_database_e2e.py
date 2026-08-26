@@ -1,10 +1,14 @@
 from __future__ import annotations
 
-from pathlib import Path
 import sys
+from pathlib import Path
 
 from browser_harness import DEFAULT_E2E_OPERATOR_TOKEN
-from fake_brain import FakeBrainServer, write_conflict_brain_registry
+from fake_brain import (
+    FakeBrainServer,
+    graph_snapshot,
+    write_conflict_brain_registry,
+)
 
 
 def test_stage3_fresh_database_graph_and_debug_handoff(
@@ -12,7 +16,6 @@ def test_stage3_fresh_database_graph_and_debug_handoff(
     unused_tcp_port_factory,
     e2e_console,
     e2e_browser_page,
-    e2e_artifact_dir: Path,
     e2e_summary_writer,
 ) -> None:
     """Verify Stage 3 settlement/lifecycle telemetry is usable in the console."""
@@ -38,24 +41,28 @@ def test_stage3_fresh_database_graph_and_debug_handoff(
                 "completed"
             )
             graph = page.locator("#overview-cognition-graph")
-            assert graph.locator(".graph-node").count() == 7
-            assert graph.locator("[data-node-id='settlement.trace']").count() == 1
-            assert graph.locator("[data-node-id='lifecycle.record']").count() == 1
-            assert graph.locator("[data-node-id='settlement.trace']").get_attribute(
+            assert graph.locator(".graph-node[data-node-id]").count() == 11
+            assert graph.locator(
+                ".graph-node[data-node-id='reasoning.context']"
+            ).count() == 1
+            assert graph.locator(
+                ".graph-node[data-node-id='surface.visible']"
+            ).count() == 1
+            assert graph.locator(
+                ".graph-node[data-node-id='reasoning.context']"
+            ).get_attribute(
                 "title"
-            ) == "one canonical episode trace settled"
+            ) == "Subjective reasoning is available."
 
-            graph.locator("[data-node-id='settlement.trace']").click()
-            inspector_text = graph.locator(".graph-inspector").inner_text()
-            assert "one canonical episode trace settled" in inspector_text
+            graph.locator(
+                ".graph-node[data-node-id='reasoning.context']"
+            ).click()
+            inspector_text = graph.locator("[aria-label='Cognition node detail']").inner_text()
+            assert "Context consumption" in inspector_text
             assert "prompts" not in graph.inner_text().lower()
             assert "embeddings" not in graph.inner_text().lower()
             assert "raw messages" not in graph.inner_text().lower()
             assert "message envelopes" not in graph.inner_text().lower()
-
-            screenshot_path = e2e_artifact_dir / "stage3_settlement_graph.png"
-            page.screenshot(path=str(screenshot_path), full_page=True)
-            assert screenshot_path.exists()
 
             page.locator("[data-page-link='debug']").click()
             page.wait_for_selector("#debug-send")
@@ -71,7 +78,9 @@ def test_stage3_fresh_database_graph_and_debug_handoff(
                 "() => document.querySelector('#debug-cognition-status')?.textContent === 'completed'"
             )
             assert "fake brain reply" in page.locator("#chat-history").inner_text()
-            assert page.locator("#debug-cognition-graph .graph-node").count() == 6
+            assert page.locator(
+                "#debug-cognition-graph .graph-node[data-node-id]"
+            ).count() == 11
             assert len(getattr(page, "kazusa_console_messages", [])) == 0
             requests = fake_brain.chat_requests()
             assert len(requests) == 1
@@ -90,11 +99,9 @@ def test_stage3_fresh_database_graph_and_debug_handoff(
                         "fresh Stage 3 settlement graph",
                         "lifecycle node inspection",
                         "protected-field redaction",
-                        "browser screenshot",
                         "debug-chat handoff",
                         "browser console and page errors",
                     ],
-                    "screenshot": str(screenshot_path),
                 },
             )
 
@@ -115,101 +122,13 @@ def _login(page) -> None:
 
 
 def _stage3_graph_snapshot() -> dict:
-    """Return bounded Stage 3 graph telemetry for browser inspection."""
+    """Return canonical Stage 3 observation telemetry for browser inspection."""
 
-    nodes = [
-        {
-            "id": "input.user_message",
-            "label": "User message",
-            "stage": "Input",
-            "lane": "input",
-            "column": 1,
-            "branch": "source",
-            "status": "completed",
-            "detail": {"summary": "user_message source admitted"},
-        },
-        {
-            "id": "l2.cognition",
-            "label": "Cognition",
-            "stage": "L2",
-            "lane": "cognition",
-            "column": 2,
-            "branch": "judgment",
-            "status": "completed",
-            "detail": {"reasoning": "grounded character judgment completed"},
-        },
-        {
-            "id": "l2.actions",
-            "label": "Actions",
-            "stage": "L2",
-            "lane": "action",
-            "column": 3,
-            "branch": "action",
-            "status": "completed",
-            "detail": {"summary": "action specs and results projected"},
-        },
-        {
-            "id": "l3.surface",
-            "label": "Visible surface",
-            "stage": "L3",
-            "lane": "surface",
-            "column": 4,
-            "branch": "dialog",
-            "status": "completed",
-            "detail": {"summary": "one visible surface returned"},
-        },
-        {
-            "id": "settlement.trace",
-            "label": "Episode trace",
-            "stage": "Settlement",
-            "lane": "settlement",
-            "column": 5,
-            "branch": "audit",
-            "status": "completed",
-            "detail": {"summary": "one canonical episode trace settled"},
-        },
-        {
-            "id": "lifecycle.record",
-            "label": "Lifecycle record",
-            "stage": "Persistence",
-            "lane": "persistence",
-            "column": 6,
-            "branch": "audit",
-            "status": "completed",
-            "detail": {"summary": "one post-turn lifecycle record persisted"},
-        },
-        {
-            "id": "delivery.correlation",
-            "label": "Delivery correlation",
-            "stage": "Delivery",
-            "lane": "delivery",
-            "column": 7,
-            "branch": "audit",
-            "status": "completed",
-            "detail": {"summary": "delivery correlation recorded"},
-        },
-    ]
-    edges = [
-        {"source": "input.user_message", "target": "l2.cognition", "kind": "sequence"},
-        {"source": "l2.cognition", "target": "l2.actions", "kind": "fork"},
-        {"source": "l2.cognition", "target": "l3.surface", "kind": "fork"},
-        {"source": "l2.actions", "target": "settlement.trace", "kind": "join"},
-        {"source": "l3.surface", "target": "settlement.trace", "kind": "join"},
-        {"source": "settlement.trace", "target": "lifecycle.record", "kind": "sequence"},
-        {"source": "lifecycle.record", "target": "delivery.correlation", "kind": "sequence"},
-    ]
-    return {
-        "status": "completed",
-        "run_id": "stage3-fresh-database-browser-proof",
-        "nodes": nodes,
-        "edges": edges,
-        "redaction": {
-            "detail": "bounded Stage 3 operator graph only",
-            "excluded": [
-                "prompts",
-                "embeddings",
-                "raw messages",
-                "message envelopes",
-            ],
-        },
-    }
+    snapshot = graph_snapshot(
+        status="completed",
+        run_id="stage3-fresh-database-browser-proof",
+        llm_trace_id="llm-trace-stage3",
+        cognition_invocation_id="cognition-invocation-stage3",
+    )
+    assert snapshot is not None
+    return snapshot

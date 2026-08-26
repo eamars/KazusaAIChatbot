@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import re
+from collections.abc import Mapping
+from copy import deepcopy
 from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict
 
 from kazusa_ai_chatbot.cognition_episode import (
@@ -28,6 +31,10 @@ RESOLVER_EVIDENCE_STATE_VERSION = "resolver_evidence_state.v1"
 REQUIRED_RESOLVER_EVIDENCE_DEPENDENCY_VERSION = (
     "required_resolver_evidence_dependency.v1"
 )
+SHARED_MEMORY_PREWARM_OUTCOME_VERSION = "shared_memory_prewarm_outcome.v1"
+MAX_SHARED_MEMORY_PREWARM_ENTRIES = 24
+MAX_SHARED_MEMORY_PREWARM_LATENCY_MS = 120000
+MAX_SHARED_MEMORY_PREWARM_JSON_CHARS = 65536
 MAX_RESOLVER_SUMMARY_CHARS = 600
 MAX_RESOLVER_OBJECTIVE_CHARS = 400
 MAX_RESOLVER_REASON_CHARS = 400
@@ -40,6 +47,49 @@ MAX_RESOLVER_RAG_EVIDENCE_ITEMS = 4
 MAX_RESOLVER_KNOWLEDGE_ITEMS = 8
 MAX_RESOLVER_EVIDENCE_EXCERPTS = 4
 MAX_RESOLVER_EVIDENCE_EXCERPT_CHARS = 500
+
+SHARED_MEMORY_PREWARM_RAG_FIELDS = frozenset({
+    "answer",
+    "user_image",
+    "user_memory_unit_candidates",
+    "character_image",
+    "third_party_profiles",
+    "memory_evidence",
+    "recall_evidence",
+    "conversation_evidence",
+    "external_evidence",
+    "supervisor_trace",
+})
+SHARED_MEMORY_PREWARM_STATUSES = frozenset({
+    "completed",
+    "empty",
+    "skipped",
+    "failed",
+})
+SHARED_MEMORY_PREWARM_REASON_CODES = frozenset({
+    "not_first_cycle",
+    "unsupported_episode",
+    "empty_query_after_character_mention",
+    "worker_error",
+    "worker_contract_invalid",
+    "worker_unresolved",
+    "no_shared_memory",
+    "projection_failed",
+    "shared_memory_ready",
+    "shared_memory_merged",
+})
+SHARED_MEMORY_PREWARM_REASON_STATUS = {
+    "not_first_cycle": "skipped",
+    "unsupported_episode": "skipped",
+    "empty_query_after_character_mention": "skipped",
+    "worker_error": "failed",
+    "worker_contract_invalid": "failed",
+    "worker_unresolved": "empty",
+    "no_shared_memory": "empty",
+    "projection_failed": "failed",
+    "shared_memory_ready": "completed",
+    "shared_memory_merged": "completed",
+}
 
 _RAW_MARKER_RE = re.compile(r"\braw-[A-Za-z0-9_-]+")
 
@@ -114,6 +164,39 @@ class ResolverValidationError(ValueError):
     """Raised when a resolver contract payload is structurally invalid."""
 
 
+SharedMemoryPrewarmStatus = Literal[
+    "completed",
+    "empty",
+    "skipped",
+    "failed",
+]
+SharedMemoryPrewarmReasonCode = Literal[
+    "not_first_cycle",
+    "unsupported_episode",
+    "empty_query_after_character_mention",
+    "worker_error",
+    "worker_contract_invalid",
+    "worker_unresolved",
+    "no_shared_memory",
+    "projection_failed",
+    "shared_memory_ready",
+    "shared_memory_merged",
+]
+
+
+class SharedMemoryPrewarmOutcomeV1(TypedDict):
+    """Bounded diagnostic outcome for one shared-memory prewarm attempt."""
+
+    schema_version: Literal["shared_memory_prewarm_outcome.v1"]
+    status: SharedMemoryPrewarmStatus
+    reason_code: SharedMemoryPrewarmReasonCode
+    attempted: bool
+    latency_ms: int
+    retrieved_shared_count: int
+    merged_shared_count: int
+    rag_result: dict[str, object]
+
+
 class ResolverCapabilityRequestV1(TypedDict):
     """A cognition-selected request for one bounded resolver capability."""
 
@@ -148,7 +231,7 @@ class ResolverObservationV1(TypedDict):
     pending_resume_id: NotRequired[str]
     blocker_kind: NotRequired[ResolverObservationBlockerV1]
     task_resolution_evidence_state: NotRequired[
-        "ResolverEvidenceStateV1"
+        ResolverEvidenceStateV1
     ]
     goal_continuation_ref: NotRequired[GoalContinuationRefV1]
     evidence_refs: list[EvidenceRefV1]
@@ -279,6 +362,268 @@ class ResolverCycleStateV1(TypedDict):
         RequiredResolverEvidenceDependencyV1
     ]
     terminal_reason: str
+
+
+def validate_shared_memory_prewarm_outcome(
+    value: object,
+) -> SharedMemoryPrewarmOutcomeV1:
+    """Validate and deep-copy one shared-memory prewarm disposition."""
+
+    if not isinstance(value, Mapping):
+        raise ResolverValidationError(
+            "shared_memory_prewarm_outcome: expected object"
+        )
+    data = dict(value)
+    _require_exact_keys(
+        data,
+        {
+            "schema_version",
+            "status",
+            "reason_code",
+            "attempted",
+            "latency_ms",
+            "retrieved_shared_count",
+            "merged_shared_count",
+            "rag_result",
+        },
+        "shared_memory_prewarm_outcome",
+    )
+    _require_version(data, SHARED_MEMORY_PREWARM_OUTCOME_VERSION)
+    status = _require_enum(
+        data,
+        "status",
+        SHARED_MEMORY_PREWARM_STATUSES,
+    )
+    reason_code = _require_enum(
+        data,
+        "reason_code",
+        SHARED_MEMORY_PREWARM_REASON_CODES,
+    )
+    expected_status = SHARED_MEMORY_PREWARM_REASON_STATUS[reason_code]
+    if status != expected_status:
+        raise ResolverValidationError(
+            "shared_memory_prewarm_outcome: status and reason conflict"
+        )
+
+    attempted = data["attempted"]
+    if not isinstance(attempted, bool):
+        raise ResolverValidationError(
+            "shared_memory_prewarm_outcome.attempted: expected boolean"
+        )
+    latency_ms = _require_bounded_int(
+        data["latency_ms"],
+        "shared_memory_prewarm_outcome.latency_ms",
+        minimum=0,
+        maximum=MAX_SHARED_MEMORY_PREWARM_LATENCY_MS,
+    )
+    retrieved_shared_count = _require_bounded_int(
+        data["retrieved_shared_count"],
+        "shared_memory_prewarm_outcome.retrieved_shared_count",
+        minimum=0,
+        maximum=MAX_SHARED_MEMORY_PREWARM_ENTRIES,
+    )
+    merged_shared_count = _require_bounded_int(
+        data["merged_shared_count"],
+        "shared_memory_prewarm_outcome.merged_shared_count",
+        minimum=0,
+        maximum=MAX_SHARED_MEMORY_PREWARM_ENTRIES,
+    )
+    normalized_rag_result = _validate_shared_memory_prewarm_rag_result(
+        data["rag_result"]
+    )
+    actual_retrieved_count = len(normalized_rag_result["memory_evidence"])
+    if retrieved_shared_count != actual_retrieved_count:
+        raise ResolverValidationError(
+            "shared_memory_prewarm_outcome: retrieved count is not truthful"
+        )
+
+    if status == "skipped":
+        if (
+            attempted
+            or latency_ms
+            or retrieved_shared_count
+            or merged_shared_count
+        ):
+            raise ResolverValidationError(
+                "skipped prewarm outcome must not be attempted"
+            )
+        if not _prewarm_rag_result_is_empty(normalized_rag_result):
+            raise ResolverValidationError(
+                "skipped prewarm outcome must contain empty RAG"
+            )
+    elif status in {"empty", "failed"}:
+        if not attempted or merged_shared_count:
+            raise ResolverValidationError(
+                "empty or failed prewarm outcome has invalid attempt state"
+            )
+        if not _prewarm_rag_result_is_empty(normalized_rag_result):
+            raise ResolverValidationError(
+                "empty or failed prewarm outcome must contain empty RAG"
+            )
+    elif reason_code == "shared_memory_ready":
+        if (
+            not attempted
+            or retrieved_shared_count <= 0
+            or merged_shared_count
+        ):
+            raise ResolverValidationError(
+                "shared_memory_ready outcome has invalid counts"
+            )
+    elif (
+        not attempted
+        or retrieved_shared_count <= 0
+        or merged_shared_count != retrieved_shared_count
+    ):
+        raise ResolverValidationError(
+            "shared_memory_merged outcome has invalid counts"
+        )
+
+    normalized: SharedMemoryPrewarmOutcomeV1 = {
+        "schema_version": SHARED_MEMORY_PREWARM_OUTCOME_VERSION,
+        "status": status,
+        "reason_code": reason_code,
+        "attempted": attempted,
+        "latency_ms": latency_ms,
+        "retrieved_shared_count": retrieved_shared_count,
+        "merged_shared_count": merged_shared_count,
+        "rag_result": normalized_rag_result,
+    }
+    return_value = deepcopy(normalized)
+    return return_value
+
+
+def _validate_shared_memory_prewarm_rag_result(
+    value: object,
+) -> dict[str, object]:
+    """Validate the strict prewarm-only RAG shape and project safe values."""
+
+    if not isinstance(value, Mapping):
+        raise ResolverValidationError(
+            "shared_memory_prewarm_outcome.rag_result: expected object"
+        )
+    data = dict(value)
+    if set(data) != SHARED_MEMORY_PREWARM_RAG_FIELDS:
+        raise ResolverValidationError(
+            "shared_memory_prewarm_outcome.rag_result: fields are not exact"
+        )
+    if not isinstance(data["answer"], str):
+        raise ResolverValidationError(
+            "shared_memory_prewarm_outcome.rag_result.answer: expected string"
+        )
+    for field_name in (
+        "user_image",
+        "character_image",
+        "supervisor_trace",
+    ):
+        if not isinstance(data[field_name], Mapping):
+            raise ResolverValidationError(
+                f"shared_memory_prewarm_outcome.rag_result.{field_name}: "
+                "expected object"
+            )
+    for field_name in (
+        "user_memory_unit_candidates",
+        "third_party_profiles",
+        "memory_evidence",
+        "recall_evidence",
+        "conversation_evidence",
+        "external_evidence",
+    ):
+        if not isinstance(data[field_name], list):
+            raise ResolverValidationError(
+                f"shared_memory_prewarm_outcome.rag_result.{field_name}: "
+                "expected list"
+            )
+    for field_name in (
+        "user_memory_unit_candidates",
+        "third_party_profiles",
+        "recall_evidence",
+        "conversation_evidence",
+        "external_evidence",
+    ):
+        if data[field_name]:
+            raise ResolverValidationError(
+                "shared-memory prewarm RAG may contain only memory evidence"
+            )
+    memory_evidence = data["memory_evidence"]
+    if len(memory_evidence) > MAX_SHARED_MEMORY_PREWARM_ENTRIES:
+        raise ResolverValidationError(
+            "shared_memory_prewarm_outcome.rag_result.memory_evidence: "
+            "too many entries"
+        )
+    if any(not isinstance(item, Mapping) for item in memory_evidence):
+        raise ResolverValidationError(
+            "shared_memory_prewarm_outcome.rag_result.memory_evidence: "
+            "expected objects"
+        )
+
+    normalized = normalize_projected_rag_result(data)
+    if set(normalized) != SHARED_MEMORY_PREWARM_RAG_FIELDS:
+        raise ResolverValidationError(
+            "shared_memory_prewarm_outcome.rag_result: projection is incomplete"
+        )
+    if normalized["answer"] != "":
+        raise ResolverValidationError(
+            "shared_memory_prewarm_outcome.rag_result.answer: expected empty"
+        )
+    try:
+        serialized = json.dumps(
+            normalized,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ResolverValidationError(
+            "shared_memory_prewarm_outcome.rag_result: payload is not "
+            "serializable"
+        ) from exc
+    if len(serialized) > MAX_SHARED_MEMORY_PREWARM_JSON_CHARS:
+        raise ResolverValidationError(
+            "shared_memory_prewarm_outcome.rag_result: payload is over budget"
+        )
+    return_value = deepcopy(normalized)
+    return return_value
+
+
+def _prewarm_rag_result_is_empty(value: Mapping[str, object]) -> bool:
+    """Return whether a prewarm RAG payload contains no projected evidence."""
+
+    return (
+        value["answer"] == ""
+        and all(
+            not value[field_name]
+            for field_name in (
+                "user_memory_unit_candidates",
+                "third_party_profiles",
+                "memory_evidence",
+                "recall_evidence",
+                "conversation_evidence",
+                "external_evidence",
+            )
+        )
+    )
+
+
+def _require_bounded_int(
+    value: object,
+    field_name: str,
+    *,
+    minimum: int,
+    maximum: int,
+) -> int:
+    """Require a non-Boolean integer within one declared contract bound."""
+
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or value < minimum
+        or value > maximum
+    ):
+        raise ResolverValidationError(
+            f"{field_name}: expected integer in {minimum}..{maximum}"
+        )
+    return_value = value
+    return return_value
 
 
 def validate_resolver_evidence_state(
@@ -504,7 +849,9 @@ def validate_resolver_observation(value: object) -> ResolverObservationV1:
         "created_at_utc": created_at_utc,
     }
     if "rag_result" in data:
-        normalized["rag_result"] = _normalize_rag_result(data["rag_result"])
+        normalized["rag_result"] = normalize_projected_rag_result(
+            data["rag_result"]
+        )
     if "knowledge_projection" in data:
         normalized["knowledge_projection"] = _normalize_knowledge_projection(
             data["knowledge_projection"],
@@ -1275,11 +1622,12 @@ def _normalize_evidence_refs(evidence_refs: list) -> list[EvidenceRefV1]:
     return return_value
 
 
-def _normalize_rag_result(value: object) -> dict:
+def normalize_projected_rag_result(value: object) -> dict:
     """Keep the prompt-safe projected RAG payload for later cognition."""
 
-    if not isinstance(value, dict):
+    if not isinstance(value, Mapping):
         raise ResolverValidationError("rag_result: expected object")
+    value = dict(value)
     normalized: dict[str, object] = {}
     answer = value.get("answer")
     if isinstance(answer, str) and answer.strip():
@@ -1293,7 +1641,7 @@ def _normalize_rag_result(value: object) -> dict:
         "supervisor_trace",
     ):
         field_value = value.get(field_name)
-        if isinstance(field_value, dict):
+        if isinstance(field_value, Mapping):
             normalized[field_name] = _normalize_rag_mapping(field_value)
 
     for field_name in (
@@ -1312,7 +1660,7 @@ def _normalize_rag_result(value: object) -> dict:
     return return_value
 
 
-def _normalize_rag_mapping(value: dict) -> dict:
+def _normalize_rag_mapping(value: Mapping) -> dict:
     """Recursively copy prompt-safe RAG mapping values."""
 
     normalized: dict[str, object] = {}
@@ -1325,7 +1673,7 @@ def _normalize_rag_mapping(value: dict) -> dict:
                 MAX_RESOLVER_SUMMARY_CHARS,
             )
             continue
-        if isinstance(field_value, dict):
+        if isinstance(field_value, Mapping):
             normalized[field_name] = _normalize_rag_mapping(field_value)
             continue
         if isinstance(field_value, list):
@@ -1345,7 +1693,7 @@ def _normalize_rag_list(value: list) -> list[object]:
         if isinstance(item, str):
             normalized.append(_clip_text(item, MAX_RESOLVER_SUMMARY_CHARS))
             continue
-        if isinstance(item, dict):
+        if isinstance(item, Mapping):
             normalized.append(_normalize_rag_mapping(item))
             continue
         if isinstance(item, list):

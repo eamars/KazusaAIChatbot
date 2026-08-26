@@ -150,9 +150,9 @@ tool catalog and operational evidence.
 
 This draft authorizes planning only. After an explicit user implementation
 command, the parent records `approved` and then `in_progress` before the Luna
-worker makes the first production edit.
+worker makes the first Phase 1 test edit.
 
-Production execution uses exactly two roles:
+Plan execution uses exactly two roles:
 
 | Role | Fixed owner and model | Owned surface and responsibility | Authority limit | Mandatory skills | Capability floor | Required output and gate |
 |---|---|---|---|---|---|---|
@@ -205,6 +205,42 @@ Runtime security fingerprints and the tool-catalog digest remain mandatory
 because they are part of the architecture. Workspace-file hashes,
 whole-repository hashes, test-artifact hashes, redundant integrity ledgers, and
 parallel review transcripts are outside this plan.
+
+## Mandatory Implementation Order
+
+The complete change inventory and `Test Impact And Traceability` matrix are
+frozen before implementation begins. Execution then follows these three
+blocking phases across the entire plan change radius:
+
+1. **Tests first.** Create, replace, modify, or delete every plan-owned
+   TypeScript test, Python test, fixture, test helper, live-case definition,
+   static absence check, test configuration entry, and source-to-test manifest
+   row before changing production code. Attempt test discovery and collection
+   for the complete matrix. A collection or execution failure may cross the
+   Phase 1 gate only when its recorded cause is the planned absence of a new or
+   changed production symbol; test syntax, fixture, node-ID, and unrelated
+   collection defects are resolved within Phase 1. The Phase 1 evidence is the
+   complete test diff, the exact discovered/collected node inventory, and the
+   expected red results mapped to the production contracts they require.
+2. **Production changes second.** After the Phase 1 gate passes, implement all
+   plan-owned runtime source, sidecar, persistence, configuration, dependency,
+   lockfile, package, script, and production deletion work. Run the tests
+   created in Phase 1 throughout this phase. Code is ready for documentation
+   when the production diff is complete, builds and lint pass, and every
+   applicable non-documentation deterministic, process, live-DB, and live-LLM
+   behavior gate is green.
+3. **Documentation last.** After the code-ready gate passes, update the
+   architecture document, subsystem ICDs, `README.md`, `docs/HOWTO.md`, and
+   every other plan-owned documentation surface to describe the implemented
+   behavior. Then run documentation assertions, link/static checks, and the
+   final mapped verification suite. Documentation reflects the accepted code
+   and does not define an unimplemented intermediate state.
+
+Production and documentation paths remain at the captured execution baseline
+during Phase 1. Documentation paths remain at that baseline during Phase 2.
+A phase advances only after its evidence and exit gate are recorded. Any
+production change that expands the change radius returns execution to Phase 1
+for the newly required tests before that production expansion proceeds.
 
 ## Frozen Plan 1 Interface
 
@@ -658,6 +694,11 @@ replacement alias.
 
 ## Work Blocks And Effort Gates
 
+These blocks describe functional scope and effort, not chronological edit
+order. For every block, its complete test and fixture work executes in Phase
+1, its production work executes in Phase 2, and its documentation work
+executes in Phase 3 under the mandatory order above.
+
 | Block | Relative effort | Work | Independent completion gate |
 |---|---|---|---|
 | 1. Legacy replacement boundary | Medium | Delete the old resolver design and resolver-only shared LLM additions; establish the new package exports and strict contracts | Old symbols and modules are absent; ordinary LLM regressions pass; current Brain/workflow source has no resolver import |
@@ -665,7 +706,7 @@ replacement alias.
 | 3. Sidecar spine | High | Add the profile factory, exact DSH composition, concurrent loopback JSON-RPC server, versioned SQLite store, supported evidence/terminal receipts, terminal tool, and empty semantic catalog | Typecheck/build/direct TypeScript tests pass; one independent sidecar serves health and two sessions; receipt replay and dependency-graph diagnostics pass |
 | 4. Standalone controller | High | Add reusable RPC client, semantic operation/reconciliation state machine, preserved runtime entry point, fenced controls, lease renewal, and typed exhaust | Python unit tests pass for duplicate/digest behavior, ambiguous disconnect inspection, open/continue/amend/checkpoint/cancel/inspect/dispose, and terminal/checkpoint/fault exhaust |
 | 5. Restart and adversarial lifecycle | High | Add cold evidence and terminal replay, commit-before-response recovery, lease/live-activation fencing, concurrent controls, mismatch/store rotation, zero/multi-call correction, evidence validation, and crash classification | Real-process restart/security/fault tests prove one admission, zero invalid-step side effects, responsive lifecycle control, and exact terminal replay with no model rerun, semantic tool, or Brain edge |
-| 6. Operational and closure gate | Small | Final docs, manifest, exact lockfile, mapped regressions, deterministic suite, live DB, and one live LLM case | Every release blocker below is green and the parent completes final architecture sign-off |
+| 6. Operational, documentation, and closure gate | Small | Complete the source-to-test manifest in Phase 1, the exact lockfile and operational code in Phase 2, and final docs in Phase 3; then run mapped regressions, deterministic suite, live DB, and one live LLM case | Every release blocker below is green and the parent completes final architecture sign-off |
 
 Block completion records only its functional result and command evidence. It
 does not create an additional review cycle.

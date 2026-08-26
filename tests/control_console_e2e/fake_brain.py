@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import json
+import time
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from itertools import pairwise
 from pathlib import Path
 from threading import Lock, Thread
 from typing import Any
-import json
-import time
+
+from typing_extensions import Self
 
 
 class FakeBrainServer(AbstractContextManager["FakeBrainServer"]):
@@ -23,14 +26,16 @@ class FakeBrainServer(AbstractContextManager["FakeBrainServer"]):
         self._self_graph = graph_snapshot(
             status="not_reported",
             run_id="self-not-reported",
+            run_kind="self_cognition",
         )
+        self._chat_graph: dict[str, Any] | None = None
         self._chat_requests: list[dict[str, Any]] = []
         self._chat_status_code = 200
         self._chat_delay_seconds = 0.0
         self._server: ThreadingHTTPServer | None = None
         self._thread: Thread | None = None
 
-    def __enter__(self) -> "FakeBrainServer":
+    def __enter__(self) -> Self:
         """Start the fake brain server in a background thread."""
 
         handler_class = self._handler_class()
@@ -54,30 +59,36 @@ class FakeBrainServer(AbstractContextManager["FakeBrainServer"]):
             self._thread.join(timeout=5)
             self._thread = None
 
-    def set_graph(self, graph: dict[str, Any]) -> None:
-        """Replace the latest graph returned by the fake brain."""
+    def set_graph(self, graph: dict[str, Any] | None) -> None:
+        """Replace the latest observation returned by the fake brain."""
 
         with self._lock:
             self._graph = graph
 
-    def set_self_graph(self, graph: dict[str, Any]) -> None:
-        """Replace the latest self-cognition graph returned by the fake brain."""
+    def set_self_graph(self, graph: dict[str, Any] | None) -> None:
+        """Replace the latest self-cognition observation returned by the fake brain."""
 
         with self._lock:
             self._self_graph = graph
 
-    def latest_graph(self) -> dict[str, Any]:
-        """Return a copy of the latest graph."""
+    def set_chat_graph(self, graph: dict[str, Any] | None) -> None:
+        """Set the observation returned by the next debug chat request."""
 
         with self._lock:
-            graph = dict(self._graph)
+            self._chat_graph = graph
+
+    def latest_graph(self) -> dict[str, Any] | None:
+        """Return a copy of the latest observation."""
+
+        with self._lock:
+            graph = None if self._graph is None else dict(self._graph)
         return graph
 
-    def latest_self_graph(self) -> dict[str, Any]:
-        """Return a copy of the latest self-cognition graph."""
+    def latest_self_graph(self) -> dict[str, Any] | None:
+        """Return a copy of the latest self-cognition observation."""
 
         with self._lock:
-            graph = dict(self._self_graph)
+            graph = None if self._self_graph is None else dict(self._self_graph)
         return graph
 
     def chat_requests(self) -> list[dict[str, Any]]:
@@ -158,12 +169,17 @@ class FakeBrainServer(AbstractContextManager["FakeBrainServer"]):
                     body = self.rfile.read(content_length)
                     payload = json.loads(body.decode("utf-8"))
                 owner.record_chat_request(payload)
-                graph = graph_snapshot(
-                    status="completed",
-                    run_id="debug-run-1",
-                    llm_trace_id="llm-trace-debug-1",
-                    cognition_invocation_id="cognition-invocation-debug-1",
-                )
+                with owner._lock:
+                    graph = owner._chat_graph
+                if graph is None:
+                    graph = graph_snapshot(
+                        status="completed",
+                        run_id="debug-run-1",
+                        llm_trace_id="llm-trace-debug-1",
+                        cognition_invocation_id=(
+                            "cognition-invocation-debug-1"
+                        ),
+                    )
                 owner.set_graph(graph)
                 _write_json(
                     self,
@@ -219,8 +235,13 @@ def graph_snapshot(
     llm_trace_id: str = "",
     cognition_invocation_id: str = "",
     source_calendar_run_id: str = "",
-) -> dict[str, Any]:
-    """Return a cognition graph snapshot with parallel branches."""
+    run_kind: str = "",
+) -> dict[str, Any] | None:
+    """Return a canonical Brain observation fixture."""
+
+    run_kind = run_kind or (
+        "self_cognition" if run_id.startswith("self-") else "live_turn"
+    )
 
     llm_trace_id = llm_trace_id or f"llm-trace-{run_id}"
     cognition_invocation_id = (
@@ -228,134 +249,566 @@ def graph_snapshot(
     )
     if not source_calendar_run_id and run_id.startswith("self-"):
         source_calendar_run_id = f"calendar-run-{run_id}"
-    metadata = {
-        "llm_trace_id": llm_trace_id,
-        "cognition_invocation_id": cognition_invocation_id,
-        "source_calendar_run_id": source_calendar_run_id,
+    section_ids = [
+        "input.turn",
+        "decision.response",
+        "cognition.appraisals",
+        "cognition.goal",
+        "cognition.response_plan",
+        "cognition.affect",
+        "reasoning.subjective",
+        "reasoning.context_consumption",
+        "evidence.memory",
+        "evidence.shared_memory_prewarm",
+        "context.conversation_progress",
+        "context.public_group_scene",
+        "action.requests",
+        "action.results",
+        "action.continuation",
+        "surface.visual_directives",
+        "surface.visible_messages",
+    ]
+    if run_kind == "self_cognition":
+        section_ids.extend(
+            ["self.source", "self.route", "self.consolidation"]
+        )
+        section_ids.remove("input.turn")
+        section_ids.remove("decision.response")
+
+    labels = {
+        "input.turn": "Queued turn",
+        "decision.response": "Response decision",
+        "cognition.appraisals": "Semantic appraisals",
+        "cognition.goal": "Character goal",
+        "cognition.response_plan": "Response plan",
+        "cognition.affect": "Affect projection",
+        "reasoning.subjective": "Subjective reasoning",
+        "reasoning.context_consumption": "Context consumption",
+        "evidence.memory": "Memory evidence",
+        "evidence.shared_memory_prewarm": "Shared-memory prewarm",
+        "context.conversation_progress": "Conversation progress",
+        "context.public_group_scene": "Public group scene",
+        "action.requests": "Action requests",
+        "action.results": "Action results",
+        "action.continuation": "Action continuation",
+        "surface.visual_directives": "Visual directives",
+        "surface.visible_messages": "Visible messages",
+        "self.source": "Self-cognition source",
+        "self.route": "Self-cognition route",
+        "self.consolidation": "Self-cognition consolidation",
     }
+    section_categories = {
+        "input.turn": "input",
+        "decision.response": "decision",
+        "cognition.appraisals": "appraisal",
+        "cognition.goal": "goal",
+        "cognition.response_plan": "response",
+        "cognition.affect": "affect",
+        "reasoning.subjective": "reasoning",
+        "reasoning.context_consumption": "context",
+        "evidence.memory": "memory",
+        "evidence.shared_memory_prewarm": "prewarm",
+        "context.conversation_progress": "progress",
+        "context.public_group_scene": "group_scene",
+        "action.requests": "action",
+        "action.results": "action",
+        "action.continuation": "continuation",
+        "surface.visual_directives": "visual",
+        "surface.visible_messages": "dialog",
+        "self.source": "source",
+        "self.route": "route",
+        "self.consolidation": "continuity",
+    }
+    record_sections = {
+        "cognition.appraisals",
+        "cognition.affect",
+        "reasoning.context_consumption",
+        "evidence.memory",
+        "evidence.shared_memory_prewarm",
+        "context.conversation_progress",
+        "context.public_group_scene",
+        "action.requests",
+        "action.results",
+        "action.continuation",
+        "surface.visual_directives",
+        "surface.visible_messages",
+    }
+    sections: list[dict[str, Any]] = []
+    for section_id in section_ids:
+        presentation = "records" if section_id in record_sections else "fields"
+        sections.append(
+            {
+                "section_id": section_id,
+                "label": labels[section_id],
+                "category": section_categories[section_id],
+                "presentation": presentation,
+                "status": (
+                    "not_reported" if status == "not_reported" else "completed"
+                ),
+                "summary": (
+                    ""
+                    if status == "not_reported"
+                    else f"{labels[section_id]} is available."
+                ),
+                "fields": [],
+                "records": [],
+                "reported_record_count": 0,
+                "displayed_record_count": 0,
+                "truncated": False,
+            }
+        )
 
-    if status == "not_reported":
-        return {
-            "status": "not_reported",
-            "run_id": run_id,
-            **metadata,
-            "nodes": [],
-            "edges": [],
+    reasoning_section = next(
+        section
+        for section in sections
+        if section["section_id"] == "reasoning.subjective"
+    )
+    if status != "not_reported":
+        reasoning_section["fields"] = [
+            {
+                "key": "private_monologue",
+                "label": "Private monologue",
+                "value": "weigh the bounded operator request",
+            },
+            {
+                "key": "logical_stance",
+                "label": "Logical stance",
+                "value": "respond with grounded detail",
+            },
+            {
+                "key": "character_intent",
+                "label": "Character intent",
+                "value": "provide useful information",
+            },
+        ]
+
+    visible_section = next(
+        section
+        for section in sections
+        if section["section_id"] == "surface.visible_messages"
+    )
+    if status != "not_reported":
+        visible_section["records"] = [
+            {
+                "key": "item_01",
+                "label": "Message",
+                "summary": "first visible line",
+                "fields": [
+                    {"key": "position", "label": "Position", "value": 1},
+                    {
+                        "key": "text",
+                        "label": "Text",
+                        "value": "first visible line",
+                    },
+                ],
+            },
+            {
+                "key": "item_02",
+                "label": "Message",
+                "summary": "final visible message",
+                "fields": [
+                    {"key": "position", "label": "Position", "value": 2},
+                    {
+                        "key": "text",
+                        "label": "Text",
+                        "value": "final visible message",
+                    },
+                ],
+            },
+        ]
+        visible_section["reported_record_count"] = 2
+        visible_section["displayed_record_count"] = 2
+
+    prewarm_section = next(
+        section
+        for section in sections
+        if section["section_id"] == "evidence.shared_memory_prewarm"
+    )
+    if status != "not_reported":
+        prewarm_section["fields"] = [
+            {
+                "key": "attempted",
+                "label": "Attempted",
+                "value": True,
+            },
+            {
+                "key": "reason_code",
+                "label": "Reason code",
+                "value": "shared_memory_merged",
+            },
+            {
+                "key": "retrieved_count",
+                "label": "Retrieved count",
+                "value": 1,
+            },
+            {
+                "key": "merged_count",
+                "label": "Merged count",
+                "value": 1,
+            },
+        ]
+        prewarm_section["records"] = [
+            {
+                "key": "item_01",
+                "label": "Shared memory",
+                "summary": "operator context",
+                "fields": [
+                    {
+                        "key": "source_kind",
+                        "label": "Source kind",
+                        "value": "shared_memory",
+                    },
+                    {
+                        "key": "content",
+                        "label": "Content",
+                        "value": "operator context",
+                    },
+                ],
+            }
+        ]
+        prewarm_section["reported_record_count"] = 1
+        prewarm_section["displayed_record_count"] = 1
+
+    for section in sections:
+        for index, record in enumerate(section["records"], 1):
+            record["key"] = f"item_{index:02d}"
+
+    node_catalog = [
+        ("input.turn", "Queued turn", "Input", "input", 1, "input", ["input.turn"]),
+        (
+            "decision.response",
+            "Response decision",
+            "Decision",
+            "gate",
+            2,
+            "decision",
+            ["decision.response"],
+        ),
+        (
+            "cognition.meaning",
+            "Meaning appraisal",
+            "Cognition",
+            "cognition",
+            3,
+            "appraisal",
+            ["cognition.appraisals"],
+        ),
+        (
+            "cognition.goal",
+            "Character goal",
+            "Cognition",
+            "cognition",
+            3,
+            "goal",
+            ["cognition.goal"],
+        ),
+        (
+            "cognition.response",
+            "Response plan",
+            "Cognition",
+            "cognition",
+            3,
+            "response",
+            ["cognition.response_plan"],
+        ),
+        (
+            "cognition.affect",
+            "Affect projection",
+            "Cognition",
+            "cognition",
+            3,
+            "affect",
+            ["cognition.affect"],
+        ),
+        (
+            "reasoning.context",
+            "Reasoning and context",
+            "Reasoning",
+            "cognition",
+            3,
+            "reasoning",
+            ["reasoning.subjective", "reasoning.context_consumption"],
+        ),
+        (
+            "evidence.memory",
+            "Memory and context",
+            "Evidence",
+            "memory",
+            3,
+            "memory",
+            [
+                "evidence.shared_memory_prewarm",
+                "evidence.memory",
+                "context.conversation_progress",
+                "context.public_group_scene",
+            ],
+        ),
+        (
+            "action.results",
+            "Actions",
+            "Actions",
+            "action",
+            3,
+            "action",
+            ["action.requests", "action.results", "action.continuation"],
+        ),
+        (
+            "surface.visual",
+            "Visual directive",
+            "Surface",
+            "surface",
+            4,
+            "visual",
+            ["surface.visual_directives"],
+        ),
+        (
+            "surface.visible",
+            "Visible surface",
+            "Surface",
+            "surface",
+            4,
+            "dialog",
+            ["surface.visible_messages"],
+        ),
+    ]
+    if run_kind == "self_cognition":
+        node_catalog = [
+            (
+                "self.source",
+                "Source case",
+                "Input",
+                "input",
+                1,
+                "source",
+                ["self.source"],
+            ),
+            (
+                "cognition.meaning",
+                "Meaning appraisal",
+                "Cognition",
+                "cognition",
+                2,
+                "appraisal",
+                ["cognition.appraisals"],
+            ),
+            (
+                "cognition.goal",
+                "Character goal",
+                "Cognition",
+                "cognition",
+                2,
+                "goal",
+                ["cognition.goal"],
+            ),
+            (
+                "cognition.response",
+                "Response plan",
+                "Cognition",
+                "cognition",
+                2,
+                "response",
+                ["cognition.response_plan"],
+            ),
+            (
+                "cognition.affect",
+                "Affect projection",
+                "Cognition",
+                "cognition",
+                2,
+                "affect",
+                ["cognition.affect"],
+            ),
+            (
+                "reasoning.context",
+                "Reasoning and context",
+                "Reasoning",
+                "cognition",
+                2,
+                "reasoning",
+                ["reasoning.subjective", "reasoning.context_consumption"],
+            ),
+            (
+                "evidence.memory",
+                "Memory and context",
+                "Evidence",
+                "memory",
+                2,
+                "memory",
+                [
+                    "evidence.shared_memory_prewarm",
+                    "evidence.memory",
+                    "context.conversation_progress",
+                    "context.public_group_scene",
+                ],
+            ),
+            (
+                "self.route",
+                "Route decision",
+                "Decision",
+                "decision",
+                3,
+                "route",
+                ["self.route"],
+            ),
+            (
+                "action.results",
+                "Actions",
+                "Actions",
+                "action",
+                4,
+                "action",
+                ["action.requests", "action.results", "action.continuation"],
+            ),
+            (
+                "surface.visual",
+                "Visual directive",
+                "Surface",
+                "surface",
+                4,
+                "visual",
+                ["surface.visual_directives"],
+            ),
+            (
+                "surface.visible",
+                "Visible surface",
+                "Surface",
+                "surface",
+                4,
+                "dialog",
+                ["surface.visible_messages"],
+            ),
+            (
+                "self.consolidation",
+                "Consolidation",
+                "Continuity",
+                "memory",
+                5,
+                "continuity",
+                ["self.consolidation"],
+            ),
+        ]
+    nodes = []
+    section_by_id = {section["section_id"]: section for section in sections}
+    status_priority = (
+        "failed",
+        "partial",
+        "completed",
+        "empty",
+        "skipped",
+        "not_reported",
+    )
+    for node_id, label, stage, lane, column, category, refs in node_catalog:
+        referenced = [section_by_id[ref] for ref in refs]
+        node_status = next(
+            (
+                status
+                for status in status_priority
+                if any(section["status"] == status for section in referenced)
+            ),
+            "not_reported",
+        )
+        nodes.append(
+            {
+                "node_id": node_id,
+                "label": label,
+                "stage": stage,
+                "lane": lane,
+                "column": column,
+                "category": category,
+                "status": node_status,
+                "summary": referenced[0]["summary"][:180] or node_status,
+                "section_refs": refs,
+            }
+        )
+    sequence = [
+        "input.turn",
+        "decision.response",
+        "cognition.meaning",
+        "cognition.goal",
+        "cognition.response",
+        "action.results",
+    ]
+    if run_kind == "self_cognition":
+        sequence = [
+            "self.source",
+            "cognition.meaning",
+            "cognition.goal",
+            "cognition.response",
+            "self.route",
+            "action.results",
+            "self.consolidation",
+        ]
+    edges = [
+        {
+            "source": source,
+            "target": target,
+            "kind": "sequence",
+            "label": "",
         }
-
-    node_status = "running" if status == "running" else "completed"
-    if status == "failed":
-        node_status = "failed"
-    long_text = "input-start\n" + ("semantic-detail-" * 90) + "input-end <&> \"quoted\""
+        for source, target in pairwise(sequence)
+        if source in {node["node_id"] for node in nodes}
+        and target in {node["node_id"] for node in nodes}
+    ]
+    edges.extend(
+        {
+            "source": source,
+            "target": target,
+            "kind": "reference",
+            "label": "",
+        }
+        for source, target in (
+            ("evidence.memory", "cognition.meaning"),
+            ("cognition.response", "cognition.affect"),
+            ("cognition.response", "reasoning.context"),
+            ("cognition.response", "surface.visual"),
+            ("reasoning.context", "surface.visual"),
+            ("evidence.memory", "surface.visual"),
+            ("action.results", "surface.visual"),
+            ("cognition.response", "surface.visible"),
+            ("reasoning.context", "surface.visible"),
+            ("evidence.memory", "surface.visible"),
+            ("action.results", "surface.visible"),
+            ("self.route", "surface.visual"),
+            ("self.route", "surface.visible"),
+            ("surface.visual", "self.consolidation"),
+            ("surface.visible", "self.consolidation"),
+        )
+        if source in {node["node_id"] for node in nodes}
+        and target in {node["node_id"] for node in nodes}
+    )
     return {
-        "status": status,
-        "run_id": run_id,
-        **metadata,
-        "nodes": [
-            {
-                "id": "input.message",
-                "label": "Queued turn",
-                "stage": "L1",
-                "lane": "input",
-                "column": 1,
-                "branch": "source",
-                "status": "completed",
-                "detail": {
-                    "input": long_text,
-                    "reply_context": {
-                        "reply_excerpt": "earlier message context",
-                    },
-                },
-            },
-            {
-                "id": "l2.reasoning",
-                "label": "Reasoning",
-                "stage": "L2",
-                "lane": "cognition",
-                "column": 2,
-                "branch": "judgment",
-                "status": node_status,
-                "detail": {
-                    "internal_monologue": "weigh intent, memory, and scene pressure",
-                    "logical_stance": "respond only if grounded",
-                    "character_intent": "provide useful information",
-                    "judgment_note": "the current request is grounded",
-                },
-            },
-            {
-                "id": "l2.memory",
-                "label": "Memory",
-                "stage": "Memory",
-                "lane": "memory",
-                "column": 2,
-                "branch": "parallel",
-                "status": node_status,
-                "detail": {
-                    "retrieval_answer": "parallel memory evidence lookup",
-                    "memory_evidence": [
-                        {"fact": "the operator wants useful detail"},
-                    ],
-                    "conversation_progress": {
-                        "current_thread": "The operator's current thread.",
-                    },
-                    "public_group_scene": (
-                        "Participants: Ari, Operator\n"
-                        "At trigger: The current public group scene."
-                    ),
-                },
-            },
-            {
-                "id": "decision.reply",
-                "label": "Decision",
-                "stage": "Decision",
-                "lane": "decision",
-                "column": 3,
-                "branch": "join",
-                "status": node_status,
-                "detail": {
-                    "decision": "produce bounded reply",
-                    "reasoning": "the request has a concrete operator goal",
-                },
-            },
-            {
-                "id": "l3.visual_directives",
-                "label": "Visual directive",
-                "stage": "L3",
-                "lane": "surface",
-                "column": 4,
-                "branch": "visual",
-                "status": node_status,
-                "detail": {
-                    "facial_expression": ["focused"],
-                    "body_language": ["hands relaxed"],
-                    "gaze_direction": ["toward the screen"],
-                    "visual_vibe": ["attentive", "attentive"],
-                },
-            },
-            {
-                "id": "l3.surface",
-                "label": "Visible surface",
-                "stage": "L3",
-                "lane": "surface",
-                "column": 4,
-                "branch": "dialog",
-                "status": node_status,
-                "detail": {
-                    "messages": [
-                        "first visible line\nsecond visible line",
-                        "final visible message <&> \"safe\"",
-                    ],
-                },
-            },
-        ],
-        "edges": [
-            {"source": "input.message", "target": "l2.reasoning", "kind": "fork"},
-            {"source": "input.message", "target": "l2.memory", "kind": "fork"},
-            {"source": "l2.reasoning", "target": "decision.reply", "kind": "join"},
-            {"source": "l2.memory", "target": "decision.reply", "kind": "join"},
-            {"source": "decision.reply", "target": "l3.visual_directives", "kind": "fork"},
-            {"source": "decision.reply", "target": "l3.surface", "kind": "fork"},
-        ],
+        "schema_version": "cognition_run_observation.v1",
+        "run_kind": run_kind,
+        "status": (
+            status
+            if status in {"completed", "failed", "partial"}
+            else "completed"
+        ),
+        "generated_at": "2026-08-26T00:00:00Z",
+        "correlation": {
+            "run_id": run_id,
+            "llm_trace_id": llm_trace_id,
+            "cognition_invocation_id": cognition_invocation_id,
+            "source_calendar_run_id": source_calendar_run_id or None,
+        },
+        "sections": sections,
+        "nodes": nodes,
+        "edges": edges,
+        "disclosure": {
+            "policy": "approved_cognition_observation.v1",
+            "excluded": [
+                "prompt",
+                "raw_model_output",
+                "embedding",
+                "raw_message",
+                "message_envelope",
+                "database_identifier",
+                "adapter_identifier",
+                "action_parameter",
+                "handler_metadata",
+                "worker_error_text",
+            ],
+        },
     }
 
 

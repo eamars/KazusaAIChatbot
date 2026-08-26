@@ -1111,3 +1111,40 @@ deployment environment only.
   prompt geometry alone and degrades gracefully to V2-equivalent cost.
 - No new runtime capabilities, tools, or action kinds.
 - No relaxation of fail-closed boundaries in exchange for latency.
+# Observability boundary
+
+Each live or self run produces a process-local `cognition_run_observation.v1`
+snapshot through the Brain service producer catalog. The snapshot is separate
+from the historical `cognition_chain_run.v2` persistence record: the former is
+a bounded operator observation, while the latter is the durable semantic chain
+run. They are separate by ownership, timing, and disclosure policy, and the
+observation is not historical persistence.
+
+The Brain projection reports typed prewarm, RAG, cognition, action, surface,
+conversation-progress, and public-group-scene sections. It includes only
+approved semantic fields and excludes prompts, raw model output, embeddings,
+raw messages, envelopes, identifiers, and operational error text. The console
+consumes the canonical object in validation-only mode and uses one generic
+section renderer, so additive producer sections retain their labels and order
+without a frontend schema copy.
+
+Live terminal publication ends at response cognition, selected actions, and
+surface generation. Self-cognition may include its own completed consolidation
+artifact. Cancellation publishes no terminal observation, and a later
+persistence or consolidation phase cannot fabricate a completed live node.
+
+The process-local `cognition_run_observation.v1` snapshot is a bounded
+operator view, while the historical `cognition_chain_run.v2` persistence record
+is the durable semantic chain. The observation is not historical persistence.
+The Brain service producer catalog owns the exact live and self section order,
+status aggregation, source-to-wire mapping, and disclosure policy. The
+validation-only console uses one generic section renderer for the same base
+sections, including typed prewarm and public-group-scene sections; additive
+producer sections remain renderable without a consumer catalog copy.
+
+Live and self publication carry the fixed prewarm dispositions and truthful
+records/counts. Live terminal publication ends before later persistence or
+consolidation. Self-cognition may add its own consolidation section. The
+console availability envelope keeps request failures separate from cognition
+status, and browser checks cover Overview, Debug, and Self Latest. Cancellation
+publishes no terminal observation.

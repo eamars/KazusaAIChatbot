@@ -1253,3 +1253,48 @@ Before approving this reference, review:
 This reference is approved as of 2026-05-16 after independent review blockers
 were resolved. It satisfies the contracts-reference prerequisite for derived
 execution plans, but it does not authorize implementation by itself.
+## Canonical cognition observation publication
+
+The Brain service owns the strict, frozen `cognition_run_observation.v1`
+DTOs and their live/self projection catalog. `service.py` supplies explicit
+typed builder inputs, stores process-local deep copies, and publishes the
+validated model through `ChatResponse` and the latest-observation endpoint.
+The control console validates that object and adds only a
+`ConsoleCognitionObservationView` availability envelope.
+
+The contract is closed at the producer boundary: strict scalar values, UTC-Z
+timestamps, bounded identifiers and text, exact run-kind base sections,
+source-ordered `item_XX` records, known edge endpoints, truthful counts, and a
+fixed disclosure exclusion list. Additive producer sections remain valid and
+are rendered by section metadata; consumers do not maintain a second field
+allowlist or infer values from response payloads.
+
+The concrete v1 DTO set is `CognitionRunObservationV1`,
+`CognitionObservationCorrelationV1`, `CognitionObservationDisclosureV1`,
+`CognitionObservationSectionV1`, `CognitionObservationFieldV1`,
+`CognitionObservationRecordV1`, `CognitionObservationNodeV1`, and
+`CognitionObservationEdgeV1`. Models are strict, frozen, and extra-forbid.
+The run-kind values are `live_turn` and `self_cognition`; terminal run status
+is `completed`, `failed`, or `partial`, while section status also includes
+`empty`, `skipped`, and `not_reported`. The serialized payload budget is
+131072 characters, generated records use `item_01` through `item_24`, and
+only `sequence` and `reference` edges are valid.
+
+The disclosure policy is `approved_cognition_observation.v1`. Prompts, raw
+model output, embeddings, raw messages, message envelopes, database
+identifiers, adapter identifiers, action parameters, handler metadata, and
+worker error text are excluded from the wire object. Brain owns source-to-wire
+projection and terminal aggregation; the console is a validation-only
+consumer.
+
+The shared-memory prewarm outcome is carried through the current graph attempt
+and projected into `evidence.shared_memory_prewarm`. Its fixed dispositions
+distinguish worker resolution, contract/projection failures, no evidence,
+ready evidence, merged evidence, ineligible cycles, empty character mentions,
+and unsupported episodes. Live terminal observations stop before later
+persistence/consolidation; cancellation has no fabricated terminal snapshot.
+
+Console Overview, Debug, and Self use one generic section renderer. The
+console's `available`, `not_reported`, `unavailable`, and `invalid` states are
+presentation metadata, not cognition statuses, and the console never becomes a
+schema or semantic projection owner.

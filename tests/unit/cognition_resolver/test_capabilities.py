@@ -12,6 +12,8 @@ MODULE_PATH = "kazusa_ai_chatbot.cognition_resolver.capabilities"
 EXPECTED_SYMBOLS = [
     "project_resolver_observation_for_cognition",
     "validate_task_resolution_execution_readiness",
+    "run_first_cycle_shared_memory_prewarm",
+    "merge_shared_memory_prewarm_outcome",
 ]
 
 

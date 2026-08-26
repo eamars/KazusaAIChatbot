@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
+from kazusa_ai_chatbot.brain_service.cognition_observation_projection import (
+    build_live_cognition_observation,
+)
 from tests.test_real_history_personality_e2e_live_llm import (
     _CASES,
     _build_profile_case,
@@ -16,7 +20,6 @@ from tests.test_real_history_personality_e2e_live_llm import (
     _relevance_dispositions,
     _source_identity_tokens,
 )
-
 
 _ROOT = Path(__file__).resolve().parents[1]
 _REQUIRED_PRIVATE_FIXTURES = (
@@ -163,56 +166,58 @@ def test_routing_guard_reads_frontline_discard_disposition() -> None:
     assert _relevance_dispositions(trace_steps) == ["discard"]
 
 
-def test_private_monologue_uses_only_canonical_reasoning_node() -> None:
-    """A later branch value must not replace the canonical reasoning value."""
+def _fixture_observation_payload(private_monologue: str) -> dict[str, object]:
+    """Build a deterministic canonical response observation fixture."""
 
-    response_payload = {
-        "cognition_graph": {
-            "nodes": [
-                {
-                    "id": "v2.branch.1",
-                    "detail": {
-                        "private_monologue": "错误的分支引用",
-                    },
-                },
-                {
-                    "id": "l2.reasoning",
-                    "detail": {
-                        "internal_monologue": "规范的认知独白",
-                    },
-                },
-                {
-                    "id": "v2.collapse",
-                    "detail": {
-                        "private_monologue": "错误的折叠引用",
-                    },
-                },
-            ],
+    observation = build_live_cognition_observation(
+        graph_result={
+            "should_respond": True,
+            "reason_to_respond": "fixture response",
+            "final_dialog": ["fixture response"],
+            "cognition_core_output": {
+                "schema_version": "cognition_output.v3",
+                "private_monologue": private_monologue,
+            },
         },
-    }
+        persona_state={"user_input": "fixture input"},
+        run_id="fixture-run-1",
+        cognition_invocation_id="fixture-invocation-1",
+        terminal_status="completed_visible",
+        visual_stage_failed=False,
+        visual_stage_reached=False,
+        failure_code="",
+        generated_at=datetime(2026, 5, 1, tzinfo=timezone.utc),
+    )
+    assert observation is not None
+    return {"cognition_graph": observation.model_dump(mode="json")}
+
+
+def test_private_monologue_uses_only_canonical_reasoning_node() -> None:
+    """Only the canonical reasoning section supplies the monologue."""
+
+    response_payload = _fixture_observation_payload("规范的认知独白")
 
     assert _extract_private_monologue(response_payload) == (
         "规范的认知独白",
-        'response.cognition_graph.nodes[id="l2.reasoning"]'
-        ".detail.internal_monologue",
+        (
+            'response.cognition_graph.nodes[node_id="reasoning.context"]'
+            '.sections[section_id="reasoning.subjective"]'
+            '.fields[key="private_monologue"].value'
+        ),
     )
 
 
 def test_private_monologue_fails_closed_when_canonical_node_is_missing() -> None:
     """A non-canonical private field cannot satisfy the monologue contract."""
 
-    response_payload = {
-        "cognition_graph": {
-            "nodes": [
-                {
-                    "id": "v2.branch.1",
-                    "detail": {
-                        "private_monologue": "不能冒充认知独白",
-                    },
-                },
-            ],
-        },
-    }
+    response_payload = _fixture_observation_payload("规范的认知独白")
+    graph = response_payload["cognition_graph"]
+    assert isinstance(graph, dict)
+    graph["nodes"] = [
+        node
+        for node in graph["nodes"]
+        if node["node_id"] != "reasoning.context"
+    ]
 
     assert _extract_private_monologue(response_payload) == ("", "")
 

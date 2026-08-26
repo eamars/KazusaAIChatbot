@@ -10,13 +10,13 @@
   progress and public group scene use the same detail shape and density; all
   graph views use the same labels, statuses, counts, and layout rules.
 - Plan class: cross-stage runtime contract and control-console big-bang cutover.
-- Status: draft.
+- Status: completed.
 - Decision authority: the user approves production execution and any later
   contract expansion. The architect owns the design and acceptance decisions.
-- Fixed implementation constraint: all production-code edits, test edits, test
-  execution, and browser execution use the existing persistent
-  `/root/cognition_console_implementer` agent on `gpt-5.6-luna` with `max`
-  reasoning and standard execution speed.
+- Final execution override: on 2026-08-27 the user directed Role 1 to stop the
+  implementation handoff and complete the remaining frontend regression fixes,
+  line audit, verification, and closure directly. This instruction supersedes
+  the earlier fixed-executor binding for the final closure slice.
 - Highest risks: losing evidence provenance, exposing protected cognition
   material, creating another schema owner, silently truncating detail, and
   allowing live/debug/self views to drift again.
@@ -119,9 +119,13 @@ report whether prewarm ran and what safe evidence it contributed.
 - Keep the architect as contract authority and final code-review/sign-off
   authority. The architect performs read-only review and directs the next
   implementation slice.
-- Preserve the live response path, existing cognition decisions, existing
-  prewarm eligibility, existing fail-soft retrieval behavior, and current
-  response latency ownership.
+- Preserve the live response path, existing cognition decisions, prewarm
+  eligibility, fail-soft behavior, direct-worker/call budget, authority and
+  retry policy, and current response latency ownership. The sole retrieval
+  input change is a prewarm-specific structural projection that excludes the
+  typed active-character address mention from both the task and model-visible
+  current-message context, and excludes exact typed active-turn rows from its
+  history copies, without mutating the source envelope or older history.
 - Keep model calls, prompts, model routes, RAG semantic judgment, dialog
   wording, persistence, adapters, and database schemas unchanged.
 - Use one atomic internal contract cutover. Callers, producers, Brain response
@@ -1107,6 +1111,52 @@ never enter graph layout. The Overview panel reads
 `panelItems(panels.cognition_observations)[].view`. This is the only envelope-unwrapping
 path in JavaScript.
 
+### 8A. Freeze The Existing Portal Layout And Limit UI Work To Card Content
+
+The renderer migration changes cognition-card content, not the surrounding
+portal or the established graph-composition algorithm. The pre-plan `HEAD`
+versions of `src/control_console/static/index.html`, `console.css`, and the
+layout helpers in `console.js` are the visual baseline. The following remain
+fixed:
+
+- application shell, sidebar, navigation, top bar, page/content grids, card
+  placement, and Debug/Overview/Self panel placement;
+- graph DOM ordering: run summary, semantic summary, bounded relationship
+  panel, graph body, producer-column stage rail, and inspector;
+- producer-column grouping, producer-lane ordering, inter-stage connectors,
+  current-node selection, independent per-view pins, and the fitted rail;
+- the existing stage-wrapper and node-card visual hierarchy.
+
+The approved UI change radius is inside cognition-card content:
+
+- resolve the Brain-owned `section_refs` and render producer-owned labels,
+  statuses, summaries, fields, records, counts, omission markers, and scalar
+  lists in the existing inspector/card surfaces;
+- use producer-owned node summaries in the existing node and semantic-summary
+  cards;
+- add only card-local wrapping required by the planned v1 catalog. Branch
+  stacks retain natural vertical growth with the baseline `max-height: none`
+  and `overflow-y: visible`; card-local vertical caps or internal sliders are
+  outside the approved radius. The surrounding portal layout remains fixed.
+
+The following are outside scope: making every node a top-level rail column,
+using a `max-content` rail, changing global content-grid selectors, moving or
+resizing page cards, replacing producer-column grouping with a new topology,
+hiding planned contract nodes, moving the inspector, removing the existing
+semantic-summary or bounded-relationship surfaces, or emitting unbounded edge
+rows into the page flow.
+
+Before closure, compare the pre-plan `HEAD` source and the candidate source
+line by line, then run deterministic DOM assertions for Overview, Debug, and
+Self. Screenshot capture is excluded by the user's final verification
+instruction. Record the `index.html` diff, exact CSS selector delta, renderer
+topology/selection diff, and DOM geometry for cognition cards, graph body,
+stage rail, inspector, stage groups, relationship panel, and page overflow.
+The candidate retains four live/debug producer-column groups, five self
+groups, fitted horizontal geometry, reachable naturally growing branch
+stacks, and zero page-level horizontal overflow. Any unexplained source or DOM
+delta blocks signoff and archival.
+
 ### 9. Update Ownership Manifest And Documentation
 
 Add the new production package paths to
@@ -1130,8 +1180,9 @@ row to the exact canonical tests in this plan. Update the subsystem docs with:
 - Adding post-turn background persistence/consolidation nodes to the live v1
   snapshot.
 - A new prewarm-specific operational event or event-monitor panel.
-- Changes to prewarm eligibility, retrieval semantics, worker selection,
-  authority mapping, prompt content, or retry policy.
+- Changes to prewarm eligibility, worker selection, authority mapping, prompt
+  content, retry policy, or retrieval semantics beyond the exact structural
+  active-character-address projection frozen in Handoff 3P.
 - Changes to conversation-progress or group-scene semantic generation.
 - Public adapter exposure of the operator observation snapshot.
 - A frontend framework migration or page-specific cognition renderer.
@@ -1317,6 +1368,11 @@ major observation schema and an approved cutover plan.
 - Gate: exact fixed binding, clean captured baseline, approved plan, mandatory
   skills loaded, and explicit owned-file slice before each handoff.
 
+The user's 2026-08-27 instruction superseded the fixed binding for the final
+frontend correction and closure slice. Role 1 therefore performed that slice
+directly and records the loss of executor/reviewer independence as an explicit
+execution deviation rather than claiming an independent final edit review.
+
 ## Test Impact And Traceability
 
 Every listed production source or governed contract artifact has an exact
@@ -1329,7 +1385,7 @@ and must collect successfully before the first passing execution checkpoint.
 | `src/kazusa_ai_chatbot/brain_service/cognition_observation_contracts.py` | all `*ObservationV1` DTOs, validators, canonical serialization | Brain-service wire owner | `tests/unit/cognition_observability/test_contracts.py::test_observation_contract_rejects_unknown_fields_invalid_references_and_over_budget_payloads`; `tests/unit/cognition_observability/test_contracts.py::test_observation_contract_enforces_truthful_record_counts_statuses_and_utc_serialization` | none | deterministic unit | loose detail, invalid refs, timestamp replacement, fake unavailable observation |
 | `src/kazusa_ai_chatbot/brain_service/cognition_observation_projection.py` | catalog, closed source mapping, `build_live_cognition_observation`, `build_self_cognition_observation` | Brain-service projection owner | `tests/unit/cognition_observability/test_projection.py::test_live_projection_reports_all_shared_memory_prewarm_dispositions`; `tests/unit/cognition_observability/test_projection.py::test_context_sources_share_one_detail_shape_and_budget`; `tests/unit/cognition_observability/test_projection.py::test_live_and_self_projections_share_exact_section_catalog`; `tests/unit/cognition_observability/test_projection.py::test_projection_uses_closed_source_field_mapping_and_invalid_row_counts`; `tests/unit/cognition_observability/test_projection.py::test_projection_excludes_protected_and_operational_fields`; `tests/unit/cognition_observability/test_projection.py::test_projection_emits_only_canonical_sequence_and_reference_edges` | `tests/control_console_e2e/test_cognition_observability_e2e.py::test_live_debug_and_self_views_share_observation_section_layout` | deterministic unit + browser supplemental | producer drift, lost prewarm, source-shape inference, unequal detail, unsafe disclosure, edge loss |
 | `src/kazusa_ai_chatbot/cognition_resolver/contracts.py` | `SharedMemoryPrewarmOutcomeV1`, `normalize_projected_rag_result`, validators | cognition-resolver contract owner | `tests/test_shared_memory_prewarm.py::test_shared_memory_prewarm_outcome_validator_rejects_invalid_disposition_and_counts`; `tests/test_shared_memory_prewarm.py::test_shared_memory_prewarm_outcome_enforces_exact_types_bounds_and_rag_shape`; `tests/unit/cognition_resolver/test_capabilities.py::test_capabilities_exposes_owned_contract`; `tests/unit/cognition_resolver/test_capabilities.py::test_resolver_observation_evidence_has_typed_authority` | none | deterministic unit | invalid type/status/reason/count/RAG combinations or changed evidence authority |
-| `src/kazusa_ai_chatbot/cognition_resolver/capabilities.py` | `run_first_cycle_shared_memory_prewarm`, `merge_shared_memory_prewarm_outcome` | cognition-resolver capability owner | `tests/test_shared_memory_prewarm.py::test_first_cycle_prewarm_returns_explicit_outcome_dispositions`; `tests/test_shared_memory_prewarm.py::test_merge_shared_memory_prewarm_outcome_counts_projected_entries_and_rejects_repeat_or_invalid_base`; `tests/test_shared_memory_prewarm.py::test_first_cycle_prewarm_propagates_cancellation_without_fabricating_terminal_outcome` | `tests/test_local_context_resolver_integration.py::test_first_cycle_prewarm_uses_memory_worker_without_full_resolver` | deterministic unit + patched integration | empty/failure collapse, grouped-row miscount, repeated merge, unsafe base, or swallowed cancellation |
+| `src/kazusa_ai_chatbot/cognition_resolver/capabilities.py` | `run_first_cycle_shared_memory_prewarm`, `merge_shared_memory_prewarm_outcome` | cognition-resolver capability owner | `tests/test_shared_memory_prewarm.py::test_first_cycle_prewarm_returns_explicit_outcome_dispositions`; `tests/test_shared_memory_prewarm.py::test_merge_shared_memory_prewarm_outcome_counts_projected_entries_and_rejects_repeat_or_invalid_base`; `tests/test_shared_memory_prewarm.py::test_first_cycle_prewarm_propagates_cancellation_without_fabricating_terminal_outcome`; `tests/test_shared_memory_prewarm.py::test_napcat_character_mention_recalls_and_merges_corresponding_shared_memory` | `tests/test_local_context_resolver_integration.py::test_first_cycle_prewarm_uses_memory_worker_without_full_resolver`; `tests/test_shared_memory_prewarm_live_llm.py::test_production_napcat_command_recalls_seeded_shared_memory` | deterministic unit + patched integration + isolated live LLM/DB | empty/failure collapse, grouped-row miscount, repeated merge, unsafe base, swallowed cancellation, or loss of the exact `#napcat` shared-memory anchor |
 | `src/kazusa_ai_chatbot/cognition_shared/model_attempt_policy.py` | request-scoped prewarm checkpoint record/snapshot/graph-attempt clearing | cognition diagnostic-carrier owner | `tests/unit/cognition_shared/test_observation_checkpoint.py::test_prewarm_checkpoint_is_deep_copied_scoped_to_graph_attempt_and_cleared` | `tests/unit/brain_service/test_cognition_graph_projection.py::test_failed_run_uses_current_attempt_prewarm_checkpoint` | deterministic unit | completed prewarm disappears when a later graph stage fails or leaks across retries |
 | `src/kazusa_ai_chatbot/nodes/persona_supervisor2_schema.py` | `shared_memory_prewarm_outcome`, typed group scene, projection status/reason | persona-state contract owner | `tests/unit/nodes/test_persona_supervisor2_schema.py::test_persona_supervisor2_schema_exposes_owned_contract` | none | deterministic unit | untyped carrier or inability to distinguish non-group from failed projection |
 | `src/kazusa_ai_chatbot/nodes/persona_supervisor2.py` | structured group-scene retention and explicit projection discriminator | persona orchestration owner | `tests/test_conversation_progress_group_scene.py::test_persona_supervisor_reports_group_scene_success_non_group_and_failure` | `tests/test_conversation_progress_v2_service.py::test_service_load_passes_group_anchor_mode_and_keeps_user_scope` | deterministic unit/integration | prompt rendering destroys inspectable scene, failed projection looks non-group, or user scope changes |
@@ -1361,6 +1417,8 @@ Cross-boundary required tests:
 - `tests/unit/brain_service/test_cognition_graph_projection.py::test_live_terminal_status_mapping_and_cancellation_are_exact`
 - `tests/unit/brain_service/test_cognition_graph_projection.py::test_failed_run_uses_current_attempt_prewarm_checkpoint`
 - `tests/test_local_context_resolver_integration.py::test_first_cycle_prewarm_uses_memory_worker_without_full_resolver`
+- `tests/test_shared_memory_prewarm.py::test_napcat_character_mention_recalls_and_merges_corresponding_shared_memory`
+- `tests/test_shared_memory_prewarm_live_llm.py::test_production_napcat_command_recalls_seeded_shared_memory`
 - `tests/test_control_console_bootstrap.py::test_bootstrap_returns_initial_state_session_csrf_services_and_stream_url`
 - `tests/test_control_console_stream.py::test_stream_poll_appends_graph_invalidation_for_new_latest_run`
 - `tests/control_console_e2e/test_debug_chat_e2e.py::test_debug_chat_sends_to_brain_and_updates_history_and_graph`
@@ -1415,6 +1473,8 @@ no legacy required node remains after it.
 - `tests/unit/cognition_shared/test_observation_checkpoint.py`
 - `tests/control_console_e2e/test_cognition_observability_e2e.py`
 - `tests/test_cognition_observability_docs.py`
+- `tests/test_shared_memory_prewarm_live_llm.py`
+- `development_plans/archive/completed/short_term/cognition_observability_icd_and_console_consistency_plan_2026-08-26.md`
 
 ### Modify
 
@@ -1455,6 +1515,8 @@ no legacy required node remains after it.
 - `tests/test_control_console_repository.py`
 - `tests/test_control_console_redaction.py`
 - `tests/test_control_console_web_surface.py`
+- `tests/test_console_debug_chat.py`
+- `tests/test_console_lookup_limits.py`
 - `tests/control_console_e2e/fake_brain.py`
 - `tests/control_console_e2e/test_debug_chat_e2e.py`
 - `tests/control_console_e2e/test_stage3_fresh_database_e2e.py`
@@ -1466,6 +1528,7 @@ no legacy required node remains after it.
 - `tests/unit/cognition_resolver/test_capabilities.py`
 - `tests/ownership/source_test_impact_manifest.json`
 - `development_plans/README.md`
+- `development_plans/active/short_term/cognition_observability_icd_and_console_consistency_plan_2026-08-26.md`
 
 ### Delete
 
@@ -1641,7 +1704,8 @@ control-console legacy API accesses/fields:
 - Existing `src/control_console/static/index.html`; the current graph
   containers and `#ui-notice` loading/error region are sufficient for v1.
 - Existing prewarm eligibility, direct persistent-memory worker, safe shared
-  row filtering, and cognition evidence authority.
+  row filtering, cognition evidence authority, and one prewarm-only sanitized
+  copy of the current-message context.
 - Existing conversation-progress and group-scene semantic source contracts.
 - Existing process-local latest-run storage behavior.
 - `tests/test_rag3_media_debug_adapter_e2e_live_llm.py` and
@@ -1681,23 +1745,28 @@ different executor pauses that slice for a user-approved amendment.
 ## Implementation Order
 
 1. Obtain user approval, promote the plan to `approved`, capture worktree and
-   owned-path baseline, and hand the first bounded slice to the persistent Luna
-   executor.
-2. Add failing contract/projection/prewarm tests and the exact manifest rows.
-3. Implement the resolver prewarm outcome and typed persona-state carriers.
-4. Implement the cognition-observability package and live/self projection.
-5. Cut Brain response/latest storage to the typed observation model and remove
-   service-owned graph logic.
-6. Cut console contracts/client/app/repository to direct canonical
-   consumption and remove duplicate projections.
-7. Replace frontend semantic-field rendering with generic section rendering,
-   update fixtures, and validate all three views.
-8. Update ICD, READMEs, HOWTO, registry, and execution evidence.
-9. Run exact mapped tests, focused batches, broader regressions, manifest
-   validation, static checks, and browser checks.
-10. Route the final diff and evidence to the architect for independent code
-    review. Role 2 resolves findings and reruns affected gates; the architect
-    re-reviews and signs off.
+   owned-path baseline, and hand execution to the persistent Luna executor.
+2. Complete the entire planned test surface before further production work:
+   every deterministic unit/integration/static test, fake-service and browser
+   E2E test, fixture, live-LLM compile/collection consumer, documentation test,
+   and exact ownership-manifest row in Change Surface.
+3. Collect every exact node in Test Impact And Traceability, then run the
+   deterministic test surface once to record the comprehensive expected
+   failing/passing baseline against the incomplete production cutover. Test
+   failures at this checkpoint are implementation evidence, not invitations to
+   edit production piecemeal.
+4. Implement the remaining production cutover across resolver carriers,
+   cognition-observability contracts/projection, Brain publication, console
+   validation transport, repository/API consumption, and the shared frontend
+   renderer while preserving the now-fixed test contract.
+5. Update the ICD, runtime READMEs, HOWTO, registry, and execution evidence
+   after production implementation matches the completed test surface.
+6. Run all exact mapped tests, focused batches, broader regressions, manifest
+   validation, static checks, live-LLM compile/collection gates, and browser
+   checks.
+7. Route the final diff and evidence to the architect for independent code
+   review. Role 2 resolves findings and reruns affected gates; the architect
+   re-reviews and signs off.
 
 ## Verification
 
@@ -1711,49 +1780,73 @@ Role 2 runs commands from the repository root with `venv\Scripts\python`.
    venv\Scripts\python -m pytest tests\unit\cognition_observability tests\unit\cognition_shared\test_observation_checkpoint.py tests\unit\cognition_resolver\test_capabilities.py tests\test_shared_memory_prewarm.py tests\test_local_context_resolver_integration.py -q
    ```
 
-3. Run Brain publication/state tests:
+3. After the entire test surface is implemented and its exact collection
+   baseline is recorded, run the trace-specific live LLM/live DB case by
+   itself:
+
+   ```powershell
+   $env:MONGODB_DB_NAME = "asuna_core_v2"
+   $env:IDENTITY_GROWTH_DATABASE_GUARD = "1"
+   $env:IDENTITY_GROWTH_TEST_DATABASE = "asuna_core_v2"
+   $env:NAPCAT_PREWARM_LIVE_GUARD = "1"
+   $env:NAPCAT_PREWARM_LIVE_DATABASE = "asuna_core_v2"
+   venv\Scripts\python -m pytest -m "live_llm and live_db" tests\test_shared_memory_prewarm_live_llm.py::test_production_napcat_command_recalls_seeded_shared_memory -q -s
+   ```
+
+   This is the user-directed re-verification for
+   `llmtrace_7177e22b64a84324a3f60481ae184353`. Inspect the single case and
+   record the expected memory unit
+   `seed_7ac6348ccd9bf7a80fbc74584c6b3ce3`, actual prewarm status/reason,
+   retrieved/merged counts, and safe evidence references. Run it once in the
+   tests-first failure baseline and again after production implementation. If
+   passing it requires a prompt, model, route, worker-selection, or retrieval-
+   semantic change, stop at the failing evidence and amend the approved scope
+   before that production change.
+
+4. Run Brain publication/state tests:
 
    ```powershell
    venv\Scripts\python -m pytest tests\unit\brain_service\test_cognition_graph_projection.py tests\test_service_background_consolidation.py tests\test_service_ops_status.py tests\test_conversation_progress_v2_service.py tests\unit\nodes\test_persona_supervisor2_schema.py tests\unit\nodes\test_persona_supervisor2_cognition_commit.py tests\test_conversation_progress_group_scene.py -q
    ```
 
-4. Run console contract/client/repository/static/stream tests:
+5. Run console contract/client/repository/static/stream tests:
 
    ```powershell
    venv\Scripts\python -m pytest tests\test_control_console_contracts.py tests\test_control_console_kazusa_client.py tests\test_control_console_bootstrap.py tests\test_control_console_stream.py tests\test_control_console_redaction.py tests\test_control_console_repository.py tests\test_control_console_web_surface.py tests\test_cognition_observability_docs.py -q
    ```
 
-5. Run cognition console E2E tests:
+6. Run cognition console E2E tests:
 
    ```powershell
    venv\Scripts\python -m pytest tests\control_console_e2e\test_debug_chat_e2e.py tests\control_console_e2e\test_cognition_observability_e2e.py tests\control_console_e2e\test_stage3_fresh_database_e2e.py -q
    ```
 
-6. Run deterministic legacy-consumer replacements:
+7. Run deterministic legacy-consumer replacements:
 
    ```powershell
    venv\Scripts\python -m pytest tests\test_self_cognition_integration.py::test_prepared_commitment_state_contains_public_group_scene tests\test_real_history_personality_fixture_contract.py::test_private_monologue_uses_only_canonical_reasoning_node tests\test_real_history_personality_fixture_contract.py::test_private_monologue_fails_closed_when_canonical_node_is_missing -q
    ```
 
-7. Compile and collect the changed live-LLM supplemental files without
+8. Compile and collect the changed live-LLM supplemental files without
    executing their model-backed cases:
 
    ```powershell
-   venv\Scripts\python -m py_compile tests\test_real_history_personality_e2e_live_llm.py tests\test_short_horizon_state_composition_live_llm.py tests\test_short_horizon_state_composition_e2e_live_llm.py tests\test_rag3_media_debug_adapter_e2e_live_llm.py tests\test_qq_group_public_scene_live_llm.py
-   venv\Scripts\python -m pytest --collect-only tests\test_real_history_personality_e2e_live_llm.py tests\test_short_horizon_state_composition_live_llm.py tests\test_short_horizon_state_composition_e2e_live_llm.py tests\test_rag3_media_debug_adapter_e2e_live_llm.py tests\test_qq_group_public_scene_live_llm.py -q
+   venv\Scripts\python -m py_compile tests\test_shared_memory_prewarm_live_llm.py tests\test_real_history_personality_e2e_live_llm.py tests\test_short_horizon_state_composition_live_llm.py tests\test_short_horizon_state_composition_e2e_live_llm.py tests\test_rag3_media_debug_adapter_e2e_live_llm.py tests\test_qq_group_public_scene_live_llm.py
+   venv\Scripts\python -m pytest --collect-only tests\test_shared_memory_prewarm_live_llm.py tests\test_real_history_personality_e2e_live_llm.py tests\test_short_horizon_state_composition_live_llm.py tests\test_short_horizon_state_composition_e2e_live_llm.py tests\test_rag3_media_debug_adapter_e2e_live_llm.py tests\test_qq_group_public_scene_live_llm.py -q
    ```
 
-   Any live-LLM execution remains one case at a time under the
+   Any additional live-LLM execution remains one case at a time under the
    `test-style-and-execution` contract and requires a separately recorded
-   execution decision.
-8. Run the ownership-manifest changed-path checker and
+   execution decision. Step 3 records the user's explicit decision for the
+   isolated `#napcat` case.
+9. Run the ownership-manifest changed-path checker and
    `tests/test_test_impact_manifest.py` using the documented HOWTO command.
-9. Run `py_compile` for every changed Python production module,
+10. Run `py_compile` for every changed Python production module,
    `git diff --check`, and the relevant broader deterministic regression batch
    selected by `test-style-and-execution`.
-10. Start clean isolated Brain/fake-Brain and console processes, then validate
-   Overview Latest, Debug cognition, and Self-cognition Latest in the in-app
-   browser. Capture desktop screenshots and DOM assertions for:
+11. Start clean isolated Brain/fake-Brain and console processes, then validate
+   Overview Latest, Debug cognition, and Self-cognition Latest through
+   deterministic DOM assertions, with screenshot capture excluded, for:
 
    - completed/empty/skipped/failed prewarm;
    - conversation progress and group scene peer layout;
@@ -1764,34 +1857,90 @@ Role 2 runs commands from the repository root with `venv\Scripts\python`.
    - long/multiline/CJK/emoji/HTML-sensitive values; and
    - zero browser console errors.
 
-11. Inspect the final worktree and diff against the owned path baseline and
-   record exact outputs, screenshots, deviations, and residual risk.
+12. Inspect the final worktree and line diff against the owned path baseline
+   and record exact outputs, deviations, and residual risk.
 
 ## Progress Checklist
 
 - [x] Three-pass implementability-review quota is complete; every final-pass
   finding is resolved in the architect's consolidated closure below.
-- [ ] User approves the architecture and production scope.
-- [ ] Plan status is promoted to `approved` and then `in_progress`.
-- [ ] Fixed Luna handoff, baseline, skills, and owned paths are recorded.
-- [ ] Strict v1 contract and ICD are implemented.
-- [ ] Explicit prewarm outcome survives retrieval, merge, cognition, Brain,
+- [x] User approves the architecture and production scope.
+- [x] Plan status is promoted to `approved` and then `in_progress`.
+- [x] Fixed Luna handoff, baseline, skills, and owned paths are recorded.
+- [x] Complete tests-first surface and comprehensive pre-production baseline
+  are recorded before remaining production implementation.
+- [x] Strict v1 contract and ICD are implemented.
+- [x] Explicit prewarm outcome survives retrieval, merge, cognition, Brain,
   console, and renderer boundaries.
-- [ ] Conversation progress and group scene use peer context sections.
-- [ ] Live and self projection use the same section model and budgets.
-- [ ] Brain response/latest graph fields are typed.
-- [ ] Console semantic reconstruction and duplicate graph models are removed.
-- [ ] Shared renderer uses producer labels and generic sections.
-- [ ] Pending/error debug UI is separate from authoritative cognition graph.
-- [ ] Exact source-to-test manifest is current.
-- [ ] Focused and regression tests pass.
-- [ ] Browser evidence passes for all three views with zero console errors.
-- [ ] Architect code review findings are resolved and re-reviewed.
-- [ ] Plan evidence and registry are complete and the plan is archived.
+- [x] Trace `llmtrace_7177e22b64a84324a3f60481ae184353` is re-verified
+  through the isolated `#napcat` live LLM/DB case, including the exact outcome
+  reason and seeded-memory evidence. The legacy trace lacks the worker task and
+  outcome records needed to reconstruct its exact internal disposition; the
+  current isolated reproduction is recorded below.
+- [x] Conversation progress and group scene use peer context sections.
+- [x] Live and self projection use the same section model and budgets.
+- [x] Brain response/latest graph fields are typed.
+- [x] Console semantic reconstruction and duplicate graph models are removed.
+- [x] Shared renderer uses producer labels and generic sections.
+- [x] Pending/error debug UI is separate from authoritative cognition graph.
+- [x] Exact source-to-test manifest is current.
+- [x] Focused and regression tests pass.
+- [x] Deterministic UI/DOM evidence passes for all three views with zero console
+  errors and no screenshot capture.
+- [x] All architect findings and user-reported regressions are resolved and
+  line-reviewed.
+- [x] Plan evidence and registry are complete and the plan is archived.
 
 ## Execution Evidence
 
-No production execution is authorized while this plan remains `draft`.
+Production execution was approved by the user on 2026-08-26 through the
+explicit instruction to execute this plan.
+
+User execution-policy amendment on 2026-08-26: complete all remaining tests,
+fixtures, and manifest expectations before resuming production implementation.
+The accepted Handoff 1 work and partial Handoff 2 workspace state remain
+preserved. Role 2 freezes further production edits, finishes the complete test
+surface, collects every exact node, and records one comprehensive expected
+baseline before production work resumes. This changes execution sequencing
+only; the approved architecture, scope, fixed executor, contracts, exclusions,
+and acceptance criteria remain unchanged.
+
+User-added prewarm verification on 2026-08-26: re-verify the failure recorded
+under `llmtrace_7177e22b64a84324a3f60481ae184353`, where direct input containing
+`#napcat` should have recalled its corresponding shared memory. The protected
+trace export resolved one successful run with nine LLM steps and no cognition
+failure capsule. The active shared-memory export resolved canonical row
+`seed_7ac6348ccd9bf7a80fbc74584c6b3ce3`; its ID and full content were absent
+from every cognition-stage prompt and parsed output. These sanitized facts are
+now a deterministic recall/merge regression plus one isolated live LLM/live DB
+verification gate in the tests-first phase. Raw trace and memory payloads remain
+only under `test_artifacts/diagnostics`.
+
+Tests-first checkpoint result: PASS. Role 2 added the full remaining unit,
+integration, browser-E2E, documentation, guarded live, fake-Brain, fixture,
+legacy-consumer, and ownership-manifest surface without changing any frozen
+production or documentation file. The plan-owned surface collected 309 tests;
+the six live files collected 63 tests and compiled. Exact prewarm/resolver/
+persona/group/local nodes passed 15/15, Brain/ops/progress/self/legacy nodes
+passed 11/11, manifest checks passed 12/12 with 135 registered entries, 38
+changed Python test paths compiled, targeted test Ruff passed, and
+`git diff --check` passed. The frozen-production baseline intentionally reports
+39 console deterministic passes with 22 failures, six browser-E2E failures,
+and four documentation failures. One background-consolidation node timed out
+after approximately 60 seconds following a cancelled event-log write and is
+retained for post-implementation rerun. The unchanged resolver baseline remains
+9 failures and 28 passes, all from the already-recorded required
+`goal_continuation_ref` fixture drift.
+
+The user-authorized isolated live LLM/live DB `#napcat` case passed against
+`asuna_core_v2`: the current prewarm returned
+`completed/shared_memory_ready`, retrieved one safe row with memory unit
+`seed_7ac6348ccd9bf7a80fbc74584c6b3ce3`, and finalized as
+`completed/shared_memory_merged` with merged count one. Therefore the semantic
+omission in the historical trace is confirmed, while its old internal prewarm
+reason is not recoverable from that pre-observability trace and the failure is
+not deterministic under the current isolated path. The same exact case remains
+mandatory after production implementation.
 
 Draft reconnaissance record:
 
@@ -1883,6 +2032,480 @@ After approval, each handoff to `/root/cognition_console_implementer` records:
 The same agent is reused for all later implementation, test, browser, and
 remediation handoffs.
 
+### Handoff 1: Resolver Prewarm And State Carriers
+
+- Lifecycle state: `in_progress` after explicit user approval on 2026-08-26.
+- Role: Role 2, fixed implementation and verification executor.
+- Resolved executor: `/root/cognition_console_implementer` on
+  `gpt-5.6-luna`, reasoning `max`, standard execution speed, with repository
+  filesystem, terminal, patch, skill, and deterministic-test access.
+- Resolution mode and rationale: plan-scoped fixed execution constraint. The
+  exact binding is available and satisfies the cross-layer Python, contract,
+  and deterministic verification capability floor; substitution is outside
+  the approved contract.
+- Baseline: `git status --short` was clean before lifecycle promotion. At
+  handoff it contains only architect-owned modifications to this plan and
+  `development_plans/README.md`. SHA-256 baselines were captured for every
+  existing slice-owned path; the new checkpoint test path was absent.
+- Owned production surface: resolver contracts/capabilities, the cognition
+  attempt ledger, persona schema/orchestration/cognition carrier paths.
+- Owned verification surface: the prewarm, resolver capability, checkpoint,
+  persona schema/cognition, group-scene, local-context integration tests, and
+  their ownership-manifest rows named in the plan.
+- Mandatory constraints: all relevant mandatory skills loaded by Role 2;
+  `venv\\Scripts\\python`, `apply_patch`, CJK-safe Python handling, no `.env`,
+  no compatibility aliases, and no prompt/model/route/retrieval-semantic
+  changes.
+- Entry verification: production/test paths were unchanged from the captured
+  baseline; the plan and registry alone carry lifecycle edits.
+- Acceptance output: the exact mapped nodes for this owned slice collect and
+  pass, changed production modules compile, `git diff --check` passes, and the
+  executor returns a scoped diff plus inspected output and deviations.
+- Next checkpoint: architect inspection of the resolver/state-carrier diff and
+  evidence before assigning the observation-contract/Brain cutover slice.
+
+### Handoff 1R: Resolver Checkpoint Remediation
+
+- Prior assignment: Handoff 1 completed its 14 exact mapped nodes, 48 adjacent
+  owned tests, 12 manifest checks, changed-module compilation, and
+  `git diff --check`.
+- Reviewer: Role 1 architect, read-only checkpoint review.
+- Findings: required group-scene discriminator reads could silently produce
+  `None`; one new exception log omitted the exception text; the group-scene
+  owner test stopped at a private helper; fixed prewarm reason mappings lacked
+  complete direct coverage; and touched manifest descriptions retained stale
+  pre-change contract wording.
+- Resolved executor/configuration: the same fixed
+  `/root/cognition_console_implementer`, `gpt-5.6-luna`, reasoning `max`,
+  standard speed. This is remediation within the original owned slice, not a
+  reassignment.
+- Acceptance output: findings corrected without semantic-scope expansion, all
+  14 original mapped nodes recollected and passed, affected adjacent and
+  manifest tests passed, production modules compiled, and diff checks passed.
+- Additional evidence request: identify the reported nine baseline resolver
+  fixture failures and the evidence that they pre-date this slice; preserve
+  them outside the remediation diff.
+- Next checkpoint: architect re-review and explicit Slice 1 acceptance.
+
+Checkpoint result: PASS. Role 1 re-reviewed the corrected production, test,
+and manifest diff. Role 2 collected all 14 exact nodes, passed all 14, passed
+60 affected adjacent/manifest tests, compiled every changed production module,
+passed `git diff --check`, and passed targeted Ruff checks. The complete fixed
+prewarm reason matrix is directly exercised, group-scene propagation is tested
+through the persona owner return boundary, and the checkpoint remains scoped
+to the current graph attempt.
+
+Recorded baseline deviation: the unchanged
+`tests/test_cognition_resolver_contracts.py` suite reports 9 failures and 16
+passes because nine existing fixtures omit the already-required
+`goal_continuation_ref`. The test file is unchanged by this plan and the
+requirement exists in `HEAD`; these stale fixtures pre-date Handoff 1 and remain
+outside this plan's approved surface.
+
+### Handoff 2: Observation Contract And Brain Publication
+
+- Remaining scope: implement the complete strict v1 DTO and producer catalog,
+  cut live/self Brain publication and latest storage to the typed model, remove
+  the frozen service projection vocabulary, and migrate the exact legacy test
+  consumers owned by this backend boundary.
+- Owned surface: the two new Brain observation modules, Brain exports/contracts,
+  `service.py`, cognition-observability and Brain projection tests, named
+  service/legacy-consumer tests, three compile/collect-only live-LLM consumers,
+  and corresponding ownership-manifest rows.
+- Baseline: all new module/test paths are absent. SHA-256 baselines were
+  captured for every existing owned path after accepted Handoff 1. The only
+  worktree changes at entry are architect lifecycle evidence and accepted
+  Handoff 1 files.
+- Resolved executor/configuration: the same fixed
+  `/root/cognition_console_implementer`, `gpt-5.6-luna`, reasoning `max`,
+  standard speed, with Python, patch, collection, and deterministic-test access.
+- Selection rationale: the plan-scoped binding remains eligible and retains
+  the implementation context from Handoff 1; reassignment would violate the
+  fixed constraint and increase cross-boundary rework.
+- Mandatory constraints: plan/execution gates, local-LLM boundary audit,
+  Python style, test execution, CJK safety, no `.env`, no compatibility layer,
+  no prompts/models/routes/retrieval/persistence/adapter/database changes.
+- Completed verification at entry: Handoff 1 exact and adjacent gates pass;
+  the nine documented stale resolver fixtures remain outside this slice.
+- Acceptance output: every exact mapped backend node collects and passes;
+  Brain publication/state batches pass; changed Python compiles; changed
+  live-LLM files compile and collect without execution; manifest/style/diff
+  gates pass; and Role 2 returns inspected evidence and deviations.
+- Next checkpoint: Role 1 independent DTO/projection/disclosure/publication
+  review before any console transport handoff.
+
+### Handoff 2T: Consolidated Tests-First Review Remediation
+
+- Reviewer: Role 1 architect after the complete tests-first checkpoint; no
+  remaining production or documentation implementation may resume until this
+  test-only checkpoint passes.
+- Findings: one console fixture used non-canonical terminal status `completed`;
+  DTO negative coverage did not enforce several strict grammar, uniqueness,
+  run-kind, edge, scalar, record-key, and payload invariants; live/self catalog
+  assertions allowed missing or additive base entries; protected-field checks
+  omitted some exclusion values; terminal mapping omitted accepted statuses;
+  the failed-run prewarm test stopped at a checkpoint getter instead of the
+  service failure-publication seam; fake-Brain categories, record keys, and
+  settled prewarm reason were not canonical; and browser tests did not prove
+  generic additive-section rendering, CJK/emoji/multiline/HTML-safe text, or
+  zero console/page errors across Overview, Debug, and Self.
+- Resolved executor/configuration: the same fixed
+  `/root/cognition_console_implementer`, `gpt-5.6-luna`, reasoning `max`,
+  standard speed. Ownership is limited to tests, fixtures, and their manifest
+  rows; the existing production and documentation hashes remain frozen.
+- Acceptance output: all findings become assertions under the existing exact
+  nodes where possible, the whole plan surface recollects, affected
+  deterministic tests and expected frozen-production failures are inspected,
+  test Python compiles and passes targeted Ruff, manifest checks and
+  `git diff --check` pass, and production hashes match the freeze baseline.
+- Next checkpoint: Role 1 reviews the corrected test contract once, then the
+  same executor resumes the consolidated production phase.
+
+Checkpoint result: PASS. Role 1 re-reviewed the corrected tests and fixtures.
+The exact observation contract cases now enforce nested-extra rejection,
+strict integer and UTC handling, section/record/reference grammar and
+uniqueness, canonical ordering, run-kind catalogs, truthful counts, bounded
+payloads, and additive producer-owned sections. Projection tests assert the
+exact live/self catalogs and node references, every protected value, all
+terminal dispositions, partial-run downgrade, current-attempt failure
+publication, and retry isolation. Browser fixtures now cover the exact shared
+layout on Overview, Debug, and Self, including an unknown producer section,
+CJK/emoji/multiline/HTML-sensitive text, escaped DOM output, and zero browser
+errors.
+
+Role 2 passed the 14 original mapped nodes, the deterministic `#napcat`
+regression, five Brain projection tests, twelve ownership-manifest checks,
+collection of 263 plan-owned tests, compilation of 42 changed Python test
+files, targeted Ruff, and `git diff --check`. The manifest resolves 374 exact
+required nodes across 94 files; its mapped surface collects 1,204 tests. Six
+live-LLM files collect 63 tests without execution. The production hash freeze
+remained intact. Expected red-state evidence against frozen production was
+inspected: the missing console DTO/renderer and strict record-key enforcement
+fail their new tests, while the previously recorded nine stale resolver
+fixtures and background-consolidation timeout remain baseline deviations.
+
+The tests-first implementation boundary is satisfied. Production and
+documentation implementation may now proceed as one consolidated phase.
+
+### Handoff 3: Consolidated Production And Documentation Implementation
+
+- Resolved executor/configuration: the same fixed
+  `/root/cognition_console_implementer`, `gpt-5.6-luna`, reasoning `max`,
+  standard speed.
+- Scope: the entire remaining plan-owned production, frontend, ICD, subsystem
+  documentation, fixture, and ownership-manifest surface was implemented only
+  after Handoff 2T accepted the complete tests-first surface.
+- Verification result: the exact resolver/prewarm/node batch passed 14 tests;
+  cognition/Brain batches passed 9 tests and the Brain projection batch passed
+  5 tests; documentation/manifest checks passed 19 tests; the deterministic
+  console batch passed 149 tests with two inspected stale-fixture failures;
+  47 changed Python files compiled; targeted Ruff, JavaScript syntax, and
+  `git diff --check` passed. The manifest manually resolved all 418 required
+  exact nodes across 94 files. The official all-node impact checker could not
+  launch its single Windows command because the command line exceeded the
+  platform limit.
+- Browser result: the available Playwright fallback produced and inspected the
+  debug cognition and settlement-graph screenshots. The final debug-chat and
+  canonical-edge smoke tests passed with no browser errors. Two supplemental
+  cognition-observability browser cases exposed fixture/helper defects and are
+  assigned to the tests-first remediation below.
+- Live prewarm result: the one authorized post-production run of
+  `tests/test_shared_memory_prewarm_live_llm.py::test_production_napcat_command_recalls_seeded_shared_memory`
+  passed. The real prewarm returned `completed/shared_memory_ready`, retrieved
+  memory unit `seed_7ac6348ccd9bf7a80fbc74584c6b3ce3`, and the production merge
+  returned `completed/shared_memory_merged` with merged count one. This is an
+  isolated retrieval-and-merge proof, not a replay of the whole historical
+  cognition graph. It will not be repeated during deterministic remediation.
+- Inspected deviations: two console tests retain pre-cutover fake signatures;
+  two service descriptor tests reference symbols already absent from `HEAD`;
+  nine resolver fixtures omit an already-required reference; and one required
+  background-consolidation case waits on an unpatched event-logging seam. The
+  plan-owned fixture defects are included below; unrelated baseline failures
+  remain documented outside the production diff.
+
+### Handoff 3T: Post-Production Independent Review Tests-First Remediation
+
+- Reviewer: Role 1 architect after the complete consolidated implementation.
+  Production and documentation hashes are frozen until this test-only
+  checkpoint is accepted.
+- Correlation and transport findings: the service failure publisher must map
+  the current attempt-ledger cognition invocation identifier to both canonical
+  correlation fields; an attempted debug HTTP failure must report
+  `debug_request_failed`; and a missing observation response field must be a
+  protocol error rather than a reported null value.
+- Projection findings: context-consumption aggregate status must consider only
+  reported source containers; character and relationship Details must follow
+  their closed disclosure mappings; style relevance/surface records must use
+  the exact consumer/source labels; public group scene must report its Status
+  and classify invalid headers; conversation-progress invalid headers must
+  affect status; self-source records must use the stable v1 labels; self action
+  fallback applies only to a valid empty results list; invalid preferred
+  self-message sources must not silently fall through; and visible-message
+  reported counts must describe the source container rather than only valid
+  displayed rows.
+- Renderer findings: canonical `skipped` must remain visibly `skipped`; scalar
+  lists must render as ordered list rows; and Overview/Debug/Self pins must be
+  selected independently by view kind. Static and browser coverage must prove
+  these behaviors through the generic renderer.
+- Documentation findings: the authoritative ICD must state the full owner,
+  producer/publisher/transport/consumer, model, status, catalog/mapping,
+  prewarm, disclosure, budget, availability, versioning, live/self, and
+  additive-rendering contracts. The Brain and architecture documentation must
+  remove contradictory legacy snapshot/input-disclosure descriptions. Tests
+  must verify the substantive contract rather than only isolated tokens.
+- Fixture findings: migrate the two stale console fakes to canonical typed
+  signatures; correct the two supplemental browser fixtures/helpers; and mock
+  the background chat test's event-log intake seam so the required node
+  terminates deterministically.
+- Test-only ownership: cognition-observation projection/Brain tests, console
+  client/web/static/browser tests and fixtures, the two stale console tests,
+  the background-consolidation test, documentation tests, and manifest rows
+  only when an exact node changes. All plan-owned production and documentation
+  files remain frozen.
+- Acceptance output: implement the complete remediation assertion surface
+  first; run it against frozen production; inspect every expected contract
+  failure and corrected fixture pass; compile and lint changed test Python;
+  run JavaScript syntax and diff checks where applicable; and prove all frozen
+  production/documentation hashes remain unchanged. The authorized live
+  `#napcat` test is excluded from rerun.
+- Next checkpoint: Role 1 reviews the consolidated corrected test surface once.
+  Only then may the same executor receive one consolidated production and
+  documentation remediation handoff.
+
+Checkpoint result: PASS. Role 2 changed only the assigned tests and fixtures;
+all 26 frozen production/documentation hashes remained exact and no prewarm
+test or live test ran. The targeted batch produced 14 passing fixture,
+contract, and Brain cases plus 12 inspected red assertions against frozen
+production/docs: six projection mappings, missing-observation protocol
+handling, debug HTTP failure reason, and four substantive documentation
+contracts. Plan-owned deterministic collection found 254 tests; the six live
+files collected 63 without execution; 12 manifest tests, exact-node impact
+validation, affected Ruff, `py_compile`, JavaScript syntax, and diff checks
+passed. Repository-wide collection retained two unrelated missing-module
+errors. Browser fallback retained the two expected frozen-renderer red states
+and passed seven existing debug/stage/error/lifecycle/visual smokes. Role 1
+reviewed and accepted the assertion boundaries; Handoff 3P now extends this
+same tests-first checkpoint before any consolidated production remediation.
+
+### Handoff 3P: Historical Prewarm Regression Inventory And Tests-First Gate
+
+The user required a complete review of prior prewarm repairs before any new
+prewarm test or production change. Role 1 completed that read-only review and
+froze the following chronology and non-regression rules:
+
+1. April Stage 1 (`rag_reply_mention_and_vague_input_plan.md`) diagnosed the
+   current-bot mention as addressing metadata that had been flattened into
+   content and could retrieve unrelated bot-addressed history. Its RAG-slot
+   sanitizer was explicitly a stopgap.
+2. April Stage 2 (`typed_message_envelope_stage2_plan.md`) moved the canonical
+   boundary to `body_text` plus typed mentions and prohibited brain-side
+   platform-wire parsers. The readable `@display_name` representation can
+   still occur in `body_text`, so downstream consumers must distinguish typed
+   active-character addressing from authored retrieval content structurally.
+3. Commit `4b1626a0` introduced the one-attempt first-cognition shared-memory
+   lookup. It used the complete decontextualized input and collapsed worker
+   failures or empty results into an empty RAG payload without a typed
+   disposition.
+4. Commit `01352ca7` replaced the bounded prewarm worker with the full RAG3
+   resolver. Commit `42463e9b` restored the direct
+   `PersistentMemorySearchAgent`, one attempt, shared memory only, and tests
+   forbidding the full resolver and `user_memory_units` lane.
+5. Commit `9210bede` disconnected the prewarm caller during the V2 cutover
+   while helper-only tests remained green. Commit `27da3169` restored one
+   cycle-zero caller, the join, and the cognition carrier. This establishes
+   that helper-only verification is insufficient.
+6. The July mention regression captured in
+   `cognition_core_v2_prewarm_mention_content_query_bugfix_plan.md` showed
+   `@一之濑明日奈 #napcat` entering the worker as one query and centering the
+   generated search on the character name. The initial substring repair
+   damaged longer literals such as `@一之濑明日奈-archive`; commit `3b4edbd7`
+   retained a whitespace-bounded exact-token removal and tests for mention
+   only, non-character mentions, plain character names, and longer literals.
+7. Commit `779ab035` added a V2 in-connector parent-replay guard so that replay
+   reused preparation and did not rerun cycle-zero prewarm. The later V3
+   cutover removed that parent-replay architecture. Current outer service
+   retries are fresh graph attempts with isolated prewarm checkpoints; this
+   remediation preserves that current boundary rather than restoring V2.
+8. Commit `ceecc252` deleted the 506-line caller-level prewarm suite during the
+   cognition projection cutover while retaining the production caller and
+   helper tests. The current plan must restore equivalent caller-to-cognition
+   coverage and keep it mapped in the ownership manifest.
+9. Commit `e5159722` made both normal RAG and prewarm use the same typed memory
+   authority classifier: only active, global, curated/certified shared rows
+   enter; private, scoped, target-bearing, unsupported, and
+   `user_memory_units` rows remain excluded; fact and conditional
+   self-guidance authority remain distinct.
+
+Read-only inspection of the current path found a remaining secondary leak.
+`run_first_cycle_shared_memory_prewarm` sanitizes the worker `task` to
+`#napcat`, but passes the original `prompt_message_context` into
+`build_text_chat_rag_request`. `project_runtime_context_for_llm` retains that
+object, and `PersistentMemorySearchAgent._generator` serializes it into the
+model request. The model therefore still sees
+`body_text="@一之濑明日奈 #napcat"` and a typed bot-mention row containing the
+same display name. Existing tests assert only the sanitized `task` and do not
+inspect this model-visible context.
+
+The same active address has a second model-visible route. Brain ingress commits
+the current conversation row before the service loads `chat_history_recent`
+and `chat_history_wide`. The RAG request adapter forwards those histories, and
+the common worker projection renders them without applying the already-typed
+active-turn row/message identifiers. A prewarm-specific projection must
+therefore exclude current-turn history rows by those exact identifiers while
+preserving every earlier history row; it must not remove character names or
+mentions recursively from authored historical context.
+
+The protected historical trace
+`llmtrace_7177e22b64a84324a3f60481ae184353` has exactly that envelope shape:
+readable body `@一之濑明日奈 #napcat`, raw QQ wire mention
+`[CQ:at,qq=3768713357]`, and a typed bot mention whose global id is the active
+character id. Its cognition prompts contain no shared-memory evidence and the
+visible response asks what `#napcat` means. The old trace does not contain a
+prewarm task, worker result, or disposition, so the exact old internal failure
+mode cannot be reconstructed or relabeled after the fact.
+
+Before any prewarm production edit, the consolidated tests-first checkpoint
+must add and inspect all of these assertions against frozen production:
+
+- parameterized Asuna and Kazusa active-character mentions produce the exact
+  worker task `#napcat`, and the complete model-visible worker payload contains
+  neither the active readable mention nor its display name from the current
+  turn as retrieval content;
+- the prewarm-specific prompt-context copy carries the sanitized body while
+  the source state/envelope remains unchanged;
+- prewarm-specific recent/wide history copies exclude rows matching the typed
+  active-turn conversation-row or platform-message ids, while preserving
+  earlier rows even when those rows legitimately mention the character;
+- a typed mention is treated as structural active-character addressing only
+  when its `global_user_id` matches `character_profile.global_user_id`;
+  participant mentions and other-bot mentions remain authored retrieval
+  content;
+- mention-only, plain-name-subject, non-character/other-bot, and longer-literal
+  cases remain explicit so the earlier substring and over-stripping mistakes
+  cannot return;
+- the prewarm still calls only the direct persistent-memory worker once,
+  preserves literal `#napcat`, admits only certified shared rows, and never
+  enters the full resolver or current-user memory lane;
+- one deterministic caller-to-cognition test uses the historical typed-envelope
+  shape and an exact seeded memory id, without patching away the prewarm
+  boundary, and proves that the merged row reaches cognition input and the
+  finalized outcome carrier;
+- cancellation and later cycles retain their one-attempt and
+  no-fabricated-outcome guarantees; fresh outer graph attempts retain isolated
+  checkpoints and the existing service retry behavior;
+- the historical protected trace export remains read-only evidence, and the
+  already-authorized isolated live DB/LLM test is not rerun during this
+  remediation.
+
+This gate extends Handoff 3T. All observation, console, documentation, fixture,
+and prewarm regression tests must be complete and reviewed together before one
+consolidated production/documentation remediation handoff. Structural mention
+sanitation may alter only the prewarm-specific request projection; it may not
+add name/alias keyword classification, platform syntax parsing, a new LLM
+call, prompt changes, retrieval-worker changes, or semantic post-processing.
+The archived July residuals remain deferred: typed mentions still have no
+occurrence offsets, so generalized punctuation cleanup and ambiguous repeated
+visible-token interpretation require separate captured evidence and scope.
+
+Checkpoint result: PASS. Role 2 changed only the assigned deterministic tests,
+fixtures, and exact ownership-manifest mappings; all 26 frozen production and
+documentation hashes remained exact. The consolidated prewarm batch produced
+19 passes and seven inspected red assertions against frozen production: the
+Asuna/Kazusa prompt-context copies still retained the active readable mention,
+both active-turn history projections retained the current row, the other-bot
+and unproven-bot identity cases exposed the existing over-stripping behavior,
+and the real caller-to-cognition regression retained the unsanitized current
+body. All direct-worker, one-attempt, certified-shared-authority, merge,
+cancellation, later-cycle, source-immutability, older-history, plain-name,
+longer-literal, and non-character-mention assertions passed. The three owned
+files collected 36 deterministic tests; the isolated live prewarm file
+collected one test without execution; 12 manifest tests, impact validation,
+Ruff, `py_compile`, and diff checks passed. Role 1 reviewed and accepted the
+assertion boundaries. Handoffs 3T and 3P now form the complete tests-first red
+checkpoint for one consolidated production and documentation remediation.
+
+## Closure Evidence
+
+Closure review completed on 2026-08-27 under the user's final instruction to
+use source-line and deterministic DOM evidence without screenshots.
+
+### Historical Prewarm Re-verification
+
+- The historical failure is correlated to
+  `llmtrace_7177e22b64a84324a3f60481ae184353`: the `#napcat` turn should have
+  recalled the corresponding shared memory, but the cognition run did not use
+  it. That legacy trace predates worker task/outcome telemetry, so its exact
+  internal prewarm disposition cannot be reconstructed truthfully.
+- The authorized isolated production-path reproduction ran once. Memory unit
+  `seed_7ac6348ccd9bf7a80fbc74584c6b3ce3` was retrieved and merged with
+  `status=completed`, `reason=shared_memory_merged`, retrieved count `1`, and
+  merged count `1`.
+- The prior-fix inventory is covered by deterministic tests: exact typed
+  active-character address removal for both Asuna and Kazusa, exact current-
+  turn history exclusion, preservation of plain names/longer literals/other-
+  bot and unproven mentions, direct persistent-memory worker ownership,
+  one-attempt behavior, typed evidence authority, cancellation, and conditional
+  guidance. No prompt, model, route, retrieval semantics, adapter, or database
+  contract changed.
+
+### Layout And Selection Line Audit
+
+- `src/control_console/static/index.html` has zero diff from pre-plan `HEAD`.
+- `console.css` has no removed or modified baseline rule. Its exact delta is 18
+  added `.observation-*` declarations for approved inspector content. The
+  baseline `.graph-branch-stack` declaration remains exact, with natural
+  height and no `max-height` or `overflow-y` cap.
+- Shell, sidebar, navigation, top bar, content grids, card placement, card
+  widths, rail sizing, inspector placement, and page overflow selectors are
+  unchanged.
+- The JavaScript graph keeps the baseline run-summary -> semantic-summary ->
+  relationship-panel -> graph-body order, fitted producer-column rail, sorted
+  observed columns, lane then label ordering, cognition-first relationship
+  ordering, connector algorithm, and independent per-view pins. The selection
+  path again uses the one baseline `[data-graph-node]` handler and validated
+  pinned-node lookup, adapted only from legacy `id` to canonical `node_id`.
+- The one intentional wrapper-name delta is `graph-node-stack` to the already
+  baseline-styled `graph-branch-stack`; this is the user-directed restoration
+  of the existing 8 px gap between sibling cards. It adds no boundary, cap, or
+  new topology.
+- The three exercised E2E files contain zero screenshot calls or screenshot
+  metadata. Deterministic DOM checks confirm four live/debug column groups,
+  five self groups, equal group/card widths, 12 px rail gaps, 8 px sibling
+  gaps, no nested stage wrappers, reachable nodes, no page-level horizontal
+  overflow, and zero recorded browser console/page errors.
+
+### Final Verification
+
+- resolver/prewarm/observation focused batch: 37 passed;
+- Brain publication, state, progress, and group-scene batch: 40 passed;
+- console contract/client/repository/static/docs batch: 69 passed;
+- deterministic control-console E2E batch: 7 passed;
+- legacy-consumer replacements: 3 passed;
+- exact source-impact validator: 64 of 64 mapped nodes passed;
+- ownership-manifest suite: 12 passed;
+- documentation contract suite: 4 passed;
+- changed production Python compilation, JavaScript syntax, and
+  `git diff --check`: passed;
+- live-LLM supplemental compilation and collection: 63 nodes collected with
+  pytest addopts cleared; no live case was executed during final closure.
+
+### Final Change Radius
+
+- The Change Surface declares every plan-owned source, test, documentation,
+  manifest, registry, and lifecycle path. The previously omitted debug caller,
+  lookup caller, isolated live prewarm, and plan-lifecycle paths are now
+  explicit.
+- Four pre-existing concurrent changes are outside this plan and remain
+  untouched: the three active DSH plans and
+  `tests/test_service_event_logging.py`.
+- `tests/test_conversation_progress_v2_service.py` has staged/unstaged state in
+  the shared worktree but zero net content diff from `HEAD`; it is absent from
+  the final changed-path set.
+- Final deviation: the user superseded the fixed Role 2 binding for the last
+  frontend correction and closure slice. Role 1 performed that bounded work
+  directly, and closure relies on the recorded line audit and deterministic
+  gates rather than a claim of independent review for those final edits.
+
 ## Acceptance Criteria
 
 1. Every live/self Brain cognition observation validates as
@@ -1896,10 +2519,16 @@ remediation handoffs.
    `shared_memory_merged`, retrieved/merged counts, and safe evidence records.
    Skipped, empty, and failed outcomes remain distinguishable and truthful.
    Cancellation propagates and produces no fabricated terminal outcome or
-   observation.
-4. The prewarm outcome reaches the observer without changing prompt-safe
-   evidence authority, retrieval selection, retry behavior, or cognition
-   semantics.
+   observation. The isolated `@character #napcat` verification retrieves and
+   merges memory unit `seed_7ac6348ccd9bf7a80fbc74584c6b3ce3`; the test
+   records the exact failure disposition before any remediation.
+4. The prewarm outcome reaches the observer while preserving prompt-safe
+   evidence authority, worker selection, retry behavior, and cognition
+   semantics. The prewarm-only request projection excludes the typed active
+   character address mention from task and model-visible current-message
+   context and excludes exact typed active-turn rows from its history copies;
+   it preserves other authored mentions, older history, and the source
+   envelope unchanged.
 5. Conversation progress and public group scene render as peer `context`
    sections with identical header, status, summary, fields/records, counts,
    budgets, wrapping, scrolling, and omission treatment.

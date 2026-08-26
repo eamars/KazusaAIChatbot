@@ -297,16 +297,20 @@ The endpoint is process-local and read-only. It must not expose prompts,
 embeddings, raw messages, message envelopes, raw source packets, secrets, or
 unbounded memory content.
 
-The graph is a process-local semantic projection. It excludes prompts, raw
-messages, provider configuration, persistence references, and implementation
-topology. Missing graph telemetry is reported as `null` and never changes
-cognition-facing completion.
+The endpoint returns the process-local strict
+`cognition_run_observation.v1` object. Brain owns its DTO validation, producer
+catalog, source-to-wire mapping, disclosure policy, and UTC-Z serialization.
+Missing observation telemetry is reported as `null` and never changes
+cognition-facing completion. The object excludes prompts, raw model output,
+embeddings, raw messages, message envelopes, database identifiers, adapter
+identifiers, action parameters, handler metadata, and worker error text.
 
-Canonical cognition graph rows may include the bounded current-turn
-`private_monologue` under the active-character goal and the bounded
-`epistemic_boundary` under the response plan for trusted operator inspection.
-The graph remains implementation-agnostic: it exposes no A1, A2, G, or P stage
-nodes and never forwards either field to adapter delivery.
+The observation uses the canonical node and section identifiers, truthful
+counts, bounded `item_XX` records, and only `sequence` or `reference` edges
+with known endpoints. The control console consumes this object in
+validation-only mode; it does not rebuild graph rows, infer semantic fields,
+or become a schema owner. The endpoint remains read-only and process-local,
+not historical persistence.
 
 ### `GET /ops/runtime-status`
 
@@ -778,6 +782,33 @@ adapters cause dispatcher delivery validation to reject or fail callback sends
 according to dispatcher policy.
 
 ## Debug Chat Trace Disclosure
+
+## Canonical Cognition Observation Contract
+
+The process-local operator snapshot carried by the Brain `cognition_graph`
+field is the strict `cognition_run_observation.v1` contract. Brain owns its
+DTOs, labels, section order, producer projection, disclosure policy, and UTC-Z
+serialization. `ChatResponse` and `OpsLatestCognitionGraphResponse` carry the
+typed model directly; latest storage uses a deep copy and remains non-historical.
+
+Live turns and self-cognition use their fixed catalogs. The observation records
+typed RAG evidence, shared-memory prewarm, conversation progress, public group
+scene, cognition, actions, and surfaces. Live publication ends before later
+persistence/consolidation. Self-cognition may include its own consolidation
+artifact. Cancellation publishes no fabricated observation.
+
+The prewarm section preserves one of the fixed dispositions: `worker_unresolved`,
+`worker_contract_invalid`, `projection_failed`, `no_shared_memory`,
+`worker_error`, `shared_memory_ready`, `shared_memory_merged`,
+`empty_query_after_character_mention`, `not_first_cycle`, or
+`unsupported_episode`. Its counts and omission marker are truthful. The
+contract excludes prompts, raw model output, embeddings, raw messages,
+message envelopes, database and adapter identifiers, action parameters,
+handler metadata, and worker error text.
+
+The control console validates this object without semantic reprojection. It
+may add only availability metadata for Overview, Debug, and Self views; it
+does not become a cognition schema owner.
 
 `ChatResponse.trace_id` is the brain-owned protected trace id for the current
 turn. It is populated only for an authorized Control Console Debug Chat request

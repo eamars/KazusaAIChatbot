@@ -2,27 +2,27 @@
 
 from __future__ import annotations
 
-from collections import Counter
-from collections.abc import Mapping
-from datetime import datetime, timezone
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import sys
 import time
+from collections import Counter
+from collections.abc import Mapping
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import pytest
 
+from kazusa_ai_chatbot.brain_service import CognitionRunObservationV1
 from tests.stage3_fresh_database import validate_stage3_environment
 from tests.test_stage3_fresh_database_e2e_live_llm import (
-    _Stage3DebugAdapter,
     _json_safe,
+    _Stage3DebugAdapter,
     _wait_for_trace_run_finalization,
 )
-
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm, pytest.mark.live_db]
 
@@ -985,31 +985,46 @@ async def _seed_context(
 def _extract_private_monologue(
     response_payload: Mapping[str, Any],
 ) -> tuple[str, str]:
-    """Extract one monologue from the canonical response graph node."""
+    """Extract private monologue through the canonical reasoning section."""
 
     cognition_graph = response_payload.get("cognition_graph")
-    if not isinstance(cognition_graph, Mapping):
+    try:
+        observation = CognitionRunObservationV1.model_validate(cognition_graph)
+    except (TypeError, ValueError):
         return "", ""
-    nodes = cognition_graph.get("nodes")
-    if not isinstance(nodes, list):
+    if observation.run_kind != "live_turn":
         return "", ""
     reasoning_nodes = [
         node
-        for node in nodes
-        if isinstance(node, Mapping)
-        and node.get("id") == "l2.reasoning"
+        for node in observation.nodes
+        if node.node_id == "reasoning.context"
     ]
     if len(reasoning_nodes) != 1:
         return "", ""
-    detail = reasoning_nodes[0].get("detail")
-    if not isinstance(detail, Mapping):
+    reasoning_node = reasoning_nodes[0]
+    if "reasoning.subjective" not in reasoning_node.section_refs:
         return "", ""
-    monologue = detail.get("internal_monologue")
-    if not isinstance(monologue, str) or not monologue.strip():
+    subjective_sections = [
+        section
+        for section in observation.sections
+        if section.section_id == "reasoning.subjective"
+    ]
+    if len(subjective_sections) != 1:
+        return "", ""
+    fields = [
+        field
+        for field in subjective_sections[0].fields
+        if field.key == "private_monologue"
+    ]
+    if len(fields) != 1 or not isinstance(fields[0].value, str):
+        return "", ""
+    monologue = fields[0].value.strip()
+    if not monologue:
         return "", ""
     return monologue, (
-        'response.cognition_graph.nodes[id="l2.reasoning"]'
-        ".detail.internal_monologue"
+        'response.cognition_graph.nodes[node_id="reasoning.context"]'
+        '.sections[section_id="reasoning.subjective"]'
+        '.fields[key="private_monologue"].value'
     )
 
 

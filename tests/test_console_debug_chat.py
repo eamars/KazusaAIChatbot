@@ -127,17 +127,29 @@ def test_debug_chat_uses_live_unmanaged_brain_endpoint(
             _ = control_shared_secret
 
         async def send_debug_chat(self, request):
-            return {
-                "request_id": "cc-req-debug",
-                "brain_available": True,
-                "request": request.model_dump(mode="json"),
-                "response": {"messages": [{"text": "hello operator"}]},
-                "tracking_id": "tracking-1",
-                "trace_id": "trace-debug-1",
-                "latency_ms": 12,
-                "sent_at": "2026-06-17T00:00:00+00:00",
-                "error": None,
-            }
+            _ = request
+            from control_console.kazusa_client import KazusaDebugChatResult
+            from kazusa_ai_chatbot.brain_service.cognition_observation_contracts import (
+                CognitionRunObservationV1,
+            )
+            from tests.test_control_console_contracts import (
+                _canonical_live_observation,
+            )
+
+            observation = CognitionRunObservationV1.model_validate(
+                _canonical_live_observation(
+                    run_id="debug-turn-1",
+                    invocation_id="debug-invocation-1",
+                )
+            )
+            return KazusaDebugChatResult(
+                response_payload={
+                    "messages": [{"text": "hello operator"}],
+                    "delivery_tracking_id": "tracking-1",
+                    "trace_id": "trace-debug-1",
+                },
+                cognition_observation=observation,
+            )
 
     monkeypatch.setattr(app_module, "KazusaClient", FakeKazusaClient)
     settings = ControlConsoleSettings(
@@ -165,6 +177,10 @@ def test_debug_chat_uses_live_unmanaged_brain_endpoint(
     assert payload["brain_available"] is True
     assert payload["response"]["messages"][0]["text"] == "hello operator"
     assert payload["trace_id"] == "trace-debug-1"
+    assert payload["cognition_observation"]["availability"] == "available"
+    assert payload["cognition_observation"]["observation"]["correlation"][
+        "run_id"
+    ] == "debug-turn-1"
 
 
 def test_debug_chat_rejects_stale_unowned_brain_conflict(

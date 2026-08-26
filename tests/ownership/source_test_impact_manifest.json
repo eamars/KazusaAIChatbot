@@ -5,6 +5,8 @@
     "src/control_console/contracts.py",
     "src/control_console/kazusa_client.py",
     "src/control_console/app.py",
+    "src/control_console/redaction.py",
+    "src/control_console/repository.py",
     "src/control_console/static/index.html",
     "src/control_console/static/console.js",
     "src/control_console/static/console.css",
@@ -63,7 +65,10 @@
     "src/kazusa_ai_chatbot/nodes/dialog_agent.py",
     "src/kazusa_ai_chatbot/nodes/persona_supervisor2_schema.py",
     "src/kazusa_ai_chatbot/brain_service/post_turn.py",
+    "src/kazusa_ai_chatbot/brain_service/__init__.py",
     "src/kazusa_ai_chatbot/brain_service/contracts.py",
+    "src/kazusa_ai_chatbot/brain_service/cognition_observation_contracts.py",
+    "src/kazusa_ai_chatbot/brain_service/cognition_observation_projection.py",
     "src/kazusa_ai_chatbot/local_context_resolver/service.py",
     "src/kazusa_ai_chatbot/local_context_resolver/stages.py",
     "src/kazusa_ai_chatbot/service.py",
@@ -133,30 +138,64 @@
     {
       "source": "src/control_console/contracts.py",
       "owner": "control-console contract owner",
-      "contract": "strict bounded service, debug, and cognition graph API models",
+      "contract": "strict bounded service/debug models and canonical cognition-observation view envelopes",
       "required_unit_tests": [
-        "tests/test_control_console_contracts.py::test_service_contracts_reject_extra_fields_and_unbounded_strings"
+        "tests/test_control_console_contracts.py::test_service_contracts_reject_extra_fields_and_unbounded_strings",
+        "tests/test_control_console_contracts.py::test_console_response_contract_uses_view_envelopes_for_bootstrap_and_debug"
       ],
       "supplemental_tests": []
     },
     {
       "source": "src/control_console/kazusa_client.py",
       "owner": "control-console client owner",
-      "contract": "bounded semantic cognition graph projection",
+      "contract": "validation-only canonical cognition-observation reads with typed debug results and no secondary projection/fetch",
       "required_unit_tests": [
-        "tests/test_control_console_kazusa_client.py::test_graph_projection_preserves_semantic_cognition_rows"
+        "tests/test_control_console_kazusa_client.py::test_client_validates_canonical_cognition_observation_without_reprojection",
+        "tests/test_control_console_kazusa_client.py::test_client_raises_protocol_error_for_invalid_observation_version",
+        "tests/test_control_console_kazusa_client.py::test_client_rejects_invalid_latest_observation_without_reconstruction",
+        "tests/test_control_console_kazusa_client.py::test_debug_client_returns_direct_response_observation_without_latest_fetch",
+        "tests/test_control_console_kazusa_client.py::test_kazusa_client_reads_health_and_posts_debug_chat",
+        "tests/unit/brain_service/test_cognition_graph_projection.py::test_legacy_cognition_graph_projection_symbols_are_absent_from_production"
       ],
       "supplemental_tests": []
     },
     {
       "source": "src/control_console/app.py",
       "owner": "control-console web API owner",
-      "contract": "bounded bootstrap, overview, lookup, and debug surfaces",
+      "contract": "canonical observation view availability, renamed envelope fields, nested correlation, and validation-only web surfaces",
       "required_unit_tests": [
+        "tests/test_control_console_bootstrap.py::test_bootstrap_wraps_canonical_observations_with_view_metadata",
+        "tests/test_control_console_web_surface.py::test_debug_api_wraps_canonical_observation_without_reprojection",
+        "tests/test_control_console_web_surface.py::test_latest_and_debug_protocol_errors_map_to_exact_view_availability",
+        "tests/test_control_console_stream.py::test_stream_uses_nested_observation_run_id_and_ignores_empty_id",
         "tests/test_control_console_web_surface.py::test_web_api_outputs_for_logs_events_audit_character_and_debug_error"
       ],
       "supplemental_tests": [
+        "tests/control_console_e2e/test_debug_chat_e2e.py::test_debug_chat_sends_to_brain_and_updates_history_and_graph",
+        "tests/test_control_console_bootstrap.py::test_bootstrap_returns_initial_state_session_csrf_services_and_stream_url",
+        "tests/test_control_console_stream.py::test_stream_poll_appends_graph_invalidation_for_new_latest_run",
+        "tests/control_console_e2e/test_stage3_fresh_database_e2e.py::test_stage3_fresh_database_graph_and_debug_handoff"
       ]
+    },
+    {
+      "source": "src/control_console/redaction.py",
+      "owner": "control-console disclosure owner",
+      "contract": "canonical cognition observations bypass legacy semantic reprojection while generic secret redaction remains bounded",
+      "required_unit_tests": [
+        "tests/test_control_console_redaction.py::test_canonical_observation_sections_bypass_legacy_semantic_reprojection",
+        "tests/test_control_console_redaction.py::test_responses_exclude_secrets_prompts_embeddings_env_values_and_raw_messages"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/control_console/repository.py",
+      "owner": "control-console entity-projection owner",
+      "contract": "operational posture consumes the canonical context observation section and preserves console UTC offsets",
+      "required_unit_tests": [
+        "tests/test_control_console_repository.py::test_character_posture_consumes_canonical_context_observation_section",
+        "tests/test_control_console_repository.py::test_repository_operational_panels_accept_console_utc_offset"
+      ],
+      "supplemental_tests": []
     },
     {
       "source": "src/control_console/static/index.html",
@@ -170,22 +209,31 @@
     },
     {
       "source": "src/control_console/static/console.js",
-      "owner": "control-console semantic graph renderer owner",
-      "contract": "absent-safe semantic cognition graph and lookup rendering",
+      "owner": "control-console cognition observation renderer owner",
+      "contract": "section-driven canonical observation renderer, pending/error banners, and removal of legacy field lists",
       "required_unit_tests": [
-        "tests/test_control_console_web_surface.py::test_static_shell_favicon_and_generic_lookup_outputs"
+        "tests/test_control_console_web_surface.py::test_cognition_observation_renderer_uses_contract_labels_and_shared_detail_layout",
+        "tests/test_control_console_web_surface.py::test_renderer_accepts_unknown_producer_section_without_js_catalog",
+        "tests/test_control_console_web_surface.py::test_debug_loading_and_error_states_are_separate_from_cognition_graph",
+        "tests/unit/brain_service/test_cognition_graph_projection.py::test_legacy_cognition_graph_projection_symbols_are_absent_from_production"
       ],
       "supplemental_tests": [
+        "tests/control_console_e2e/test_cognition_observability_e2e.py::test_live_debug_and_self_views_share_observation_section_layout",
+        "tests/control_console_e2e/test_debug_chat_e2e.py::test_debug_chat_click_shows_live_running_state_before_response",
+        "tests/control_console_e2e/test_cognition_observability_e2e.py::test_canonical_sequence_and_reference_edges_render",
+        "tests/control_console_e2e/test_stage3_fresh_database_e2e.py::test_stage3_fresh_database_graph_and_debug_handoff"
       ]
     },
     {
       "source": "src/control_console/static/console.css",
-      "owner": "control-console cognition-chain layout owner",
-      "contract": "responsive bounded cognition-chain panels without horizontal overflow",
+      "owner": "control-console cognition observation visual-system owner",
+      "contract": "shared canonical observation section/record/count/status layout without overflow",
       "required_unit_tests": [
-        "tests/test_control_console_web_surface.py::test_static_shell_favicon_and_generic_lookup_outputs"
+        "tests/test_control_console_web_surface.py::test_cognition_observation_renderer_uses_contract_labels_and_shared_detail_layout"
       ],
-      "supplemental_tests": []
+      "supplemental_tests": [
+        "tests/control_console_e2e/test_cognition_observability_e2e.py::test_prewarm_and_context_sources_render_status_counts_and_omissions"
+      ]
     },
     {
       "source": "src/control_console/brain_model_routes.py",
@@ -661,19 +709,33 @@
     {
       "source": "src/kazusa_ai_chatbot/cognition_resolver/capabilities.py",
       "owner": "cognition_resolver owner",
-      "contract": "capabilities public contract",
+      "contract": "shared-memory prewarm outcomes, one-time evidence merge, and typed active-turn request projection",
       "required_unit_tests": [
         "tests/unit/cognition_resolver/test_capabilities.py::test_capabilities_exposes_owned_contract",
-        "tests/unit/cognition_resolver/test_capabilities.py::test_resolver_observation_evidence_has_typed_authority"
+        "tests/unit/cognition_resolver/test_capabilities.py::test_resolver_observation_evidence_has_typed_authority",
+        "tests/test_shared_memory_prewarm.py::test_first_cycle_prewarm_returns_explicit_outcome_dispositions",
+        "tests/test_shared_memory_prewarm.py::test_merge_shared_memory_prewarm_outcome_counts_projected_entries_and_rejects_repeat_or_invalid_base",
+        "tests/test_shared_memory_prewarm.py::test_first_cycle_prewarm_propagates_cancellation_without_fabricating_terminal_outcome",
+        "tests/test_shared_memory_prewarm.py::test_napcat_character_mention_recalls_and_merges_corresponding_shared_memory[active_asuna]",
+        "tests/test_shared_memory_prewarm.py::test_napcat_character_mention_recalls_and_merges_corresponding_shared_memory[active_kazusa]",
+        "tests/test_shared_memory_prewarm.py::test_prewarm_model_projection_excludes_active_turn_history_rows[active_asuna]",
+        "tests/test_shared_memory_prewarm.py::test_prewarm_model_projection_excludes_active_turn_history_rows[active_kazusa]"
       ],
-      "supplemental_tests": []
+      "supplemental_tests": [
+        "tests/test_local_context_resolver_integration.py::test_first_cycle_prewarm_uses_memory_worker_without_full_resolver",
+        "tests/test_shared_memory_prewarm_live_llm.py::test_production_napcat_command_recalls_seeded_shared_memory"
+      ]
     },
     {
       "source": "src/kazusa_ai_chatbot/cognition_resolver/contracts.py",
       "owner": "resolver contract validator",
-      "contract": "typed capability, observation, evidence, and progress validation",
+      "contract": "resolver contracts plus SharedMemoryPrewarmOutcomeV1 validation",
       "required_unit_tests": [
-        "tests/test_cognition_resolver_contracts.py::test_capability_request_validator_rejects_unknown_kind"
+        "tests/test_cognition_resolver_contracts.py::test_capability_request_validator_rejects_unknown_kind",
+        "tests/test_shared_memory_prewarm.py::test_shared_memory_prewarm_outcome_validator_rejects_invalid_disposition_and_counts",
+        "tests/test_shared_memory_prewarm.py::test_shared_memory_prewarm_outcome_enforces_exact_types_bounds_and_rag_shape",
+        "tests/unit/cognition_resolver/test_capabilities.py::test_capabilities_exposes_owned_contract",
+        "tests/unit/cognition_resolver/test_capabilities.py::test_resolver_observation_evidence_has_typed_authority"
       ],
       "supplemental_tests": []
     },
@@ -761,7 +823,7 @@
     {
       "source": "src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition.py",
       "owner": "nodes owner",
-      "contract": "persona_supervisor2_cognition input binding and canonical typed-memory authority across search and promoted-reflection ingress",
+      "contract": "prewarm outcome state-carriers and graph-attempt checkpoint ownership",
       "required_unit_tests": [
         "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_persona_supervisor2_l3_surface_exposes_owned_contract",
         "tests/unit/nodes/test_persona_supervisor2_cognition_commit.py::test_resolver_recurrence_commits_against_original_user_base",
@@ -772,6 +834,9 @@
         "tests/unit/nodes/test_persona_supervisor2_cognition_commit.py::test_promoted_reflection_context_rejects_incomplete_legacy_certificate",
         "tests/unit/nodes/test_persona_supervisor2_cognition_commit.py::test_promoted_reflection_context_maps_certified_rows_through_typed_memory_contract",
         "tests/unit/nodes/test_persona_supervisor2_cognition_commit.py::test_dialog_semantic_projection_excludes_procedural_provider_metadata",
+        "tests/unit/nodes/test_persona_supervisor2_cognition_commit.py::test_cognition_state_preserves_shared_memory_prewarm_outcome_after_merge",
+        "tests/unit/nodes/test_persona_supervisor2_cognition_commit.py::test_cognition_records_noneligible_prewarm_without_starting_worker",
+        "tests/unit/nodes/test_persona_supervisor2_cognition_commit.py::test_cognition_cancellation_publishes_no_prewarm_outcome_or_observation",
         "tests/test_conversation_progress_cognition_evidence.py::test_cognition_input_receives_exact_current_participant_overused_moves"
       ],
       "supplemental_tests": [
@@ -783,10 +848,11 @@
     {
       "source": "src/kazusa_ai_chatbot/nodes/persona_supervisor2.py",
       "owner": "persona stage owner",
-      "contract": "live stage coordinator propagation and one terminal final commit after resolver recurrence",
+      "contract": "typed group-scene state-carrier propagation and terminal commit",
       "required_unit_tests": [
         "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_l3_surface_preserves_selected_response_operation",
-        "tests/unit/nodes/test_persona_supervisor2_cognition_commit.py::test_persona_character_commit_reads_canonical_state_projection"
+        "tests/unit/nodes/test_persona_supervisor2_cognition_commit.py::test_persona_character_commit_reads_canonical_state_projection",
+        "tests/test_conversation_progress_group_scene.py::test_persona_supervisor_reports_group_scene_success_non_group_and_failure"
       ],
       "supplemental_tests": [
         "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_persona_supervisor2_l3_surface_exposes_owned_contract"
@@ -859,26 +925,68 @@
     {
       "source": "src/kazusa_ai_chatbot/service.py",
       "owner": "brain service cognition graph and runtime owner",
-      "contract": "canonical runtime integration and bounded semantic graph projection",
+      "contract": "canonical cognition observation publication, latest storage, and current-attempt checkpoint propagation",
       "required_unit_tests": [
         "tests/test_conversation_progress_v2_service.py::test_service_load_passes_group_anchor_mode_and_keeps_user_scope",
-        "tests/unit/brain_service/test_cognition_graph_projection.py::test_cognition_graph_projects_subjective_semantics_without_stage_topology"
+        "tests/unit/brain_service/test_cognition_graph_projection.py::test_service_publishes_canonical_observation_without_legacy_graph_helpers",
+        "tests/unit/brain_service/test_cognition_graph_projection.py::test_live_terminal_status_mapping_and_cancellation_are_exact",
+        "tests/unit/brain_service/test_cognition_graph_projection.py::test_failed_run_uses_current_attempt_prewarm_checkpoint",
+        "tests/unit/brain_service/test_cognition_graph_projection.py::test_legacy_cognition_graph_projection_symbols_are_absent_from_production",
+        "tests/test_service_background_consolidation.py::test_chat_response_tracks_deliverable_assistant_row"
+      ],
+      "supplemental_tests": [
+        "tests/test_self_cognition_integration.py::test_prepared_commitment_state_contains_public_group_scene",
+        "tests/test_real_history_personality_fixture_contract.py::test_private_monologue_uses_only_canonical_reasoning_node",
+        "tests/test_real_history_personality_fixture_contract.py::test_private_monologue_fails_closed_when_canonical_node_is_missing"
+      ]
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/brain_service/__init__.py",
+      "owner": "brain-service wire export owner",
+      "contract": "canonical observation DTO exports without projection/runtime leakage",
+      "required_unit_tests": [
+        "tests/unit/cognition_observability/test_contracts.py::test_brain_service_exports_only_canonical_observation_wire_models"
       ],
       "supplemental_tests": []
     },
     {
       "source": "src/kazusa_ai_chatbot/brain_service/contracts.py",
       "owner": "brain-service response contract owner",
-      "contract": "strict bounded health, status, graph, and chat response models",
+      "contract": "strict bounded response and ops status models carrying the canonical cognition observation DTO",
       "required_unit_tests": [
+        "tests/unit/brain_service/test_cognition_graph_projection.py::test_brain_response_contract_uses_canonical_cognition_observation",
         "tests/test_service_ops_status.py::test_ops_runtime_status_merges_config_and_worker_liveness"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/brain_service/cognition_observation_contracts.py",
+      "owner": "brain-service observation wire owner",
+      "contract": "strict frozen cognition_run_observation.v1 DTOs, disclosure, catalog, status, and payload invariants",
+      "required_unit_tests": [
+        "tests/unit/cognition_observability/test_contracts.py::test_observation_contract_rejects_unknown_fields_invalid_references_and_over_budget_payloads",
+        "tests/unit/cognition_observability/test_contracts.py::test_observation_contract_enforces_truthful_record_counts_statuses_and_utc_serialization"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/brain_service/cognition_observation_projection.py",
+      "owner": "brain-service observation projection owner",
+      "contract": "closed live/self source catalog, explicit section/node/edge projection, and truthful observation outcomes",
+      "required_unit_tests": [
+        "tests/unit/cognition_observability/test_projection.py::test_live_projection_reports_all_shared_memory_prewarm_dispositions",
+        "tests/unit/cognition_observability/test_projection.py::test_context_sources_share_one_detail_shape_and_budget",
+        "tests/unit/cognition_observability/test_projection.py::test_live_and_self_projections_share_exact_section_catalog",
+        "tests/unit/cognition_observability/test_projection.py::test_projection_uses_closed_source_field_mapping_and_invalid_row_counts",
+        "tests/unit/cognition_observability/test_projection.py::test_projection_excludes_protected_and_operational_fields",
+        "tests/unit/cognition_observability/test_projection.py::test_projection_emits_only_canonical_sequence_and_reference_edges"
       ],
       "supplemental_tests": []
     },
     {
       "source": "src/kazusa_ai_chatbot/nodes/persona_supervisor2_schema.py",
       "owner": "nodes owner",
-      "contract": "persona_supervisor2_schema public contract",
+      "contract": "typed prewarm and group-scene state carriers",
       "required_unit_tests": [
         "tests/unit/nodes/test_persona_supervisor2_schema.py::test_persona_supervisor2_schema_exposes_owned_contract"
       ],
@@ -1291,9 +1399,10 @@
     {
       "source": "src/kazusa_ai_chatbot/cognition_shared/model_attempt_policy.py",
       "owner": "shared model attempt policy owner",
-      "contract": "bounded V2 protocol attempt reservation arithmetic",
+      "contract": "current graph-attempt prewarm checkpoint ownership",
       "required_unit_tests": [
-        "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_text_surface_services_have_one_semantic_stage"
+        "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_text_surface_services_have_one_semantic_stage",
+        "tests/unit/cognition_shared/test_observation_checkpoint.py::test_prewarm_checkpoint_is_deep_copied_scoped_to_graph_attempt_and_cleared"
       ],
       "supplemental_tests": []
     },

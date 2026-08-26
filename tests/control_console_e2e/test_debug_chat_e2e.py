@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 import sys
+from pathlib import Path
 
 from browser_harness import DEFAULT_E2E_OPERATOR_TOKEN
 from fake_brain import FakeBrainServer, write_conflict_brain_registry
@@ -12,7 +12,6 @@ def test_debug_chat_sends_to_brain_and_updates_history_and_graph(
     unused_tcp_port_factory,
     e2e_console,
     e2e_browser_page,
-    e2e_artifact_dir,
     e2e_summary_writer,
 ) -> None:
     """Verify debug chat UI talks to brain and renders the returned graph."""
@@ -68,27 +67,25 @@ def test_debug_chat_sends_to_brain_and_updates_history_and_graph(
             run_reference = run_summary.locator(".graph-run-reference")
             run_reference.locator("summary").click()
             assert "debug-run-1" in run_reference.inner_text()
-            debug_run_reference_screenshot = (
-                e2e_artifact_dir / "debug_cognition_run_reference.png"
-            )
-            run_reference.screenshot(path=str(debug_run_reference_screenshot))
-            debug_id_screenshot = (
-                e2e_artifact_dir / "debug_chat_id_references.png"
-            )
-            page.screenshot(path=str(debug_id_screenshot), full_page=True)
-            assert page.locator("#debug-cognition-graph .graph-stage-group").count() == 4
-            assert page.locator("#debug-cognition-graph .graph-edge-layer").count() == 0
+            assert page.locator(
+                "#debug-cognition-graph .graph-node[data-node-id]"
+            ).count() == 11
+            assert page.locator(
+                "#debug-cognition-graph [data-edge-kind='sequence']"
+            ).count() >= 1
+            assert page.locator(
+                "#debug-cognition-graph [data-edge-kind='reference']"
+            ).count() >= 1
             debug_graph = page.locator("#debug-cognition-graph")
             debug_graph.locator(
-                "[data-graph-node][data-node-id='l3.visual_directives']"
+                ".graph-node[data-node-id='surface.visual']"
             ).click()
             inspector = debug_graph.locator(
                 "[aria-label='Cognition node detail']"
             )
             inspector_text = inspector.inner_text()
-            assert "Visual directive" in inspector_text
-            assert "focused" in inspector_text
-            assert "toward the screen" in inspector_text
+            assert "Visual directives" in inspector_text
+            assert "Fields" not in inspector_text
             assert "summary" not in inspector_text.casefold()
             assert "status" not in inspector_text.casefold()
             assert "stage" not in inspector_text.casefold()
@@ -130,10 +127,6 @@ def test_debug_chat_sends_to_brain_and_updates_history_and_graph(
                         "debug cognition graph",
                         "brain /chat payload",
                     ],
-                    "screenshots": {
-                        "chat_ids": str(debug_id_screenshot),
-                        "run_reference": str(debug_run_reference_screenshot),
-                    },
                 },
             )
 
@@ -176,7 +169,8 @@ def test_debug_chat_click_shows_live_running_state_before_response(
                 timeout=1000,
             )
             assert page.locator("#debug-send").is_disabled()
-            assert page.locator("#debug-cognition-graph .status-running").count() >= 1
+            assert page.locator("#ui-notice").is_visible()
+            assert page.locator("#debug-cognition-graph [data-node-id]").count() == 0
             assert "slow visible reply probe" in page.locator(
                 "#chat-history",
             ).inner_text()
@@ -186,7 +180,76 @@ def test_debug_chat_click_shows_live_running_state_before_response(
                 timeout=5000,
             )
             assert page.locator("#debug-send").is_enabled()
+            assert page.locator("#ui-notice").is_hidden()
             assert "fake brain reply" in page.locator("#chat-history").inner_text()
+
+
+def test_debug_chat_abort_renders_network_failure_without_graph(
+    tmp_path: Path,
+    unused_tcp_port_factory,
+    e2e_console,
+    e2e_browser_page,
+) -> None:
+    """An aborted debug request should render a safe, recoverable failure."""
+
+    brain_port = unused_tcp_port_factory()
+    with FakeBrainServer(brain_port) as fake_brain:
+        registry_path = write_conflict_brain_registry(
+            path=tmp_path / "brain_conflict_registry.json",
+            fake_brain_base_url=fake_brain.base_url,
+            python_executable=sys.executable,
+        )
+
+        with e2e_console(
+            brain_base_url=fake_brain.base_url,
+            service_registry_path=registry_path,
+        ) as console:
+            page = e2e_browser_page(console.base_url)
+            _login(page)
+            page.locator("[data-page-link='debug']").click()
+            page.locator("input[name='debug_mode'][value='visible_reply']").check()
+            page.locator("textarea[name='message_text']").fill(
+                "aborted network probe"
+            )
+            page.route(
+                "**/api/debug-chat",
+                lambda route: route.abort("aborted"),
+            )
+            page.locator("#debug-send").click()
+
+            page.wait_for_function(
+                """() => [...document.querySelectorAll('#chat-history .message')]
+                  .some(message => message.textContent.includes('debug request failed'))"""
+            )
+            assert page.locator("#debug-cognition-status").inner_text() == (
+                "unavailable"
+            )
+            failure_graph = page.locator("#debug-cognition-graph")
+            assert "debug_request_failed" in failure_graph.inner_text()
+            assert failure_graph.locator("[data-node-id]").count() == 0
+            assert page.locator("#debug-send").is_enabled()
+
+            for availability, reason in (
+                ("unavailable", "brain_unavailable"),
+                ("invalid", "observation_protocol_error"),
+                ("not_reported", "not_reported"),
+            ):
+                page.evaluate(
+                    """view => renderDebugCognitionGraph(view)""",
+                    {
+                        "view_kind": "debug_latest",
+                        "availability": availability,
+                        "reason_code": reason,
+                        "observation": None,
+                    },
+                )
+                assert page.locator("#debug-cognition-status").inner_text() == (
+                    availability.replace("_", " ")
+                )
+                assert reason in failure_graph.inner_text()
+                assert failure_graph.locator("[data-node-id]").count() == 0
+
+            assert page.kazusa_console_messages == []
 
 
 def _login(page) -> None:

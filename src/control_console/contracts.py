@@ -3,13 +3,24 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
+
+from kazusa_ai_chatbot.brain_service.cognition_observation_contracts import (
+    CognitionRunObservationV1,
+)
 
 SERVICE_ID_PATTERN = r"^[a-z0-9][a-z0-9_.-]{0,63}$"
-COGNITION_GRAPH_NODE_ID_PATTERN = r"^[a-z0-9][a-z0-9_.:-]{0,79}$"
+COGNITION_VIEW_REASON_PATTERN = r"^(?:|[a-z][a-z0-9_]{0,79})$"
 SHELL_META_CHARS = frozenset({"&&", "||", ";", "|", ">", "<", "&"})
 DENIED_COMMAND_EXECUTABLES = frozenset({
     "bash",
@@ -138,78 +149,64 @@ class ServiceRuntimeState(StrictModel):
     version: int = 0
 
 
-class CognitionRunGraphNode(StrictModel):
-    """One bounded node in a cognition-run graph snapshot."""
+class ConsoleCognitionObservationView(BaseModel):
+    """Console availability metadata around one Brain observation."""
 
-    id: str = Field(pattern=COGNITION_GRAPH_NODE_ID_PATTERN)
-    label: str = Field(min_length=1, max_length=80)
-    stage: str = Field(min_length=1, max_length=40)
-    lane: str = Field(min_length=1, max_length=40)
-    column: int = Field(ge=1, le=24)
-    category: str = Field(default="", max_length=40)
-    status: Literal[
-        "pending",
-        "running",
-        "completed",
-        "skipped",
-        "failed",
-        "partial",
-        "not_reported",
-    ] = "not_reported"
-    detail: dict[str, Any] = Field(default_factory=dict)
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
-
-class CognitionRunGraphEdge(StrictModel):
-    """One directed edge in a cognition-run graph snapshot."""
-
-    source: str = Field(pattern=COGNITION_GRAPH_NODE_ID_PATTERN)
-    target: str = Field(pattern=COGNITION_GRAPH_NODE_ID_PATTERN)
-    kind: Literal["sequence", "reference"] = "sequence"
-    label: str = Field(default="", max_length=80)
-
-
-class CognitionRunGraphSnapshot(StrictModel):
-    """Reusable graph projection for live or stored cognition runs."""
-
-    source: Literal[
-        "overview_latest",
-        "debug_latest",
-        "self_latest",
-        "historical",
-    ]
-    status: Literal[
-        "not_reported",
-        "running",
-        "completed",
-        "failed",
-        "partial",
-    ] = "not_reported"
-    run_id: str | None = Field(default=None, max_length=120)
-    llm_trace_id: str | None = Field(default=None, max_length=120)
-    cognition_invocation_id: str | None = Field(default=None, max_length=120)
-    source_calendar_run_id: str | None = Field(default=None, max_length=120)
-    generated_at: datetime
-    nodes: list[CognitionRunGraphNode] = Field(default_factory=list, max_length=64)
-    edges: list[CognitionRunGraphEdge] = Field(default_factory=list, max_length=96)
-    redaction: dict[str, Any] = Field(default_factory=dict)
-
-
-class CognitionContextConsumption(StrictModel):
-    """Exact redacted context consumed by the latest cognition graph run."""
-
-    schema_version: Literal["cognition_context_consumption.v1"]
-    status: Literal[
+    view_kind: Literal["overview_latest", "debug_latest", "self_latest"]
+    availability: Literal[
         "available",
-        "partial",
         "not_reported",
         "unavailable",
-        "stale",
-        "degraded",
+        "invalid",
     ]
-    settled_relevance: dict[str, Any] = Field(default_factory=dict)
-    cognition: dict[str, Any] = Field(default_factory=dict)
-    surface: dict[str, Any] = Field(default_factory=dict)
-    health: dict[str, Any] = Field(default_factory=dict)
+    reason_code: str = Field(
+        max_length=80,
+        pattern=COGNITION_VIEW_REASON_PATTERN,
+    )
+    generated_at: datetime
+    observation: CognitionRunObservationV1 | None
+
+    @field_validator("generated_at")
+    @classmethod
+    def _normalize_generated_at(cls, value: datetime) -> datetime:
+        """Require an aware console timestamp normalized to UTC."""
+
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("generated_at must be timezone-aware")
+        return value.astimezone(timezone.utc)
+
+    @field_serializer("generated_at")
+    def _serialize_generated_at(self, value: datetime) -> str:
+        """Serialize console timestamps with the canonical terminal Z."""
+
+        return value.astimezone(timezone.utc).isoformat().replace(
+            "+00:00",
+            "Z",
+        )
+
+    @model_validator(mode="after")
+    def _validate_availability(self) -> ConsoleCognitionObservationView:
+        """Keep availability and observation payloads mutually consistent."""
+
+        if self.availability == "available":
+            if not self.observation or self.reason_code:
+                raise ValueError(
+                    "available observation views require an observation and no reason"
+                )
+            expected_kind = (
+                "self_cognition"
+                if self.view_kind == "self_latest"
+                else "live_turn"
+            )
+            if self.observation.run_kind != expected_kind:
+                raise ValueError("observation run kind does not match view kind")
+        elif self.observation is not None or not self.reason_code:
+            raise ValueError(
+                "non-available observation views require a reason and no observation"
+            )
+        return self
 
 
 class ServiceActionRequest(StrictModel):
@@ -404,7 +401,7 @@ class ConsoleDebugChatResponse(StrictModel):
     latency_ms: int | None
     sent_at: datetime
     error: dict[str, Any] | None = None
-    cognition_graph: CognitionRunGraphSnapshot | None = None
+    cognition_observation: ConsoleCognitionObservationView
 
 
 class ConsoleLookupQuery(StrictModel):
@@ -445,8 +442,8 @@ class ControlConsoleBootstrapResponse(StrictModel):
     services: list[ServiceRuntimeState]
     overview: dict[str, Any]
     health: dict[str, Any]
-    latest_cognition_graph: CognitionRunGraphSnapshot | None = None
-    latest_self_cognition_graph: CognitionRunGraphSnapshot | None = None
+    latest_cognition_observation: ConsoleCognitionObservationView
+    latest_self_cognition_observation: ConsoleCognitionObservationView
     recent_audit_events: list[dict[str, Any]]
     event_counters: dict[str, int]
     ui_capabilities: dict[str, bool]

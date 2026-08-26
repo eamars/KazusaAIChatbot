@@ -115,6 +115,42 @@ environment. Live LLM cases run one at a time with raw output inspected.
 
 ## Forbidden Paths
 
+## Shared-Memory Prewarm Outcome
+
+The first-cycle memory worker returns the typed
+`SharedMemoryPrewarmOutcomeV1` carrier. The resolver owns validation and
+projection of the bounded RAG shape; cognition owns semantic interpretation.
+The fixed reason vocabulary is `worker_unresolved`,
+`worker_contract_invalid`, `projection_failed`, `no_shared_memory`,
+`worker_error`, `shared_memory_ready`, `shared_memory_merged`,
+`empty_query_after_character_mention`, `not_first_cycle`, and
+`unsupported_episode`. A skipped outcome is explicit and does not start a
+worker. A ready outcome exposes retrieved evidence; merge produces the
+`shared_memory_merged` disposition with truthful retrieved and merged counts.
+
+The outcome is copied into the current graph-attempt checkpoint and then into
+the Brain `cognition_run_observation.v1` `evidence.shared_memory_prewarm`
+section. A retry starts with a cleared checkpoint, so stale prewarm evidence
+cannot leak across graph attempts. Cancellation propagates without fabricating
+a terminal outcome.
+
+The validated carrier reports `latency_ms`, `retrieved_count`, and
+`merged_count` as bounded diagnostic counts (the wire model names the latter
+two `retrieved_shared_count` and `merged_shared_count`). The current graph attempt
+owns the checkpoint: recording deep-copies the outcome, binds it to that
+attempt, and clears it when a retry begins. The Brain publisher may
+project the carrier into its observation section, while the resolver never
+publishes raw worker values.
+
+The prewarm-only request projection is structural rather than semantic query
+interpretation. It copies the prompt message context and current-turn
+histories, removes only a typed active-character mention whose bot identity
+matches the active character global id, and excludes the exact active-turn
+history rows. Participant mentions, other bots, unproven bot mentions, older
+history, and longer literal tokens remain source content. The original state
+and envelope remain unchanged, and a query emptied by the typed mention
+becomes the explicit `empty_query_after_character_mention` skipped outcome.
+
 Do not choose a specialist, worker, timeout, checkpoint, delivery target, or
 low-level tool parameter from cognition. Do not make resolver observations into
 persona stance, mutate replacement state, send adapter text, or import

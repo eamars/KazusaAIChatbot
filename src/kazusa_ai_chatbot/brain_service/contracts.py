@@ -11,6 +11,9 @@ from pydantic import (
     PrivateAttr,
 )
 
+from kazusa_ai_chatbot.brain_service.cognition_observation_contracts import (
+    CognitionRunObservationV1,
+)
 from kazusa_ai_chatbot.message_envelope import MentionEntityKind
 
 
@@ -119,13 +122,13 @@ class ChatResponse(BaseModel):
     scheduled_followups: int = 0
     delivery_tracking_id: str = ""
     trace_id: str = ""
-    cognition_graph: dict[str, Any] | None = None
+    cognition_graph: CognitionRunObservationV1 | None = None
     operational_error: OperationalErrorOut | None = None
 
 
 class OpsLatestCognitionGraphResponse(BaseModel):
-    cognition_graph: dict[str, Any] | None = None
-    self_cognition_graph: dict[str, Any] | None = None
+    cognition_graph: CognitionRunObservationV1 | None = None
+    self_cognition_graph: CognitionRunObservationV1 | None = None
 
 
 class DeliveryReceiptRequest(BaseModel):

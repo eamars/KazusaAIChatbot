@@ -40,12 +40,13 @@ post-Plan 2 repository, while retaining every functional gate below.
 ## Fixed Execution Ownership
 
 This coarse draft authorizes planning only. Its post-Plan 2 refinement requires
-explicit user approval and `in_progress` status before production execution.
+explicit user approval and `in_progress` status before the first Phase 1 test
+edit.
 
 | Role | Fixed owner | Responsibility |
 |---|---|---|
 | Architecture and closure | Parent agent | Owns cutover/deletion decisions, consolidated material review, gate interpretation, status, and final closure |
-| Implementation and verification | The persistent `/root/dsh_implementation_worker` subagent on `gpt-5.6-luna`, `max` reasoning, normal execution speed | Owns all production/test edits, deletions, deployment fixtures, test execution, remediation, and pre-handoff self-review |
+| Implementation and verification | The persistent `/root/dsh_implementation_worker` subagent on `gpt-5.6-luna`, `max` reasoning, normal execution speed | Owns all production, test, fixture, and product-documentation edits, deletions, test execution, remediation, and pre-handoff self-review |
 
 The Plan 1/2 Luna worker remains the sole implementation worker and work
 proceeds one plan at a time. The parent stays read-only for production code and
@@ -67,6 +68,47 @@ Process evidence remains limited to working-tree status, owned paths, final
 diff/deletion inventory, exact commands/results, inspected live deployment
 cases, and gate decisions. Runtime security digests remain. General source,
 workspace, and artifact hashing remains outside scope.
+
+## Mandatory Implementation Order
+
+The post-Plan 2 refinement freezes the complete caller/callee, deletion, data,
+configuration, dependency, documentation, and source-to-test change radius
+before implementation begins. Execution then follows these three blocking
+phases across the whole big-bang cutover:
+
+1. **Tests first.** Create, replace, modify, or delete every planned unit,
+   integration, process, static-absence, prewarm, database, live-LLM,
+   real-service, adapter, deployment, and documentation test; all fixtures and
+   test helpers; and every source-to-test manifest row before changing
+   production code. Attempt discovery and collection for the complete frozen
+   matrix. A collection or execution failure may cross the Phase 1 gate only
+   when its recorded cause is the planned absence or presence of a production
+   symbol that the big-bang cutover changes; syntax, fixture, node-ID, and
+   unrelated collection defects are resolved within Phase 1. The Phase 1
+   evidence contains the complete test/deletion diff, exact node inventory,
+   and expected red results mapped to the production contracts or legacy
+   surfaces they govern.
+2. **Production changes second.** After the Phase 1 gate passes, implement the
+   Brain caller, result mapper, background lifecycle, DSH references, database
+   and configuration changes, dependency/package changes, and complete legacy
+   production deletion. Run the Phase 1 tests throughout this phase. Code is
+   ready for documentation when the production diff and deletion inventory
+   are complete, builds and lint pass, and every applicable non-documentation
+   deterministic, process, live-DB, live-LLM, real-service, adapter, and drain
+   rehearsal behavior gate is green on the DSH-only route.
+3. **Documentation last.** After the code-ready gate passes, publish the
+   DSH-only boundary and remove or replace every legacy architecture, ICD,
+   operator, configuration, and usage example in the frozen documentation
+   radius. Then run documentation assertions, link/static checks, the final
+   mapped verification suite, and the closure audit.
+
+Production and documentation paths remain at the captured execution baseline
+during Phase 1. Documentation paths remain at that baseline during Phase 2.
+A phase advances only after its evidence and exit gate are recorded. Any
+change-radius expansion returns execution to Phase 1 for its complete test
+work before the additional production cutover work proceeds. The deployment
+remains one atomic DSH-only release boundary; the three phases govern how that
+single candidate is built.
 
 ## Target Production Boundary
 
@@ -95,7 +137,9 @@ source remains untouched.
 ## Big-Bang Cutover Rules
 
 1. Update the Brain caller, Resolution Controller composition, result mapping,
-   background resume path, tests, configuration, and ICD in one atomic scope.
+   background resume path, tests, configuration, and ICD in one atomic release
+   scope using the mandatory tests-first, production-second,
+   documentation-last order.
 2. Preserve `task_resolution_request` as the Brain-facing action name.
 3. Map validated DSH terminal statuses to the canonical
    `TaskResolutionResultV1` statuses.
@@ -111,9 +155,10 @@ source remains untouched.
    harness design replaced by the accepted DSH/tool path.
 9. Retain only bounded leaf implementations that the Plan 2 tool gateway owns.
    Their old graph/router entry points and vocabularies are deleted.
-10. Remove obsolete prompts, models, state/checkpoint DTOs, accepted-task
-    payload fields, configuration, exports, tests, docs, manifests, scripts,
-    and package dependencies in the same cutover.
+10. Remove obsolete tests and source-to-test manifest rows in Phase 1; remove
+    obsolete prompts, models, state/checkpoint DTOs, accepted-task payload
+    fields, configuration, exports, scripts, and package dependencies in Phase
+    2; remove obsolete docs in Phase 3. All removals ship in the same cutover.
 11. Convert no legacy checkpoint or active graph state into DSH state. New work
     begins on the DSH contract.
 12. Keep historical records only where audit or retention policy requires
@@ -143,18 +188,24 @@ The refined plan must enumerate exact files from these owners:
 | Accepted tasks/background work | Replace legacy graph checkpoint payloads with opaque DSH thread/segment/session/revision references while retaining Kazusa scheduling authority |
 | Cognition handoff | Consume canonical `TaskResolutionResultV1` only; keep cognition judgment and dialog wording ownership unchanged |
 | Database | Add or update only DSH-backed task/thread references needed by the new route; retire legacy runtime reads and indexes according to the approved data disposition |
-| Documentation and test ownership | Publish the DSH-only production boundary and remove legacy examples, test nodes, and manifest rows |
+| Test ownership | Replace legacy test nodes and manifest rows with the complete DSH-only cutover matrix in Phase 1 |
+| Documentation ownership | Publish the DSH-only production boundary and remove legacy examples in Phase 3 after the code-ready gate |
 
 ## Work Blocks And Effort Gates
+
+These blocks are cutover scope groupings rather than chronological edit order.
+Their complete test, fixture, and manifest portions execute in Phase 1; their
+production and deletion portions execute in Phase 2; and their documentation
+portions execute in Phase 3 under the mandatory order above.
 
 | Block | Relative effort | Work | Independent completion gate |
 |---|---|---|---|
 | 1. Final ownership and drain contract | Medium | Freeze caller/callee/deletion/data/config inventory and operational drain | Every active legacy producer/consumer has one cutover disposition and zero legacy work remains at deployment |
 | 2. Brain caller and result mapping | High | Connect `task_resolution_request` to the controller and map terminal/checkpoint/fault outcomes | Inline resolved/partial/clarification/approval/unavailable/failed/deferred paths reach cognition through one canonical result |
 | 3. Background and lifecycle cutover | High | Move accepted-task/background resume, priority, cancellation, restart, and completion to opaque DSH thread/session references | Foreground promotion and background completion resume the same safe DSH session and retain Kazusa scheduling/delivery authority |
-| 4. Legacy design deletion | High | Delete superseded task-resolution, post-selector RAG/internal/external resolver, specialist DAG, and coding harness surfaces | Static imports, package exports, config, tests, docs, and manifests contain no executable legacy route |
+| 4. Legacy design deletion | High | Define legacy test/manifest removal in Phase 1, delete superseded task-resolution, post-selector RAG/internal/external resolver, specialist DAG, and coding harness production surfaces in Phase 2, and remove legacy documentation in Phase 3 | Static tests prove imports, package exports, config, manifests, and production code contain no executable legacy route; final documentation contains no current legacy route |
 | 5. Production fault and behavior validation | High | Validate sidecar absence/restart, Mongo/SQLite recovery, duplicate lease, scope rotation, approval, dialog handoff, and adapter delivery | Real service tests pass on DSH only and faults remain typed without fallback to legacy code |
-| 6. Final deployment and closure | Medium | Execute the approved drain/cutover rehearsal, final deterministic/live suites, docs, and closure audit | All release gates are green on the exact deployment candidate and the parent closes the DSH-only plan |
+| 6. Final deployment and closure | Medium | Complete the Phase 2 drain/cutover rehearsal and code-ready gate, perform the Phase 3 documentation update, then run final deterministic/live suites and the closure audit | All release gates are green on the exact deployment candidate and the parent closes the DSH-only plan |
 
 ## Functional Release Gates
 

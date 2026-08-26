@@ -43,7 +43,9 @@ from control_console.contracts import (
     BrainModelRouteActionResponse,
     BrainModelRouteApplyRequest,
     BrainModelRouteResetRequest,
+    ConsoleCognitionObservationView,
     ConsoleDebugChatRequest,
+    ConsoleDebugChatResponse,
     ConsoleLookupQuery,
     ControlConsoleBootstrapResponse,
     ControlConsoleOperator,
@@ -63,8 +65,8 @@ from control_console.event_monitor import (
     EventMonitor,
 )
 from control_console.kazusa_client import (
+    CognitionObservationProtocolError,
     KazusaClient,
-    not_reported_cognition_graph,
 )
 from control_console.log_store import ProcessLogStore
 from control_console.process_store import ProcessStore
@@ -92,6 +94,10 @@ from control_console.supervisor import (
     ENDPOINT_CONFLICT_MESSAGE,
     ProcessSupervisor,
     ServiceLifecycleError,
+)
+from kazusa_ai_chatbot.brain_service.cognition_observation_contracts import (
+    CognitionObservationSectionV1,
+    CognitionRunObservationV1,
 )
 from kazusa_ai_chatbot.event_logging import repository as event_repository
 
@@ -221,7 +227,7 @@ def create_app(
     )
     stream_buffer = SSEEventBuffer(max_events=100)
     stream_shutdown_event = asyncio.Event()
-    latest_cognition_graph_state: dict[str, str | None] = {
+    latest_cognition_observation_state: dict[str, str | None] = {
         "run_id": None,
         "self_run_id": None,
     }
@@ -344,17 +350,17 @@ def create_app(
             states=states,
             kazusa_client=kazusa_client,
         )
-        latest_cognition_graph = operational_sources[
-            "latest_cognition_graph"
+        latest_cognition_observation = operational_sources[
+            "latest_cognition_observation"
         ]
-        latest_self_cognition_graph = operational_sources[
-            "latest_self_cognition_graph"
+        latest_self_cognition_observation = operational_sources[
+            "latest_self_cognition_observation"
         ]
-        latest_cognition_graph_state["run_id"] = (
-            latest_cognition_graph.run_id
+        latest_cognition_observation_state["run_id"] = _observation_run_id(
+            latest_cognition_observation.observation
         )
-        latest_cognition_graph_state["self_run_id"] = (
-            latest_self_cognition_graph.run_id
+        latest_cognition_observation_state["self_run_id"] = _observation_run_id(
+            latest_self_cognition_observation.observation
         )
         audit_events = [
             event.model_dump(mode="json")
@@ -375,8 +381,8 @@ def create_app(
             health_page=health_page,
             audit_page=audit_page,
             runtime_status=operational_sources["runtime_status"],
-            latest_cognition_graph=latest_cognition_graph,
-            latest_self_cognition_graph=latest_self_cognition_graph,
+            latest_cognition_observation=latest_cognition_observation,
+            latest_self_cognition_observation=latest_self_cognition_observation,
         )
         return page
 
@@ -409,15 +415,17 @@ def create_app(
             states=states,
             kazusa_client=kazusa_client,
         )
-        latest_cognition_graph = operational_sources[
-            "latest_cognition_graph"
+        latest_cognition_observation = operational_sources[
+            "latest_cognition_observation"
         ]
-        latest_self_cognition_graph = operational_sources[
-            "latest_self_cognition_graph"
+        latest_self_cognition_observation = operational_sources[
+            "latest_self_cognition_observation"
         ]
-        latest_cognition_graph_state["run_id"] = latest_cognition_graph.run_id
-        latest_cognition_graph_state["self_run_id"] = (
-            latest_self_cognition_graph.run_id
+        latest_cognition_observation_state["run_id"] = _observation_run_id(
+            latest_cognition_observation.observation
+        )
+        latest_cognition_observation_state["self_run_id"] = (
+            _observation_run_id(latest_self_cognition_observation.observation)
         )
         recent_audit = [
             event.model_dump(mode="json")
@@ -438,8 +446,8 @@ def create_app(
             health_page=health_page,
             audit_page=audit_page,
             runtime_status=operational_sources["runtime_status"],
-            latest_cognition_graph=latest_cognition_graph,
-            latest_self_cognition_graph=latest_self_cognition_graph,
+            latest_cognition_observation=latest_cognition_observation,
+            latest_self_cognition_observation=latest_self_cognition_observation,
         )
         application_identity = await repository.application_identity()
         payload = ControlConsoleBootstrapResponse(
@@ -455,8 +463,8 @@ def create_app(
             services=states,
             overview=overview_page,
             health=health_page,
-            latest_cognition_graph=latest_cognition_graph,
-            latest_self_cognition_graph=latest_self_cognition_graph,
+            latest_cognition_observation=latest_cognition_observation,
+            latest_self_cognition_observation=latest_self_cognition_observation,
             recent_audit_events=audit_page["actions"],
             event_counters={"audit": len(recent_audit), "services": len(states)},
             ui_capabilities={
@@ -900,39 +908,96 @@ def create_app(
                 },
                 request_id=request_id,
             )
-            payload = {
-                "request_id": request_id,
-                "brain_available": False,
-                "request": redact_mapping(request.model_dump(mode="json")),
-                "response": None,
-                "tracking_id": None,
-                "trace_id": "",
-                "delivery_tracking_id": None,
-                "llm_trace_id": "",
-                "latency_ms": None,
-                "sent_at": datetime.now(timezone.utc).isoformat(),
-                "error": {
+            response = ConsoleDebugChatResponse(
+                request_id=request_id,
+                brain_available=False,
+                request=redact_mapping(request.model_dump(mode="json")),
+                response=None,
+                tracking_id=None,
+                trace_id="",
+                delivery_tracking_id=None,
+                llm_trace_id="",
+                latency_ms=None,
+                sent_at=datetime.now(timezone.utc),
+                error={
                     "code": "brain_unavailable",
                     "message": "Brain HTTP endpoint is not available.",
                 },
-                "cognition_graph": not_reported_cognition_graph(
-                    source="debug_latest",
-                    run_id=request_id,
-                    reason="debug chat did not start because brain is unavailable",
-                ).model_dump(mode="json"),
-            }
-            return payload
+                cognition_observation=_cognition_observation_view(
+                    view_kind="debug_latest",
+                    availability="unavailable",
+                    reason_code="brain_unavailable",
+                    observation=None,
+                    generated_at=datetime.now(timezone.utc),
+                ),
+            )
+            return response.model_dump(mode="json")
 
         try:
-            payload = await kazusa_client.send_debug_chat(request)
-            stream_buffer.append(
-                "control.cognition_graph_invalidated",
-                {
-                    "source": "debug_latest",
-                    "run_id": payload.get("tracking_id") or payload.get("request_id"),
-                },
+            result = await kazusa_client.send_debug_chat(request)
+            observation = result.cognition_observation
+            if observation is None:
+                availability = "not_reported"
+                reason_code = "brain_not_reported"
+            else:
+                availability = "available"
+                reason_code = ""
+                run_id = _observation_run_id(observation)
+                if run_id:
+                    stream_buffer.append(
+                        "control.cognition_graph_invalidated",
+                        {
+                            "source": "debug_latest",
+                            "run_id": run_id,
+                        },
+                    )
+            response_payload = result.response_payload
+            tracking_id = response_payload.get("delivery_tracking_id")
+            trace_id = response_payload.get("trace_id", "")
+            response = ConsoleDebugChatResponse(
+                request_id=request_id,
+                brain_available=True,
+                request=redact_mapping(request.model_dump(mode="json")),
+                response=response_payload,
+                tracking_id=tracking_id,
+                trace_id=trace_id if isinstance(trace_id, str) else "",
+                delivery_tracking_id=tracking_id,
+                llm_trace_id=trace_id if isinstance(trace_id, str) else "",
+                latency_ms=None,
+                sent_at=datetime.now(timezone.utc),
+                error=None,
+                cognition_observation=_cognition_observation_view(
+                    view_kind="debug_latest",
+                    availability=availability,
+                    reason_code=reason_code,
+                    observation=observation,
+                    generated_at=datetime.now(timezone.utc),
+                ),
             )
-        except httpx.HTTPError as exc:
+            return response.model_dump(mode="json")
+        except CognitionObservationProtocolError:
+            response = ConsoleDebugChatResponse(
+                request_id=request_id,
+                brain_available=True,
+                request=redact_mapping(request.model_dump(mode="json")),
+                response=None,
+                tracking_id=None,
+                trace_id="",
+                delivery_tracking_id=None,
+                llm_trace_id="",
+                latency_ms=None,
+                sent_at=datetime.now(timezone.utc),
+                error={"code": "observation_contract_invalid"},
+                cognition_observation=_cognition_observation_view(
+                    view_kind="debug_latest",
+                    availability="invalid",
+                    reason_code="observation_contract_invalid",
+                    observation=None,
+                    generated_at=datetime.now(timezone.utc),
+                ),
+            )
+            return response.model_dump(mode="json")
+        except httpx.HTTPError:
             audit_writer.write_event(
                 event_type="debug_chat_unavailable",
                 operator_id=operator.operator_id,
@@ -943,25 +1008,30 @@ def create_app(
                 },
                 request_id=request_id,
             )
-            payload = {
-                "request_id": request_id,
-                "brain_available": False,
-                "request": redact_mapping(request.model_dump(mode="json")),
-                "response": None,
-                "tracking_id": None,
-                "trace_id": "",
-                "delivery_tracking_id": None,
-                "llm_trace_id": "",
-                "latency_ms": None,
-                "sent_at": datetime.now(timezone.utc).isoformat(),
-                "error": {"code": "brain_unavailable", "message": str(exc)},
-                "cognition_graph": not_reported_cognition_graph(
-                    source="debug_latest",
-                    run_id=request_id,
-                    reason="debug chat failed before cognition telemetry was reported",
-                ).model_dump(mode="json"),
-            }
-        return payload
+            response = ConsoleDebugChatResponse(
+                request_id=request_id,
+                brain_available=False,
+                request=redact_mapping(request.model_dump(mode="json")),
+                response=None,
+                tracking_id=None,
+                trace_id="",
+                delivery_tracking_id=None,
+                llm_trace_id="",
+                latency_ms=None,
+                sent_at=datetime.now(timezone.utc),
+                error={
+                    "code": "brain_unavailable",
+                    "message": "Brain HTTP endpoint is not available.",
+                },
+                cognition_observation=_cognition_observation_view(
+                    view_kind="debug_latest",
+                    availability="unavailable",
+                    reason_code="debug_request_failed",
+                    observation=None,
+                    generated_at=datetime.now(timezone.utc),
+                ),
+            )
+            return response.model_dump(mode="json")
 
     @app.get("/api/lookups/memory")
     async def lookup_memory(
@@ -1109,7 +1179,7 @@ def create_app(
 
         lookup_query = ConsoleLookupQuery.model_validate({"limit": limit})
         states = _all_service_states(app_supervisor, services)
-        latest_context_consumption = await _latest_context_consumption(
+        latest_context_section = await _latest_context_section(
             states=states,
             kazusa_client=kazusa_client,
         )
@@ -1123,7 +1193,7 @@ def create_app(
         )
         payload = await repository.character_entity(
             current_timestamp_utc=datetime.now(timezone.utc).isoformat(),
-            latest_context_consumption=latest_context_consumption,
+            latest_context_section=latest_context_section,
             include_operational_context=True,
             limit=lookup_query.limit,
         )
@@ -1264,7 +1334,7 @@ def create_app(
                 supervisor=app_supervisor,
                 services=services,
                 kazusa_client=kazusa_client,
-                latest_cognition_graph_state=latest_cognition_graph_state,
+                latest_cognition_graph_state=latest_cognition_observation_state,
                 interval_seconds=app_settings.sse_interval_seconds,
             ),
             media_type="text/event-stream",
@@ -1496,10 +1566,14 @@ async def _append_cognition_graph_invalidation_if_changed(
 
     try:
         latest_graph = await kazusa_client.get_latest_cognition_graph()
-    except (AttributeError, httpx.HTTPError):
+    except (
+        AttributeError,
+        httpx.HTTPError,
+        CognitionObservationProtocolError,
+    ):
         return previous_run_id
 
-    latest_run_id = latest_graph.run_id
+    latest_run_id = _observation_run_id(latest_graph)
     if not latest_run_id:
         return previous_run_id
     if latest_run_id and latest_run_id != previous_run_id:
@@ -1523,10 +1597,14 @@ async def _append_self_cognition_graph_invalidation_if_changed(
 
     try:
         latest_graph = await kazusa_client.get_latest_self_cognition_graph()
-    except (AttributeError, httpx.HTTPError):
+    except (
+        AttributeError,
+        httpx.HTTPError,
+        CognitionObservationProtocolError,
+    ):
         return previous_run_id
 
-    latest_run_id = latest_graph.run_id
+    latest_run_id = _observation_run_id(latest_graph)
     if not latest_run_id:
         return previous_run_id
     if latest_run_id != previous_run_id:
@@ -2284,12 +2362,71 @@ def _service_config_environment() -> dict[str, str]:
     return environment
 
 
+def _cognition_observation_view(
+    *,
+    view_kind: Literal["overview_latest", "debug_latest", "self_latest"],
+    availability: Literal[
+        "available",
+        "not_reported",
+        "unavailable",
+        "invalid",
+    ],
+    reason_code: str,
+    observation: CognitionRunObservationV1 | None,
+    generated_at: datetime,
+) -> ConsoleCognitionObservationView:
+    """Build one validated console envelope around a Brain observation."""
+
+    return ConsoleCognitionObservationView(
+        view_kind=view_kind,
+        availability=availability,
+        reason_code=reason_code,
+        observation=observation,
+        generated_at=generated_at,
+    )
+
+
+def _observation_run_id(
+    observation: CognitionRunObservationV1 | None,
+) -> str | None:
+    """Return the non-empty run id from a canonical observation correlation."""
+
+    if observation is None:
+        return None
+    value = observation.correlation.run_id
+    return value if value else None
+
+
+def _observation_view_from_result(
+    *,
+    view_kind: Literal["overview_latest", "debug_latest", "self_latest"],
+    observation: CognitionRunObservationV1 | None,
+) -> ConsoleCognitionObservationView:
+    """Build an available or not-reported view from one nullable result."""
+
+    if observation is None:
+        return _cognition_observation_view(
+            view_kind=view_kind,
+            availability="not_reported",
+            reason_code="brain_not_reported",
+            observation=None,
+            generated_at=datetime.now(timezone.utc),
+        )
+    return _cognition_observation_view(
+        view_kind=view_kind,
+        availability="available",
+        reason_code="",
+        observation=observation,
+        generated_at=datetime.now(timezone.utc),
+    )
+
+
 async def _load_operational_sources(
     *,
     states: list[Any],
     kazusa_client: Any,
 ) -> dict[str, Any]:
-    """Load live brain owner sources for console projections."""
+    """Load live Brain owner sources and typed observation envelopes."""
 
     brain_record = _service_state_record(states, service_id="brain")
     brain_state = _service_actual_state(brain_record)
@@ -2318,52 +2455,95 @@ async def _load_operational_sources(
         brain_health = {"status": "unavailable", "reason": reason}
         runtime_status = {"status": "unavailable", "reason": reason}
 
-    latest_cognition_graph = not_reported_cognition_graph(
-        source="overview_latest",
-    )
-    latest_self_cognition_graph = not_reported_cognition_graph(
-        source="self_latest",
-    )
-    if brain_http_available:
-        try:
-            latest_cognition_graph = (
-                await kazusa_client.get_latest_cognition_graph()
-            )
-        except (AttributeError, httpx.HTTPError) as exc:
-            latest_cognition_graph = not_reported_cognition_graph(
-                source="overview_latest",
-                reason=(
-                    "brain latest cognition graph unavailable: "
-                    f"{exc}"
-                ),
-            )
-        try:
-            latest_self_cognition_graph = (
-                await kazusa_client.get_latest_self_cognition_graph()
-            )
-        except (AttributeError, httpx.HTTPError) as exc:
-            latest_self_cognition_graph = not_reported_cognition_graph(
-                source="self_latest",
-                reason=(
-                    "brain latest self-cognition graph unavailable: "
-                    f"{exc}"
-                ),
-            )
-    sources = {
+    if not brain_http_available:
+        latest_cognition_observation = _cognition_observation_view(
+            view_kind="overview_latest",
+            availability="unavailable",
+            reason_code="brain_unavailable",
+            observation=None,
+            generated_at=datetime.now(timezone.utc),
+        )
+        latest_self_cognition_observation = _cognition_observation_view(
+            view_kind="self_latest",
+            availability="unavailable",
+            reason_code="brain_unavailable",
+            observation=None,
+            generated_at=datetime.now(timezone.utc),
+        )
+    else:
+        latest_cognition_observation = await _load_observation_view(
+            kazusa_client=kazusa_client,
+            view_kind="overview_latest",
+            getter_name="get_latest_cognition_graph",
+        )
+        latest_self_cognition_observation = await _load_observation_view(
+            kazusa_client=kazusa_client,
+            view_kind="self_latest",
+            getter_name="get_latest_self_cognition_graph",
+        )
+    return {
         "brain_health": brain_health,
         "runtime_status": runtime_status,
-        "latest_cognition_graph": latest_cognition_graph,
-        "latest_self_cognition_graph": latest_self_cognition_graph,
+        "latest_cognition_observation": latest_cognition_observation,
+        "latest_self_cognition_observation": latest_self_cognition_observation,
     }
-    return sources
 
 
-async def _latest_context_consumption(
+async def _load_observation_view(
+    *,
+    kazusa_client: Any,
+    view_kind: Literal["overview_latest", "debug_latest", "self_latest"],
+    getter_name: str,
+) -> ConsoleCognitionObservationView:
+    """Map one nullable Brain read into its exact console availability view."""
+
+    try:
+        getter = getattr(kazusa_client, getter_name)
+        observation = await getter()
+    except CognitionObservationProtocolError:
+        return _cognition_observation_view(
+            view_kind=view_kind,
+            availability="invalid",
+            reason_code="observation_contract_invalid",
+            observation=None,
+            generated_at=datetime.now(timezone.utc),
+        )
+    except (AttributeError, httpx.HTTPError):
+        return _cognition_observation_view(
+            view_kind=view_kind,
+            availability="unavailable",
+            reason_code="brain_unavailable",
+            observation=None,
+            generated_at=datetime.now(timezone.utc),
+        )
+    return _observation_view_from_result(
+        view_kind=view_kind,
+        observation=observation,
+    )
+
+
+def _context_section(
+    observation: CognitionRunObservationV1,
+    section_id: str,
+) -> CognitionObservationSectionV1 | None:
+    """Return one canonical section by its producer-owned identifier."""
+
+    return next(
+        (
+            section
+            for section in observation.sections
+            if section.section_id == section_id
+        ),
+        None,
+    )
+
+
+async def _latest_context_section(
     *,
     states: list[Any],
     kazusa_client: Any,
-) -> dict[str, Any]:
-    """Read the exact latest public graph consumption when Brain is live."""
+) -> CognitionObservationSectionV1 | None:
+    """Read the latest canonical context section without reprojecting it."""
 
     brain_record = _service_state_record(states, service_id="brain")
     brain_state = _service_actual_state(brain_record)
@@ -2372,54 +2552,14 @@ async def _latest_context_consumption(
         brain_state,
         last_error_preview=brain_error,
     ):
-        return {
-            "status": "stale",
-            "reason_code": "brain_unavailable",
-        }
+        return None
     try:
-        graph = await kazusa_client.get_latest_cognition_graph()
-    except (AttributeError, httpx.HTTPError):
-        return {
-            "status": "unavailable",
-            "reason_code": "latest_graph_unavailable",
-        }
-    context = _context_consumption_from_graph(graph)
-    run_id = getattr(graph, "run_id", None)
-    generated_at = getattr(graph, "generated_at", None)
-    payload: dict[str, Any] = {
-        "status": "not_reported",
-        "reason_code": "context_not_reported",
-    }
-    if isinstance(run_id, str) and run_id:
-        payload["run_id"] = run_id
-    if isinstance(generated_at, datetime):
-        payload["generated_at"] = generated_at.isoformat()
-    if not context:
-        return payload
-    context_status = context.get("status")
-    if isinstance(context_status, str):
-        payload["status"] = context_status
-    payload["context"] = context
-    payload.pop("reason_code")
-    return payload
-
-
-def _context_consumption_from_graph(graph: Any) -> dict[str, Any]:
-    """Extract the source-owned context payload without reconstructing it."""
-
-    raw_nodes = getattr(graph, "nodes", None)
-    if not isinstance(raw_nodes, list):
-        return {}
-    for node in raw_nodes:
-        detail = getattr(node, "detail", None)
-        if isinstance(node, Mapping):
-            detail = node.get("detail")
-        if not isinstance(detail, Mapping):
-            continue
-        context = detail.get("context_consumption")
-        if isinstance(context, Mapping):
-            return dict(context)
-    return {}
+        observation = await kazusa_client.get_latest_cognition_graph()
+    except (AttributeError, httpx.HTTPError, CognitionObservationProtocolError):
+        return None
+    if observation is None:
+        return None
+    return _context_section(observation, "reasoning.context_consumption")
 
 
 def _project_health_page(
@@ -2555,8 +2695,8 @@ def _project_overview_page(
     states: list[Any],
     health_page: dict[str, Any],
     audit_page: dict[str, Any],
-    latest_cognition_graph: Any,
-    latest_self_cognition_graph: Any,
+    latest_cognition_observation: ConsoleCognitionObservationView,
+    latest_self_cognition_observation: ConsoleCognitionObservationView,
     runtime_status: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Project only bounded cross-owner aggregates for Overview."""
@@ -2667,39 +2807,30 @@ def _project_overview_page(
     ][:5]
     recent_failures = (service_failures + audit_failures)[:5]
 
-    graph_items: list[dict[str, Any]] = []
-    for graph_kind, graph in (
-        (
-            "conversation",
-            latest_cognition_graph,
-        ),
-        (
-            "self_cognition",
-            latest_self_cognition_graph,
-        ),
-    ):
-        graph_payload = graph.model_dump(mode="json")
-        if graph_payload.get("status") == "not_reported":
-            continue
-        graph_items.append({
-            "graph_kind": graph_kind,
-            "graph": graph_payload,
-        })
-
-    cognition_graphs_panel = _console_panel(
-        status="available" if graph_items else "empty",
-        items=graph_items,
+    observation_items = [
+        {
+            "observation_kind": "conversation",
+            "view": latest_cognition_observation.model_dump(mode="json"),
+        },
+        {
+            "observation_kind": "self_cognition",
+            "view": latest_self_cognition_observation.model_dump(mode="json"),
+        },
+    ]
+    observation_available = any(
+        item["view"]["availability"] == "available"
+        for item in observation_items
+    )
+    cognition_observations_panel = _console_panel(
+        status="available" if observation_available else "empty",
+        items=observation_items,
         reason=(
             ""
-            if graph_items
-            else "no cognition run graphs have been reported"
+            if observation_available
+            else "no cognition observations have been reported"
         ),
     )
-    if graph_items:
-        # The cognition graph projector already enforces its semantic
-        # allowlist. Preserve approved detail text instead of applying the
-        # generic console text-preview limit a second time.
-        cognition_graphs_panel["items"] = graph_items
+    cognition_observations_panel["items"] = observation_items
 
     panels = {
         "service_summary": _console_panel(
@@ -2725,16 +2856,16 @@ def _project_overview_page(
                 else "no recent state-changing operator actions"
             ),
         ),
-        "cognition_graphs": cognition_graphs_panel,
+        "cognition_observations": cognition_observations_panel,
     }
     page = {
         "status": _console_page_status(panels),
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "latest_cognition_graph": latest_cognition_graph.model_dump(
-            mode="json",
+        "latest_cognition_observation": (
+            latest_cognition_observation.model_dump(mode="json")
         ),
-        "latest_self_cognition_graph": latest_self_cognition_graph.model_dump(
-            mode="json",
+        "latest_self_cognition_observation": (
+            latest_self_cognition_observation.model_dump(mode="json")
         ),
         "panels": panels,
     }
@@ -2853,6 +2984,16 @@ def _all_service_states(supervisor: Any, services: dict[str, Any]) -> list[Any]:
         }
         for service in services.values()
     ]
+    if hasattr(supervisor, "service_state") and "brain" in services:
+        try:
+            brain_state = supervisor.service_state("brain")
+        except (AttributeError, KeyError):
+            brain_state = None
+        if brain_state is not None:
+            states = [
+                brain_state if state.get("id") == "brain" else state
+                for state in states
+            ]
     return states
 
 

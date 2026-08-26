@@ -336,6 +336,17 @@ actions, deliver messages, schedule work, or reopen cognition.
 
 ## Public Entrypoints
 
+## Observation Carriers
+
+Persona state carries the typed shared-memory prewarm outcome and the explicit
+`public_group_scene_context` plus
+`public_group_scene_projection_status` values. Group scenes distinguish a
+successful rendered context, a non-group turn, and
+`projection_unavailable` without changing cognition semantics. These carriers
+are projected by Brain into the canonical `cognition_run_observation.v1`
+sections; the console consumes the published sections and does not reconstruct
+them.
+
 - `persona_supervisor2.persona_supervisor2(...)`
 - `persona_supervisor2.stage_1_goal_resolver(...)`
 - `persona_supervisor2_cognition.build_cognition_input_from_global_state(...)`

@@ -385,30 +385,23 @@ the dialog payload. With no corresponding `executed` permitted-action result,
 surface and dialog express only a verbal acceptance, refusal, proposal,
 invitation, or intent; they do not render an external effect as completed.
 
-The control-console cognition graph exposes the same selected-detail widget in
-Overview Latest, Debug cognition, and the dedicated latest self-cognition
-Overview panel. The
-selected fields are semantic rather than generic status rows: queued-turn
-`input` and useful `reply_context`; the response `decision` and `reasoning`; L2
-reasoning, retrieval/evidence, continuity/progress/commitments, and action
-decisions/results/continuations; the four actual L3 visual-directive lists; and
-the final visible `messages`. The separate `l3.visual_directives` node remains
-grey/dashed with the existing terminated rendering when the visual gate is
-disabled. An enabled empty result is shown as completed with an explicit empty
-state. Long approved text and ordered lists are available through the
-scrollable inspector; prompts, raw model output, embeddings, message
-envelopes, and operational identifiers remain excluded.
+The control-console cognition observation view exposes one generic selected-
+section widget in Overview Latest, Debug cognition, and the dedicated latest
+self-cognition Overview panel. Each view consumes the Brain-owned
+`cognition_run_observation.v1` object and resolves node `section_refs` in
+producer order. It renders producer labels, section status and summary,
+ordered fields and records, truthful displayed/reported counts, and explicit
+omission markers. Additive producer sections require no JavaScript catalog.
+Long approved text, CJK, emoji, multiline values, and HTML-sensitive text are
+rendered through text-safe escaping; prompts, raw model output, embeddings,
+message envelopes, and operational identifiers remain excluded.
 
-The `l2.reasoning.detail.context_consumption` graph field is the only latest
-turn-consumption source used by the Character operational-posture panel. Its
-schema is `cognition_context_consumption.v1`; the brain creates it from the
-immutable turn snapshot and actual V2 cognition/L3 inputs, and the console
-only transports and renders it. The projection includes bounded consumed
-character posture, current-user relationship bands, source-labelled style
-roles, and typed predecessor/stage/attempt health. It excludes user/channel
-identifiers, relationship ids, raw text, evidence references, prompts, and
-private facts. When the brain is unavailable, stale, or did not emit the
-field, the panel states that status rather than reconstructing a substitute.
+The `reasoning.context_consumption` section is the only latest turn-consumption
+source used by the Character operational-posture panel. Brain creates the
+already-safe section from the immutable turn snapshot and actual cognition/
+surface inputs; the console only validates, transports, and renders it. When
+Brain is unavailable, did not report it, or sends an invalid contract, the
+panel states that availability instead of reconstructing a substitute.
 
 The Character page additionally shows all persisted and elapsed-effective
 native affect/pressure rows, source and view digests, and whether ordinary
@@ -1136,6 +1129,8 @@ pytest -m live_llm tests/test_cognition_live_llm.py::test_live_msg_decontextuali
 pytest -m live_llm tests/test_coding_agent_full_workflow_integration_live_llm.py::test_live_gate_01_read_only_question_from_l2d_to_worker -q -s
 ```
 
+live LLM cases remain isolated from deterministic contract and browser checks.
+
 Live DB tests can be run explicitly when MongoDB is available:
 
 ```bash
@@ -1144,6 +1139,30 @@ pytest -m live_db -q
 
 Live LLM tests write inspection traces to `test_artifacts/llm_traces/`, which
 is ignored by git.
+
+### Cognition observation and browser verification
+
+Brain publication and console views use one strict
+`cognition_run_observation.v1` contract. Run deterministic contract,
+projection, service, console, and documentation tests first, then collect the
+browser suites with `--collect-only` before execution. Browser verification
+must inspect Overview, Debug, and Self Latest in the in-app browser when
+available, or the repository Playwright harness otherwise. Check exact section
+and node order, additive producer sections, status/count/omission rendering,
+loading/error separation, CJK/emoji/multiline text, HTML escaping, and empty
+page/console error logs. The acceptance result must contain zero page or console error logs. Live LLM cases remain one-at-a-time and are not part
+of the deterministic browser contract. The browser cases live under
+`tests/control_console_e2e`.
+
+The strict v1 boundary is Brain-owned: `CognitionRunObservationV1` is
+validated, frozen, extra-forbid, UTC-Z serialized, and bounded before
+publication. Its live/self producer catalogs, `sequence`/`reference` edges,
+`item_01`–`item_24` record keys, disclosure exclusions, truthful counts, and
+131072-character payload budget are contract checks. The
+`evidence.shared_memory_prewarm` section keeps the fixed worker/merge
+dispositions and does not expose raw worker output. The console adds only
+validation-only availability metadata and renders additive producer sections
+generically; it is not a second schema owner.
 
 ## Current Notes
 

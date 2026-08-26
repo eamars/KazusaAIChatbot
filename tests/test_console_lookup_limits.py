@@ -19,23 +19,54 @@ def test_lookup_routes_enforce_pagination_redaction_and_no_embeddings(
 
     from fastapi.testclient import TestClient
 
+    from control_console import app as app_module
     from control_console import repository as repository_module
     from control_console.app import create_app
     from control_console.auth import hash_operator_token
     from control_console.settings import ControlConsoleSettings
+    from kazusa_ai_chatbot.brain_service.cognition_observation_contracts import (
+        CognitionObservationSectionV1,
+    )
+
+    latest_section = CognitionObservationSectionV1(
+        section_id="reasoning.context_consumption",
+        label="Context consumption",
+        category="context",
+        presentation="records",
+        status="not_reported",
+        summary="",
+        fields=[],
+        records=[],
+        reported_record_count=0,
+        displayed_record_count=0,
+        truncated=False,
+    )
+
+    async def latest_context_section(*, states, kazusa_client):
+        _ = states, kazusa_client
+        return latest_section
+
+    monkeypatch.setattr(
+        app_module,
+        "_latest_context_section",
+        latest_context_section,
+    )
 
     async def character_entity(
         self,
         *,
         current_timestamp_utc: str | None = None,
-        latest_context_consumption: dict | None = None,
+        latest_context_section: CognitionObservationSectionV1 | None = None,
         include_operational_context: bool = False,
         limit: int = 25,
     ):
         _ = self
         assert current_timestamp_utc
-        assert isinstance(latest_context_consumption, dict)
-        assert isinstance(latest_context_consumption.get("status"), str)
+        assert latest_context_section is not None
+        assert latest_context_section.section_id == (
+            "reasoning.context_consumption"
+        )
+        assert latest_context_section.status == "not_reported"
         assert include_operational_context is True
         assert limit == 5
         return {

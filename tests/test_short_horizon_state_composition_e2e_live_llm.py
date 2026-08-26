@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
 import sys
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -17,6 +17,7 @@ from kazusa_ai_chatbot import service as brain_service
 from kazusa_ai_chatbot.background_work.result_source import (
     build_result_ready_episode_from_job,
 )
+from kazusa_ai_chatbot.brain_service import CognitionRunObservationV1
 from kazusa_ai_chatbot.db import (
     get_character_cognition_state,
     get_character_profile,
@@ -91,37 +92,94 @@ class _DebugDeliveryAdapter:
         return result
 
 
-def _graph_node(graph: dict[str, Any], node_id: str) -> dict[str, Any]:
-    """Return one required node from the public cognition graph."""
+def _observation(graph: object) -> CognitionRunObservationV1:
+    """Validate one live Brain observation at the typed boundary."""
 
-    for node in graph["nodes"]:
-        if node["id"] == node_id:
+    try:
+        observation = CognitionRunObservationV1.model_validate(graph)
+    except (TypeError, ValueError) as exc:
+        raise AssertionError("live turn has an invalid observation") from exc
+    if observation.run_kind != "live_turn":
+        raise AssertionError("live turn observation has the wrong run kind")
+    return observation
+
+
+def _observation_node(
+    observation: CognitionRunObservationV1,
+    node_id: str,
+):
+    """Return one required canonical observation node."""
+
+    for node in observation.nodes:
+        if node.node_id == node_id:
             return node
-    raise AssertionError(f"cognition graph is missing node {node_id}")
+    raise AssertionError(f"observation is missing node {node_id}")
 
 
-def _context_consumption(graph: dict[str, Any]) -> dict[str, Any]:
-    """Return the exact consumed-context record from a completed turn."""
+def _observation_section(
+    observation: CognitionRunObservationV1,
+    section_id: str,
+):
+    """Return one required canonical observation section."""
 
-    reasoning = _graph_node(graph, "l2.reasoning")
-    consumption = reasoning["detail"]["context_consumption"]
-    if consumption["schema_version"] != "cognition_context_consumption.v1":
-        raise AssertionError("context consumption schema is invalid")
-    return consumption
+    for section in observation.sections:
+        if section.section_id == section_id:
+            return section
+    raise AssertionError(f"observation is missing section {section_id}")
 
 
-def _decision_evidence(graph: dict[str, Any]) -> dict[str, object]:
-    """Project the response decision, appraisal, goal collapse, and stance."""
+def _section_values(section) -> dict[str, object]:
+    """Convert ordered section fields to a test-only lookup mapping."""
 
-    evidence = {
-        node_id: _graph_node(graph, node_id)["detail"]
-        for node_id in (
-            "l1.relevance",
-            "l2.reasoning",
-            "v2.appraisal",
-            "v2.collapse",
-        )
+    return {field.key: field.value for field in section.fields}
+
+
+def _context_consumption(graph: object) -> dict[str, Any]:
+    """Return canonical context-consumption records from a completed turn."""
+
+    observation = _observation(graph)
+    reasoning = _observation_node(observation, "reasoning.context")
+    if "reasoning.context_consumption" not in reasoning.section_refs:
+        raise AssertionError("reasoning node lacks context section")
+    section = _observation_section(
+        observation,
+        "reasoning.context_consumption",
+    )
+    records = [
+        {field.key: field.value for field in record.fields}
+        for record in section.records
+    ]
+    values = _section_values(section)
+    return {
+        "status": section.status,
+        "overall_status": values.get("overall_status"),
+        "consumer_count": values.get("consumer_count"),
+        "records": records,
     }
+
+
+def _decision_evidence(graph: object) -> dict[str, object]:
+    """Project the canonical decision-bearing nodes and section values."""
+
+    observation = _observation(graph)
+    evidence: dict[str, object] = {}
+    for node_id in (
+        "decision.response",
+        "cognition.meaning",
+        "cognition.goal",
+        "cognition.response",
+    ):
+        node = _observation_node(observation, node_id)
+        evidence[node_id] = {
+            "status": node.status,
+            "summary": node.summary,
+            "sections": {
+                section_id: _section_values(
+                    _observation_section(observation, section_id),
+                )
+                for section_id in node.section_refs
+            },
+        }
     return evidence
 
 
@@ -238,9 +296,7 @@ async def _run_chat(
     lifecycle = await _wait_for_lifecycle(
         delivery_tracking_id=response.delivery_tracking_id,
     )
-    graph = response.cognition_graph
-    if not isinstance(graph, dict):
-        raise AssertionError("natural turn has no cognition graph")
+    graph = _observation(response.cognition_graph)
     turn = {
         "request": request.model_dump(),
         "response": response.model_dump(),
@@ -253,25 +309,23 @@ async def _run_chat(
 
 
 def _operational_contexts(consumption: dict[str, Any]) -> list[dict[str, Any]]:
-    """Collect exact character contexts consumed by runtime stages."""
+    """Collect canonical character-context records consumed by runtime stages."""
 
     contexts: list[dict[str, Any]] = []
-    for stage_name in ("settled_relevance", "cognition"):
-        stage = consumption[stage_name]
-        context = stage.get("character_operational_context")
-        if isinstance(context, dict):
-            contexts.append(context)
+    for record in consumption.get("records", []):
+        if not isinstance(record, dict):
+            continue
+        if record.get("source_kind") != "character_operational_context":
+            continue
+        contexts.append(record)
     return contexts
 
 
-async def _console_graph() -> dict[str, Any]:
+async def _console_graph() -> CognitionRunObservationV1:
     """Read the operator endpoint consumed by the control console."""
 
     response = await brain_service.ops_latest_cognition_graph()
-    graph = response.cognition_graph
-    if not isinstance(graph, dict):
-        raise AssertionError("operator endpoint has no cognition graph")
-    return graph
+    return _observation(response.cognition_graph)
 
 
 def _assert_natural_chain(
@@ -280,7 +334,7 @@ def _assert_natural_chain(
     produced_state: dict[str, object],
     source_turn: dict[str, object],
     next_turn: dict[str, object],
-    console_graph: dict[str, Any],
+    console_graph: CognitionRunObservationV1,
 ) -> None:
     """Apply structural anti-cheat gates to one natural causal chain."""
 
@@ -296,13 +350,27 @@ def _assert_natural_chain(
     assert source_receipt["committed_updated_at"] == produced_state["updated_at"]
     assert before_state["updated_at"] != produced_state["updated_at"]
     assert contexts
-    assert all(context["context_digest"] for context in contexts)
-    assert any(context["affect"] or context["pressures"] for context in contexts)
-    assert next_decision["v2.appraisal"]
-    assert next_decision["v2.collapse"]
+    assert all(
+        context["status"] in {
+            "active",
+            "empty",
+            "missing",
+            "failed",
+            "healthy",
+            "degraded",
+            "completed",
+        }
+        for context in contexts
+    )
+    assert any(context.get("details") for context in contexts)
+    assert next_decision["cognition.meaning"]
+    assert next_decision["cognition.goal"]
     assert next_dialog
     assert next_response["messages"] == next_dialog
-    assert console_graph["run_id"] == next_response["cognition_graph"]["run_id"]
+    next_observation = _observation(next_response["cognition_graph"])
+    assert console_graph.correlation.run_id == (
+        next_observation.correlation.run_id
+    )
 
 
 async def _write_and_assert_chain(

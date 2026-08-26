@@ -889,9 +889,18 @@ async def test_prepared_commitment_state_contains_public_group_scene(
     assert captured_state["interaction_style_context"] is style_snapshot
     assert len(captured_scope_identity) == 1
     run_record = artifacts[models.ARTIFACT_RUN_RECORD]
-    self_graph = service._build_self_cognition_cognition_graph(artifacts)
-    assert self_graph is not None
-    assert self_graph["run_id"] == run_record["run_id"]
+    service._clear_latest_cognition_graph()
+    await service._publish_self_cognition_latest_graph(artifacts)
+    latest = await service.ops_latest_cognition_graph()
+    observation = latest.self_cognition_graph
+    assert observation is not None
+    assert observation.correlation.run_id == run_record["run_id"]
+    group_scene = next(
+        section
+        for section in observation.sections
+        if section.section_id == "context.public_group_scene"
+    )
+    assert group_scene.status == "not_reported"
     assert captured_scope_identity[0] == (
         run_record["run_id"],
         "self_cognition",

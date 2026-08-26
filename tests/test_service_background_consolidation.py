@@ -508,6 +508,11 @@ def _patch_chat_dependencies(
         AsyncMock(),
     )
     monkeypatch.setattr(
+        service_module.event_logging,
+        "record_queue_intake_event",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
         service_module,
         "save_conversation",
         AsyncMock(return_value="conversation-row-1"),
@@ -908,6 +913,11 @@ async def test_chat_response_tracks_deliverable_assistant_row(monkeypatch):
         "_run_consolidation_background",
         AsyncMock(),
     )
+    monkeypatch.setattr(
+        service_module,
+        "_run_internal_monologue_residue_record_background",
+        AsyncMock(),
+    )
     _patch_chat_dependencies(monkeypatch, _FakeGraph(_graph_result()))
 
     response = await service_module.chat(
@@ -920,17 +930,25 @@ async def test_chat_response_tracks_deliverable_assistant_row(monkeypatch):
     assert response.delivery_tracking_id
     assert response.cognition_graph is not None
     graph = response.cognition_graph
-    assert graph["run_id"] == response.delivery_tracking_id
-    assert graph["status"] == "completed"
-    node_ids = {node["id"] for node in graph["nodes"]}
+    assert graph.correlation.run_id
+    assert graph.status == "completed"
+    node_ids = {node.node_id for node in graph.nodes}
     assert {"reasoning.context", "evidence.memory", "action.results"} <= node_ids
-    edge_kinds = {edge["kind"] for edge in graph["edges"]}
+    edge_kinds = {edge.kind for edge in graph.edges}
     assert edge_kinds <= {"sequence", "reference"}
-    graph_text = repr(graph)
-    assert "test" in graph_text
-    assert "PROVIDE" in graph_text
-    assert "CONFIRM" in graph_text
-    detail_text = repr([node["detail"] for node in graph["nodes"]])
+    subjective = next(
+        section
+        for section in graph.sections
+        if section.section_id == "reasoning.subjective"
+    )
+    subjective_values = {
+        field.key: field.value
+        for field in subjective.fields
+    }
+    assert subjective_values["character_intent"] == "PROVIDE"
+    assert subjective_values["logical_stance"] == "CONFIRM"
+    assert "internal_monologue" not in subjective_values
+    detail_text = repr(graph.model_dump(mode="json")["sections"])
     assert "prompt" not in detail_text
     assert "embedding" not in detail_text
     save_assistant_message.assert_awaited_once()
@@ -939,8 +957,8 @@ async def test_chat_response_tracks_deliverable_assistant_row(monkeypatch):
 
     latest = await service_module.ops_latest_cognition_graph()
     assert latest.cognition_graph is not None
-    assert latest.cognition_graph["run_id"] == response.delivery_tracking_id
-    assert latest.cognition_graph["nodes"] == graph["nodes"]
+    assert latest.cognition_graph.correlation.run_id == graph.correlation.run_id
+    assert latest.cognition_graph.nodes == graph.nodes
     await _reset_queue_state()
 
 

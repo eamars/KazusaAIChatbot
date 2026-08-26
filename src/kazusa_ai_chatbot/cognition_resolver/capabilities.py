@@ -15,13 +15,16 @@ from openai import OpenAIError
 from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.cognition_episode import GoalContinuationRefV1
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
+    MAX_SHARED_MEMORY_PREWARM_LATENCY_MS,
     RESOLVER_EVIDENCE_STATE_VERSION,
     RESOLVER_OBSERVATION_VERSION,
     ResolverCapabilityRequestV1,
     ResolverObservationV1,
     ResolverValidationError,
+    SharedMemoryPrewarmOutcomeV1,
     validate_resolver_capability_request,
     validate_resolver_observation,
+    validate_shared_memory_prewarm_outcome,
 )
 from kazusa_ai_chatbot.cognition_shared.contracts import (
     EVIDENCE_SOURCE_QUESTION_IDS,
@@ -293,40 +296,85 @@ async def run_rag_evidence_for_persona_state(
     return return_value
 
 
+def build_skipped_shared_memory_prewarm_outcome(
+    reason_code: Literal["not_first_cycle", "unsupported_episode"],
+) -> SharedMemoryPrewarmOutcomeV1:
+    """Build the canonical outcome for a prewarm that was not eligible."""
+
+    if reason_code not in {"not_first_cycle", "unsupported_episode"}:
+        raise ResolverValidationError("prewarm skip reason is invalid")
+    outcome = _build_shared_memory_prewarm_outcome(
+        status="skipped",
+        reason_code=reason_code,
+        attempted=False,
+        latency_ms=0,
+        rag_result=_empty_projected_rag_result(),
+    )
+    return outcome
+
+
+def _build_shared_memory_prewarm_outcome(
+    *,
+    status: str,
+    reason_code: str,
+    attempted: bool,
+    latency_ms: int,
+    rag_result: Mapping[str, object],
+    retrieved_shared_count: int = 0,
+    merged_shared_count: int = 0,
+) -> SharedMemoryPrewarmOutcomeV1:
+    """Validate one internal prewarm candidate before exposing it to state."""
+
+    candidate = {
+        "schema_version": "shared_memory_prewarm_outcome.v1",
+        "status": status,
+        "reason_code": reason_code,
+        "attempted": attempted,
+        "latency_ms": latency_ms,
+        "retrieved_shared_count": retrieved_shared_count,
+        "merged_shared_count": merged_shared_count,
+        "rag_result": dict(rag_result),
+    }
+    validated = validate_shared_memory_prewarm_outcome(candidate)
+    return_value = validated
+    return return_value
+
+
+def _prewarm_elapsed_ms(started_at: float) -> int:
+    """Return monotonic prewarm latency clipped to its diagnostic bound."""
+
+    elapsed = time.perf_counter() - started_at
+    elapsed_ms = int(max(0.0, elapsed) * MILLISECONDS_PER_SECOND)
+    bounded_elapsed_ms = min(elapsed_ms, MAX_SHARED_MEMORY_PREWARM_LATENCY_MS)
+    return_value = bounded_elapsed_ms
+    return return_value
+
+
 async def run_first_cycle_shared_memory_prewarm(
     state: GlobalPersonaState,
-) -> dict[str, Any]:
-    """Return a projected RAG payload with shared persistent memory evidence.
+) -> SharedMemoryPrewarmOutcomeV1:
+    """Run one bounded shared-memory prewarm and retain its disposition.
 
     Args:
         state: Persona state after decontextualization and resolver input
             initialization.
 
     Returns:
-        A normal ``rag_result`` shape containing only shared memory evidence, or
-        the empty projected RAG payload when retrieval does not produce safe
-        shared rows.
+        A validated outcome whose RAG payload contains only safe shared-memory
+        evidence and whose disposition describes the worker and projection.
     """
 
+    started_at = time.perf_counter()
     empty_rag_result = _empty_projected_rag_result(state)
-    prewarm_task = state["decontextualized_input"]
-    prompt_message_context = state["prompt_message_context"]
-    for mention in prompt_message_context["mentions"]:
-        if not isinstance(mention, Mapping):
-            continue
-        if mention.get("entity_kind") != "bot":
-            continue
-        display_name = mention.get("display_name")
-        if not isinstance(display_name, str) or not display_name.strip():
-            continue
-        mention_token = f"@{display_name.strip()}"
-        mention_pattern = re.compile(
-            rf"(?<!\S){re.escape(mention_token)}(?!\S)"
-        )
-        prewarm_task = mention_pattern.sub("", prewarm_task, count=1)
-    prewarm_task = prewarm_task.strip()
+    prewarm_task, prompt_message_context = _prewarm_request_projection(state)
     if not prewarm_task:
-        return_value = empty_rag_result
+        return_value = _build_shared_memory_prewarm_outcome(
+            status="skipped",
+            reason_code="empty_query_after_character_mention",
+            attempted=False,
+            latency_ms=0,
+            rag_result=empty_rag_result,
+        )
         return return_value
 
     rag_request = build_text_chat_rag_request(
@@ -336,8 +384,14 @@ async def run_first_cycle_shared_memory_prewarm(
         user_profile=state["user_profile"],
         prompt_message_context=prompt_message_context,
         channel_topic=state["channel_topic"],
-        chat_history_recent=state["chat_history_recent"],
-        chat_history_wide=state["chat_history_wide"],
+        chat_history_recent=_prewarm_history_projection(
+            state["chat_history_recent"],
+            state,
+        ),
+        chat_history_wide=_prewarm_history_projection(
+            state["chat_history_wide"],
+            state,
+        ),
         reply_context=state["reply_context"],
         indirect_speech_context=state["indirect_speech_context"],
         conversation_progress=state.get("conversation_progress"),
@@ -354,31 +408,67 @@ async def run_first_cycle_shared_memory_prewarm(
         )
     except (OpenAIError, DatabaseBackendError, TimeoutError) as exc:
         logger.warning(f"Shared memory prewarm worker failed: {exc}")
-        return_value = empty_rag_result
+        return_value = _build_shared_memory_prewarm_outcome(
+            status="failed",
+            reason_code="worker_error",
+            attempted=True,
+            latency_ms=_prewarm_elapsed_ms(started_at),
+            rag_result=empty_rag_result,
+        )
         return return_value
 
-    if not isinstance(worker_result, dict):
-        return_value = empty_rag_result
+    if not isinstance(worker_result, Mapping):
+        return_value = _build_shared_memory_prewarm_outcome(
+            status="failed",
+            reason_code="worker_contract_invalid",
+            attempted=True,
+            latency_ms=_prewarm_elapsed_ms(started_at),
+            rag_result=empty_rag_result,
+        )
         return return_value
-    if worker_result.get("resolved") is not True:
-        return_value = empty_rag_result
+    resolved = worker_result.get("resolved")
+    if not isinstance(resolved, bool):
+        return_value = _build_shared_memory_prewarm_outcome(
+            status="failed",
+            reason_code="worker_contract_invalid",
+            attempted=True,
+            latency_ms=_prewarm_elapsed_ms(started_at),
+            rag_result=empty_rag_result,
+        )
+        return return_value
+    if resolved is False:
+        return_value = _build_shared_memory_prewarm_outcome(
+            status="empty",
+            reason_code="worker_unresolved",
+            attempted=True,
+            latency_ms=_prewarm_elapsed_ms(started_at),
+            rag_result=empty_rag_result,
+        )
         return return_value
 
     raw_rows = worker_result.get("result")
     if not isinstance(raw_rows, list):
-        return_value = empty_rag_result
+        return_value = _build_shared_memory_prewarm_outcome(
+            status="failed",
+            reason_code="worker_contract_invalid",
+            attempted=True,
+            latency_ms=_prewarm_elapsed_ms(started_at),
+            rag_result=empty_rag_result,
+        )
         return return_value
 
     shared_rows = _shared_memory_prewarm_rows(raw_rows)
     if not shared_rows:
-        return_value = empty_rag_result
+        return_value = _build_shared_memory_prewarm_outcome(
+            status="empty",
+            reason_code="no_shared_memory",
+            attempted=True,
+            latency_ms=_prewarm_elapsed_ms(started_at),
+            rag_result=empty_rag_result,
+        )
         return return_value
 
     summary = _shared_memory_prewarm_summary(shared_rows)
-    if not summary:
-        return_value = empty_rag_result
-        return return_value
-
     known_facts = [
         {
             "slot": rag_request["original_query"],
@@ -388,55 +478,192 @@ async def run_first_cycle_shared_memory_prewarm(
             "raw_result": shared_rows,
         }
     ]
-    rag_result = project_known_facts(
-        known_facts,
-        current_user_id=rag_request["current_user_id"],
-        character_user_id=rag_request["character_user_id"],
-        answer="",
-        unknown_slots=[],
-        loop_count=0,
-    )
-    rag_result["user_memory_unit_candidates"] = []
-    rag_result["recall_evidence"] = []
-    rag_result["conversation_evidence"] = []
-    rag_result["external_evidence"] = []
-    return_value = rag_result
+    try:
+        rag_result = project_known_facts(
+            known_facts,
+            current_user_id=rag_request["current_user_id"],
+            character_user_id=rag_request["character_user_id"],
+            answer="",
+            unknown_slots=[],
+            loop_count=0,
+        )
+        rag_result["user_memory_unit_candidates"] = []
+        rag_result["recall_evidence"] = []
+        rag_result["conversation_evidence"] = []
+        rag_result["external_evidence"] = []
+        retrieved_shared_count = len(rag_result["memory_evidence"])
+        if retrieved_shared_count == 0:
+            return_value = _build_shared_memory_prewarm_outcome(
+                status="empty",
+                reason_code="no_shared_memory",
+                attempted=True,
+                latency_ms=_prewarm_elapsed_ms(started_at),
+                rag_result=empty_rag_result,
+            )
+        else:
+            return_value = _build_shared_memory_prewarm_outcome(
+                status="completed",
+                reason_code="shared_memory_ready",
+                attempted=True,
+                latency_ms=_prewarm_elapsed_ms(started_at),
+                retrieved_shared_count=retrieved_shared_count,
+                rag_result=rag_result,
+            )
+    except (KeyError, TypeError, ValueError, ResolverValidationError) as exc:
+        logger.warning(f"Shared memory prewarm projection failed: {exc}")
+        return_value = _build_shared_memory_prewarm_outcome(
+            status="failed",
+            reason_code="projection_failed",
+            attempted=True,
+            latency_ms=_prewarm_elapsed_ms(started_at),
+            rag_result=empty_rag_result,
+        )
     return return_value
 
 
-def merge_shared_memory_prewarm_result(
+def _prewarm_request_projection(
+    state: GlobalPersonaState,
+) -> tuple[str, dict[str, Any]]:
+    """Copy and structurally project the active-character request for prewarm."""
+
+    prompt_message_context = deepcopy(state["prompt_message_context"])
+    character_profile = state["character_profile"]
+    character_global_user_id = character_profile.get("global_user_id")
+    if not isinstance(character_global_user_id, str) or not character_global_user_id:
+        return state["decontextualized_input"].strip(), prompt_message_context
+
+    prewarm_task = state["decontextualized_input"]
+    mentions = prompt_message_context.get("mentions", [])
+    projected_mentions: list[object] = []
+    if not isinstance(mentions, list):
+        mentions = []
+    for mention in mentions:
+        if not isinstance(mention, Mapping):
+            projected_mentions.append(mention)
+            continue
+        is_active_character = (
+            mention.get("entity_kind") == "bot"
+            and isinstance(mention.get("global_user_id"), str)
+            and bool(mention.get("global_user_id"))
+            and mention.get("global_user_id") == character_global_user_id
+        )
+        display_name = mention.get("display_name")
+        if (
+            not is_active_character
+            or not isinstance(display_name, str)
+            or not display_name.strip()
+        ):
+            projected_mentions.append(mention)
+            continue
+        mention_token = f"@{display_name.strip()}"
+        mention_pattern = re.compile(
+            rf"(?<!\S){re.escape(mention_token)}(?!\S)"
+        )
+        prewarm_task = mention_pattern.sub("", prewarm_task, count=1)
+        body_text = prompt_message_context.get("body_text")
+        if isinstance(body_text, str):
+            prompt_message_context["body_text"] = mention_pattern.sub(
+                "",
+                body_text,
+                count=1,
+            ).strip()
+    prompt_message_context["mentions"] = projected_mentions
+    return prewarm_task.strip(), prompt_message_context
+
+
+def _prewarm_history_projection(
+    history: list[dict[str, Any]],
+    state: GlobalPersonaState,
+) -> list[dict[str, Any]]:
+    """Copy history and omit only typed active-turn message or row IDs."""
+
+    platform_message_ids = set(_prewarm_active_turn_ids(
+        state,
+        "active_turn_platform_message_ids",
+    ))
+    current_message_id = text_or_empty(state.get("platform_message_id"))
+    if current_message_id:
+        platform_message_ids.add(current_message_id)
+    conversation_row_ids = set(_prewarm_active_turn_ids(
+        state,
+        "active_turn_conversation_row_ids",
+    ))
+    projected: list[dict[str, Any]] = []
+    for row in deepcopy(history):
+        platform_message_id = text_or_empty(row.get("platform_message_id"))
+        conversation_row_id = text_or_empty(row.get("conversation_row_id"))
+        if (
+            platform_message_id in platform_message_ids
+            or conversation_row_id in conversation_row_ids
+        ):
+            continue
+        projected.append(row)
+    return projected
+
+
+def _prewarm_active_turn_ids(
+    state: GlobalPersonaState,
+    field_name: str,
+) -> list[str]:
+    """Collect typed active-turn IDs from state and episode origin metadata."""
+
+    values = _string_list(state.get(field_name))
+    episode = state.get("cognitive_episode")
+    if isinstance(episode, Mapping):
+        origin_metadata = episode.get("origin_metadata")
+        if isinstance(origin_metadata, Mapping):
+            for value in _string_list(origin_metadata.get(field_name)):
+                if value not in values:
+                    values.append(value)
+    return values
+
+
+def merge_shared_memory_prewarm_outcome(
     base_rag_result: dict[str, Any],
-    prewarm_rag_result: dict[str, Any],
-) -> dict[str, Any]:
-    """Append prompt-safe shared-memory evidence to an existing RAG payload.
+    outcome: SharedMemoryPrewarmOutcomeV1,
+) -> tuple[dict[str, Any], SharedMemoryPrewarmOutcomeV1]:
+    """Append one validated shared-memory outcome to the caller's RAG state.
 
     Args:
         base_rag_result: Existing cognition RAG payload.
-        prewarm_rag_result: Projected prewarm payload returned by
-            ``run_first_cycle_shared_memory_prewarm``.
+        outcome: Ready prewarm outcome whose evidence is appended in source
+            order and then finalized as merged.
 
     Returns:
-        The base payload unchanged when no shared evidence is present, or a
-        shallow copy with valid prewarm memory evidence appended.
+        A deep-copied merged RAG payload and its finalized merged outcome.
     """
 
-    prewarm_memory_evidence = _shared_memory_evidence_from_rag_result(
-        prewarm_rag_result,
-    )
-    if not prewarm_memory_evidence:
-        return_value = base_rag_result
-        return return_value
+    validated_outcome = validate_shared_memory_prewarm_outcome(outcome)
+    if (
+        validated_outcome["status"] != "completed"
+        or validated_outcome["reason_code"] != "shared_memory_ready"
+    ):
+        raise ResolverValidationError("prewarm_outcome_not_ready")
+    if not isinstance(base_rag_result, Mapping):
+        raise ResolverValidationError("base_rag_result_invalid")
+    if (
+        "memory_evidence" in base_rag_result
+        and not isinstance(base_rag_result["memory_evidence"], list)
+    ):
+        raise ResolverValidationError("base_rag_result_invalid")
+    prewarm_memory_evidence = validated_outcome["rag_result"][
+        "memory_evidence"
+    ]
+    base_memory_evidence = base_rag_result.get("memory_evidence", [])
+    if not isinstance(base_memory_evidence, list):
+        raise ResolverValidationError("base_rag_result_invalid")
+    merged_memory_evidence = deepcopy(base_memory_evidence)
+    merged_memory_evidence.extend(deepcopy(prewarm_memory_evidence))
 
-    base_memory_evidence = base_rag_result.get("memory_evidence")
-    if isinstance(base_memory_evidence, list):
-        merged_memory_evidence = list(base_memory_evidence)
-    else:
-        merged_memory_evidence = []
-    merged_memory_evidence.extend(prewarm_memory_evidence)
-
-    merged = dict(base_rag_result)
+    merged = deepcopy(dict(base_rag_result))
     merged["memory_evidence"] = merged_memory_evidence
-    return_value = merged
+    finalized_candidate = deepcopy(dict(validated_outcome))
+    finalized_candidate["reason_code"] = "shared_memory_merged"
+    finalized_candidate["merged_shared_count"] = len(prewarm_memory_evidence)
+    finalized_outcome = validate_shared_memory_prewarm_outcome(
+        finalized_candidate
+    )
+    return_value = merged, finalized_outcome
     return return_value
 
 
@@ -1100,7 +1327,9 @@ def _mapping_list_items(value: object) -> list[dict[str, object]]:
     return items
 
 
-def _empty_projected_rag_result(_state: GlobalPersonaState) -> dict[str, Any]:
+def _empty_projected_rag_result(
+    _state: GlobalPersonaState | None = None,
+) -> dict[str, Any]:
     """Build the normal projected empty RAG payload."""
 
     rag_result = {
@@ -1320,26 +1549,6 @@ def _local_context_time_context_from_state(
     if current_local_weekday and "local_weekday" not in time_context:
         time_context["local_weekday"] = current_local_weekday
     return time_context
-
-
-def _shared_memory_evidence_from_rag_result(
-    rag_result: dict[str, Any],
-) -> list[dict[str, Any]]:
-    """Return only shared memory evidence from a projected RAG payload."""
-
-    raw_memory_evidence = rag_result.get("memory_evidence")
-    if not isinstance(raw_memory_evidence, list):
-        memory_evidence: list[dict[str, Any]] = []
-        return memory_evidence
-    memory_evidence = [
-        dict(item)
-        for item in raw_memory_evidence
-        if (
-            isinstance(item, dict)
-            and text_or_empty(item.get("source_system")) != "user_memory_units"
-        )
-    ]
-    return memory_evidence
 
 
 def _shared_memory_prewarm_rows(rows: list[Any]) -> list[dict[str, Any]]:

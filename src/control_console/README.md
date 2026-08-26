@@ -95,57 +95,36 @@ summary is intentionally compact: configurable state, apply behavior, and
 field count only. Full field metadata is loaded on demand through the generic
 service config route.
 
-`GET /api/bootstrap` returns `latest_cognition_graph` and
-`latest_self_cognition_graph`. Its `overview` field uses the same five-panel
-aggregate contract as `GET /api/overview`, and its `health` field uses the
-same three-panel owner contract as `GET /api/health`. When the brain HTTP
-endpoint is available, the console reads both graph values from the brain
-`GET /ops/latest-cognition-graph` endpoint; otherwise each returns
-`status: not_reported`. `POST /api/debug-chat` returns `cognition_graph` for
-the most recent debug turn. These fields use the same bounded cognition-run
-graph snapshot contract:
+`GET /api/bootstrap` returns the canonical
+`latest_cognition_observation` and `latest_self_cognition_observation` view
+envelopes. `GET /api/overview` repeats those envelopes and exposes one
+`cognition_observations` panel containing conversation and self-cognition
+entries. `POST /api/debug-chat` returns `cognition_observation` for the direct
+debug response. Each envelope has `view_kind`, `availability`, `reason_code`,
+`generated_at`, and a nullable Brain-owned
+`cognition_run_observation.v1` observation.
 
-- `source`: `overview_latest`, `debug_latest`, `self_latest`, or future
-  `historical`.
-- `status`: `not_reported`, `running`, `completed`, `failed`, or `partial`.
-- `nodes`: up to 64 supplied semantic nodes with an arbitrary stable id,
-  category, status, and selected semantic detail. The renderer does not assume
-  a fixed cognition stage layout or node count.
-- `edges`: up to 96 directed links with a generic kind and source/target ids.
-- `redaction`: an explicit policy summary for excluded prompts, embeddings,
-  raw messages, message envelopes, and operational identifiers.
+The console validates Brain's exact observation object and never infers nodes,
+sections, labels, or values from messages or other response fields. `available`
+requires a matching live/self run kind; `not_reported`, `unavailable`, and
+`invalid` carry a bounded reason code and no observation. The envelope's time
+is console-owned and never replaces Brain's observation timestamp.
 
-The renderer labels each graph by semantic source. Correlation metadata remains
-in its dedicated protected telemetry surface; graph detail itself contains no
-provider, prompt, storage, evidence, or root identifiers.
+### Cognition observation selected detail
 
-The brain `/chat` response may include a bounded `cognition_graph` snapshot
-derived from the actual graph result and consolidation state. The console
-projects that snapshot through this same redacted contract. If the brain is
-unavailable or a response does not include graph telemetry, the console returns
-`status: not_reported` rather than fabricating graph nodes.
+Overview Latest, Debug, and Self Latest use one generic producer-driven
+renderer. It resolves each selected node's ordered `section_refs`, then shows
+the producer label, status, summary, ordered fields, ordered records, truthful
+displayed/reported counts, and an omission marker. Additive producer sections
+render without a JavaScript catalog. HTML-sensitive text is escaped and
+loading/request-error banners remain separate from observation data.
 
-### Cognition graph selected detail
-
-Overview Latest, Debug cognition, and the latest self-cognition snapshot use
-the same `renderCognitionGraph` inspector. Its selected detail order follows
-the supplied semantic fields: meaning/appraisal summaries, the active goal,
-response intent and capability outcomes, affect and concrete causes, bounded
-continuity/evidence summaries, and visible messages. Optional categories may
-add visual or operational summaries without changing the renderer contract.
-The selected panel preserves approved semantic text and list order in a
-scrollable region; generic console redaction remains in force for all other
-payloads. Prompts, raw model output, embeddings, message envelopes, target
-identifiers, handler metadata, and internal ids stay excluded.
-
-The semantic reasoning node's `context_consumption` field is a strict detail
-field with schema `cognition_context_consumption.v1`. The brain constructs it
-from the immutable turn snapshot and executed cognition/surface inputs. The
-console validates, redacts, transports, and renders that exact field; it does
-not reconstruct consumed state from a current database read. The payload contains bounded
-`settled_relevance`, `cognition`, `surface`, and `health` sections. It excludes
-episode and relationship ids, user/channel identifiers, entity handles, event
-descriptions, raw messages, evidence references, prompts, and private facts.
+The canonical `reasoning.context_consumption` and
+`evidence.shared_memory_prewarm` sections are already-safe Brain sections. The
+Character operational-posture panel receives the context section by its stable
+identifier and performs no second semantic projection. Prewarm dispositions,
+context-source parity, and group-scene status are preserved as producer-owned
+fields.
 
 The human-readable brain process log records the normalized visual directive
 after enabled validation using the same complete JSON rendering convention as
@@ -194,10 +173,10 @@ worker, cache-agent, or audit-action detail.
 
 | Page | Canonical information | Endpoint |
 |---|---|---|
-| Overview | Managed-service counts, one readiness aggregate, recent failures, recent changes, cognition graph entry points | `GET /api/overview` |
+| Overview | Managed-service counts, one readiness aggregate, recent failures, recent changes, cognition observation entry points | `GET /api/overview` |
 | Services | Authoritative lifecycle state, action/block reason, bounded process detail, one current value per model route | bootstrap and `/api/services/*` |
 | Live logs | Bounded supervisor/stdout/stderr text and stream connection state | `GET /api/logs/stream` |
-| Debug chat | Request controls, current response/error, cognition graph, browser-session history | `POST /api/debug-chat` |
+| Debug chat | Request controls, current response/error, cognition observation, browser-session history | `POST /api/debug-chat` |
 | Event monitor | Structured events, filters, dynamic facets, duration/error/correlation detail | `GET /api/events` |
 | Character | Latest profile, canonical cognition, persisted/effective operational posture, exact graph consumption, current self-image, redacted growth candidates/outcomes, immutable identity lineage and health | `GET /api/entities/character` |
 | Users | Safe directory; profile, relationship/cognition, causal relationship projection, memory, consumer-labelled style, progress, carry-over | plural user entity routes |
@@ -476,18 +455,17 @@ environment dictionaries.
 
 The UI is buildless static HTML, CSS, and JavaScript served by Python/FastAPI. It follows shadcn component family anatomy for common surfaces: Sidebar, Button, Card, Badge, Table, Input, Select, Textarea, Separator, ScrollArea, Field/Form grouping, and dialog/sheet-style detail surfaces where needed.
 
-The cognition-run graph is a reusable static UI gadget, not a page-specific
-mockup. Overview uses it for the latest reported run; Debug chat uses it for
-the most recent debug turn; a future historical-run inspector must reuse the
-same graph contract and renderer instead of adding a second diagram widget.
-Nodes expose bounded reasoning detail through hover and keyboard focus.
-
-Overview and Debug chat render the latest brain-supplied semantic graph through
-the same generic inspector. Missing telemetry is projected as
-`status=not_reported`; the console never invents nodes or chooses a stale
-implementation-specific snapshot. Displayed values are escaped and the
+The cognition observation view is a reusable static UI surface, not a
+page-specific mockup. Overview, Debug chat, and Self Latest resolve the
+Brain-supplied `cognition_run_observation.v1` through the same generic section
+renderer. The renderer uses producer labels, section references, field/record
+order, truthful counts, and status dispositions; it does not maintain a
+semantic field catalog or invent nodes. Displayed values are escaped and the
 browser contract excludes prompts, raw answers, endpoint data, credentials,
 and unapproved identifiers.
+
+This is a validation-only transport and rendering boundary; Brain remains the
+sole producer of the observation schema and projections.
 
 No Node.js, npm, pnpm, yarn, React, Vue, Vite, Webpack, Tailwind build tooling, frontend dev server, frontend package manager workflow, or frontend build/runtime stack is required.
 

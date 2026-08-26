@@ -2,6 +2,7 @@
 
 import logging
 from collections.abc import Mapping
+from typing import Literal
 
 from langgraph.graph import END, START, StateGraph
 
@@ -52,6 +53,8 @@ from kazusa_ai_chatbot.config import (
     COGNITION_RESOLVER_MAX_CYCLES,
 )
 from kazusa_ai_chatbot.conversation_progress import (
+    ConversationLogicalTurnV1,
+    GroupSceneContextV1,
     GroupSceneProjectionError,
     build_group_scene_context,
     filter_group_scene_ambient_turns,
@@ -88,6 +91,68 @@ from kazusa_ai_chatbot.utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _project_public_group_scene(
+    *,
+    channel_type: str,
+    ambient_logical_turns: list[ConversationLogicalTurnV1],
+    trigger_occurred_at: str,
+    trigger_speaker_name: str,
+    trigger_body_text: str,
+    trigger_addressed_global_user_ids: list[str],
+    trigger_reply_to_display_name: str,
+    scope_users: list[ScopeUser],
+    current_global_user_id: str,
+) -> tuple[
+    str,
+    GroupSceneContextV1 | None,
+    Literal['completed', 'skipped', 'failed'],
+    Literal['available', 'not_group', 'projection_unavailable'],
+]:
+    """Return the public group scene with an explicit projection disposition."""
+
+    if channel_type != 'group':
+        return_value = ('', None, 'skipped', 'not_group')
+        return return_value
+    try:
+        group_scene_context = build_group_scene_context(
+            ambient_logical_turns=ambient_logical_turns,
+            trigger_occurred_at=trigger_occurred_at,
+            trigger_speaker_name=trigger_speaker_name,
+            trigger_body_text=trigger_body_text,
+            trigger_addressed_global_user_ids=(
+                trigger_addressed_global_user_ids
+            ),
+            trigger_reply_to_display_name=trigger_reply_to_display_name,
+            scope_users=scope_users,
+            current_global_user_id=current_global_user_id,
+        )
+        public_group_scene = project_group_scene_prompt(
+            group_scene_context
+        )
+        return_value = (
+            public_group_scene,
+            group_scene_context,
+            'completed',
+            'available',
+        )
+        return return_value
+    except GroupSceneProjectionError as exc:
+        failure = exc.as_failure()
+        logger.warning(
+            f'Group public-scene projection degraded: '
+            f'code={failure["code"]} '
+            f'protected_anchor_count={failure["protected_anchor_count"]}'
+        )
+    except Exception as exc:
+        exception_text = str(exc)
+        logger.exception(
+            'Group public-scene projection failed; Cognition continues '
+            f'with an empty public scene: {exception_text}'
+        )
+    return_value = ('', None, 'failed', 'projection_unavailable')
+    return return_value
 
 
 def _find_scope_user_index(
@@ -812,43 +877,29 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         state,
         scope_users,
     )
-    public_group_scene = ''
-    if state['channel_type'] == 'group':
-        try:
-            group_scene_context = build_group_scene_context(
-                ambient_logical_turns=ambient_logical_turns,
-                trigger_occurred_at=state['storage_timestamp_utc'],
-                trigger_speaker_name=state['user_name'],
-                trigger_body_text=state['prompt_message_context']['body_text'],
-                trigger_addressed_global_user_ids=(
-                    state['prompt_message_context'][
-                        'addressed_to_global_user_ids'
-                    ]
-                ),
-                trigger_reply_to_display_name=state['reply_context'].get(
-                    'reply_to_display_name',
-                    '',
-                ),
-                scope_users=scope_users,
-                current_global_user_id=state['global_user_id'],
-            )
-            public_group_scene = project_group_scene_prompt(
-                group_scene_context
-            )
-        except GroupSceneProjectionError as exc:
-            failure = exc.as_failure()
-            logger.warning(
-                f'Group public-scene projection degraded: '
-                f'code={failure["code"]} '
-                f'protected_anchor_count={failure["protected_anchor_count"]}'
-            )
-            public_group_scene = ''
-        except Exception as exc:
-            logger.exception(
-                f'Group public-scene projection failed; Cognition continues '
-                f'with an empty public scene: {exc}'
-            )
-            public_group_scene = ''
+    (
+        public_group_scene,
+        public_group_scene_context,
+        public_group_scene_projection_status,
+        public_group_scene_projection_reason,
+    ) = _project_public_group_scene(
+        channel_type=state['channel_type'],
+        ambient_logical_turns=ambient_logical_turns,
+        trigger_occurred_at=state['storage_timestamp_utc'],
+        trigger_speaker_name=state['user_name'],
+        trigger_body_text=state['prompt_message_context']['body_text'],
+        trigger_addressed_global_user_ids=(
+            state['prompt_message_context'][
+                'addressed_to_global_user_ids'
+            ]
+        ),
+        trigger_reply_to_display_name=state['reply_context'].get(
+            'reply_to_display_name',
+            '',
+        ),
+        scope_users=scope_users,
+        current_global_user_id=state['global_user_id'],
+    )
     raw_interaction_wide = logical_turns_as_history_rows(
         interaction_logical_turns
     )
@@ -951,6 +1002,12 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "scope_users": scope_users,
         "scene_participant_bindings": scene_participant_bindings,
         "public_group_scene": public_group_scene,
+        "public_group_scene_projection_status": (
+            public_group_scene_projection_status
+        ),
+        "public_group_scene_projection_reason": (
+            public_group_scene_projection_reason
+        ),
         "conversation_episode_state": state.get("conversation_episode_state"),
         "conversation_progress": state.get("conversation_progress"),
         "ambient_logical_turns": ambient_logical_turns,
@@ -974,6 +1031,10 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
     cognitive_episode = state.get("cognitive_episode")
     if cognitive_episode is not None:
         initial_persona_state["cognitive_episode"] = cognitive_episode
+    if public_group_scene_context is not None:
+        initial_persona_state["public_group_scene_context"] = (
+            public_group_scene_context
+        )
     for identity_field in (
         "character_identity_revision_number",
         "character_identity_context",
@@ -1003,6 +1064,12 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "target_addressed_user_ids": results["target_addressed_user_ids"],
         "target_broadcast": bool(results["target_broadcast"]),
         "scope_users": results.get("scope_users", []),
+        "public_group_scene_projection_status": results[
+            "public_group_scene_projection_status"
+        ],
+        "public_group_scene_projection_reason": results[
+            "public_group_scene_projection_reason"
+        ],
         "future_promises": [],
         "cognition_core_output": results.get("cognition_core_output"),
         "cognition_state_update": results.get("cognition_state_update"),
@@ -1038,4 +1105,8 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
             "character_identity_epistemic_core_included"
         ),
     }
+    if "public_group_scene_context" in results:
+        return_value["public_group_scene_context"] = results[
+            "public_group_scene_context"
+        ]
     return return_value

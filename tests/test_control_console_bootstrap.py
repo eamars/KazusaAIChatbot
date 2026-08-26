@@ -3,6 +3,114 @@
 from __future__ import annotations
 
 
+def test_bootstrap_wraps_canonical_observations_with_view_metadata(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Bootstrap should wrap direct Brain observations in view envelopes."""
+
+    from fastapi.testclient import TestClient
+
+    from control_console import app as app_module
+    from control_console import repository as repository_module
+    from control_console.auth import hash_operator_token
+    from control_console.contracts import ServiceRuntimeState
+    from control_console.settings import ControlConsoleSettings
+    from kazusa_ai_chatbot.brain_service.cognition_observation_contracts import (
+        CognitionRunObservationV1,
+    )
+    from tests.test_control_console_contracts import _canonical_live_observation
+
+    async def application_identity(self):
+        _ = self
+        return {
+            "status": "available",
+            "character_name": "Test Character",
+            "source": "character_state",
+        }
+
+    class RunningBrainSupervisor:
+        def all_service_states(self):
+            return [ServiceRuntimeState(
+                id="brain",
+                display_name="Brain service",
+                kind="backend",
+                actual_state="running",
+            )]
+
+    class FakeKazusaClient:
+        def __init__(
+            self,
+            *,
+            base_url: str,
+            timeout_seconds: float,
+            control_shared_secret: str = "",
+        ) -> None:
+            _ = base_url
+            _ = timeout_seconds
+            _ = control_shared_secret
+
+        async def get_health(self) -> dict:
+            return {"status": "ok", "db": True, "scheduler": True}
+
+        async def get_runtime_status(self) -> dict:
+            return {"workers": {}}
+
+        async def get_latest_cognition_graph(self):
+            return CognitionRunObservationV1.model_validate(
+                _canonical_live_observation(run_id="bootstrap-live-run")
+            )
+
+        async def get_latest_self_cognition_graph(self):
+            return None
+
+    monkeypatch.setattr(app_module, "KazusaClient", FakeKazusaClient)
+    monkeypatch.setattr(
+        repository_module.ControlConsoleRepository,
+        "application_identity",
+        application_identity,
+    )
+    settings = ControlConsoleSettings(
+        state_dir=tmp_path,
+        operator_token_hash=hash_operator_token("secret"),
+    )
+    client = TestClient(app_module.create_app(
+        settings=settings,
+        supervisor=RunningBrainSupervisor(),
+    ))
+
+    assert client.post("/api/auth/login", json={"token": "secret"}).status_code == 200
+    response = client.get("/api/bootstrap")
+
+    assert response.status_code == 200
+    payload = response.json()
+    latest = payload["latest_cognition_observation"]
+    assert latest["view_kind"] == "overview_latest"
+    assert latest["availability"] == "available"
+    assert latest["reason_code"] == ""
+    assert latest["observation"]["schema_version"] == (
+        "cognition_run_observation.v1"
+    )
+    assert latest["observation"]["correlation"]["run_id"] == (
+        "bootstrap-live-run"
+    )
+    assert payload["latest_self_cognition_observation"] == {
+        "view_kind": "self_latest",
+        "availability": "not_reported",
+        "reason_code": "brain_not_reported",
+        "generated_at": payload["latest_self_cognition_observation"][
+            "generated_at"
+        ],
+        "observation": None,
+    }
+    assert "latest_cognition_graph" not in payload
+    assert "latest_self_cognition_graph" not in payload
+    assert "latest_cognition_observation" in payload["overview"]
+    assert "latest_self_cognition_observation" in payload["overview"]
+    assert "cognition_observations" in payload["overview"]["panels"]
+    assert "cognition_graphs" not in payload["overview"]["panels"]
+
+
 def test_overview_api_returns_only_owner_aggregates(tmp_path) -> None:
     """Overview should expose exceptions and links without owner-page detail."""
 
@@ -29,7 +137,7 @@ def test_overview_api_returns_only_owner_aggregates(tmp_path) -> None:
         "internal_readiness",
         "recent_failures",
         "recent_changes",
-        "cognition_graphs",
+        "cognition_observations",
     }
     rendered = repr(payload)
     for duplicated_owner_detail in (
@@ -148,12 +256,6 @@ def test_bootstrap_projects_live_health_without_overview_duplication(
             )
             return [state]
 
-    long_graph_detail = (
-        "input-start "
-        + ("semantic-detail " * 100)
-        + "input-end"
-    )
-
     class FakeKazusaClient:
         def __init__(
             self,
@@ -205,31 +307,13 @@ def test_bootstrap_projects_live_health_without_overview_duplication(
             }
 
         async def get_latest_cognition_graph(self):
-            from control_console.kazusa_client import project_cognition_graph_snapshot
+            from kazusa_ai_chatbot.brain_service.cognition_observation_contracts import (
+                CognitionRunObservationV1,
+            )
+            from tests.test_control_console_contracts import _canonical_live_observation
 
-            return project_cognition_graph_snapshot(
-                source="overview_latest",
-                payload={
-                    "cognition_graph": {
-                        "run_id": "turn-123",
-                        "status": "completed",
-                        "nodes": [
-                            {
-                                "id": "l2.reasoning",
-                                "label": "Reasoning",
-                                "stage": "L2",
-                                "lane": "cognition",
-                                "column": 3,
-                                "branch": "reasoning",
-                                "status": "completed",
-                                "detail": {
-                                    "input": long_graph_detail,
-                                },
-                            },
-                        ],
-                        "edges": [],
-                    },
-                },
+            return CognitionRunObservationV1.model_validate(
+                _canonical_live_observation(run_id="turn-123")
             )
 
     monkeypatch.setattr(app_module, "KazusaClient", FakeKazusaClient)
@@ -300,17 +384,17 @@ def test_bootstrap_projects_live_health_without_overview_duplication(
         "internal_readiness",
         "recent_failures",
         "recent_changes",
-        "cognition_graphs",
+        "cognition_observations",
     }
     assert "workers" not in overview["panels"]
     assert "cache_agents" not in overview["panels"]
-    graphs = overview["panels"]["cognition_graphs"]["items"]
-    assert graphs[0]["graph"]["run_id"] == "turn-123"
-    assert (
-        graphs[0]["graph"]["nodes"][0]["detail"]["input"]
-        == long_graph_detail
+    observations = overview["panels"]["cognition_observations"]["items"]
+    assert observations[0]["view"]["observation"]["correlation"]["run_id"] == (
+        "turn-123"
     )
-    assert payload["latest_cognition_graph"]["run_id"] == "turn-123"
+    assert payload["latest_cognition_observation"]["observation"][
+        "correlation"
+    ]["run_id"] == "turn-123"
 
 
 def test_bootstrap_projects_live_health_when_brain_is_unmanaged(
@@ -371,9 +455,7 @@ def test_bootstrap_projects_live_health_when_brain_is_unmanaged(
             }
 
         async def get_latest_cognition_graph(self):
-            from control_console.kazusa_client import not_reported_cognition_graph
-
-            return not_reported_cognition_graph(source="overview_latest")
+            return None
 
     monkeypatch.setattr(app_module, "KazusaClient", FakeKazusaClient)
     monkeypatch.setattr(

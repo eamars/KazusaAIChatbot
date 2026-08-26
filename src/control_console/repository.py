@@ -11,9 +11,11 @@ from pymongo.errors import PyMongoError
 
 from control_console.redaction import (
     redact_character_operational_state_view,
-    redact_latest_context_consumption,
     redact_mapping,
     redact_operational_relationship_context,
+)
+from kazusa_ai_chatbot.brain_service.cognition_observation_contracts import (
+    CognitionObservationSectionV1,
 )
 from kazusa_ai_chatbot.calendar_scheduler import repository as calendar_repository
 from kazusa_ai_chatbot.character_identity_growth.projection import (
@@ -30,32 +32,42 @@ from kazusa_ai_chatbot.cognition_shared.state_projection import (
 )
 from kazusa_ai_chatbot.conversation_progress import (
     ConversationProgressScope,
+)
+from kazusa_ai_chatbot.conversation_progress import (
     load_progress_context as default_load_progress_context,
 )
 from kazusa_ai_chatbot.db import background_work_jobs as background_work_job_store
-from kazusa_ai_chatbot.db import llm_tracing as llm_trace_store
 from kazusa_ai_chatbot.db import character_identity_growth as identity_store
+from kazusa_ai_chatbot.db import llm_tracing as llm_trace_store
 from kazusa_ai_chatbot.db.character import (
     get_character_profile as default_get_character_profile,
+)
+from kazusa_ai_chatbot.db.character import (
     get_character_runtime_state as default_get_character_runtime_state,
+)
+from kazusa_ai_chatbot.db.conversation import (
+    list_recent_group_summaries as default_list_recent_group_summaries,
 )
 from kazusa_ai_chatbot.db.errors import DatabaseOperationError
 from kazusa_ai_chatbot.db.interaction_style_images import (
     build_interaction_style_context as default_build_interaction_style_context,
-)
-from kazusa_ai_chatbot.db.conversation import (
-    list_recent_group_summaries as default_list_recent_group_summaries,
 )
 from kazusa_ai_chatbot.db.self_cognition import (
     list_group_review_windows as default_list_group_review_windows,
 )
 from kazusa_ai_chatbot.db.user_memory_units import (
     query_user_memory_units as default_query_user_memory_units,
+)
+from kazusa_ai_chatbot.db.user_memory_units import (
     search_user_memory_units_by_keyword as default_search_user_memory_units_by_keyword,
 )
 from kazusa_ai_chatbot.db.users import (
     find_user_profile_by_identifier as default_find_user_profile_by_identifier,
+)
+from kazusa_ai_chatbot.db.users import (
     get_user_profile as default_get_user_profile,
+)
+from kazusa_ai_chatbot.db.users import (
     list_recent_user_profiles as default_list_recent_user_profiles,
 )
 from kazusa_ai_chatbot.internal_monologue_residue import (
@@ -312,7 +324,7 @@ class ControlConsoleRepository:
         self,
         *,
         current_timestamp_utc: str | None = None,
-        latest_context_consumption: Mapping[str, Any] | None = None,
+        latest_context_section: CognitionObservationSectionV1 | None = None,
         include_operational_context: bool = False,
         limit: int = 25,
     ) -> dict[str, Any]:
@@ -415,7 +427,7 @@ class ControlConsoleRepository:
                 _project_character_operational_posture(
                     runtime_cognition_state,
                     effective_at=timestamp,
-                    latest_context_consumption=latest_context_consumption,
+                    latest_context_section=latest_context_section,
                 )
             )
         panels.update({
@@ -2925,7 +2937,7 @@ def _project_character_operational_posture(
     cognition_state: Any,
     *,
     effective_at: str,
-    latest_context_consumption: Mapping[str, Any] | None,
+    latest_context_section: CognitionObservationSectionV1 | None,
 ) -> dict[str, Any]:
     """Project persisted/effective posture and exact latest consumption.
 
@@ -2980,12 +2992,11 @@ def _project_character_operational_posture(
             items=[],
             reason="character operational state projection was redacted",
         )
-    latest_source = (
-        latest_context_consumption
-        if isinstance(latest_context_consumption, Mapping)
-        else {"status": "not_reported"}
+    latest = (
+        latest_context_section.model_dump(mode="json")
+        if latest_context_section is not None
+        else None
     )
-    latest = redact_latest_context_consumption(latest_source)
     item = {
         "persisted": persisted,
         "effective": effective,

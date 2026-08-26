@@ -4,9 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from contextvars import ContextVar, Token
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Literal, TypedDict, cast
 from uuid import uuid4
+
+from kazusa_ai_chatbot.cognition_resolver.contracts import (
+    SharedMemoryPrewarmOutcomeV1,
+    validate_shared_memory_prewarm_outcome,
+)
 
 V2_MODEL_TOTAL_ATTEMPTS = 3
 V2_APPRAISAL_TOTAL_ATTEMPTS = 2
@@ -88,6 +94,8 @@ class V2InvocationAttemptLedger:
 
     cognition_invocation_id: str
     graph_attempt: int = 1
+    prewarm_checkpoint_graph_attempt: int = 1
+    shared_memory_prewarm_checkpoint: dict[str, object] | None = None
     producer_attempts: dict[tuple[str, str], int] = field(
         default_factory=dict,
         repr=False,
@@ -239,6 +247,8 @@ def bind_v2_attempt_ledger(
     ):
         raise ValueError("graph attempt must be a positive integer")
     ledger.graph_attempt = graph_attempt
+    ledger.prewarm_checkpoint_graph_attempt = graph_attempt
+    ledger.shared_memory_prewarm_checkpoint = None
     return _CURRENT_ATTEMPT_LEDGER.set(ledger)
 
 
@@ -248,6 +258,50 @@ def reset_v2_attempt_ledger(
     """Restore the attempt-ledger context that preceded one binding."""
 
     _CURRENT_ATTEMPT_LEDGER.reset(token)
+
+
+def record_v2_shared_memory_prewarm_checkpoint(
+    outcome: SharedMemoryPrewarmOutcomeV1,
+) -> None:
+    """Record the validated prewarm outcome for the current graph attempt."""
+
+    validated_outcome = validate_shared_memory_prewarm_outcome(outcome)
+    ledger = _CURRENT_ATTEMPT_LEDGER.get()
+    if ledger is None:
+        return
+    ledger.prewarm_checkpoint_graph_attempt = ledger.graph_attempt
+    ledger.shared_memory_prewarm_checkpoint = deepcopy(
+        dict(validated_outcome)
+    )
+
+
+def snapshot_v2_shared_memory_prewarm_checkpoint(
+) -> SharedMemoryPrewarmOutcomeV1 | None:
+    """Return a deep copy of the current graph attempt's prewarm outcome."""
+
+    ledger = _CURRENT_ATTEMPT_LEDGER.get()
+    if ledger is None:
+        return None
+    if (
+        ledger.prewarm_checkpoint_graph_attempt != ledger.graph_attempt
+        or ledger.shared_memory_prewarm_checkpoint is None
+    ):
+        return None
+    validated_outcome = validate_shared_memory_prewarm_outcome(
+        ledger.shared_memory_prewarm_checkpoint
+    )
+    return_value = deepcopy(validated_outcome)
+    return return_value
+
+
+def clear_v2_shared_memory_prewarm_checkpoint() -> None:
+    """Discard the current graph attempt's prewarm checkpoint."""
+
+    ledger = _CURRENT_ATTEMPT_LEDGER.get()
+    if ledger is None:
+        return
+    ledger.prewarm_checkpoint_graph_attempt = ledger.graph_attempt
+    ledger.shared_memory_prewarm_checkpoint = None
 
 
 def enable_guarded_v2_attempt_ledger() -> None:

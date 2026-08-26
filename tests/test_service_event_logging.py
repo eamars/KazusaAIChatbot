@@ -431,6 +431,132 @@ async def test_graph_failure_records_runtime_error_and_failed_pipeline(
 
 
 @pytest.mark.asyncio
+async def test_precommit_cognition_conflict_retries_graph_once(
+    monkeypatch,
+) -> None:
+    """A cognition state race is retried before any visible surface work."""
+
+    _patch_character_identity(monkeypatch)
+    record_database_operation_event = AsyncMock()
+    record_pipeline_turn_event = AsyncMock()
+    record_runtime_error_event = AsyncMock()
+    monkeypatch.setattr(
+        service_module.event_logging,
+        "record_database_operation_event",
+        record_database_operation_event,
+    )
+    monkeypatch.setattr(
+        service_module.event_logging,
+        "record_pipeline_turn_event",
+        record_pipeline_turn_event,
+    )
+    monkeypatch.setattr(
+        service_module.event_logging,
+        "record_runtime_error_event",
+        record_runtime_error_event,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_active_character_name_snapshot",
+        "Character",
+    )
+    monkeypatch.setattr(service_module, "_runtime_character_state", {})
+    monkeypatch.setattr(
+        service_module,
+        "_ensure_character_global_identity",
+        AsyncMock(return_value="character-global-id"),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_resolve_queued_user",
+        AsyncMock(return_value=("global-user-1", {})),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_resolve_message_envelope_identities",
+        AsyncMock(return_value=_request("msg").message_envelope.model_dump()),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "get_conversation_history",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_hydrate_reply_context",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_save_user_message_from_item",
+        AsyncMock(return_value="row-user"),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "save_conversation",
+        AsyncMock(return_value="row-assistant"),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_refresh_runtime_character_state",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "build_promoted_reflection_context",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "upsert_post_turn_lifecycle_record",
+        AsyncMock(),
+    )
+
+    conflict = service_module.CognitionExecutionError(
+        "canonical cognition state commit encountered a version conflict",
+        error_code="version_conflict",
+        stage="cognition.persistence",
+        safe_checkpoint="pre_state_commit",
+        retryable=True,
+    )
+
+    class _Graph:
+        """Fail once at the pre-commit boundary, then complete normally."""
+
+        def __init__(self):
+            self.attempts = 0
+
+        async def ainvoke(self, _state):
+            self.attempts += 1
+            if self.attempts == 1:
+                raise conflict
+            return {
+                "should_respond": True,
+                "use_reply_feature": False,
+                "final_dialog": ["visible response"],
+                "future_promises": [],
+                "consolidation_state": {},
+            }
+
+    graph = _Graph()
+    monkeypatch.setattr(service_module, "_graph", graph)
+    item = _item("msg", body_text="private retry text")
+
+    await service_module._process_queued_chat_item(item)
+
+    assert graph.attempts == 2
+    assert item.future.result().messages == ["visible response"]
+    record_database_operation_event.assert_not_awaited()
+    record_pipeline_turn_event.assert_not_awaited()
+    record_runtime_error_event.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_user_persistence_failure_keeps_failure_telemetry(
     monkeypatch,
 ) -> None:

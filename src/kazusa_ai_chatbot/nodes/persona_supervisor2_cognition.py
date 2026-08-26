@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from collections.abc import Mapping
 from copy import deepcopy
@@ -59,7 +58,8 @@ from kazusa_ai_chatbot.cognition_episode import (
 )
 from kazusa_ai_chatbot.cognition_resolver.capabilities import (
     _task_resolution_execution_context_from_state,
-    merge_shared_memory_prewarm_result,
+    build_skipped_shared_memory_prewarm_outcome,
+    merge_shared_memory_prewarm_outcome,
     project_resolver_observation_for_cognition,
     run_first_cycle_shared_memory_prewarm,
     validate_task_resolution_execution_readiness,
@@ -69,7 +69,9 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     RESOLVER_CAPABILITY_REQUEST_VERSION,
     RESOLVER_CAPABILITY_SEMANTICS,
     ResolverValidationError,
+    SharedMemoryPrewarmOutcomeV1,
     validate_resolver_capability_request,
+    validate_shared_memory_prewarm_outcome,
 )
 from kazusa_ai_chatbot.cognition_shared.contracts import (
     EVIDENCE_SOURCE_QUESTION_IDS,
@@ -83,6 +85,10 @@ from kazusa_ai_chatbot.cognition_shared.contracts import (
     SceneContextV2,
     _validate_scene_context,
     validate_scheduled_authority_proposal,
+)
+from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
+    clear_v2_shared_memory_prewarm_checkpoint,
+    record_v2_shared_memory_prewarm_checkpoint,
 )
 from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_acquaintance_user_state,
@@ -543,15 +549,24 @@ async def call_cognition_subgraph(
         isinstance(resolver_state, Mapping)
         and resolver_state.get("cycle_index") == 0
     )
-    prewarm_task: asyncio.Task[dict[str, Any]] | None = None
+    prewarm_task: asyncio.Task[SharedMemoryPrewarmOutcomeV1] | None = None
+    prewarm_outcome: SharedMemoryPrewarmOutcomeV1 | None = None
     group_self_cognition = _is_group_self_cognition_state(state)
-    if (
-        is_cycle_zero
-        and _supports_first_cycle_shared_memory_prewarm(state)
-    ):
-        prewarm_task = asyncio.create_task(
-            run_first_cycle_shared_memory_prewarm(state)
+    if is_cycle_zero:
+        if _supports_first_cycle_shared_memory_prewarm(state):
+            prewarm_task = asyncio.create_task(
+                run_first_cycle_shared_memory_prewarm(state)
+            )
+        else:
+            prewarm_outcome = build_skipped_shared_memory_prewarm_outcome(
+                "unsupported_episode"
+            )
+            record_v2_shared_memory_prewarm_checkpoint(prewarm_outcome)
+    else:
+        prewarm_outcome = build_skipped_shared_memory_prewarm_outcome(
+            "not_first_cycle"
         )
+        record_v2_shared_memory_prewarm_checkpoint(prewarm_outcome)
     try:
         caller = _scope_caller(episode)
         target_user_id = state.get("global_user_id")
@@ -639,7 +654,14 @@ async def call_cognition_subgraph(
             else:
                 mutable_state = prior_replacement
             character_state = await get_character_cognition_state()
-    except (Exception, asyncio.CancelledError):
+    except asyncio.CancelledError:
+        clear_v2_shared_memory_prewarm_checkpoint()
+        await _cancel_cognition_preparation_tasks(
+            prewarm_task,
+        )
+        raise
+    except Exception:
+        _checkpoint_completed_prewarm_task(prewarm_task)
         await _cancel_cognition_preparation_tasks(
             prewarm_task,
         )
@@ -647,22 +669,34 @@ async def call_cognition_subgraph(
     try:
         resolved_state = dict(state)
         if prewarm_task is not None:
-            prewarm_rag_result = await prewarm_task
-            base_rag_result = state.get("rag_result")
-            if isinstance(base_rag_result, Mapping):
-                merge_base = dict(base_rag_result)
-            else:
-                merge_base = {}
-            merged_rag_result = merge_shared_memory_prewarm_result(
-                merge_base,
-                prewarm_rag_result,
+            prewarm_outcome = validate_shared_memory_prewarm_outcome(
+                await prewarm_task
             )
+            record_v2_shared_memory_prewarm_checkpoint(prewarm_outcome)
+            base_rag_result = state.get("rag_result")
             if (
-                merged_rag_result is not merge_base
-                and "answer" not in merged_rag_result
+                prewarm_outcome["status"] == "completed"
+                and prewarm_outcome["reason_code"]
+                == "shared_memory_ready"
             ):
-                merged_rag_result["answer"] = ""
-            resolved_state["rag_result"] = merged_rag_result
+                if not isinstance(base_rag_result, Mapping):
+                    raise ResolverValidationError(
+                        "base_rag_result_invalid"
+                    )
+                merged_rag_result, prewarm_outcome = (
+                    merge_shared_memory_prewarm_outcome(
+                        dict(base_rag_result),
+                        prewarm_outcome,
+                    )
+                )
+                record_v2_shared_memory_prewarm_checkpoint(
+                    prewarm_outcome
+                )
+                resolved_state["rag_result"] = merged_rag_result
+        if prewarm_outcome is not None:
+            resolved_state["shared_memory_prewarm_outcome"] = deepcopy(
+                prewarm_outcome
+            )
         empty_group_context: GroupEngagementActionContextV2 = {
             "engagement_guidelines": [],
             "confidence": "",
@@ -688,7 +722,13 @@ async def call_cognition_subgraph(
             ),
             "confidence": group_engagement_context["confidence"],
         }
-    except (Exception, asyncio.CancelledError):
+    except asyncio.CancelledError:
+        clear_v2_shared_memory_prewarm_checkpoint()
+        await _cancel_cognition_preparation_tasks(
+            prewarm_task,
+        )
+        raise
+    except Exception:
         await _cancel_cognition_preparation_tasks(
             prewarm_task,
         )
@@ -719,15 +759,19 @@ async def call_cognition_subgraph(
             == "reflection_inferred"
         )
     )
-    await record_continuity_boundary_event(
-        component="persona_supervisor2_cognition",
-        boundary="reflection_projection",
-        status="succeeded" if reflection_count else "empty",
-        scope_kind=_continuity_scope_kind(state),
-        selected_count=reflection_count,
-        source_age="unknown",
-        trace_ref=_text(state.get("llm_trace_id")),
-    )
+    try:
+        await record_continuity_boundary_event(
+            component="persona_supervisor2_cognition",
+            boundary="reflection_projection",
+            status="succeeded" if reflection_count else "empty",
+            scope_kind=_continuity_scope_kind(state),
+            selected_count=reflection_count,
+            source_age="unknown",
+            trace_ref=_text(state.get("llm_trace_id")),
+        )
+    except asyncio.CancelledError:
+        clear_v2_shared_memory_prewarm_checkpoint()
+        raise
     trace_token = llm_tracing.bind_trace_id(
         str(state.get("llm_trace_id") or ""),
     )
@@ -757,19 +801,27 @@ async def call_cognition_subgraph(
                 cognition_invocation_id=(invocation_id or run_id),
             )
         # The canonical engine owns one direct A1/A2/G/P pass.
-        output = await run_cognition(
-            cognition_input,
-            cognition_services,
-        )
+        try:
+            output = await run_cognition(
+                cognition_input,
+                cognition_services,
+            )
+        except asyncio.CancelledError:
+            clear_v2_shared_memory_prewarm_checkpoint()
+            raise
     finally:
         if diagnostics_token is not None:
             reset_protected_chain_records(diagnostics_token)
         llm_tracing.reset_trace_id(trace_token)
     if commit:
-        await _commit_cognition_state(
-            output,
-            expected_character_updated_at=character_base_updated_at,
-        )
+        try:
+            await _commit_cognition_state(
+                output,
+                expected_character_updated_at=character_base_updated_at,
+            )
+        except asyncio.CancelledError:
+            clear_v2_shared_memory_prewarm_checkpoint()
+            raise
     resolved_state["cognition_scene_context"] = deepcopy(
         cognition_input["scene_context"]
     )
@@ -796,6 +848,13 @@ async def call_cognition_subgraph(
         update["group_engagement_action_context"] = dict(
             cognition_input["group_engagement_action_context"]
         )
+    if prewarm_outcome is not None:
+        update["shared_memory_prewarm_outcome"] = deepcopy(
+            prewarm_outcome
+        )
+    state_rag_result = state.get("rag_result")
+    if isinstance(state_rag_result, Mapping):
+        update["rag_result"] = deepcopy(dict(state_rag_result))
     update.update(_episode_identity_state_update(state))
     return update  # type: ignore[return-value]
 
@@ -932,7 +991,11 @@ async def _commit_cognition_state(
             raise CognitionExecutionError("canonical state scope is invalid")
         if not committed:
             raise CognitionExecutionError(
-                "canonical cognition state commit encountered a version conflict"
+                "canonical cognition state commit encountered a version conflict",
+                error_code="version_conflict",
+                stage="cognition.persistence",
+                safe_checkpoint="pre_state_commit",
+                retryable=True,
             )
         return
 
@@ -2521,7 +2584,7 @@ def _is_group_self_cognition_state(state: Mapping[str, Any]) -> bool:
 
 
 async def _cancel_cognition_preparation_tasks(
-    *tasks: asyncio.Task[dict[str, Any]] | None,
+    *tasks: asyncio.Task[SharedMemoryPrewarmOutcomeV1] | None,
 ) -> None:
     """Cancel and join every started cognition-preparation task.
 
@@ -2538,6 +2601,17 @@ async def _cancel_cognition_preparation_tasks(
             task.cancel()
     if started_tasks:
         await asyncio.gather(*started_tasks, return_exceptions=True)
+
+
+def _checkpoint_completed_prewarm_task(
+    task: asyncio.Task[SharedMemoryPrewarmOutcomeV1] | None,
+) -> None:
+    """Checkpoint a completed prewarm before identity-preparation cleanup."""
+
+    if task is None or not task.done() or task.cancelled():
+        return
+    outcome = validate_shared_memory_prewarm_outcome(task.result())
+    record_v2_shared_memory_prewarm_checkpoint(outcome)
 
 
 def _scope_caller(episode: Mapping[str, Any] | object) -> str:

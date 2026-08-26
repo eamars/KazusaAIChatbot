@@ -101,34 +101,18 @@ async def test_stream_poll_appends_graph_invalidation_for_new_latest_run() -> No
     """SSE should notify the UI when the brain latest cognition graph changes."""
 
     from control_console.app import _append_cognition_graph_invalidation_if_changed
-    from control_console.kazusa_client import project_cognition_graph_snapshot
     from control_console.stream import SSEEventBuffer
+    from kazusa_ai_chatbot.brain_service.cognition_observation_contracts import (
+        CognitionRunObservationV1,
+    )
+    from tests.test_control_console_contracts import _canonical_live_observation
 
     class FakeKazusaClient:
         async def get_latest_cognition_graph(self):
-            return project_cognition_graph_snapshot(
-                source="overview_latest",
-                payload={
-                    "cognition_graph": {
-                        "run_id": "self_cognition_run:future-123",
-                        "status": "completed",
-                        "nodes": [
-                            {
-                                "id": "self.reasoning",
-                                "label": "Reasoning",
-                                "stage": "L2",
-                                "lane": "cognition",
-                                "column": 2,
-                                "branch": "reasoning",
-                                "status": "completed",
-                                "detail": {
-                                    "internal_monologue": "bounded reason",
-                                },
-                            },
-                        ],
-                        "edges": [],
-                    },
-                },
+            return CognitionRunObservationV1.model_validate(
+                _canonical_live_observation(
+                    run_id="self_cognition_run:future-123",
+                )
             )
 
     buffer = SSEEventBuffer(max_events=5)
@@ -151,12 +135,11 @@ async def test_stream_poll_ignores_missing_run_id_and_client_errors() -> None:
     import httpx
 
     from control_console.app import _append_cognition_graph_invalidation_if_changed
-    from control_console.kazusa_client import not_reported_cognition_graph
     from control_console.stream import SSEEventBuffer
 
     class MissingRunClient:
         async def get_latest_cognition_graph(self):
-            return not_reported_cognition_graph(source="overview_latest")
+            return None
 
     class ErrorClient:
         async def get_latest_cognition_graph(self):
@@ -179,18 +162,68 @@ async def test_stream_poll_ignores_missing_run_id_and_client_errors() -> None:
     assert buffer.replay_after(None) == []
 
 
+async def test_stream_uses_nested_observation_run_id_and_ignores_empty_id() -> None:
+    """SSE cursors should read nested correlation ids and preserve empty ids."""
+
+    from control_console.app import _append_cognition_graph_invalidation_if_changed
+    from control_console.stream import SSEEventBuffer
+    from kazusa_ai_chatbot.brain_service.cognition_observation_contracts import (
+        CognitionRunObservationV1,
+    )
+    from tests.test_control_console_contracts import _canonical_live_observation
+
+    complete = CognitionRunObservationV1.model_validate(
+        _canonical_live_observation(run_id="nested-run")
+    )
+    empty_payload = _canonical_live_observation(run_id="empty-run")
+    empty_payload["correlation"]["run_id"] = None
+    empty = CognitionRunObservationV1.model_validate(empty_payload)
+
+    class FakeKazusaClient:
+        def __init__(self) -> None:
+            self.observations = iter((complete, empty))
+
+        async def get_latest_cognition_graph(self):
+            return next(self.observations)
+
+    client = FakeKazusaClient()
+    buffer = SSEEventBuffer(max_events=5)
+
+    first_id = await _append_cognition_graph_invalidation_if_changed(
+        kazusa_client=client,
+        stream_buffer=buffer,
+        previous_run_id="old-run",
+    )
+    event_count = len(buffer.replay_after(None))
+    second_id = await _append_cognition_graph_invalidation_if_changed(
+        kazusa_client=client,
+        stream_buffer=buffer,
+        previous_run_id=first_id,
+    )
+
+    assert first_id == "nested-run"
+    assert second_id == "nested-run"
+    assert event_count == 1
+    assert len(buffer.replay_after(None)) == event_count
+
+
 async def test_stream_iterator_emits_graph_invalidation_and_heartbeat() -> None:
     """The SSE iterator should yield graph invalidations added in its loop."""
+
+    from typing import ClassVar
 
     import pytest
 
     from control_console.app import _stream_console_events
     from control_console.contracts import ServiceRuntimeState
-    from control_console.kazusa_client import project_cognition_graph_snapshot
     from control_console.stream import SSEEventBuffer
+    from kazusa_ai_chatbot.brain_service.cognition_observation_contracts import (
+        CognitionRunObservationV1,
+    )
+    from tests.test_control_console_contracts import _canonical_live_observation
 
     class FakeRequest:
-        headers: dict[str, str] = {}
+        headers: ClassVar[dict[str, str]] = {}
 
         async def is_disconnected(self) -> bool:
             return False
@@ -218,16 +251,8 @@ async def test_stream_iterator_emits_graph_invalidation_and_heartbeat() -> None:
             return {"status": "running"}
 
         async def get_latest_cognition_graph(self):
-            return project_cognition_graph_snapshot(
-                source="overview_latest",
-                payload={
-                    "cognition_graph": {
-                        "run_id": "stream-run",
-                        "status": "completed",
-                        "nodes": [],
-                        "edges": [],
-                    },
-                },
+            return CognitionRunObservationV1.model_validate(
+                _canonical_live_observation(run_id="stream-run")
             )
 
     stream_buffer = SSEEventBuffer(max_events=10)
@@ -251,6 +276,6 @@ async def test_stream_iterator_emits_graph_invalidation_and_heartbeat() -> None:
     with pytest.raises(StopAsyncIteration):
         await iterator.__anext__()
 
-    body = "\n".join([first, second, third])
+    body = f"{first}\n{second}\n{third}"
     assert "event: control.heartbeat" in body
     assert "event: control.cognition_graph_invalidated" in body
