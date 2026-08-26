@@ -43,7 +43,12 @@ recorded evidence.
 
 ### Active Short-Term Plans
 
-No active short-term plans are registered.
+| Document | Type | Status |
+|---|---|---|
+| [cognition_observability_icd_and_console_consistency_plan_2026-08-26.md](active/short_term/cognition_observability_icd_and_console_consistency_plan_2026-08-26.md) | Canonical cognition observability ICD, explicit prewarm outcome, and consistent control-console graph cutover | draft; awaiting user approval |
+| [dsh_standalone_sidecar_and_resolution_interface_plan_2026-08-26.md](active/short_term/dsh_standalone_sidecar_and_resolution_interface_plan_2026-08-26.md) | Plan 1 executable standalone DSH sidecar, canonical resolution interface, durable lifecycle, and old resolver replacement | draft; executable after user approval |
+| [dsh_semantic_tools_and_coding_capability_plan_2026-08-26.md](active/short_term/dsh_semantic_tools_and_coding_capability_plan_2026-08-26.md) | Plan 2 coarse standalone Kazusa semantic tools and DSH-native coding capability expansion | draft; refine after Plan 1 closure |
+| [dsh_brain_bigbang_cutover_and_legacy_resolution_decommission_plan_2026-08-26.md](active/short_term/dsh_brain_bigbang_cutover_and_legacy_resolution_decommission_plan_2026-08-26.md) | Plan 3 coarse DSH-only Brain big-bang cutover and legacy resolution/coding design decommission | draft; refine after Plan 2 closure |
 
 ### Superseded Plans
 
