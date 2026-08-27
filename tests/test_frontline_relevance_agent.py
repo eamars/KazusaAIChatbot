@@ -22,7 +22,6 @@ from kazusa_ai_chatbot.relevance.participation_evidence import (
     validate_participation_assessment,
 )
 
-
 frontline_module = import_module(
     "kazusa_ai_chatbot.relevance.frontline_relevance_agent"
 )
@@ -317,17 +316,134 @@ async def test_frontline_agent_uses_structural_parser_and_returns_decision(
 
     result = await frontline_relevance_agent(_frontline_state())
 
-    assert result["intake_action"] == "start"
-    assert result["append_target"] == "none"
+    assert result["decision"]["intake_action"] == "start"
+    assert result["decision"]["append_target"] == "none"
     assert set(result) == {
+        "decision",
+        "attempt_diagnostics",
+    }
+    assert set(result["decision"]) == {
         "intake_action",
         "append_target",
         "prelude_targets",
         "reason",
     }
+    assert result["attempt_diagnostics"] == []
     invoke.assert_awaited_once()
     assert invoke.await_args.kwargs["config"] is (
         frontline_module._frontline_relevance_agent_llm_config
+    )
+
+
+@pytest.mark.asyncio
+async def test_frontline_provider_exhaustion_starts_authoritative_turn(
+    monkeypatch,
+) -> None:
+    """Two provider failures use the typed authoritative start decision."""
+
+    invoke = AsyncMock(
+        side_effect=[RuntimeError("provider unavailable")] * 2,
+    )
+    record_trace = AsyncMock()
+    monkeypatch.setattr(
+        frontline_module._frontline_relevance_agent_llm,
+        "ainvoke",
+        invoke,
+    )
+    monkeypatch.setattr(
+        frontline_module.llm_tracing,
+        "record_llm_trace_step",
+        record_trace,
+    )
+    state = _frontline_state()
+    state["llm_trace_id"] = "frontline-provider-trace"
+
+    result = await frontline_relevance_agent(state)
+
+    assert result["decision"] == {
+        "intake_action": "start",
+        "append_target": "none",
+        "prelude_targets": [],
+        "reason": "authoritative character participation",
+    }
+    assert result["attempt_diagnostics"] == [{
+        "schema_version": "episode_attempt_diagnostic.v1",
+        "stage": "frontline_relevance",
+        "error_code": "frontline_relevance_deterministic_degraded",
+        "attempt_count": 2,
+        "safe_checkpoint": "pre_state_commit",
+        "retryable": False,
+        "final_status": "accepted_degraded",
+    }]
+    assert invoke.await_count == 2
+    assert invoke.await_args_list[0].args[0] == (
+        invoke.await_args_list[1].args[0]
+    )
+    assert [call.kwargs["attempt_index"] for call in record_trace.await_args_list] == [
+        1,
+        2,
+        0,
+    ]
+    assert [call.kwargs["parse_status"] for call in record_trace.await_args_list] == [
+        "provider_error",
+        "provider_error",
+        "deterministic",
+    ]
+    assert [call.kwargs["status"] for call in record_trace.await_args_list] == [
+        "failed",
+        "failed",
+        "accepted_degraded",
+    ]
+    assert record_trace.await_args_list[-1].kwargs["stage_name"] == (
+        "frontline_relevance_agent.deterministic"
+    )
+    assert record_trace.await_args_list[-1].kwargs["response_text"] == ""
+
+
+@pytest.mark.asyncio
+async def test_frontline_provider_exhaustion_discards_non_authoritative_turn(
+    monkeypatch,
+) -> None:
+    """Two provider failures use the typed ordinary discard decision."""
+
+    invoke = AsyncMock(
+        side_effect=[RuntimeError("provider unavailable")] * 2,
+    )
+    record_trace = AsyncMock()
+    monkeypatch.setattr(
+        frontline_module._frontline_relevance_agent_llm,
+        "ainvoke",
+        invoke,
+    )
+    monkeypatch.setattr(
+        frontline_module.llm_tracing,
+        "record_llm_trace_step",
+        record_trace,
+    )
+    state = _frontline_state()
+    state["llm_trace_id"] = "frontline-provider-trace"
+    state["current_message"]["semantic_target_labels"] = []
+    state["current_message"]["reply_target_label"] = "none"
+    state["open_turns"] = []
+    state["recent_preludes"] = []
+
+    result = await frontline_relevance_agent(state)
+
+    assert result["decision"]["intake_action"] == "discard"
+    assert result["decision"]["append_target"] == "none"
+    assert result["decision"]["prelude_targets"] == []
+    assert result["decision"]["reason"] == "frontline provider exhausted"
+    assert result["attempt_diagnostics"][0]["error_code"] == (
+        "frontline_relevance_deterministic_degraded"
+    )
+    assert invoke.await_count == 2
+    assert [call.kwargs["parse_status"] for call in record_trace.await_args_list] == [
+        "provider_error",
+        "provider_error",
+        "deterministic",
+    ]
+    assert record_trace.await_args_list[-1].kwargs["status"] == (
+        "accepted_degraded"
     )
 
 
@@ -349,12 +465,13 @@ async def test_frontline_direct_without_candidates_starts_without_model_call(
 
     result = await frontline_relevance_agent(state)
 
-    assert result == {
+    assert result["decision"] == {
         "intake_action": "start",
         "append_target": "none",
         "prelude_targets": [],
         "reason": "authoritative character participation",
     }
+    assert result["attempt_diagnostics"] == []
     invoke.assert_not_awaited()
 
 
@@ -377,17 +494,29 @@ async def test_frontline_direct_open_turn_rejects_discard_without_retry(
         "ainvoke",
         invoke,
     )
+    record_trace = AsyncMock()
+    monkeypatch.setattr(
+        frontline_module.llm_tracing,
+        "record_llm_trace_step",
+        record_trace,
+    )
     state = _frontline_state()
+    state["llm_trace_id"] = "frontline-normalized-trace"
 
     result = await frontline_relevance_agent(state)
 
-    assert result == {
+    assert result["decision"] == {
         "intake_action": "start",
         "append_target": "none",
         "prelude_targets": [],
         "reason": "invalid authoritative frontline output",
     }
+    assert result["attempt_diagnostics"] == []
     invoke.assert_awaited_once()
+    assert record_trace.await_count == 1
+    assert record_trace.await_args.kwargs["parse_status"] == "normalized"
+    assert record_trace.await_args.kwargs["status"] == "succeeded"
+    assert record_trace.await_args.kwargs["attempt_index"] == 1
 
 
 @pytest.mark.asyncio
@@ -410,7 +539,7 @@ async def test_frontline_broadcast_without_candidates_starts_without_call(
 
     result = await frontline_relevance_agent(state)
 
-    assert result["intake_action"] == "start"
+    assert result["decision"]["intake_action"] == "start"
     invoke.assert_not_awaited()
 
 
@@ -444,7 +573,7 @@ async def test_frontline_does_not_recheck_untargeted_discard(
 
     result = await frontline_relevance_agent(state)
 
-    assert result["intake_action"] == "discard"
+    assert result["decision"]["intake_action"] == "discard"
     invoke.assert_awaited_once()
 
 
@@ -484,8 +613,8 @@ async def test_frontline_incident_rejects_message_only_character_claim(
 
     result = await frontline_relevance_agent(state)
 
-    assert result["intake_action"] == "discard"
-    assert result["reason"] == "invalid frontline output"
+    assert result["decision"]["intake_action"] == "discard"
+    assert result["decision"]["reason"] == "invalid frontline output"
 
 
 @pytest.mark.asyncio
@@ -525,7 +654,7 @@ async def test_frontline_quoted_canonical_name_remains_model_judged(
 
     result = await frontline_relevance_agent(state)
 
-    assert result["intake_action"] == "discard"
+    assert result["decision"]["intake_action"] == "discard"
     invoke.assert_awaited_once()
 
 
@@ -567,8 +696,8 @@ async def test_frontline_state_salience_preserves_other_recipient(
 
     result = await frontline_relevance_agent(state)
 
-    assert result["intake_action"] == "start"
-    assert "recipient_relation" not in result
+    assert result["decision"]["intake_action"] == "start"
+    assert "recipient_relation" not in result["decision"]
 
 
 @pytest.mark.asyncio
@@ -585,20 +714,34 @@ async def test_frontline_agent_fails_closed_on_unsupplied_model_slot(
         "reason": "invented slot",
     })
     llm = frontline_module._frontline_relevance_agent_llm
-    monkeypatch.setattr(llm, "ainvoke", AsyncMock(return_value=response))
+    invoke = AsyncMock(return_value=response)
+    record_trace = AsyncMock()
+    monkeypatch.setattr(llm, "ainvoke", invoke)
+    monkeypatch.setattr(
+        frontline_module.llm_tracing,
+        "record_llm_trace_step",
+        record_trace,
+    )
     state = _frontline_state()
+    state["llm_trace_id"] = "frontline-normalized-trace"
     state["current_message"]["semantic_target_labels"] = []
     state["current_message"]["reply_target_label"] = "none"
     state["recent_preludes"] = []
 
     result = await frontline_relevance_agent(state)
 
-    assert result == {
+    assert result["decision"] == {
         "intake_action": "discard",
         "append_target": "none",
         "prelude_targets": [],
         "reason": "invalid frontline output",
     }
+    assert result["attempt_diagnostics"] == []
+    invoke.assert_awaited_once()
+    assert record_trace.await_count == 1
+    assert record_trace.await_args.kwargs["parse_status"] == "normalized"
+    assert record_trace.await_args.kwargs["status"] == "succeeded"
+    assert record_trace.await_args.kwargs["attempt_index"] == 1
 
 
 @pytest.mark.asyncio
@@ -623,9 +766,10 @@ async def test_frontline_agent_fails_closed_on_unsupplied_append_slot(
 
     result = await frontline_relevance_agent(state)
 
-    assert result == {
+    assert result["decision"] == {
         "intake_action": "discard",
         "append_target": "none",
         "prelude_targets": [],
         "reason": "invalid frontline output",
     }
+    assert result["attempt_diagnostics"] == []

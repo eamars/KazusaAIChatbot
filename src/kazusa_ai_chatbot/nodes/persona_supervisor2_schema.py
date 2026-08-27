@@ -3,6 +3,7 @@ from typing import Annotated, Literal, NotRequired, TypedDict
 from kazusa_ai_chatbot.action_spec.models import ActionSpecV1
 from kazusa_ai_chatbot.action_spec.results import (
     ActionResultV1,
+    EpisodeAttemptDiagnosticV1,
     EpisodeTraceV2,
     SurfaceOutputV1,
 )
@@ -38,6 +39,7 @@ from kazusa_ai_chatbot.state import (
     DebugModes,
     MultiMediaDoc,
     ReplyContext,
+    append_attempt_diagnostics,
     keep_false,
 )
 from kazusa_ai_chatbot.time_boundary import LocalTimeContextDoc
@@ -132,6 +134,10 @@ class GlobalPersonaState(TypedDict):
 
     # Response continuation
     should_respond: Annotated[bool | None, keep_false]
+    attempt_diagnostics: Annotated[
+        list[EpisodeAttemptDiagnosticV1],
+        append_attempt_diagnostics,
+    ]
     dialog_usage_mode: NotRequired[str]
 
     # Bridge variables populated by persona graph nodes
@@ -240,6 +246,10 @@ class CognitionState(TypedDict):
     action_selection_context: NotRequired[dict]
     coding_run_followup: NotRequired[dict]
     selected_text_surface_intent: NotRequired[str]
+    attempt_diagnostics: Annotated[
+        list[EpisodeAttemptDiagnosticV1],
+        append_attempt_diagnostics,
+    ]
 
     decontextualized_input: str
     referents: list[ReferentResolution]

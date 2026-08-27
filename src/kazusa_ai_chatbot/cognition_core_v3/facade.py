@@ -11,14 +11,17 @@ import json
 import logging
 import re
 import time
-from collections.abc import Mapping
-from dataclasses import replace
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 
+import httpx
 from langchain_core.messages import HumanMessage, SystemMessage
+from openai import OpenAIError
 
-from kazusa_ai_chatbot import llm_tracing
+from kazusa_ai_chatbot import event_logging, llm_tracing
 from kazusa_ai_chatbot.cognition_core_v3.appraisal import (
+    AppraisalContractError,
     bind_axis_changes,
     cut_over_ordinary_response_goals,
     validate_canonical_appraisal,
@@ -55,11 +58,16 @@ from kazusa_ai_chatbot.cognition_shared.contracts import (
     GOAL_RESOLUTION_VALUES,
     SELF_COGNITION_RESPONSE_DECISION_VALUES,
     CognitionContractError,
+    CognitionExecutionError,
     is_targetless_group_self_cognition_episode,
     validate_overused_moves,
+    validate_terminal_text_seed,
 )
 from kazusa_ai_chatbot.cognition_shared.emotion_derivation import (
     derive_persistent_emotion_activations,
+)
+from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
+    V2_MODEL_TOTAL_ATTEMPTS,
 )
 from kazusa_ai_chatbot.cognition_shared.state_models import validate_cognition_state
 from kazusa_ai_chatbot.cognition_shared.state_projection import (
@@ -156,6 +164,14 @@ _EXACT_JSON_SYSTEM_SUFFIX = '''# 输出约束
 引用。'''
 _PRIVATE_MONOLOGUE_MAX_CHARS = 600
 _EPISTEMIC_BOUNDARY_MAX_CHARS = 1000
+_COGNITION_STAGE_ATTEMPT_LIMIT = V2_MODEL_TOTAL_ATTEMPTS
+_COGNITION_ATTEMPT_TIME_FLOOR_SECONDS = 20
+_COGNITION_STAGE_ERROR_CAP = 500
+_COGNITION_STAGE_REPAIR_OUTPUT_CAP = 8000
+_COGNITION_REPAIR_INSTRUCTION = (
+    '保留原始的角色判断、情绪方向、关系方向、能力结果和事实；只修复字段集合、字段类型、长度、'
+    '列表基数。只返回当前阶段规定的完整对象，不添加解释、markdown 或额外字段。'
+)
 
 _COGNITION_STAGE_SEQUENCE = {"A1": 0, "A2": 1, "G": 2, "P": 3}
 _COGNITION_TRACE_FIELDS = {
@@ -174,6 +190,14 @@ _COGNITION_TRACE_FIELDS = {
         "epistemic_boundary",
     ),
 }
+
+
+@dataclass(frozen=True)
+class _CognitionValidationResult:
+    """Carry a validated product and an explicitly recorded normalization."""
+
+    value: object
+    normalization_kind: str = ""
 
 
 def _validate_canonical_input(value: object) -> dict[str, object]:
@@ -345,92 +369,228 @@ def _prepare_state_transaction(
     return dict(original), validated, transitions
 
 
-async def _call_once(
-    *, services: CognitionChainServicesV3, stage: str, packet: dict[str, object]
-) -> dict[str, object]:
-    """Make one direct provider call and parse only deterministic JSON."""
+async def _run_cognition_stage(
+    *,
+    services: CognitionChainServicesV3,
+    stage: str,
+    packet: dict[str, object],
+    validator: Callable[[object], object],
+    deadline_monotonic: float,
+) -> object:
+    """Run one cognition stage with bounded feedback-bearing recovery."""
 
     config = replace(
         services.chain_lane,
         stage_name=f"cognition_core_v3.{stage}",
         output_mode="text",
     )
-    started = time.monotonic()
-    messages = [
-        SystemMessage(content="\n\n".join((
-            _STAGE_SYSTEM_PROMPTS[stage],
-            _EXACT_JSON_SYSTEM_SUFFIX,
-        ))),
+    system_message = SystemMessage(content="\n\n".join((
+        _STAGE_SYSTEM_PROMPTS[stage],
+        _EXACT_JSON_SYSTEM_SUFFIX,
+    )))
+    base_messages = [
+        system_message,
         HumanMessage(content=_json(packet)),
     ]
-    try:
-        response = await services.llm.ainvoke(
-            messages,
-            config=config,
-        )
-    except Exception as exc:
+    request_messages = base_messages
+    for attempt_index in range(1, _COGNITION_STAGE_ATTEMPT_LIMIT + 1):
+        if attempt_index > 1 and (
+            deadline_monotonic - time.monotonic()
+            < _COGNITION_ATTEMPT_TIME_FLOOR_SECONDS
+        ):
+            raise _cognition_stage_exhaustion(stage)
+        started = time.monotonic()
+        try:
+            response = await services.llm.ainvoke(
+                request_messages,
+                config=config,
+            )
+        except (
+            OpenAIError,
+            httpx.HTTPError,
+            ConnectionError,
+            OSError,
+            RuntimeError,
+            TimeoutError,
+        ) as exc:
+            await _record_cognition_trace_attempt(
+                stage=stage,
+                config=config,
+                messages=request_messages,
+                response_text="",
+                parsed_output={},
+                parse_status="provider_error",
+                status="failed",
+                started=started,
+                attempt_index=attempt_index,
+                validation_error=str(exc),
+            )
+            _record_protected_cognition_attempt(
+                stage=stage,
+                config=config,
+                messages=request_messages,
+                raw_output="",
+                parsed_output=None,
+                parse_status="provider_error",
+                status="provider_error",
+                started=started,
+                attempt_index=attempt_index,
+                validation_error=str(exc),
+            )
+            if attempt_index >= _COGNITION_STAGE_ATTEMPT_LIMIT:
+                raise _cognition_stage_exhaustion(stage) from exc
+            request_messages = _cognition_repair_messages(
+                packet=packet,
+                system_message=system_message,
+                reason=(
+                    "上一轮模型调用未返回可用候选，请在相同语境下重新生成完整 JSON。"
+                ),
+                contract_error="",
+                invalid_candidate="",
+            )
+            continue
+
+        raw_content = getattr(response, "content", "")
+        response_text = str(raw_content)
+        parsed: object = None
+        try:
+            parsed = parse_llm_json_output(
+                raw_content,
+            )
+            if not isinstance(parsed, dict) or not parsed:
+                raise CanonicalContractError(
+                    f"{stage} returned no usable JSON object"
+                )
+            validated = validator(parsed)
+        except (CanonicalContractError, AppraisalContractError) as exc:
+            await _record_cognition_trace_attempt(
+                stage=stage,
+                config=config,
+                messages=request_messages,
+                response_text=response_text,
+                parsed_output=parsed,
+                parse_status="contract_error",
+                status="failed",
+                started=started,
+                attempt_index=attempt_index,
+                validation_error=str(exc),
+            )
+            _record_protected_cognition_attempt(
+                stage=stage,
+                config=config,
+                messages=request_messages,
+                raw_output=raw_content,
+                parsed_output=None,
+                parse_status="contract_error",
+                status="contract_fault",
+                started=started,
+                attempt_index=attempt_index,
+                validation_error=str(exc),
+            )
+            if attempt_index >= _COGNITION_STAGE_ATTEMPT_LIMIT:
+                raise _cognition_stage_exhaustion(stage) from exc
+            request_messages = _cognition_repair_messages(
+                packet=packet,
+                system_message=system_message,
+                reason=(
+                    "上一份候选未通过当前阶段的字段、类型、长度或列表基数校验。"
+                ),
+                contract_error=str(exc),
+                invalid_candidate=response_text,
+            )
+            continue
+
+        normalization_kind = ""
+        validated_value = validated
+        if isinstance(validated, _CognitionValidationResult):
+            validated_value = validated.value
+            normalization_kind = validated.normalization_kind
+        parse_status = "normalized" if normalization_kind else "succeeded"
         await _record_cognition_trace_attempt(
             stage=stage,
             config=config,
-            messages=messages,
-            response_text="",
-            parsed_output={},
-            parse_status="provider_error",
-            status="failed",
+            messages=request_messages,
+            response_text=response_text,
+            parsed_output=parsed,
+            parse_status=parse_status,
+            status="succeeded",
             started=started,
-            validation_error=str(exc),
+            attempt_index=attempt_index,
+            validation_error="",
         )
-        record_protected_chain_record({
-            "stage": stage,
-            "config": {
-                "route_name": config.route_name,
-                "model": config.model,
-                "stage_name": config.stage_name,
-            },
-            "messages": [
-                {"role": "system", "content": messages[0].content},
-                {"role": "human", "content": messages[1].content},
-            ],
-            "raw_output": "",
-            "parsed_output": None,
-            "status": "provider_error",
-            "duration_ms": round((time.monotonic() - started) * 1000, 3),
-        })
-        raise
-    raw_content = getattr(response, "content", "")
-    try:
-        parsed = parse_llm_json_output(raw_content, deterministic_only=True)
-        if not isinstance(parsed, dict) or not parsed:
-            raise CanonicalContractError(f"{stage} returned no usable JSON object")
-    except (TypeError, ValueError) as exc:
-        await _record_cognition_trace_attempt(
+        _record_protected_cognition_attempt(
             stage=stage,
             config=config,
-            messages=messages,
-            response_text=str(raw_content),
-            parsed_output=None,
-            parse_status="contract_error",
-            status="failed",
+            messages=request_messages,
+            raw_output=raw_content,
+            parsed_output=parsed,
+            parse_status=parse_status,
+            status="parsed",
             started=started,
-            validation_error=str(exc),
+            attempt_index=attempt_index,
+            validation_error="",
         )
-        record_protected_chain_record({
-            "stage": stage,
-            "config": {
-                "route_name": config.route_name,
-                "model": config.model,
-                "stage_name": config.stage_name,
-            },
-            "messages": [
-                {"role": "system", "content": messages[0].content},
-                {"role": "human", "content": messages[1].content},
-            ],
-            "raw_output": raw_content,
-            "parsed_output": None,
-            "status": "contract_fault",
-            "duration_ms": round((time.monotonic() - started) * 1000, 3),
-        })
-        raise
+        if normalization_kind:
+            await _record_cognition_normalization(
+                stage=stage,
+                normalization_kind=normalization_kind,
+            )
+        return validated_value
+
+    raise _cognition_stage_exhaustion(stage)
+
+
+def _cognition_stage_exhaustion(stage: str) -> CognitionExecutionError:
+    """Build the fixed retryable pre-commit stage exhaustion."""
+
+    return CognitionExecutionError(
+        f"cognition {stage} stage contract exhausted",
+        error_code=f"cognition_{stage.lower()}_contract_exhausted",
+        stage=f"cognition_core_v3.{stage}",
+        attempt_count=_COGNITION_STAGE_ATTEMPT_LIMIT,
+        safe_checkpoint="pre_state_commit",
+        retryable=True,
+    )
+
+
+def _cognition_repair_messages(
+    *,
+    packet: Mapping[str, object],
+    system_message: SystemMessage,
+    reason: str,
+    contract_error: str,
+    invalid_candidate: str,
+) -> list[SystemMessage | HumanMessage]:
+    """Append exactly one bounded contract-repair block to the stage packet."""
+
+    repair_packet = dict(packet)
+    repair_packet["contract_repair"] = {
+        "repair_instruction": _COGNITION_REPAIR_INSTRUCTION,
+        "reason": reason,
+        "contract_error": contract_error[:_COGNITION_STAGE_ERROR_CAP],
+        "invalid_candidate": invalid_candidate[:_COGNITION_STAGE_REPAIR_OUTPUT_CAP],
+    }
+    return [
+        system_message,
+        HumanMessage(content=_json(repair_packet)),
+    ]
+
+
+def _record_protected_cognition_attempt(
+    *,
+    stage: str,
+    config: LLMCallConfig,
+    messages: list[SystemMessage | HumanMessage],
+    raw_output: object,
+    parsed_output: object,
+    parse_status: str,
+    status: str,
+    started: float,
+    attempt_index: int,
+    validation_error: str,
+) -> None:
+    """Store the complete protected record for one cognition attempt."""
+
     record_protected_chain_record({
         "stage": stage,
         "config": {
@@ -442,23 +602,33 @@ async def _call_once(
             {"role": "system", "content": messages[0].content},
             {"role": "human", "content": messages[1].content},
         ],
-        "raw_output": raw_content,
-        "parsed_output": parsed,
-        "status": "parsed",
+        "raw_output": raw_output,
+        "parsed_output": parsed_output,
+        "parse_status": parse_status,
+        "status": status,
+        "attempt_index": attempt_index,
+        "validation_error": validation_error,
         "duration_ms": round((time.monotonic() - started) * 1000, 3),
     })
-    await _record_cognition_trace_attempt(
-        stage=stage,
-        config=config,
-        messages=messages,
-        response_text=str(raw_content),
-        parsed_output=parsed,
-        parse_status="succeeded",
-        status="succeeded",
-        started=started,
-        validation_error="",
+
+
+async def _record_cognition_normalization(
+    *,
+    stage: str,
+    normalization_kind: str,
+) -> None:
+    """Mirror deterministic cognition normalization without affecting output."""
+
+    await event_logging.record_model_contract_event(
+        component="cognition_core_v3",
+        stage_name=f"cognition_core_v3.{stage}",
+        violation_kind=normalization_kind,
+        missing_fields=(),
+        invalid_fields=(normalization_kind,),
+        repair_used=False,
+        status="normalized",
+        correlation_id=llm_tracing.current_trace_id(),
     )
-    return parsed
 
 
 async def _record_cognition_trace_attempt(
@@ -471,6 +641,7 @@ async def _record_cognition_trace_attempt(
     parse_status: str,
     status: str,
     started: float,
+    attempt_index: int,
     validation_error: str,
 ) -> None:
     """Persist one cognition attempt without affecting semantic execution."""
@@ -490,7 +661,7 @@ async def _record_cognition_trace_attempt(
             output_state_fields=_COGNITION_TRACE_FIELDS[stage],
             sequence=_COGNITION_STAGE_SEQUENCE[stage],
             call_config=config,
-            attempt_index=1,
+            attempt_index=attempt_index,
             validation_error=validation_error,
             attempt_started_at=started,
         )
@@ -553,11 +724,14 @@ def _validate_goal(
         "reason": _bounded_text(willingness["reason"], "willingness reason"),
         "cause_summary": _bounded_text(willingness["cause_summary"], "willingness cause"),
     }
-    private_monologue = _bounded_text(
-        raw["private_monologue"],
-        "private monologue",
-        _PRIVATE_MONOLOGUE_MAX_CHARS,
-    )
+    raw_private_monologue = raw["private_monologue"]
+    if not isinstance(raw_private_monologue, str) or not raw_private_monologue.strip():
+        raise CanonicalContractError(
+            "private monologue must be bounded non-empty text"
+        )
+    private_monologue = raw_private_monologue.strip()[
+        :_PRIVATE_MONOLOGUE_MAX_CHARS
+    ]
     return typed_goal, typed_willingness, private_monologue
 
 
@@ -575,9 +749,19 @@ def _validate_plan(raw: object, *, self_cognition: bool, capabilities: dict[str,
             raise CanonicalContractError("self-cognition response fields are not exact")
         if item["decision"] not in SELF_COGNITION_RESPONSE_DECISION_VALUES:
             raise CanonicalContractError("self-cognition decision is unsupported")
+        try:
+            self_response_goal = validate_terminal_text_seed(
+                _bounded_text(
+                    item["response_goal"],
+                    "self response goal",
+                ),
+                "self response goal",
+            )
+        except CognitionContractError as exc:
+            raise CanonicalContractError(str(exc)) from exc
         return CanonicalResponsePlan(
             goal_resolution="answerable_now",
-            response_goal=_bounded_text(item["response_goal"], "self response goal"),
+            response_goal=self_response_goal,
             action_requests=(), resolver_requests=(),
             epistemic_boundary=_bounded_text(
                 raw["epistemic_boundary"],
@@ -586,7 +770,7 @@ def _validate_plan(raw: object, *, self_cognition: bool, capabilities: dict[str,
             ),
             self_cognition_response={
                 "decision": item["decision"],
-                "response_goal": _bounded_text(item["response_goal"], "self response goal"),
+                "response_goal": self_response_goal,
                 "reason": _bounded_text(item["reason"], "self response reason"),
                 "cause_summary": _bounded_text(item["cause_summary"], "self response cause"),
             },
@@ -663,9 +847,16 @@ def _validate_plan(raw: object, *, self_cognition: bool, capabilities: dict[str,
         if capability not in resolver_affordances:
             raise CanonicalContractError("resolver capability affordance is missing")
         clean_resolvers.append({key: _bounded_text(row[key], f"resolver {key}") for key in row})
+    try:
+        response_goal = validate_terminal_text_seed(
+            _bounded_text(raw["response_goal"], "response goal"),
+            "response goal",
+        )
+    except CognitionContractError as exc:
+        raise CanonicalContractError(str(exc)) from exc
     return CanonicalResponsePlan(
         goal_resolution=raw["goal_resolution"],
-        response_goal=_bounded_text(raw["response_goal"], "response goal"),
+        response_goal=response_goal,
         action_requests=tuple(clean_actions), resolver_requests=tuple(clean_resolvers),
         epistemic_boundary=_bounded_text(
             raw["epistemic_boundary"],
@@ -675,22 +866,81 @@ def _validate_plan(raw: object, *, self_cognition: bool, capabilities: dict[str,
     )
 
 
+def _validate_appraisal_stage(
+    raw: object,
+    *,
+    families: tuple[str, ...],
+) -> _CognitionValidationResult:
+    """Validate appraisal content and identify key-order normalization."""
+
+    validated = validate_canonical_appraisal(raw, families=families)
+    normalized = isinstance(raw, Mapping) and tuple(raw) != families
+    return _CognitionValidationResult(
+        value=validated,
+        normalization_kind=(
+            "appraisal_family_key_order" if normalized else ""
+        ),
+    )
+
+
+def _validate_goal_stage(raw: object) -> _CognitionValidationResult:
+    """Validate the goal product and identify private-monologue clamping."""
+
+    validated = _validate_goal(raw)
+    normalized = (
+        isinstance(raw, Mapping)
+        and isinstance(raw.get("private_monologue"), str)
+        and len(raw["private_monologue"].strip()) > _PRIVATE_MONOLOGUE_MAX_CHARS
+    )
+    return _CognitionValidationResult(
+        value=validated,
+        normalization_kind=("private_monologue_clamped" if normalized else ""),
+    )
+
+
+def _validate_plan_stage(
+    raw: object,
+    *,
+    self_cognition: bool,
+    capabilities: dict[str, object],
+) -> _CognitionValidationResult:
+    """Validate the response plan without adding semantic recovery."""
+
+    return _CognitionValidationResult(
+        value=_validate_plan(
+            raw,
+            self_cognition=self_cognition,
+            capabilities=capabilities,
+        ),
+    )
+
+
 async def run_cognition(
     input_payload: Mapping[str, object], services: CognitionChainServicesV3
 ) -> dict[str, object]:
     """Run the complete canonical chain under its configured deadline."""
 
-    return await asyncio.wait_for(
-        _run_cognition(input_payload, services),
-        timeout=services.turn_deadline_seconds,
-    )
+    try:
+        return await asyncio.wait_for(
+            _run_cognition(input_payload, services),
+            timeout=services.turn_deadline_seconds,
+        )
+    except asyncio.TimeoutError as exc:
+        raise CognitionExecutionError(
+            "cognition turn deadline exhausted",
+            error_code="cognition_turn_deadline_exhausted",
+            stage="cognition_core_v3",
+            safe_checkpoint="pre_state_commit",
+            retryable=False,
+        ) from exc
 
 
 async def _run_cognition(
     input_payload: Mapping[str, object], services: CognitionChainServicesV3
 ) -> dict[str, object]:
-    """Run exactly A1, A2, G, and caller-selected P once each."""
+    """Run A1, A2, G, and caller-selected P with bounded stage recovery."""
 
+    deadline_monotonic = time.monotonic() + services.turn_deadline_seconds
     validated = _validate_canonical_input(input_payload)
     original_state, transaction_state, transaction_transitions = (
         _prepare_state_transaction(validated)
@@ -722,39 +972,76 @@ async def _run_cognition(
         runtime_limits=validated.get("runtime_capability_limits", []),
         group_engagement=validated.get("group_engagement_action_context", {}),
     )
-    a1_raw = await _call_once(
-        services=services, stage="A1",
-        packet=build_canonical_appraisal_question(workspace=workspace, stage_name="A1"),
+    a1 = await _run_cognition_stage(
+        services=services,
+        stage="A1",
+        packet=build_canonical_appraisal_question(
+            workspace=workspace,
+            stage_name="A1",
+        ),
+        validator=lambda raw: _validate_appraisal_stage(
+            raw,
+            families=CANONICAL_A1_FAMILIES,
+        ),
+        deadline_monotonic=deadline_monotonic,
     )
-    a1 = validate_canonical_appraisal(a1_raw, families=CANONICAL_A1_FAMILIES)
+    if not isinstance(a1, tuple):
+        raise CognitionContractError("A1 appraisal result is invalid")
     a1_summary = _appraisal_summary(a1)
-    a2_raw = await _call_once(
-        services=services, stage="A2",
+    a2 = await _run_cognition_stage(
+        services=services,
+        stage="A2",
         packet=build_canonical_appraisal_question(
             workspace=workspace,
             stage_name="A2",
             accepted_appraisal_summary=a1_summary,
         ),
+        validator=lambda raw: _validate_appraisal_stage(
+            raw,
+            families=CANONICAL_A2_FAMILIES,
+        ),
+        deadline_monotonic=deadline_monotonic,
     )
-    a2 = validate_canonical_appraisal(a2_raw, families=CANONICAL_A2_FAMILIES)
+    if not isinstance(a2, tuple):
+        raise CognitionContractError("A2 appraisal result is invalid")
     appraisals = (*a1, *a2)
     summaries = _appraisal_summary(appraisals)
-    goal_raw = await _call_once(
-        services=services, stage="G",
-        packet=build_canonical_goal_question(workspace=workspace, appraisal_summary=summaries),
+    goal_result = await _run_cognition_stage(
+        services=services,
+        stage="G",
+        packet=build_canonical_goal_question(
+            workspace=workspace,
+            appraisal_summary=summaries,
+        ),
+        validator=_validate_goal_stage,
+        deadline_monotonic=deadline_monotonic,
     )
-    goal, willingness, private_monologue = _validate_goal(goal_raw)
+    if not (
+        isinstance(goal_result, tuple)
+        and len(goal_result) == 3
+    ):
+        raise CognitionContractError("G goal result is invalid")
+    goal, willingness, private_monologue = goal_result
     self_cognition = _is_self_cognition(validated)
-    plan_raw = await _call_once(
-        services=services, stage="P",
+    plan_result = await _run_cognition_stage(
+        services=services,
+        stage="P",
         packet=build_canonical_plan_question(
             workspace=workspace,
             goal=goal.__dict__,
             appraisal_summary=summaries,
             self_cognition=self_cognition,
         ),
+        validator=lambda raw: _validate_plan_stage(
+            raw,
+            self_cognition=self_cognition,
+            capabilities=workspace["capabilities"],
+        ),
+        deadline_monotonic=deadline_monotonic,
     )
-    plan = _validate_plan(plan_raw, self_cognition=self_cognition, capabilities=workspace["capabilities"])
+    if not isinstance(plan_result, CanonicalResponsePlan):
+        raise CognitionContractError("P response plan result is invalid")
+    plan = plan_result
     binding_metadata: dict[str, object] = {}
     replacement_state, transition_contexts, binding_receipts, cause_provenance = bind_axis_changes(
         validated,

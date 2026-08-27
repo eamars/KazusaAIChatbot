@@ -21,10 +21,6 @@ from kazusa_ai_chatbot.cognition_episode import (
     GoalContinuationRefV1,
     build_goal_continuation_ref,
 )
-from kazusa_ai_chatbot.cognition_shared.contracts import (
-    CognitionContractError,
-    _validate_scene_context,
-)
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     RESOLVER_CYCLE_TRACE_VERSION,
     RESOLVER_EVIDENCE_STATE_VERSION,
@@ -40,6 +36,11 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     validate_resolver_goal_progress,
     validate_resolver_observation,
     validate_resolver_pending_resolution,
+)
+from kazusa_ai_chatbot.cognition_shared.contracts import (
+    CognitionContractError,
+    CognitionExecutionError,
+    _validate_scene_context,
 )
 from kazusa_ai_chatbot.cognition_resolver.pending import (
     apply_pending_resolution,
@@ -91,6 +92,31 @@ BLOCKED_PENDING_CAPABILITIES = frozenset((
     "approval_preparation",
 ))
 
+
+async def _call_cognition_preserving_observations(
+    state: GlobalPersonaState,
+    call_cognition_subgraph_func: CognitionSubgraphFunc,
+) -> GlobalPersonaState:
+    """Carry collected resolver observations across a cognition failure."""
+
+    try:
+        return await call_cognition_subgraph_func(state)
+    except CognitionExecutionError as exc:
+        resolver_state = _resolver_state(state)
+        exc.diagnostics = {
+            "resolver_state": {
+                **resolver_state,
+                "observations": [
+                    dict(row) for row in resolver_state["observations"]
+                ],
+                "cycle_traces": [
+                    dict(row) for row in resolver_state["cycle_traces"]
+                ],
+            },
+        }
+        raise
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -116,7 +142,10 @@ async def call_cognition_resolver_loop(
 
     while _resolver_state(current_state)["cycle_index"] < max_cycles:
         status_before = _resolver_state(current_state)["status"]
-        cognition_output = await call_cognition_subgraph_func(current_state)
+        cognition_output = await _call_cognition_preserving_observations(
+            current_state,
+            call_cognition_subgraph_func,
+        )
         cognition_state = _merge_state(current_state, cognition_output)
         cognition_state = _sync_goal_progress_from_cognition(cognition_state)
         lifecycle_conflict = _final_lifecycle_conflict(cognition_state)
@@ -326,7 +355,10 @@ async def _run_mixed_lifecycle_final_cognition(
             selected_request["goal_continuation_ref"],
         )
     )
-    cognition_output = await call_cognition_subgraph_func(cognition_input)
+    cognition_output = await _call_cognition_preserving_observations(
+        cognition_input,
+        call_cognition_subgraph_func,
+    )
     cognition_state = _merge_state(cognition_input, cognition_output)
     cognition_state = _sync_goal_progress_from_cognition(cognition_state)
     await _apply_pending_resolution_if_present(
@@ -865,7 +897,10 @@ async def _run_max_cycle_final_cognition(
     updated_resolver_state["status"] = "max_cycles"
     updated_resolver_state["terminal_reason"] = "maximum resolver cycles reached"
     cognition_input = _with_resolver_state(state, updated_resolver_state)
-    cognition_output = await call_cognition_subgraph_func(cognition_input)
+    cognition_output = await _call_cognition_preserving_observations(
+        cognition_input,
+        call_cognition_subgraph_func,
+    )
     cognition_state = _merge_state(cognition_input, cognition_output)
     cognition_state = _sync_goal_progress_from_cognition(cognition_state)
     await _apply_pending_resolution_if_present(
@@ -962,7 +997,10 @@ async def _run_duplicate_request_final_cognition(
     )
     updated_resolver_state = append_cycle_trace(updated_resolver_state, trace)
     cognition_input = _with_resolver_state(state, updated_resolver_state)
-    cognition_output = await call_cognition_subgraph_func(cognition_input)
+    cognition_output = await _call_cognition_preserving_observations(
+        cognition_input,
+        call_cognition_subgraph_func,
+    )
     cognition_state = _merge_state(cognition_input, cognition_output)
     cognition_state = _sync_goal_progress_from_cognition(cognition_state)
     await _apply_pending_resolution_if_present(
@@ -1082,7 +1120,10 @@ async def _run_blocked_pending_final_cognition(
     cognition_input = _with_resolver_state(state, updated_resolver_state)
     cognition_input["pending_resolver_resume"] = pending_resume
 
-    cognition_output = await call_cognition_subgraph_func(cognition_input)
+    cognition_output = await _call_cognition_preserving_observations(
+        cognition_input,
+        call_cognition_subgraph_func,
+    )
     cognition_state = _merge_state(cognition_input, cognition_output)
     cognition_state = _sync_goal_progress_from_cognition(cognition_state)
     await _apply_pending_resolution_if_present(
@@ -1187,7 +1228,10 @@ async def _run_user_input_blocker_final_cognition(
             observation["rag_result"],
         )
 
-    cognition_output = await call_cognition_subgraph_func(cognition_input)
+    cognition_output = await _call_cognition_preserving_observations(
+        cognition_input,
+        call_cognition_subgraph_func,
+    )
     cognition_state = _merge_state(cognition_input, cognition_output)
     cognition_state = _sync_goal_progress_from_cognition(cognition_state)
     await _apply_pending_resolution_if_present(

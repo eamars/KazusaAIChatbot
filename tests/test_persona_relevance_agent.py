@@ -7,10 +7,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import kazusa_ai_chatbot.relevance.persona_relevance_agent as relevance_module
 from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_character_production_state,
 )
-import kazusa_ai_chatbot.relevance.persona_relevance_agent as relevance_module
+from kazusa_ai_chatbot.relevance.participation_evidence import (
+    validate_participation_assessment,
+)
 from kazusa_ai_chatbot.relevance.persona_relevance_agent import (
     SETTLED_RELEVANCE_MAX_COMPLETION_TOKENS,
     SETTLED_RELEVANCE_MAX_INPUT_CHARS,
@@ -19,9 +22,6 @@ from kazusa_ai_chatbot.relevance.persona_relevance_agent import (
     build_settled_relevance_messages,
     relevance_agent,
     validate_settled_relevance_decision,
-)
-from kazusa_ai_chatbot.relevance.participation_evidence import (
-    validate_participation_assessment,
 )
 
 
@@ -186,10 +186,10 @@ async def test_relevance_agent_returns_proceed_action() -> None:
     state["assembled_fragments"][0]["reply_target_label"] = "none"
     with patch.object(relevance_module, "_relevance_agent_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=response)
-        result = await relevance_agent(state)
+        envelope = await relevance_agent(state)
+        result = envelope["decision"]
 
     assert result["response_action"] == "proceed"
-    assert result["should_respond"] is True
     assert result["use_reply_feature"] is True
     assert "recipient_relation" not in result
     assert "admission_basis" not in result
@@ -220,10 +220,11 @@ async def test_relevance_agent_returns_ignore_action() -> None:
     }]
     with patch.object(relevance_module, "_relevance_agent_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=response)
-        result = await relevance_agent(state)
+        envelope = await relevance_agent(state)
+        result = envelope["decision"]
 
     assert result["response_action"] == "ignore"
-    assert result["should_respond"] is False
+    assert envelope["attempt_diagnostics"] == []
     mock_llm.ainvoke.assert_awaited_once()
 
 
@@ -253,10 +254,10 @@ async def test_relevance_agent_incident_accepts_grounded_ignore() -> None:
 
     with patch.object(relevance_module, "_relevance_agent_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=response)
-        result = await relevance_agent(state)
+        envelope = await relevance_agent(state)
+        result = envelope["decision"]
 
     assert result["response_action"] == "ignore"
-    assert result["should_respond"] is False
 
 
 @pytest.mark.asyncio
@@ -288,10 +289,10 @@ async def test_relevance_agent_state_salience_disables_other_reply_anchor(
 
     with patch.object(relevance_module, "_relevance_agent_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=response)
-        result = await relevance_agent(state)
+        envelope = await relevance_agent(state)
+        result = envelope["decision"]
 
     assert result["response_action"] == "proceed"
-    assert result["should_respond"] is True
     assert result["use_reply_feature"] is False
     assert "recipient_relation" not in result
 
@@ -312,16 +313,29 @@ async def test_relevance_agent_fails_closed_on_invented_evidence_ref() -> None:
         "indirect_speech_context": "",
     }))
     state = _base_state()
+    state["llm_trace_id"] = "settled-normalized-trace"
     state["assembled_fragments"][0]["semantic_target_labels"] = []
     state["assembled_fragments"][0]["reply_target_label"] = "none"
 
-    with patch.object(relevance_module, "_relevance_agent_llm") as mock_llm:
+    with (
+        patch.object(relevance_module, "_relevance_agent_llm") as mock_llm,
+        patch.object(
+            relevance_module.llm_tracing,
+            "record_llm_trace_step",
+            new_callable=AsyncMock,
+        ) as record_trace,
+    ):
         mock_llm.ainvoke = AsyncMock(return_value=response)
-        result = await relevance_agent(state)
+        envelope = await relevance_agent(state)
+        result = envelope["decision"]
 
     assert result["response_action"] == "ignore"
-    assert result["should_respond"] is False
     assert result["use_reply_feature"] is False
+    mock_llm.ainvoke.assert_awaited_once()
+    assert record_trace.await_count == 1
+    assert record_trace.await_args.kwargs["parse_status"] == "normalized"
+    assert record_trace.await_args.kwargs["status"] == "succeeded"
+    assert record_trace.await_args.kwargs["attempt_index"] == 1
 
 
 @pytest.mark.asyncio
@@ -329,10 +343,10 @@ async def test_relevance_agent_uses_sole_authoritative_proceed() -> None:
     """A sole evidence-derived disposition bypasses semantic reproduction."""
 
     with patch.object(relevance_module, "_relevance_agent_llm") as mock_llm:
-        result = await relevance_agent(_base_state())
+        envelope = await relevance_agent(_base_state())
+        result = envelope["decision"]
 
     assert result["response_action"] == "proceed"
-    assert result["should_respond"] is True
     assert result["use_reply_feature"] is False
     mock_llm.ainvoke.assert_not_called()
 
@@ -359,9 +373,11 @@ async def test_relevance_agent_maps_available_already_resolved_in_one_call() -> 
 
     with patch.object(relevance_module, "_relevance_agent_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=response)
-        result = await relevance_agent(state)
+        envelope = await relevance_agent(state)
+        result = envelope["decision"]
 
     assert result["response_action"] == "ignore"
+    assert envelope["attempt_diagnostics"] == []
     mock_llm.ainvoke.assert_awaited_once()
     messages = mock_llm.ainvoke.await_args.args[0]
     assert "already_resolved" in messages[0].content
@@ -395,11 +411,12 @@ async def test_authoritative_bad_evidence_does_not_trigger_repair() -> None:
 
     with patch.object(relevance_module, "_relevance_agent_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=response)
-        result = await relevance_agent(state)
+        envelope = await relevance_agent(state)
+        result = envelope["decision"]
 
     assert result["response_action"] == "proceed"
-    assert result["should_respond"] is True
     assert result["use_reply_feature"] is True
+    assert envelope["attempt_diagnostics"] == []
     mock_llm.ainvoke.assert_awaited_once()
 
 
@@ -445,11 +462,11 @@ async def test_relevance_agent_rejects_unavailable_resolved_disposition() -> Non
         mock_llm.ainvoke = AsyncMock(
             side_effect=[invalid_response, repaired_response],
         )
-        result = await relevance_agent(state)
+        envelope = await relevance_agent(state)
+        result = envelope["decision"]
 
     assert mock_llm.ainvoke.await_count == 2
     assert result["response_action"] == "ignore"
-    assert result["should_respond"] is False
     repair_messages = mock_llm.ainvoke.await_args_list[1].args[0]
     repair_payload = json.loads(str(repair_messages[1].content))
     assert repair_payload["validation_reason"] == (
@@ -504,7 +521,8 @@ async def test_relevance_repair_feedback_identifies_missing_required_field() -> 
         mock_llm.ainvoke = AsyncMock(
             side_effect=[invalid_response, repaired_response],
         )
-        result = await relevance_agent(state)
+        envelope = await relevance_agent(state)
+        result = envelope["decision"]
 
     assert result["response_action"] == "proceed"
     assert mock_llm.ainvoke.await_count == 2
@@ -540,10 +558,10 @@ async def test_relevance_agent_maps_recipient_withdrawal_in_one_call() -> None:
     })
     with patch.object(relevance_module, "_relevance_agent_llm") as mock_llm:
         mock_llm.ainvoke = AsyncMock(return_value=response)
-        result = await relevance_agent(state)
+        envelope = await relevance_agent(state)
+        result = envelope["decision"]
 
     assert result["response_action"] == "ignore"
-    assert result["should_respond"] is False
     mock_llm.ainvoke.assert_awaited_once()
 
 
@@ -552,15 +570,17 @@ async def test_relevance_agent_rejects_single_fragment_withdrawal() -> None:
     """One direct fragment leaves proceed as the sole structural disposition."""
 
     with patch.object(relevance_module, "_relevance_agent_llm") as mock_llm:
-        result = await relevance_agent(_base_state())
+        envelope = await relevance_agent(_base_state())
+        result = envelope["decision"]
 
     assert result["response_action"] == "proceed"
     mock_llm.ainvoke.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_relevance_agent_malformed_json_fails_closed() -> None:
-    """Malformed authoritative output raises for the settlement coordinator."""
+async def test_relevance_agent_malformed_json_degrades_to_available_disposition(
+) -> None:
+    """Malformed authoritative output uses an available deterministic action."""
 
     response = _llm_response("not json")
     state = _base_state()
@@ -577,9 +597,72 @@ async def test_relevance_agent_malformed_json_fails_closed() -> None:
         ) as record_trace,
     ):
         mock_llm.ainvoke = AsyncMock(return_value=response)
-        with pytest.raises(SettledRelevanceContractError):
+        envelope = await relevance_agent(state)
+        result = envelope["decision"]
+
+    assert result["response_action"] == "proceed"
+    assert envelope["attempt_diagnostics"] == [{
+        "schema_version": "episode_attempt_diagnostic.v1",
+        "stage": "settled_relevance",
+        "error_code": "settled_relevance_deterministic_degraded",
+        "attempt_count": 2,
+        "safe_checkpoint": "pre_state_commit",
+        "retryable": False,
+        "final_status": "accepted_degraded",
+    }]
+    assert mock_llm.ainvoke.await_count == 2
+    assert [
+        call.kwargs["stage_name"]
+        for call in record_trace.await_args_list
+    ] == [
+        "persona_relevance_agent.initial",
+        "persona_relevance_agent.repair",
+        "persona_relevance_agent.deterministic",
+    ]
+    assert [
+        call.kwargs["parse_status"]
+        for call in record_trace.await_args_list
+    ] == ["invalid", "invalid", "deterministic"]
+    assert [
+        call.kwargs["status"]
+        for call in record_trace.await_args_list
+    ] == ["failed", "failed", "accepted_degraded"]
+    assert [
+        call.kwargs["attempt_index"]
+        for call in record_trace.await_args_list
+    ] == [1, 2, 0]
+
+
+@pytest.mark.asyncio
+async def test_relevance_agent_raises_when_no_authoritative_disposition_remains(
+    monkeypatch,
+) -> None:
+    """Authoritative exhaustion remains typed when no disposition is usable."""
+
+    response = _llm_response("not json")
+    state = _base_state()
+    state["llm_trace_id"] = "trace-no-disposition"
+    state["fresh_history"] = [
+        _character_history_row("The character answered this request.")
+    ]
+    monkeypatch.setattr(
+        relevance_module,
+        "_available_authoritative_dispositions",
+        lambda model_payload, observation_status: [],
+    )
+    with (
+        patch.object(relevance_module, "_relevance_agent_llm") as mock_llm,
+        patch.object(
+            relevance_module.llm_tracing,
+            "record_llm_trace_step",
+            new_callable=AsyncMock,
+        ) as record_trace,
+    ):
+        mock_llm.ainvoke = AsyncMock(return_value=response)
+        with pytest.raises(SettledRelevanceContractError) as error:
             await relevance_agent(state)
 
+    assert error.value.attempt_count == 2
     assert mock_llm.ainvoke.await_count == 2
     assert [
         call.kwargs["stage_name"]
@@ -588,9 +671,104 @@ async def test_relevance_agent_malformed_json_fails_closed() -> None:
         "persona_relevance_agent.initial",
         "persona_relevance_agent.repair",
     ]
+    assert [
+        call.kwargs["attempt_index"]
+        for call in record_trace.await_args_list
+    ] == [1, 2]
     assert all(
         call.kwargs["status"] == "failed"
         for call in record_trace.await_args_list
+    )
+
+
+@pytest.mark.asyncio
+async def test_settled_provider_exhaustion_degrades_without_raising() -> None:
+    """Authoritative provider exhaustion selects typed proceed evidence."""
+
+    state = _base_state()
+    state["llm_trace_id"] = "trace-provider-exhausted"
+    state["fresh_history"] = [
+        _character_history_row("The character answered this request.")
+    ]
+    with (
+        patch.object(relevance_module, "_relevance_agent_llm") as mock_llm,
+        patch.object(
+            relevance_module.llm_tracing,
+            "record_llm_trace_step",
+            new_callable=AsyncMock,
+        ) as record_trace,
+    ):
+        mock_llm.ainvoke = AsyncMock(
+            side_effect=[RuntimeError("provider unavailable")] * 2,
+        )
+        envelope = await relevance_agent(state)
+        result = envelope["decision"]
+
+    assert result["response_action"] == "proceed"
+    assert mock_llm.ainvoke.await_count == 2
+    assert mock_llm.ainvoke.await_args_list[0].args[0] == (
+        mock_llm.ainvoke.await_args_list[1].args[0]
+    )
+    assert [
+        call.kwargs["attempt_index"]
+        for call in record_trace.await_args_list
+    ] == [1, 2, 0]
+    assert [
+        call.kwargs["parse_status"]
+        for call in record_trace.await_args_list
+    ] == ["provider_error", "provider_error", "deterministic"]
+    assert [
+        call.kwargs["status"]
+        for call in record_trace.await_args_list
+    ] == ["failed", "failed", "accepted_degraded"]
+    assert record_trace.await_args_list[-1].kwargs["stage_name"] == (
+        "persona_relevance_agent.deterministic"
+    )
+
+
+@pytest.mark.asyncio
+async def test_non_authoritative_provider_exhaustion_returns_ignore() -> None:
+    """Ordinary provider exhaustion keeps the existing ignore decision."""
+
+    state = _base_state()
+    state["llm_trace_id"] = "trace-provider-exhausted"
+    state["assembled_fragments"] = [{
+        "body_text": "A side conversation continues.",
+        "semantic_target_labels": [],
+        "reply_target_label": "none",
+        "media_labels": [],
+    }]
+    with (
+        patch.object(relevance_module, "_relevance_agent_llm") as mock_llm,
+        patch.object(
+            relevance_module.llm_tracing,
+            "record_llm_trace_step",
+            new_callable=AsyncMock,
+        ) as record_trace,
+    ):
+        mock_llm.ainvoke = AsyncMock(
+            side_effect=[RuntimeError("provider unavailable")] * 2,
+        )
+        envelope = await relevance_agent(state)
+        result = envelope["decision"]
+
+    assert result["response_action"] == "ignore"
+    assert envelope["attempt_diagnostics"] == [{
+        "schema_version": "episode_attempt_diagnostic.v1",
+        "stage": "settled_relevance",
+        "error_code": "settled_relevance_deterministic_degraded",
+        "attempt_count": 2,
+        "safe_checkpoint": "pre_state_commit",
+        "retryable": False,
+        "final_status": "accepted_degraded",
+    }]
+    assert mock_llm.ainvoke.await_count == 2
+    assert [
+        call.kwargs["parse_status"]
+        for call in record_trace.await_args_list
+    ] == ["provider_error", "provider_error", "deterministic"]
+    assert record_trace.await_args_list[-1].kwargs["status"] == (
+        "accepted_degraded"
     )
 
 

@@ -109,7 +109,7 @@ def validate_canonical_appraisal(
     *,
     families: tuple[str, ...],
 ) -> tuple[CanonicalAppraisal, ...]:
-    if not isinstance(raw, Mapping) or tuple(raw) != families:
+    if not isinstance(raw, Mapping) or set(raw) != set(families):
         raise AppraisalContractError("appraisal family slots are not exact")
     result: list[CanonicalAppraisal] = []
     for family in families:

@@ -3,12 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+from importlib import import_module
+from pathlib import Path
 
 import pytest
 
+from kazusa_ai_chatbot import relevance as relevance_public
+from kazusa_ai_chatbot.brain_service.post_turn import settle_episode_trace
 from kazusa_ai_chatbot.brain_service.turn_settlement import (
     PersistedChatFragment,
     TurnSettlementCoordinator,
+)
+from kazusa_ai_chatbot.relevance.contracts import (
+    FrontlineDecision,
+    RelevanceEvaluationEnvelope,
+    SettledRelevanceDecision,
 )
 
 
@@ -53,32 +62,592 @@ def _fragment(
     )
 
 
+def _frontline_evaluation(
+    decision: FrontlineDecision,
+    *,
+    attempt_diagnostics: list[dict[str, object]] | None = None,
+) -> RelevanceEvaluationEnvelope:
+    """Wrap one exact frontline decision for the coordinator boundary."""
+
+    return {
+        "decision": decision,
+        "attempt_diagnostics": list(attempt_diagnostics or []),
+    }
+
+
+def _settled_evaluation(
+    decision: SettledRelevanceDecision,
+    *,
+    attempt_diagnostics: list[dict[str, object]] | None = None,
+) -> RelevanceEvaluationEnvelope:
+    """Wrap one exact settled decision for the coordinator boundary."""
+
+    return {
+        "decision": decision,
+        "attempt_diagnostics": list(attempt_diagnostics or []),
+    }
+
+
+def _start_evaluation(reason: str = "new candidate") -> RelevanceEvaluationEnvelope:
+    """Build a common start evaluation for lifecycle tests."""
+
+    return _frontline_evaluation({
+        "intake_action": "start",
+        "append_target": "none",
+        "prelude_targets": [],
+        "reason": reason,
+    })
+
+
+def _append_evaluation(reason: str = "same candidate") -> RelevanceEvaluationEnvelope:
+    """Build a common append evaluation for lifecycle tests."""
+
+    return _frontline_evaluation({
+        "intake_action": "append",
+        "append_target": "open_1",
+        "prelude_targets": [],
+        "reason": reason,
+    })
+
+
+def _discard_evaluation(reason: str = "discard") -> RelevanceEvaluationEnvelope:
+    """Build a common discard evaluation for lifecycle tests."""
+
+    return _frontline_evaluation({
+        "intake_action": "discard",
+        "append_target": "none",
+        "prelude_targets": [],
+        "reason": reason,
+    })
+
+
+def _diagnostic(error_code: str) -> dict[str, object]:
+    """Build one valid bounded diagnostic row for carrier tests."""
+
+    return {
+        "schema_version": "episode_attempt_diagnostic.v1",
+        "stage": "relevance",
+        "error_code": error_code,
+        "attempt_count": 2,
+        "safe_checkpoint": "pre_state_commit",
+        "retryable": False,
+        "final_status": "accepted_degraded",
+    }
+
+
 def _coordinator(clock: _FakeClock, *, settled=None):
     """Build a coordinator with deterministic semantic stage doubles."""
 
     async def _frontline(_state):
-        return {
+        return _frontline_evaluation({
             "intake_action": "start",
             "append_target": "none",
             "prelude_targets": [],
             "reason": "new candidate",
-        }
+        })
 
     async def _settled(lease, state):
         del lease, state
-        return settled or {
+        return _settled_evaluation(settled or {
             "response_action": "proceed",
             "reason_to_respond": "grounded request",
             "use_reply_feature": True,
             "channel_topic": "request",
             "indirect_speech_context": "",
-        }
+        })
 
     return TurnSettlementCoordinator(
         frontline_evaluator=_frontline,
         settled_evaluator=_settled,
         clock=clock,
     )
+
+
+def test_relevance_exports_canonical_decision_types_without_producer_duplicates() -> None:
+    """All relevance producers use the one canonical decision definitions."""
+
+    contracts_module = import_module(
+        "kazusa_ai_chatbot.relevance.contracts"
+    )
+    frontline_module = import_module(
+        "kazusa_ai_chatbot.relevance.frontline_relevance_agent"
+    )
+    settled_module = import_module(
+        "kazusa_ai_chatbot.relevance.persona_relevance_agent"
+    )
+
+    assert relevance_public.FrontlineDecision is contracts_module.FrontlineDecision
+    assert relevance_public.SettledRelevanceDecision is (
+        contracts_module.SettledRelevanceDecision
+    )
+    assert frontline_module.FrontlineDecision is contracts_module.FrontlineDecision
+    assert settled_module.SettledRelevanceDecision is (
+        contracts_module.SettledRelevanceDecision
+    )
+    assert "class FrontlineDecision" not in Path(
+        frontline_module.__file__
+    ).read_text(encoding="utf-8")
+    assert "class SettledRelevanceDecision" not in Path(
+        settled_module.__file__
+    ).read_text(encoding="utf-8")
+
+
+def test_relevance_evaluation_envelope_has_nested_decision_and_diagnostics_only() -> None:
+    """The public carrier has exactly the nested decision and metadata keys."""
+
+    envelope = _frontline_evaluation(
+        {
+            "intake_action": "discard",
+            "append_target": "none",
+            "prelude_targets": [],
+            "reason": "not addressed",
+        },
+        attempt_diagnostics=[_diagnostic("frontline_relevance_deterministic_degraded")],
+    )
+
+    assert set(envelope) == {"decision", "attempt_diagnostics"}
+    assert set(envelope["decision"]) == {
+        "intake_action",
+        "append_target",
+        "prelude_targets",
+        "reason",
+    }
+    assert len(envelope["attempt_diagnostics"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_frontline_start_accumulates_relevance_diagnostics_in_order() -> None:
+    """A start stores its diagnostic rows on the pending turn and lease."""
+
+    clock = _FakeClock()
+    coordinator = _coordinator(clock)
+    first = _diagnostic("frontline-first")
+    second = _diagnostic("frontline-second")
+    start = await coordinator.apply_frontline_decision(
+        _fragment(1),
+        _frontline_evaluation(
+            _start_evaluation()["decision"],
+            attempt_diagnostics=[first, second],
+        ),
+    )
+
+    assert coordinator._pending_turns[start.turn_id].attempt_diagnostics == [
+        first,
+        second,
+    ]
+    clock.advance(10.0)
+    lease = await coordinator.wait_for_assessment_ready()
+    assert list(lease.attempt_diagnostics) == [first, second]
+
+
+@pytest.mark.asyncio
+async def test_frontline_append_accumulates_relevance_diagnostics_in_order() -> None:
+    """A valid append adds rows after the existing start rows."""
+
+    clock = _FakeClock()
+    coordinator = _coordinator(clock)
+    first = _diagnostic("frontline-start")
+    second = _diagnostic("frontline-append")
+    start_decision = _start_evaluation()
+    start = await coordinator.apply_frontline_decision(
+        _fragment(1),
+        _frontline_evaluation(
+            start_decision["decision"],
+            attempt_diagnostics=[first],
+        ),
+    )
+    append_decision = _append_evaluation()
+    await coordinator.apply_frontline_decision(
+        _fragment(2, enqueue_monotonic=1.0),
+        _frontline_evaluation(
+            append_decision["decision"],
+            attempt_diagnostics=[second],
+        ),
+    )
+
+    assert coordinator._pending_turns[start.turn_id].attempt_diagnostics == [
+        first,
+        second,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_frontline_append_with_invalid_target_drops_diagnostics() -> None:
+    """An append with no valid target discards its metadata with the fragment."""
+
+    clock = _FakeClock()
+    coordinator = _coordinator(clock)
+    start = await coordinator.apply_frontline_decision(
+        _fragment(1),
+        _frontline_evaluation(
+            _start_evaluation()["decision"],
+            attempt_diagnostics=[_diagnostic("frontline-start")],
+        ),
+    )
+    invalid_append = _frontline_evaluation(
+        {
+            "intake_action": "append",
+            "append_target": "open_2",
+            "prelude_targets": [],
+            "reason": "slot unavailable",
+        },
+        attempt_diagnostics=[_diagnostic("frontline-invalid-append")],
+    )
+
+    outcome = await coordinator.apply_frontline_decision(
+        _fragment(2, enqueue_monotonic=1.0),
+        invalid_append,
+    )
+
+    assert outcome.action == "discard"
+    assert coordinator._pending_turns[start.turn_id].attempt_diagnostics == [
+        _diagnostic("frontline-start"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_relevance_validators_receive_only_nested_decision(monkeypatch) -> None:
+    """Coordinator validators never receive the outer metadata envelope."""
+
+    import kazusa_ai_chatbot.brain_service.turn_settlement as settlement_module
+
+    clock = _FakeClock()
+    coordinator = _coordinator(clock)
+    frontline_values = []
+    settled_values = []
+    original_frontline = settlement_module.validate_frontline_decision
+    original_settled = settlement_module.validate_settled_relevance_decision
+
+    def _frontline_validator(value):
+        frontline_values.append(value)
+        return original_frontline(value)
+
+    def _settled_validator(value, *, observation_status):
+        settled_values.append(value)
+        return original_settled(
+            value,
+            observation_status=observation_status,
+        )
+
+    monkeypatch.setattr(
+        settlement_module,
+        "validate_frontline_decision",
+        _frontline_validator,
+    )
+    monkeypatch.setattr(
+        settlement_module,
+        "validate_settled_relevance_decision",
+        _settled_validator,
+    )
+    frontline_evaluation = await coordinator.evaluate_frontline({})
+    await coordinator.apply_frontline_decision(
+        _fragment(1),
+        frontline_evaluation,
+    )
+    clock.advance(10.0)
+    lease = await coordinator.wait_for_assessment_ready()
+    settled_evaluation = await coordinator.evaluate_settled(lease, {})
+    await coordinator.apply_settled_decision(lease, settled_evaluation)
+
+    assert frontline_values
+    assert settled_values
+    assert all("attempt_diagnostics" not in value for value in frontline_values)
+    assert all("attempt_diagnostics" not in value for value in settled_values)
+
+
+@pytest.mark.asyncio
+async def test_settled_relevance_diagnostics_append_after_frontline() -> None:
+    """Settled degradation rows follow the retained frontline chronology."""
+
+    clock = _FakeClock()
+    settled_row = _diagnostic("settled-degraded")
+    coordinator = _coordinator(clock)
+    start = await coordinator.apply_frontline_decision(
+        _fragment(1),
+        _frontline_evaluation(
+            _start_evaluation()["decision"],
+            attempt_diagnostics=[_diagnostic("frontline-degraded")],
+        ),
+    )
+    clock.advance(10.0)
+    lease = await coordinator.wait_for_assessment_ready()
+    settled = await coordinator.evaluate_settled(lease, {})
+    settled["attempt_diagnostics"] = [settled_row]
+    outcome = await coordinator.apply_settled_decision(lease, settled)
+
+    assert outcome.claimable is True
+    assert [row["error_code"] for row in outcome.attempt_diagnostics] == [
+        "frontline-degraded",
+        "settled-degraded",
+    ]
+    assert outcome.turn_id == start.turn_id
+
+
+@pytest.mark.asyncio
+async def test_stale_settled_lease_diagnostics_do_not_pollute_current_version() -> None:
+    """Rows from a stale assessment never enter a newer turn version."""
+
+    clock = _FakeClock()
+    coordinator = _coordinator(clock)
+    start_row = _diagnostic("frontline-start")
+    append_row = _diagnostic("frontline-append")
+    stale_row = _diagnostic("settled-stale")
+    start = await coordinator.apply_frontline_decision(
+        _fragment(1),
+        _frontline_evaluation(
+            _start_evaluation()["decision"],
+            attempt_diagnostics=[start_row],
+        ),
+    )
+    clock.advance(6.0)
+    stale_lease = await coordinator.wait_for_assessment_ready()
+    append_decision = _append_evaluation()
+    await coordinator.apply_frontline_decision(
+        _fragment(2, enqueue_monotonic=6.0),
+        _frontline_evaluation(
+            append_decision["decision"],
+            attempt_diagnostics=[append_row],
+        ),
+    )
+    stale_evaluation = _settled_evaluation(
+        {
+            "response_action": "proceed",
+            "reason_to_respond": "stale",
+            "use_reply_feature": False,
+            "channel_topic": "",
+            "indirect_speech_context": "",
+        },
+        attempt_diagnostics=[stale_row],
+    )
+
+    stale_outcome = await coordinator.apply_settled_decision(
+        stale_lease,
+        stale_evaluation,
+    )
+    assert stale_outcome.stale is True
+    clock.advance(4.0)
+    current_lease = await coordinator.wait_for_assessment_ready()
+
+    assert [row["error_code"] for row in current_lease.attempt_diagnostics] == [
+        "frontline-start",
+        "frontline-append",
+    ]
+    assert "settled-stale" not in {
+        row["error_code"] for row in current_lease.attempt_diagnostics
+    }
+    assert current_lease.turn_id == start.turn_id
+
+
+@pytest.mark.asyncio
+async def test_wait_diagnostics_carry_once_before_next_settled_append() -> None:
+    """A wait carries its row into the next lease before later rows append."""
+
+    clock = _FakeClock()
+    responses = [
+        _settled_evaluation(
+            {
+                "response_action": "wait",
+                "reason_to_respond": "observe one more message",
+                "use_reply_feature": False,
+                "channel_topic": "",
+                "indirect_speech_context": "",
+            },
+            attempt_diagnostics=[_diagnostic("settled-wait")],
+        ),
+        _settled_evaluation(
+            {
+                "response_action": "proceed",
+                "reason_to_respond": "grounded request",
+                "use_reply_feature": False,
+                "channel_topic": "",
+                "indirect_speech_context": "",
+            },
+            attempt_diagnostics=[_diagnostic("settled-final")],
+        ),
+    ]
+
+    async def _settled(_lease, _state):
+        return responses.pop(0)
+
+    coordinator = TurnSettlementCoordinator(
+        frontline_evaluator=_coordinator(clock)._frontline_evaluator,
+        settled_evaluator=_settled,
+        clock=clock,
+    )
+    start = await coordinator.apply_frontline_decision(
+        _fragment(1),
+        _frontline_evaluation(
+            _start_evaluation()["decision"],
+            attempt_diagnostics=[_diagnostic("frontline-start")],
+        ),
+    )
+    clock.advance(6.0)
+    first_lease = await coordinator.wait_for_assessment_ready()
+    first_evaluation = await coordinator.evaluate_settled(first_lease, {})
+    first_outcome = await coordinator.apply_settled_decision(
+        first_lease,
+        first_evaluation,
+    )
+    assert first_outcome.response_action == "wait"
+    assert first_outcome.attempt_diagnostics == ()
+
+    clock.advance(4.0)
+    second_lease = await coordinator.wait_for_assessment_ready()
+    assert [row["error_code"] for row in second_lease.attempt_diagnostics] == [
+        "frontline-start",
+        "settled-wait",
+    ]
+    second_evaluation = await coordinator.evaluate_settled(second_lease, {})
+    second_outcome = await coordinator.apply_settled_decision(
+        second_lease,
+        second_evaluation,
+    )
+
+    assert second_outcome.turn_id == start.turn_id
+    assert [row["error_code"] for row in second_outcome.attempt_diagnostics] == [
+        "frontline-start",
+        "settled-wait",
+        "settled-final",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_relevance_diagnostics_are_bounded_to_sixteen_in_occurrence_order() -> None:
+    """The carrier retains the newest sixteen rows chronologically."""
+
+    clock = _FakeClock()
+    coordinator = _coordinator(clock)
+    start = await coordinator.apply_frontline_decision(
+        _fragment(1),
+        _frontline_evaluation(
+            _start_evaluation()["decision"],
+            attempt_diagnostics=[_diagnostic("row-01")],
+        ),
+    )
+    append_decision = _append_evaluation()
+    for sequence in range(2, 18):
+        await coordinator.apply_frontline_decision(
+            _fragment(sequence, enqueue_monotonic=1.0),
+            _frontline_evaluation(
+                append_decision["decision"],
+                attempt_diagnostics=[_diagnostic(f"row-{sequence:02d}")],
+            ),
+        )
+
+    clock.advance(10.0)
+    lease = await coordinator.wait_for_assessment_ready()
+
+    assert [row["error_code"] for row in lease.attempt_diagnostics] == [
+        f"row-{sequence:02d}" for sequence in range(2, 18)
+    ]
+    assert lease.turn_id == start.turn_id
+
+
+@pytest.mark.asyncio
+async def test_discarded_turn_keeps_protected_trace_without_episode_diagnostics() -> None:
+    """Discard removes the carrier while relevance trace ownership stays separate."""
+
+    clock = _FakeClock()
+    coordinator = _coordinator(clock)
+    outcome = await coordinator.apply_frontline_decision(
+        _fragment(1),
+        _frontline_evaluation(
+            _discard_evaluation()["decision"],
+            attempt_diagnostics=[_diagnostic("frontline-discard")],
+        ),
+    )
+
+    assert outcome.action == "discard"
+    assert coordinator._pending_turns == {}
+    assert not coordinator._ready_heap
+
+
+@pytest.mark.asyncio
+async def test_envelope_preserves_fifo_lease_and_claim_control_flow() -> None:
+    """Envelope metadata does not alter FIFO lease or cognition claim order."""
+
+    clock = _FakeClock()
+    coordinator = _coordinator(clock)
+    first = await coordinator.apply_frontline_decision(
+        _fragment(1),
+        _frontline_evaluation(
+            _start_evaluation()["decision"],
+            attempt_diagnostics=[_diagnostic("first")],
+        ),
+    )
+    second = await coordinator.apply_frontline_decision(
+        _fragment(2, author="author-b"),
+        _frontline_evaluation(
+            _start_evaluation()["decision"],
+            attempt_diagnostics=[_diagnostic("second")],
+        ),
+    )
+    clock.advance(6.0)
+    first_lease = await coordinator.wait_for_assessment_ready()
+    first_evaluation = await coordinator.evaluate_settled(first_lease, {})
+    first_outcome = await coordinator.apply_settled_decision(
+        first_lease,
+        first_evaluation,
+    )
+    assert first_lease.turn_id == first.turn_id
+    assert first_outcome.claimable is True
+    assert await coordinator.claim_for_cognition(
+        first.turn_id,
+        first.version,
+    ) is True
+    second_lease = await coordinator.wait_for_assessment_ready()
+
+    assert second_lease.turn_id == second.turn_id
+    assert [row["error_code"] for row in second_lease.attempt_diagnostics] == [
+        "second",
+    ]
+
+
+def test_service_consumes_only_settlement_outcome_diagnostics() -> None:
+    """Service handoff reads metadata only from the settled outcome carrier."""
+
+    service_source = Path(
+        "src/kazusa_ai_chatbot/service.py"
+    ).read_text(encoding="utf-8")
+    lease_source = service_source[
+        service_source.index("async def _process_settlement_lease"):
+    ]
+
+    assert "decision = evaluation[\"decision\"]" in lease_source
+    assert (
+        "settled_attempt_diagnostics=outcome.attempt_diagnostics"
+        in lease_source
+    )
+    assert "settled_attempt_diagnostics=evaluation" not in lease_source
+
+
+def test_settled_relevance_diagnostics_reach_episode_trace() -> None:
+    """The existing episode trace carrier accepts the settled diagnostic row."""
+
+    row = _diagnostic("settled_relevance_deterministic_degraded")
+    trace = settle_episode_trace(
+        episode={
+            "episode_id": "episode-relevance-diagnostic",
+            "trigger_source": "user_message",
+            "created_at": "2026-07-16T00:00:00+00:00",
+        },
+        cognition_output=None,
+        action_specs=[],
+        action_results=[],
+        surface_outputs=[],
+        terminal_status="completed_private",
+        attempt_diagnostics=[row],
+        delivery_correlation={
+            "schema_version": "delivery_correlation.v1",
+            "delivery_intent": "deliver_now",
+            "tracking_id": "",
+            "receipt_status": "not_applicable",
+            "receipt_ref": "",
+        },
+        settled_at="2026-07-16T00:00:01+00:00",
+    )
+
+    assert trace["attempt_diagnostics"] == [row]
 
 
 @pytest.mark.asyncio
@@ -90,12 +659,7 @@ async def test_group_turn_uses_six_second_quiet_window() -> None:
 
     outcome = await coordinator.apply_frontline_decision(
         _fragment(1),
-        {
-            "intake_action": "start",
-            "append_target": "none",
-            "prelude_targets": [],
-            "reason": "new candidate",
-        },
+        _start_evaluation(),
     )
 
     assert outcome.action == "start"
@@ -120,23 +684,13 @@ async def test_append_increments_version_and_clamps_to_hard_deadline() -> None:
     coordinator = _coordinator(clock)
     start = await coordinator.apply_frontline_decision(
         _fragment(1),
-        {
-            "intake_action": "start",
-            "append_target": "none",
-            "prelude_targets": [],
-            "reason": "new candidate",
-        },
+        _start_evaluation(),
     )
 
     clock.advance(5.0)
     append = await coordinator.apply_frontline_decision(
         _fragment(2, body="clarification", enqueue_monotonic=5.0),
-        {
-            "intake_action": "append",
-            "append_target": "open_1",
-            "prelude_targets": [],
-            "reason": "same topic",
-        },
+        _append_evaluation("same topic"),
     )
 
     assert append.turn_id == start.turn_id
@@ -161,12 +715,7 @@ async def test_three_open_turn_bound_freezes_oldest_before_fourth_start() -> Non
 
     clock = _FakeClock()
     coordinator = _coordinator(clock)
-    start_decision = {
-        "intake_action": "start",
-        "append_target": "none",
-        "prelude_targets": [],
-        "reason": "new topic",
-    }
+    start_decision = _start_evaluation("new topic")
 
     outcomes = []
     for sequence in range(1, 5):
@@ -206,12 +755,7 @@ async def test_wait_uses_one_extension_and_reaches_complete_phase() -> None:
     )
     start = await coordinator.apply_frontline_decision(
         _fragment(1),
-        {
-            "intake_action": "start",
-            "append_target": "none",
-            "prelude_targets": [],
-            "reason": "new candidate",
-        },
+        _start_evaluation(),
     )
     clock.advance(6.0)
     first_lease = await coordinator.wait_for_assessment_ready()
@@ -238,12 +782,7 @@ async def test_failed_assessment_closes_current_turn_without_semantic_ignore() -
     coordinator = _coordinator(clock)
     start = await coordinator.apply_frontline_decision(
         _fragment(1),
-        {
-            "intake_action": "start",
-            "append_target": "none",
-            "prelude_targets": [],
-            "reason": "new candidate",
-        },
+        _start_evaluation(),
     )
     clock.advance(6.0)
     lease = await coordinator.wait_for_assessment_ready()
@@ -266,23 +805,13 @@ async def test_failed_stale_assessment_preserves_newer_turn_version() -> None:
     coordinator = _coordinator(clock)
     start = await coordinator.apply_frontline_decision(
         _fragment(1),
-        {
-            "intake_action": "start",
-            "append_target": "none",
-            "prelude_targets": [],
-            "reason": "new candidate",
-        },
+        _start_evaluation(),
     )
     clock.advance(6.0)
     stale_lease = await coordinator.wait_for_assessment_ready()
     append = await coordinator.apply_frontline_decision(
         _fragment(2, body="newer intent", enqueue_monotonic=clock()),
-        {
-            "intake_action": "append",
-            "append_target": "open_1",
-            "prelude_targets": [],
-            "reason": "same candidate",
-        },
+        _append_evaluation(),
     )
 
     closed = await coordinator.complete_failed_assessment(stale_lease)
@@ -303,24 +832,14 @@ async def test_stale_assessment_cannot_claim_after_append() -> None:
     coordinator = _coordinator(clock)
     start = await coordinator.apply_frontline_decision(
         _fragment(1),
-        {
-            "intake_action": "start",
-            "append_target": "none",
-            "prelude_targets": [],
-            "reason": "new candidate",
-        },
+        _start_evaluation(),
     )
     clock.advance(6.0)
     lease = await coordinator.wait_for_assessment_ready()
     decision = await coordinator.evaluate_settled(lease, {})
     append = await coordinator.apply_frontline_decision(
         _fragment(2, body="newer intent"),
-        {
-            "intake_action": "append",
-            "append_target": "open_1",
-            "prelude_targets": [],
-            "reason": "same candidate",
-        },
+        _append_evaluation(),
     )
 
     assert append.version == 2
@@ -349,12 +868,7 @@ async def test_ready_heap_orders_eligibility_then_leader_sequence() -> None:
 
     clock = _FakeClock()
     coordinator = _coordinator(clock)
-    decision = {
-        "intake_action": "start",
-        "append_target": "none",
-        "prelude_targets": [],
-        "reason": "new candidate",
-    }
+    decision = _start_evaluation()
     first = await coordinator.apply_frontline_decision(_fragment(1), decision)
     second = await coordinator.apply_frontline_decision(
         _fragment(2, author="author-b"),
@@ -399,12 +913,7 @@ async def test_relevance_work_is_fifo_and_one_in_flight() -> None:
             started.set()
             await release.wait()
         active -= 1
-        return {
-            "intake_action": "discard",
-            "append_target": "none",
-            "prelude_targets": [],
-            "reason": "irrelevant",
-        }
+        return _discard_evaluation("irrelevant")
 
     async def _settled(_lease, _state):
         raise AssertionError("settled evaluator is not used in this test")
@@ -439,12 +948,7 @@ async def test_interleaved_authors_receive_only_their_own_open_turns() -> None:
 
     clock = _FakeClock()
     coordinator = _coordinator(clock)
-    start = {
-        "intake_action": "start",
-        "append_target": "none",
-        "prelude_targets": [],
-        "reason": "new candidate",
-    }
+    start = _start_evaluation()
     await coordinator.apply_frontline_decision(_fragment(1), start)
     await coordinator.apply_frontline_decision(
         _fragment(2, author="author-b", body="B1"),
@@ -474,12 +978,7 @@ async def test_discarded_prelude_is_promoted_by_supplied_slot() -> None:
     )
     await coordinator.apply_frontline_decision(
         prelude,
-        {
-            "intake_action": "discard",
-            "append_target": "none",
-            "prelude_targets": [],
-            "reason": "not addressed yet",
-        },
+        _discard_evaluation("not addressed yet"),
     )
     current = _fragment(
         2,
@@ -492,12 +991,12 @@ async def test_discarded_prelude_is_promoted_by_supplied_slot() -> None:
 
     outcome = await coordinator.apply_frontline_decision(
         current,
-        {
+        _frontline_evaluation({
             "intake_action": "start",
             "append_target": "none",
             "prelude_targets": ["prelude_1"],
             "reason": "the tag promotes the prior description",
-        },
+        }),
     )
     clock.advance(10.0)
     lease = await coordinator.wait_for_assessment_ready()
@@ -521,12 +1020,7 @@ async def test_explicit_third_party_discard_is_not_a_prelude_candidate() -> None
             targets=("other_participant",),
             reply_target="other_participant",
         ),
-        {
-            "intake_action": "discard",
-            "append_target": "none",
-            "prelude_targets": [],
-            "reason": "third-party traffic",
-        },
+        _discard_evaluation("third-party traffic"),
     )
     clock.advance(3.0)
 
@@ -547,12 +1041,7 @@ async def test_ingress_watermark_delays_claim_until_frontline_applies() -> None:
     coordinator = _coordinator(clock)
     start = await coordinator.apply_frontline_decision(
         _fragment(1),
-        {
-            "intake_action": "start",
-            "append_target": "none",
-            "prelude_targets": [],
-            "reason": "new candidate",
-        },
+        _start_evaluation(),
     )
     clock.advance(6.0)
     lease = await coordinator.wait_for_assessment_ready()
@@ -572,12 +1061,7 @@ async def test_ingress_watermark_delays_claim_until_frontline_applies() -> None:
 
     append = await coordinator.apply_frontline_decision(
         _fragment(2, body="boundary follow-up", enqueue_monotonic=9.5),
-        {
-            "intake_action": "append",
-            "append_target": "open_1",
-            "prelude_targets": [],
-            "reason": "same candidate",
-        },
+        _append_evaluation(),
     )
     clock.advance(4.0)
     final_lease = await coordinator.wait_for_assessment_ready()
@@ -598,12 +1082,7 @@ async def test_private_turn_is_immediately_ready_and_collapsed_append_is_exact(
     private.scope = ("discord", "dm-1", "private")
     start = await coordinator.apply_frontline_decision(
         private,
-        {
-            "intake_action": "start",
-            "append_target": "none",
-            "prelude_targets": [],
-            "reason": "private candidate",
-        },
+        _start_evaluation("private candidate"),
     )
     follower = _fragment(2, body="private follow-up")
     follower.scope = private.scope
@@ -626,12 +1105,7 @@ async def test_completed_cognition_releases_pending_turn_state() -> None:
     coordinator = _coordinator(clock)
     start = await coordinator.apply_frontline_decision(
         _fragment(1),
-        {
-            "intake_action": "start",
-            "append_target": "none",
-            "prelude_targets": [],
-            "reason": "candidate",
-        },
+        _start_evaluation("candidate"),
     )
     clock.advance(6.0)
     lease = await coordinator.wait_for_assessment_ready()
@@ -673,12 +1147,7 @@ async def test_latest_bot_continuity_is_scoped_to_author_and_channel() -> None:
 
     await coordinator.apply_frontline_decision(
         _fragment(5),
-        {
-            "intake_action": "start",
-            "append_target": "none",
-            "prelude_targets": [],
-            "reason": "new candidate",
-        },
+        _start_evaluation(),
     )
     clock.advance(6.0)
     lease = await coordinator.wait_for_assessment_ready()

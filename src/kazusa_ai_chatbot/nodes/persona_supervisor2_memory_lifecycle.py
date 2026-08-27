@@ -8,38 +8,45 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
+import httpx
 from langchain_core.messages import HumanMessage, SystemMessage
+from openai import OpenAIError
 
 from kazusa_ai_chatbot import llm_tracing
 from kazusa_ai_chatbot.action_spec.models import (
+    LIFECYCLE_STATUS_BY_DECISION,
     ActionSourceRefV1,
     ActionSpecV1,
-    LIFECYCLE_STATUS_BY_DECISION,
     validate_action_spec,
 )
 from kazusa_ai_chatbot.action_spec.registry import (
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
 )
+from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
+    V2_MODEL_TOTAL_ATTEMPTS,
+)
 from kazusa_ai_chatbot.config import (
     COGNITION_LLM_API_KEY,
     COGNITION_LLM_BASE_URL,
-    COGNITION_LLM_MODEL,
     COGNITION_LLM_MAX_COMPLETION_TOKENS,
+    COGNITION_LLM_MODEL,
     COGNITION_LLM_THINKING_ENABLED,
 )
-from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
-from kazusa_ai_chatbot.utils import log_preview, parse_llm_json_output
-
 from kazusa_ai_chatbot.llm_interface import (
     LLInterface,
     LLMCallConfig,
     LLMThinkingConfig,
 )
+from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
+from kazusa_ai_chatbot.utils import log_preview, parse_llm_json_output
+
 logger = logging.getLogger(__name__)
 
 ACTIVE_COMMITMENT_ALIAS_LIMIT = 12
 LIFECYCLE_UPDATE_LIMIT = 3
+_MEMORY_LIFECYCLE_ERROR_CAP = 500
+_MEMORY_LIFECYCLE_REPAIR_OUTPUT_CAP = 8000
 _ALLOWED_LIFECYCLE_DECISIONS = frozenset(LIFECYCLE_STATUS_BY_DECISION)
 _ALLOWED_CONTENT_PLAN_ROLES = frozenset(
     ("avoid_reopening", "acknowledge_fulfillment", "keep_waiting")
@@ -91,6 +98,16 @@ _MEMORY_LIFECYCLE_SPECIALIST_PROMPT = '''\
 如果没有生命周期变化，返回：
 {"decision": "no_lifecycle_change", "lifecycle_decisions": [], "content_plan_roles": []}
 '''
+
+_MEMORY_LIFECYCLE_REPAIR_INSTRUCTION = (
+    "请保留原始语义判断，并按既有生命周期输出字段、值类型和列表边界返回完整对象。"
+)
+
+
+class MemoryLifecycleContractError(ValueError):
+    """Raised when a lifecycle specialist product has no usable object."""
+
+
 _llm_interface = LLInterface()
 _memory_lifecycle_specialist_llm = LLInterface()
 _memory_lifecycle_specialist_llm_config = LLMCallConfig(
@@ -169,6 +186,10 @@ async def call_memory_lifecycle_update_handler(
         "action_specs": combined_specs,
         "memory_lifecycle_context": materialized["memory_lifecycle_context"],
     }
+    if review.get("degraded") is True:
+        return_value["attempt_diagnostics"] = [
+            _memory_lifecycle_skipped_diagnostic(),
+        ]
     return return_value
 
 
@@ -257,6 +278,7 @@ async def call_post_surface_memory_lifecycle_review(
 
     action_specs: list[ActionSpecV1] = []
     lifecycle_contexts: list[dict[str, object]] = []
+    attempt_diagnostics: list[dict[str, object]] = []
     for offset in range(0, len(filtered_units), ACTIVE_COMMITMENT_ALIAS_LIMIT):
         prepared = prepare_post_surface_memory_lifecycle_review(
             state,
@@ -274,6 +296,8 @@ async def call_post_surface_memory_lifecycle_review(
         )
         materialized = review["materialized"]
         lifecycle_contexts.append(materialized["memory_lifecycle_context"])
+        if review.get("degraded") is True:
+            attempt_diagnostics.append(_memory_lifecycle_skipped_diagnostic())
         action_specs.extend(
             action_spec
             for action_spec in materialized["action_specs"]
@@ -290,6 +314,8 @@ async def call_post_surface_memory_lifecycle_review(
             lifecycle_contexts,
         ),
     }
+    if attempt_diagnostics:
+        return_value["attempt_diagnostics"] = attempt_diagnostics
     return return_value
 
 
@@ -378,16 +404,219 @@ async def _invoke_memory_lifecycle_specialist(
     """Call the lifecycle specialist and materialize trusted alias decisions."""
 
     system_prompt = SystemMessage(content=_MEMORY_LIFECYCLE_SPECIALIST_PROMPT)
-    human_message = HumanMessage(
-        content=json.dumps(prompt_payload, ensure_ascii=False)
+    request_payload = dict(prompt_payload)
+    last_error = ""
+    for attempt_index in range(1, V2_MODEL_TOTAL_ATTEMPTS + 1):
+        human_message = HumanMessage(
+            content=json.dumps(request_payload, ensure_ascii=False)
+        )
+        started_at = time.perf_counter()
+        try:
+            response = await _memory_lifecycle_specialist_llm.ainvoke([
+                system_prompt,
+                human_message,
+            ], config=_memory_lifecycle_specialist_llm_config)
+        except (
+            OpenAIError,
+            httpx.HTTPError,
+            ConnectionError,
+            OSError,
+            RuntimeError,
+            TimeoutError,
+        ) as exc:
+            last_error = str(exc)
+            await _record_memory_lifecycle_trace(
+                trace_id=trace_id,
+                messages=[system_prompt, human_message],
+                response_text="",
+                parsed_output={},
+                parse_status="provider_error",
+                status="failed",
+                attempt_index=attempt_index,
+                validation_error=last_error,
+                started_at=started_at,
+            )
+            if attempt_index < V2_MODEL_TOTAL_ATTEMPTS:
+                request_payload = _memory_lifecycle_repair_payload(
+                    prompt_payload,
+                    reason=(
+                        "上一轮模型调用未返回可用候选，请在相同语境下重新生成完整对象。"
+                    ),
+                    contract_error="",
+                    invalid_candidate="",
+                )
+                continue
+            return _skipped_memory_lifecycle_review(
+                alias_bindings=alias_bindings,
+                visible_alias_count=visible_alias_count,
+                omitted_alias_count=omitted_alias_count,
+                reason=last_error,
+            )
+
+        response_content = getattr(response, "content", "")
+        response_text = str(response_content)
+        parsed: object = {}
+        try:
+            if not isinstance(response_content, str):
+                raise MemoryLifecycleContractError(
+                    "memory lifecycle specialist output must be text"
+                )
+            parsed = parse_llm_json_output(response_content)
+            if not isinstance(parsed, dict) or not parsed:
+                raise MemoryLifecycleContractError(
+                    "memory lifecycle specialist output must be a non-empty object"
+                )
+        except MemoryLifecycleContractError as exc:
+            last_error = str(exc)
+            await _record_memory_lifecycle_trace(
+                trace_id=trace_id,
+                messages=[system_prompt, human_message],
+                response_text=response_text,
+                parsed_output=parsed,
+                parse_status="contract_error",
+                status="failed",
+                attempt_index=attempt_index,
+                validation_error=last_error,
+                started_at=started_at,
+            )
+            if attempt_index < V2_MODEL_TOTAL_ATTEMPTS:
+                request_payload = _memory_lifecycle_repair_payload(
+                    prompt_payload,
+                    reason=(
+                        "上一份候选未通过生命周期字段、值类型或列表边界校验。"
+                    ),
+                    contract_error=last_error,
+                    invalid_candidate=response_text,
+                )
+                continue
+            return _skipped_memory_lifecycle_review(
+                alias_bindings=alias_bindings,
+                visible_alias_count=visible_alias_count,
+                omitted_alias_count=omitted_alias_count,
+                reason=last_error,
+            )
+
+        normalized = normalize_memory_lifecycle_output(parsed, alias_bindings)
+        materialized = materialize_memory_lifecycle_actions(
+            normalized,
+            alias_bindings,
+            visible_alias_count=visible_alias_count,
+            omitted_alias_count=omitted_alias_count,
+        )
+        review = {
+            "normalized": normalized,
+            "materialized": materialized,
+            "degraded": False,
+        }
+        await _record_memory_lifecycle_trace(
+            trace_id=trace_id,
+            messages=[system_prompt, human_message],
+            response_text=response_text,
+            parsed_output=review,
+            parse_status="succeeded",
+            status="succeeded",
+            attempt_index=attempt_index,
+            validation_error="",
+            started_at=started_at,
+        )
+        return review
+
+    raise AssertionError("memory lifecycle attempts must return or degrade")
+
+
+async def _record_memory_lifecycle_trace(
+    *,
+    trace_id: str,
+    messages: list[SystemMessage | HumanMessage],
+    response_text: str,
+    parsed_output: object,
+    parse_status: str,
+    status: str,
+    attempt_index: int,
+    validation_error: str,
+    started_at: float,
+) -> None:
+    """Record one lifecycle specialist attempt through protected tracing."""
+
+    await llm_tracing.record_llm_trace_step(
+        trace_id=trace_id,
+        stage_name="memory_lifecycle_specialist",
+        route_name="memory_lifecycle",
+        model_name=COGNITION_LLM_MODEL,
+        messages=messages,
+        response_text=response_text,
+        parsed_output=parsed_output,
+        parse_status=parse_status,
+        status=status,
+        duration_ms=max(0, int((time.perf_counter() - started_at) * 1000)),
+        output_state_fields=[
+            "action_specs",
+            "memory_lifecycle_context",
+        ],
+        sequence=attempt_index - 1,
+        call_config=_memory_lifecycle_specialist_llm_config,
+        attempt_index=attempt_index,
+        validation_error=validation_error[:_MEMORY_LIFECYCLE_ERROR_CAP],
+        attempt_started_at=started_at,
     )
-    started_at = time.perf_counter()
-    response = await _memory_lifecycle_specialist_llm.ainvoke([
-        system_prompt,
-        human_message,
-    ], config=_memory_lifecycle_specialist_llm_config)
-    parsed = parse_llm_json_output(response.content)
-    normalized = normalize_memory_lifecycle_output(parsed, alias_bindings)
+
+
+def _memory_lifecycle_repair_payload(
+    prompt_payload: Mapping[str, object],
+    *,
+    reason: str,
+    contract_error: str,
+    invalid_candidate: str,
+) -> dict[str, object]:
+    """Add exactly one bounded lifecycle contract-repair block."""
+
+    repair_payload = dict(prompt_payload)
+    repair_payload["contract_repair"] = {
+        "repair_instruction": _MEMORY_LIFECYCLE_REPAIR_INSTRUCTION,
+        "reason": reason,
+        "contract_error": contract_error[:_MEMORY_LIFECYCLE_ERROR_CAP],
+        "invalid_candidate": invalid_candidate[
+            :_MEMORY_LIFECYCLE_REPAIR_OUTPUT_CAP
+        ],
+    }
+    return repair_payload
+
+
+def _memory_lifecycle_skipped_diagnostic() -> dict[str, object]:
+    """Build the fixed diagnostic for an exhausted lifecycle specialist."""
+
+    return {
+        "schema_version": "episode_attempt_diagnostic.v1",
+        "stage": "memory_lifecycle_specialist",
+        "error_code": "memory_lifecycle_skipped",
+        "attempt_count": V2_MODEL_TOTAL_ATTEMPTS,
+        "safe_checkpoint": "post_cognition_commit",
+        "retryable": False,
+        "final_status": "skipped",
+    }
+
+
+def _skipped_memory_lifecycle_review(
+    *,
+    alias_bindings: list[dict[str, Any]],
+    visible_alias_count: int,
+    omitted_alias_count: int,
+    reason: str,
+) -> dict[str, object]:
+    """Return an exhausted specialist review with a skipped context."""
+
+    normalized = {
+        "decision": "skipped",
+        "lifecycle_decisions": [],
+        "content_plan_roles": [],
+        "warnings": [
+            "生命周期专员在有界重试后未返回可用候选。"
+            if not reason
+            else "生命周期专员在有界重试后未返回可用候选："
+            + reason[:_MEMORY_LIFECYCLE_ERROR_CAP],
+        ],
+        "errors": [],
+    }
     materialized = materialize_memory_lifecycle_actions(
         normalized,
         alias_bindings,
@@ -397,23 +626,8 @@ async def _invoke_memory_lifecycle_specialist(
     review = {
         "normalized": normalized,
         "materialized": materialized,
+        "degraded": True,
     }
-    await llm_tracing.record_llm_trace_step(
-        trace_id=trace_id,
-        stage_name="memory_lifecycle_specialist",
-        route_name="memory_lifecycle",
-        model_name=COGNITION_LLM_MODEL,
-        messages=[system_prompt, human_message],
-        response_text=str(response.content),
-        parsed_output=review,
-        parse_status="succeeded",
-        status="succeeded",
-        duration_ms=max(0, int((time.perf_counter() - started_at) * 1000)),
-        output_state_fields=[
-            "action_specs",
-            "memory_lifecycle_context",
-        ],
-    )
     return review
 
 
@@ -428,9 +642,12 @@ def _combine_memory_lifecycle_contexts(
     visible_alias_count = 0
     omitted_alias_count = 0
     decision = "no_lifecycle_change"
+    skipped = False
     for context in lifecycle_contexts:
         if context.get("decision") == "lifecycle_change":
             decision = "lifecycle_change"
+        elif context.get("decision") == "skipped":
+            skipped = True
         raw_visible_count = context.get("visible_alias_count")
         if isinstance(raw_visible_count, int):
             visible_alias_count += raw_visible_count
@@ -459,6 +676,8 @@ def _combine_memory_lifecycle_contexts(
                 if isinstance(raw_warning, str)
             )
 
+    if decision != "lifecycle_change" and skipped:
+        decision = "skipped"
     context = _memory_lifecycle_context(
         decision=decision,
         visible_alias_count=visible_alias_count,

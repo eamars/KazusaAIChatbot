@@ -24,6 +24,7 @@ from kazusa_ai_chatbot.cognition_shared.state_projection import (
     project_relationship_context,
     select_character_operational_context,
 )
+from kazusa_ai_chatbot.config import LLM_TRACE_CAPTURE_MODE
 from kazusa_ai_chatbot.relevance.persona_relevance_agent import (
     SettledRelevanceContractError,
 )
@@ -101,6 +102,35 @@ _PRODUCTION_REFERENCE = {
     ],
     'active_body_text': _GO_BOARD_MESSAGE,
 }
+
+
+def _safe_config(config: object) -> dict[str, object]:
+    """Project relevance route configuration without credentials."""
+
+    thinking = getattr(config, 'thinking', None)
+    return {
+        'stage_name': getattr(config, 'stage_name', ''),
+        'route_name': getattr(config, 'route_name', ''),
+        'base_url': getattr(config, 'base_url', ''),
+        'model': getattr(config, 'model', ''),
+        'temperature': getattr(config, 'temperature', None),
+        'top_p': getattr(config, 'top_p', None),
+        'top_k': getattr(config, 'top_k', None),
+        'max_completion_tokens': getattr(
+            config,
+            'max_completion_tokens',
+            None,
+        ),
+        'presence_penalty': getattr(config, 'presence_penalty', None),
+        'timeout_seconds': getattr(config, 'timeout_seconds', None),
+        'thinking_enabled': getattr(thinking, 'enabled', None),
+        'output_mode': getattr(config, 'output_mode', None),
+        'context_window_tokens': getattr(
+            config,
+            'context_window_tokens',
+            None,
+        ),
+    }
 _QQ_CURRENT_MESSAGE = (
     '@一之濑明日奈 我们看 Blue Archive the Animation 吧~你绝对会喜欢的♥\n'
     '在netflix上有哦，你先找找我马上就来'
@@ -400,10 +430,39 @@ async def _run_qq_failure_replay() -> dict[str, Any]:
     first_error: dict[str, Any] | None = None
     second_result: dict[str, Any] | None = None
     second_error: dict[str, Any] | None = None
+    trace_steps: list[dict[str, Any]] = []
+    original_trace_recorder = settled_module.llm_tracing.record_llm_trace_step
+
+    async def capture_trace_step(**kwargs: Any) -> Any:
+        """Capture protected attempt metadata while delegating persistence."""
+
+        messages = kwargs.get('messages', [])
+        trace_steps.append({
+            'stage_name': kwargs.get('stage_name', ''),
+            'attempt_index': kwargs.get('attempt_index', 0),
+            'parse_status': kwargs.get('parse_status', ''),
+            'status': kwargs.get('status', ''),
+            'validation_error': kwargs.get('validation_error', ''),
+            'response_text': kwargs.get('response_text', ''),
+            'parsed_output': kwargs.get('parsed_output', {}),
+            'messages': [
+                {
+                    'type': message.__class__.__name__,
+                    'content': str(message.content),
+                }
+                for message in messages
+            ],
+        })
+        return await original_trace_recorder(**kwargs)
+
     with patch.object(
         settled_module,
         '_relevance_agent_llm',
         recording_llm,
+    ), patch.object(
+        settled_module.llm_tracing,
+        'record_llm_trace_step',
+        capture_trace_step,
     ):
         try:
             first_result = await settled_module.relevance_agent({
@@ -414,7 +473,8 @@ async def _run_qq_failure_replay() -> dict[str, Any]:
             first_error = _settled_error_evidence(exc)
         if first_error is not None or (
             first_result is not None
-            and first_result.get('response_action') == 'wait'
+            and isinstance(first_result.get('decision'), Mapping)
+            and first_result['decision'].get('response_action') == 'wait'
         ):
             try:
                 second_result = await settled_module.relevance_agent({
@@ -474,6 +534,8 @@ async def _run_qq_failure_replay() -> dict[str, Any]:
         'first_dispositions': first_dispositions,
         'second_dispositions': second_dispositions,
         'model_calls': inspected_calls,
+        'attempts': trace_steps,
+        'protected_evidence': trace_steps,
         'first_result': first_result,
         'first_error': first_error,
         'second_result': second_result,
@@ -490,6 +552,28 @@ async def _run_qq_failure_replay() -> dict[str, Any]:
         ),
         'route': 'RELEVANCE_AGENT_LLM',
         'model': settled_module.RELEVANCE_AGENT_LLM_MODEL,
+        'case_input': {
+            'first_state': first_state,
+            'second_state': second_state,
+            'first_observation_status': 'more_time_available',
+            'second_observation_status': 'observation_complete',
+        },
+        'model_config': _safe_config(
+            settled_module._relevance_agent_llm_config
+        ),
+        'capture_mode': LLM_TRACE_CAPTURE_MODE,
+        'raw_capture_available': any(
+            bool(step.get('response_text')) for step in trace_steps
+        ),
+        'final_result': {
+            'first': first_result,
+            'second': second_result,
+        },
+        'judgment_note': (
+            'The QQ replay returned nested relevance envelopes; T1/valid '
+            'results carry zero episode diagnostics, while only a T3 '
+            'deterministic degradation may carry one fixed row.'
+        ),
     }
     write_llm_trace(
         _TRACE_SUITE,
@@ -514,11 +598,23 @@ async def test_live_replays_qq_480386272_settled_relevance_failure(
         'The fixed first assessment produced no decision: '
         f"calls={evidence['model_calls']!r}"
     )
-    assert evidence['first_result']['indirect_speech_context'] == ''
+    assert set(evidence['first_result']) == {
+        'decision',
+        'attempt_diagnostics',
+    }
+    first_decision = evidence['first_result']['decision']
+    assert isinstance(first_decision, Mapping)
+    assert first_decision['indirect_speech_context'] == ''
+    assert evidence['first_result']['attempt_diagnostics'] == []
     assert evidence['second_error'] is None, (
         'The optional-context fix still left a terminal second-assessment '
         f"error: {evidence['second_error']!r}"
     )
+    if evidence['second_result'] is not None:
+        assert set(evidence['second_result']) == {
+            'decision',
+            'attempt_diagnostics',
+        }
     assert evidence['full_terminal_failure_after_fix'] is False
 
 

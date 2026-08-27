@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from datetime import datetime
 import json
 import logging
 import time
+from collections.abc import Mapping, Sequence
+from datetime import datetime
 from typing import Any, Literal, TypedDict
 
+import httpx
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from openai import OpenAIError
 
 from kazusa_ai_chatbot import llm_tracing
+from kazusa_ai_chatbot.cognition_shared.state_projection import (
+    project_operational_relationship_context,
+)
 from kazusa_ai_chatbot.config import (
     CHARACTER_GLOBAL_USER_ID,
     RELEVANCE_AGENT_LLM_API_KEY,
@@ -21,9 +26,6 @@ from kazusa_ai_chatbot.config import (
     SETTLED_RELEVANCE_MAX_COMPLETION_TOKENS,
     SETTLED_RELEVANCE_MAX_INPUT_CHARS,
 )
-from kazusa_ai_chatbot.cognition_shared.state_projection import (
-    project_operational_relationship_context,
-)
 from kazusa_ai_chatbot.conversation_history_prompt_projection import (
     project_conversation_history_for_llm,
 )
@@ -31,6 +33,10 @@ from kazusa_ai_chatbot.llm_interface import (
     LLInterface,
     LLMCallConfig,
     LLMThinkingConfig,
+)
+from kazusa_ai_chatbot.relevance.contracts import (
+    RelevanceEvaluationEnvelope,
+    SettledRelevanceDecision,
 )
 from kazusa_ai_chatbot.relevance.participation_evidence import (
     ParticipationAssessment,
@@ -41,7 +47,6 @@ from kazusa_ai_chatbot.relevance.participation_evidence import (
 from kazusa_ai_chatbot.state import IMProcessState
 from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
 from kazusa_ai_chatbot.utils import parse_llm_json_output
-
 
 logger = logging.getLogger(__name__)
 
@@ -55,16 +60,7 @@ _FRAGMENT_TOTAL_CHARS = 6000
 _HISTORY_TOTAL_CHARS = 6000
 _CONTEXT_TOTAL_CHARS = 2000
 _MAX_STABLE_PARTICIPANTS = 8
-
-
-class SettledRelevanceDecision(TypedDict):
-    """Validated persona-aware response action."""
-
-    response_action: Literal["ignore", "proceed", "wait"]
-    reason_to_respond: str
-    use_reply_feature: bool
-    channel_topic: str
-    indirect_speech_context: str
+SETTLED_RELEVANCE_TOTAL_ATTEMPTS = 2
 
 
 class AuthoritativeSettledDecision(TypedDict):
@@ -1491,7 +1487,7 @@ def _parse_settled_response(
             "interaction_evidence_refs": [],
             "character_state_refs": [],
         }
-        parse_status = "invalid"
+        parse_status = "normalized"
     return decision, assessment, parse_status
 
 
@@ -1615,6 +1611,8 @@ async def _record_settled_trace_step(
     parse_status: str,
     status: str,
     started_at: float,
+    attempt_index: int,
+    validation_error: str = "",
 ) -> None:
     """Record one settled relevance semantic or repair boundary.
 
@@ -1627,6 +1625,8 @@ async def _record_settled_trace_step(
         parse_status: Structural parse result for the trace step.
         status: Operational success or failure status.
         started_at: Monotonic start marker for this exact attempt.
+        attempt_index: One-based model attempt, or zero for no-model output.
+        validation_error: Bounded contract or provider failure detail.
 
     Returns:
         None.
@@ -1654,19 +1654,104 @@ async def _record_settled_trace_step(
             "indirect_speech_context",
             "participation_assessment",
         ],
+        call_config=_relevance_agent_llm_config,
+        attempt_index=attempt_index,
+        validation_error=validation_error,
+        attempt_started_at=started_at,
     )
+
+
+async def _invoke_settled_model(
+    *,
+    state: SettledRelevanceState,
+    messages: Sequence[BaseMessage],
+    stage_name: str,
+    attempt_index: int,
+) -> tuple[Any | None, Exception | None, float]:
+    """Invoke settled relevance once and contain only provider failures.
+
+    Args:
+        state: Settled projection carrying the protected trace identifier.
+        messages: Exact model messages for this initial or repair attempt.
+        stage_name: Stable semantic trace name for this invocation.
+        attempt_index: One-based attempt index within the bounded call budget.
+
+    Returns:
+        The model response, a contained provider exception when invocation
+        failed, and the monotonic start marker for trace duration accounting.
+    """
+
+    started_at = time.perf_counter()
+    try:
+        response = await _relevance_agent_llm.ainvoke(
+            list(messages),
+            config=_relevance_agent_llm_config,
+        )
+    except (
+        OpenAIError,
+        httpx.HTTPError,
+        ConnectionError,
+        OSError,
+        RuntimeError,
+        TimeoutError,
+    ) as exc:
+        await _record_settled_trace_step(
+            trace_id=str(state.get("llm_trace_id", "")),
+            stage_name=stage_name,
+            messages=messages,
+            response_text="",
+            parsed_output={},
+            parse_status="provider_error",
+            status="failed",
+            started_at=started_at,
+            attempt_index=attempt_index,
+            validation_error=str(exc),
+        )
+        return None, exc, started_at
+    return response, None, started_at
+
+
+def _settled_degradation_diagnostic() -> dict[str, object]:
+    """Build the fixed row for a deterministic settled fallback."""
+
+    return_value = {
+        "schema_version": "episode_attempt_diagnostic.v1",
+        "stage": "settled_relevance",
+        "error_code": "settled_relevance_deterministic_degraded",
+        "attempt_count": SETTLED_RELEVANCE_TOTAL_ATTEMPTS,
+        "safe_checkpoint": "pre_state_commit",
+        "retryable": False,
+        "final_status": "accepted_degraded",
+    }
+    return return_value
 
 
 def _settled_return_value(
     decision: SettledRelevanceDecision,
+    *,
+    attempt_diagnostics: list[dict[str, object]] | None = None,
+) -> RelevanceEvaluationEnvelope:
+    """Build the exact settled decision-and-diagnostics envelope."""
+
+    return_value: RelevanceEvaluationEnvelope = {
+        "decision": decision,
+        "attempt_diagnostics": list(attempt_diagnostics or []),
+    }
+    return return_value
+
+
+def _settled_trace_output(
+    decision: SettledRelevanceDecision,
     state: IMProcessState,
+    assessment: ParticipationAssessment,
 ) -> dict[str, Any]:
-    """Build downstream compatibility fields from one settled decision."""
+    """Retain the existing flattened fields only inside protected traces."""
 
     return_value: dict[str, Any] = {
         **decision,
         "should_respond": decision["response_action"] == "proceed",
         "user_input": state.get("user_input", ""),
+        "participation_assessment": assessment,
     }
     if "turn_id" in state:
         return_value["turn_id"] = state["turn_id"]
@@ -1675,8 +1760,10 @@ def _settled_return_value(
     return return_value
 
 
-async def relevance_agent(state: IMProcessState) -> dict[str, Any]:
-    """Run settled relevance and expose the downstream compatibility fields."""
+async def relevance_agent(
+    state: IMProcessState,
+) -> RelevanceEvaluationEnvelope:
+    """Run settled relevance and return its validated envelope."""
 
     observation_status = state.get(
         "observation_status",
@@ -1685,15 +1772,62 @@ async def relevance_agent(state: IMProcessState) -> dict[str, Any]:
     messages = build_settled_relevance_messages(state, observation_status)
     model_payload = json.loads(str(messages[1].content))
     authoritative = _has_authoritative_participation(model_payload)
-    started_at = time.perf_counter()
     trace_id = str(state.get("llm_trace_id", ""))
-    trace_stage_name = "persona_relevance_agent"
-    trace_started_at = started_at
     if authoritative:
         available_dispositions = _available_authoritative_dispositions(
             model_payload,
             observation_status,
         )
+
+        async def _return_deterministic_degraded(
+            request_messages: Sequence[BaseMessage],
+            validation_error: str,
+            cause: Exception | None = None,
+        ) -> RelevanceEvaluationEnvelope:
+            """Return the first available disposition after bounded exhaustion.
+
+            Args:
+                request_messages: Messages used by the last attempted call.
+                validation_error: Provider or contract detail for the trace.
+                cause: Provider exception to chain when no disposition exists.
+
+            Returns:
+                The existing settled decision with its fixed degradation row.
+            """
+
+            if not available_dispositions:
+                error = SettledRelevanceContractError(
+                    "authoritative settled output has no available disposition",
+                    validation_reason=validation_error,
+                    attempt_count=SETTLED_RELEVANCE_TOTAL_ATTEMPTS,
+                )
+                if cause is not None:
+                    raise error from cause
+                raise error
+            decision, assessment = _deterministic_authoritative_decision(
+                available_dispositions[0],
+                model_payload,
+            )
+            return_value = _settled_return_value(
+                decision,
+                attempt_diagnostics=[_settled_degradation_diagnostic()],
+            )
+            await _record_settled_trace_step(
+                trace_id=trace_id,
+                stage_name="persona_relevance_agent.deterministic",
+                messages=request_messages,
+                response_text="",
+                parsed_output={
+                    **_settled_trace_output(decision, state, assessment),
+                },
+                parse_status="deterministic",
+                status="accepted_degraded",
+                started_at=time.perf_counter(),
+                attempt_index=0,
+                validation_error=validation_error,
+            )
+            return return_value
+
         if len(available_dispositions) == 1:
             decision, assessment = _deterministic_authoritative_decision(
                 available_dispositions[0],
@@ -1701,133 +1835,259 @@ async def relevance_agent(state: IMProcessState) -> dict[str, Any]:
             )
             response_text = ""
             parse_status = "deterministic"
+            trace_stage_name = "persona_relevance_agent"
+            trace_started_at = time.perf_counter()
+            trace_attempt_index = 0
         else:
-            response = await _relevance_agent_llm.ainvoke(
-                list(messages),
-                config=_relevance_agent_llm_config,
-            )
-            response_text = str(response.content)
-            try:
-                (
-                    decision,
-                    assessment,
-                    parse_status,
-                ) = _parse_authoritative_settled_response(
-                    response_text,
-                    available_dispositions=available_dispositions,
-                    model_payload=model_payload,
-                )
-            except SettledRelevanceContractError as exc:
-                await _record_settled_trace_step(
-                    trace_id=trace_id,
-                    stage_name="persona_relevance_agent.initial",
+            response, provider_error, initial_started_at = (
+                await _invoke_settled_model(
+                    state=state,
                     messages=messages,
-                    response_text=response_text,
-                    parsed_output={
-                        "error": "invalid_authoritative_settled_output",
-                        "validation_reason": exc.validation_reason,
-                    },
-                    parse_status="invalid",
-                    status="failed",
-                    started_at=started_at,
+                    stage_name="persona_relevance_agent.initial",
+                    attempt_index=1,
                 )
-                if observation_status != "observation_complete":
-                    raise
-                repair_system_prompt = (
-                    _SETTLED_AUTHORITATIVE_REPAIR_PROMPT.format(
-                        semantic_dispositions="|".join(
-                            available_dispositions
-                        ),
+            )
+            if provider_error is not None:
+                response, second_provider_error, second_started_at = (
+                    await _invoke_settled_model(
+                        state=state,
+                        messages=messages,
+                        stage_name="persona_relevance_agent.initial",
+                        attempt_index=2,
                     )
                 )
-                repair_payload = {
-                    "settled_evidence": model_payload,
-                    "validation_reason": _clip_text(
-                        exc.validation_reason,
-                        300,
-                    ),
-                    "rejected_output": _clip_text(response_text, 1200),
-                }
-                repair_human_content = json.dumps(
-                    repair_payload,
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                )
-                if (
-                    len(repair_system_prompt) + len(repair_human_content)
-                    > SETTLED_RELEVANCE_MAX_INPUT_CHARS
-                ):
-                    raise SettledRelevanceContractError(
-                        "authoritative settled repair input exceeds its cap",
-                        validation_reason="repair input exceeds hard cap",
-                        attempt_count=2,
-                    ) from exc
-                repair_messages = [
-                    SystemMessage(content=repair_system_prompt),
-                    HumanMessage(content=repair_human_content),
-                ]
-                repair_started_at = time.perf_counter()
-                repair_response = await _relevance_agent_llm.ainvoke(
-                    repair_messages,
-                    config=_relevance_agent_llm_config,
-                )
-                repair_text = str(repair_response.content)
+                if second_provider_error is not None:
+                    degraded_value = await _return_deterministic_degraded(
+                        messages,
+                        str(second_provider_error),
+                        second_provider_error,
+                    )
+                    return degraded_value
+                response_text = str(response.content)
                 try:
                     (
                         decision,
                         assessment,
-                        _,
+                        parse_status,
                     ) = _parse_authoritative_settled_response(
-                        repair_text,
+                        response_text,
                         available_dispositions=available_dispositions,
                         model_payload=model_payload,
                     )
-                except SettledRelevanceContractError as repair_exc:
+                except SettledRelevanceContractError as exc:
                     await _record_settled_trace_step(
                         trace_id=trace_id,
-                        stage_name="persona_relevance_agent.repair",
-                        messages=repair_messages,
-                        response_text=repair_text,
+                        stage_name="persona_relevance_agent.initial",
+                        messages=messages,
+                        response_text=response_text,
                         parsed_output={
                             "error": "invalid_authoritative_settled_output",
-                            "validation_reason": (
-                                repair_exc.validation_reason
-                            ),
+                            "validation_reason": exc.validation_reason,
                         },
                         parse_status="invalid",
                         status="failed",
-                        started_at=repair_started_at,
+                        started_at=second_started_at,
+                        attempt_index=2,
+                        validation_error=exc.validation_reason,
                     )
-                    repair_validation_reason = (
-                        repair_exc.validation_reason.strip()
-                        or exc.validation_reason
+                    degraded_value = await _return_deterministic_degraded(
+                        messages,
+                        exc.validation_reason,
+                        exc,
                     )
-                    raise SettledRelevanceContractError(
-                        "authoritative settled output repair failed",
-                        validation_reason=repair_validation_reason,
-                        attempt_count=2,
-                    ) from repair_exc
-                messages = tuple(repair_messages)
-                response_text = repair_text
-                parse_status = "repaired"
-                trace_stage_name = "persona_relevance_agent.repair"
-                trace_started_at = repair_started_at
+                    return degraded_value
+                trace_stage_name = "persona_relevance_agent.initial"
+                trace_started_at = second_started_at
+                trace_attempt_index = 2
+            else:
+                response_text = str(response.content)
+                try:
+                    (
+                        decision,
+                        assessment,
+                        parse_status,
+                    ) = _parse_authoritative_settled_response(
+                        response_text,
+                        available_dispositions=available_dispositions,
+                        model_payload=model_payload,
+                    )
+                except SettledRelevanceContractError as exc:
+                    await _record_settled_trace_step(
+                        trace_id=trace_id,
+                        stage_name="persona_relevance_agent.initial",
+                        messages=messages,
+                        response_text=response_text,
+                        parsed_output={
+                            "error": "invalid_authoritative_settled_output",
+                            "validation_reason": exc.validation_reason,
+                        },
+                        parse_status="invalid",
+                        status="failed",
+                        started_at=initial_started_at,
+                        attempt_index=1,
+                        validation_error=exc.validation_reason,
+                    )
+                    if observation_status != "observation_complete":
+                        raise
+                    repair_system_prompt = (
+                        _SETTLED_AUTHORITATIVE_REPAIR_PROMPT.format(
+                            semantic_dispositions="|".join(
+                                available_dispositions
+                            ),
+                        )
+                    )
+                    repair_payload = {
+                        "settled_evidence": model_payload,
+                        "validation_reason": _clip_text(
+                            exc.validation_reason,
+                            300,
+                        ),
+                        "rejected_output": _clip_text(response_text, 1200),
+                    }
+                    repair_human_content = json.dumps(
+                        repair_payload,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
+                    if (
+                        len(repair_system_prompt) + len(repair_human_content)
+                        > SETTLED_RELEVANCE_MAX_INPUT_CHARS
+                    ):
+                        raise SettledRelevanceContractError(
+                            "authoritative settled repair input exceeds its cap",
+                            validation_reason="repair input exceeds hard cap",
+                            attempt_count=2,
+                        ) from exc
+                    repair_messages = [
+                        SystemMessage(content=repair_system_prompt),
+                        HumanMessage(content=repair_human_content),
+                    ]
+                    (
+                        repair_response,
+                        repair_provider_error,
+                        repair_started_at,
+                    ) = await _invoke_settled_model(
+                        state=state,
+                        messages=repair_messages,
+                        stage_name="persona_relevance_agent.repair",
+                        attempt_index=2,
+                    )
+                    if repair_provider_error is not None:
+                        degraded_value = await _return_deterministic_degraded(
+                            repair_messages,
+                            str(repair_provider_error),
+                            repair_provider_error,
+                        )
+                        return degraded_value
+                    repair_text = str(repair_response.content)
+                    try:
+                        (
+                            decision,
+                            assessment,
+                            parse_status,
+                        ) = _parse_authoritative_settled_response(
+                            repair_text,
+                            available_dispositions=available_dispositions,
+                            model_payload=model_payload,
+                        )
+                    except SettledRelevanceContractError as repair_exc:
+                        await _record_settled_trace_step(
+                            trace_id=trace_id,
+                            stage_name="persona_relevance_agent.repair",
+                            messages=repair_messages,
+                            response_text=repair_text,
+                            parsed_output={
+                                "error": "invalid_authoritative_settled_output",
+                                "validation_reason": (
+                                    repair_exc.validation_reason
+                                ),
+                            },
+                            parse_status="invalid",
+                            status="failed",
+                            started_at=repair_started_at,
+                            attempt_index=2,
+                            validation_error=(
+                                repair_exc.validation_reason
+                            ),
+                        )
+                        degraded_value = await _return_deterministic_degraded(
+                            repair_messages,
+                            repair_exc.validation_reason,
+                            repair_exc,
+                        )
+                        return degraded_value
+                    messages = tuple(repair_messages)
+                    response_text = repair_text
+                    parse_status = "repaired"
+                    trace_stage_name = "persona_relevance_agent.repair"
+                    trace_started_at = repair_started_at
+                    trace_attempt_index = 2
+                else:
+                    trace_stage_name = "persona_relevance_agent.initial"
+                    trace_started_at = initial_started_at
+                    trace_attempt_index = 1
     else:
-        response = await _relevance_agent_llm.ainvoke(
-            list(messages),
-            config=_relevance_agent_llm_config,
+        response, provider_error, initial_started_at = (
+            await _invoke_settled_model(
+                state=state,
+                messages=messages,
+                stage_name="persona_relevance_agent",
+                attempt_index=1,
+            )
         )
+        if provider_error is not None:
+            response, second_provider_error, second_started_at = (
+                await _invoke_settled_model(
+                    state=state,
+                    messages=messages,
+                    stage_name="persona_relevance_agent",
+                    attempt_index=2,
+                )
+            )
+            if second_provider_error is not None:
+                decision = _ignore_decision(
+                    "settled relevance provider exhausted"
+                )
+                assessment = {
+                    "recipient_relation": "unknown",
+                    "admission_basis": "none",
+                    "interaction_evidence_refs": [],
+                    "character_state_refs": [],
+                }
+                return_value = _settled_return_value(
+                    decision,
+                    attempt_diagnostics=[_settled_degradation_diagnostic()],
+                )
+                await _record_settled_trace_step(
+                    trace_id=trace_id,
+                    stage_name="persona_relevance_agent.deterministic",
+                    messages=messages,
+                    response_text="",
+                    parsed_output={
+                        **_settled_trace_output(decision, state, assessment),
+                    },
+                    parse_status="deterministic",
+                    status="accepted_degraded",
+                    started_at=time.perf_counter(),
+                    attempt_index=0,
+                    validation_error=str(second_provider_error),
+                )
+                return return_value
+            trace_stage_name = "persona_relevance_agent"
+            trace_started_at = second_started_at
+            trace_attempt_index = 2
+        else:
+            trace_stage_name = "persona_relevance_agent"
+            trace_started_at = initial_started_at
+            trace_attempt_index = 1
         response_text = str(response.content)
         decision, assessment, parse_status = _parse_settled_response(
             response_text,
             observation_status=observation_status,
             model_payload=model_payload,
         )
-    return_value = _settled_return_value(decision, state)
-    trace_output = {
-        **return_value,
-        "participation_assessment": assessment,
-    }
+    return_value = _settled_return_value(decision)
+    trace_output = _settled_trace_output(decision, state, assessment)
 
     await _record_settled_trace_step(
         trace_id=trace_id,
@@ -1836,8 +2096,9 @@ async def relevance_agent(state: IMProcessState) -> dict[str, Any]:
         response_text=response_text,
         parsed_output=trace_output,
         parse_status=parse_status,
-        status="succeeded",
+        status="failed" if parse_status == "invalid" else "succeeded",
         started_at=trace_started_at,
+        attempt_index=trace_attempt_index,
     )
 
     return return_value

@@ -28,9 +28,6 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     resolver_evidence_excerpts_for_cognition,
 )
 from kazusa_ai_chatbot.cognition_resolver.state import validate_resolver_state
-from kazusa_ai_chatbot.conversation_progress import (
-    project_conversation_progress_overused_moves,
-)
 from kazusa_ai_chatbot.cognition_shared.contracts import (
     MAX_RECENT_CHARACTER_DIALOG_CHARS,
     MAX_RECENT_CHARACTER_DIALOG_ROWS,
@@ -42,6 +39,9 @@ from kazusa_ai_chatbot.cognition_shared.contracts import (
     VisualSurfaceServicesV2,
     validate_text_surface_input_canonical,
 )
+from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
+    V2_MODEL_TOTAL_ATTEMPTS,
+)
 from kazusa_ai_chatbot.cognition_shared.surface import (
     run_text_surface_planning,
     run_visual_surface_planning,
@@ -50,6 +50,9 @@ from kazusa_ai_chatbot.config import (
     COGNITION_STAGE_TIMEOUT_SECONDS,
     SURFACE_CONTENT_DEFAULT_MAX_COMPLETION_TOKENS,
     SURFACE_VISUAL_DEFAULT_MAX_COMPLETION_TOKENS,
+)
+from kazusa_ai_chatbot.conversation_progress import (
+    project_conversation_progress_overused_moves,
 )
 from kazusa_ai_chatbot.llm_interface import LLMCallConfig
 from kazusa_ai_chatbot.nodes.linguistic_texture import (
@@ -69,6 +72,7 @@ from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     _llm_interface,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
+from kazusa_ai_chatbot.runtime_coordination import PipelineCancelled
 from kazusa_ai_chatbot.utils import build_interaction_history_recent
 
 _LINGUISTIC_TEXTURE_DESCRIPTORS = {
@@ -198,13 +202,19 @@ async def _run_l3_text_surface_handler(
         "text_surface_input": input_payload,
         "text_surface_output_v2": text_output,
     }
-    if (
-        isinstance(visual_result, CognitionExecutionError)
-        and visual_result.stage == "surface.visual"
-    ):
-        return return_value
     if isinstance(visual_result, BaseException):
-        raise visual_result
+        if isinstance(visual_result, (asyncio.CancelledError, PipelineCancelled)):
+            raise visual_result
+        return_value["attempt_diagnostics"] = [{
+            "schema_version": "episode_attempt_diagnostic.v1",
+            "stage": "surface.visual",
+            "error_code": "surface_visual_omitted",
+            "attempt_count": V2_MODEL_TOTAL_ATTEMPTS,
+            "safe_checkpoint": "post_cognition_commit",
+            "retryable": False,
+            "final_status": "accepted_degraded",
+        }]
+        return return_value
     return_value["visual_surface_output_v2"] = visual_result
     return return_value
 

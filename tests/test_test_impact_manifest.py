@@ -26,6 +26,60 @@ def test_manifest_covers_strict_cognition_source_boundary() -> None:
     assert validate_manifest(manifest, REPOSITORY_ROOT) == []
 
 
+def test_manifest_covers_relevance_diagnostic_source_boundary() -> None:
+    """Relevance producers and their canonical contracts have exact gates."""
+
+    manifest = load_manifest(REPOSITORY_ROOT)
+    entries = {entry["source"]: entry for entry in manifest["entries"]}
+    required_rows = {
+        "src/kazusa_ai_chatbot/relevance/contracts.py": (
+            "tests/test_relevance_turn_settlement.py::"
+            "test_relevance_exports_canonical_decision_types_without_producer_duplicates"
+        ),
+        "src/kazusa_ai_chatbot/relevance/__init__.py": (
+            "tests/test_relevance_turn_settlement.py::"
+            "test_relevance_evaluation_envelope_has_nested_decision_and_diagnostics_only"
+        ),
+        "src/kazusa_ai_chatbot/relevance/frontline_relevance_agent.py": (
+            "tests/test_frontline_relevance_agent.py::"
+            "test_frontline_provider_exhaustion_starts_authoritative_turn"
+        ),
+        "src/kazusa_ai_chatbot/relevance/persona_relevance_agent.py": (
+            "tests/test_persona_relevance_agent.py::"
+            "test_non_authoritative_provider_exhaustion_returns_ignore"
+        ),
+    }
+
+    for source, node in required_rows.items():
+        assert source in entries
+        assert node in entries[source]["required_unit_tests"]
+
+    assert validate_manifest(manifest, REPOSITORY_ROOT) == []
+
+
+def test_manifest_covers_turn_settlement_diagnostic_source_boundary() -> None:
+    """Coordinator and reducer metadata carriers have exact gates."""
+
+    manifest = load_manifest(REPOSITORY_ROOT)
+    entries = {entry["source"]: entry for entry in manifest["entries"]}
+    required_rows = {
+        "src/kazusa_ai_chatbot/brain_service/turn_settlement.py": (
+            "tests/test_relevance_turn_settlement.py::"
+            "test_relevance_diagnostics_are_bounded_to_sixteen_in_occurrence_order"
+        ),
+        "src/kazusa_ai_chatbot/state.py": (
+            "tests/unit/brain_service/test_cognition_graph_projection.py::"
+            "test_attempt_diagnostics_reducer_concatenates_within_bound"
+        ),
+    }
+
+    for source, node in required_rows.items():
+        assert source in entries
+        assert node in entries[source]["required_unit_tests"]
+
+    assert validate_manifest(manifest, REPOSITORY_ROOT) == []
+
+
 def test_manifest_accepts_an_explicit_package_init_source_root() -> None:
     """Release metadata may be owned by a package initializer explicitly."""
 

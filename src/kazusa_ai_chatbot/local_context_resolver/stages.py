@@ -5,9 +5,17 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import time
+from collections.abc import Callable
 
+import httpx
 from langchain_core.messages import HumanMessage, SystemMessage
+from openai import OpenAIError
 
+from kazusa_ai_chatbot import llm_tracing
+from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
+    V2_MODEL_TOTAL_ATTEMPTS,
+)
 from kazusa_ai_chatbot.config import (
     RAG_PLANNER_LLM_API_KEY,
     RAG_PLANNER_LLM_BASE_URL,
@@ -25,6 +33,7 @@ from kazusa_ai_chatbot.llm_interface import (
     LLMCallConfig,
     LLMThinkingConfig,
 )
+from kazusa_ai_chatbot.utils import parse_llm_json_output
 
 from .constants import STAGE_LLM_TEMPERATURE, STAGE_LLM_TOP_P
 from .contracts import LocalContextValidationError
@@ -40,91 +49,16 @@ def drain_stage_trace_records() -> list[dict[str, object]]:
     return records
 
 
-def _parse_stage_json_output(
-    content: object,
-    stage_name: str,
-) -> dict[str, object]:
-    """Parse one stage JSON object without invoking JSON repair LLMs."""
-
-    if not isinstance(content, str):
-        raise LocalContextValidationError(
-            f"{stage_name}: raw output must be a string"
-        )
-    raw_text = content.strip()
-    try:
-        parsed = json.loads(raw_text)
-    except json.JSONDecodeError as exc:
-        object_text = _outer_json_object_text(raw_text)
-        try:
-            parsed = json.loads(object_text)
-        except json.JSONDecodeError as object_exc:
-            repaired_text = _escape_string_control_characters(object_text)
-            try:
-                parsed = json.loads(repaired_text)
-            except json.JSONDecodeError as repaired_exc:
-                if object_text == raw_text:
-                    raise LocalContextValidationError(
-                        f"{stage_name}: invalid JSON: {exc}"
-                    ) from repaired_exc
-                raise LocalContextValidationError(
-                    f"{stage_name}: invalid JSON object: {object_exc}"
-                ) from repaired_exc
-    if not isinstance(parsed, dict) or not parsed:
-        raise LocalContextValidationError(f"{stage_name}: empty parsed output")
-    result = parsed
-    return result
+_LOCAL_CONTEXT_STAGE_ATTEMPT_LIMIT = V2_MODEL_TOTAL_ATTEMPTS
+_LOCAL_CONTEXT_ERROR_CAP = 500
+_LOCAL_CONTEXT_REPAIR_OUTPUT_CAP = 8000
+_LOCAL_CONTEXT_REPAIR_INSTRUCTION = (
+    "请保留原始语义判断，并按当前阶段已有字段、值类型、列表基数和边界返回完整对象。"
+)
 
 
-def _outer_json_object_text(raw_text: str) -> str:
-    """Return the outermost object substring when a response wraps JSON."""
-
-    try:
-        start_index = raw_text.index("{")
-        end_index = raw_text.rindex("}")
-    except ValueError:
-        return_value = raw_text
-        return return_value
-    if end_index <= start_index:
-        return_value = raw_text
-        return return_value
-    return_value = raw_text[start_index:end_index + 1]
-    return return_value
-
-
-def _escape_string_control_characters(raw_text: str) -> str:
-    """Escape raw control characters that appear inside JSON strings."""
-
-    chars: list[str] = []
-    in_string = False
-    escaped = False
-    for char in raw_text:
-        if escaped:
-            chars.append(char)
-            escaped = False
-            continue
-        if char == "\\" and in_string:
-            chars.append(char)
-            escaped = True
-            continue
-        if char == '"':
-            chars.append(char)
-            in_string = not in_string
-            continue
-        if in_string and char == "\n":
-            chars.append("\\n")
-            continue
-        if in_string and char == "\r":
-            chars.append("\\r")
-            continue
-        if in_string and char == "\t":
-            chars.append("\\t")
-            continue
-        if in_string and ord(char) < 32:
-            chars.append(f"\\u{ord(char):04x}")
-            continue
-        chars.append(char)
-    return_value = "".join(chars)
-    return return_value
+class LocalContextStageContractError(LocalContextValidationError):
+    """Raised when a local-context stage exhausts its model contract attempts."""
 
 
 def _record_stage_trace(
@@ -168,6 +102,219 @@ def _record_failed_stage_trace(
         payload=payload,
         raw_output=raw_output,
         parsed_output={"parse_error": str(error)},
+    )
+
+
+async def _run_local_context_stage(
+    *,
+    payload: dict[str, object],
+    system_prompt: str,
+    llm: LLInterface,
+    config: LLMCallConfig,
+    stage_name: str,
+    output_state_fields: tuple[str, ...],
+    candidate_validator: Callable[
+        [dict[str, object]],
+        None,
+    ],
+) -> dict[str, object]:
+    """Run one local-context stage with bounded content-contract recovery."""
+
+    base_payload = dict(payload)
+    request_payload = base_payload
+    system_message = SystemMessage(content=system_prompt)
+    last_error = ""
+    for attempt_index in range(1, _LOCAL_CONTEXT_STAGE_ATTEMPT_LIMIT + 1):
+        human_message = HumanMessage(
+            content=json.dumps(request_payload, ensure_ascii=False)
+        )
+        messages = [system_message, human_message]
+        started_at = time.perf_counter()
+        try:
+            response = await llm.ainvoke(messages, config=config)
+        except (
+            OpenAIError,
+            httpx.HTTPError,
+            ConnectionError,
+            OSError,
+            RuntimeError,
+            TimeoutError,
+        ) as exc:
+            last_error = str(exc)
+            await _record_local_context_trace(
+                stage_name=stage_name,
+                config=config,
+                messages=messages,
+                response_text="",
+                parsed_output={},
+                parse_status="provider_error",
+                status="failed",
+                attempt_index=attempt_index,
+                validation_error=last_error,
+                started_at=started_at,
+                output_state_fields=output_state_fields,
+            )
+            _record_stage_trace(
+                stage_name=stage_name,
+                route_name=config.route_name,
+                model=config.model,
+                payload=request_payload,
+                raw_output="",
+                parsed_output={"provider_error": last_error},
+            )
+            if attempt_index >= _LOCAL_CONTEXT_STAGE_ATTEMPT_LIMIT:
+                raise LocalContextStageContractError(
+                    f"{stage_name}: provider attempts exhausted: {last_error}"
+                ) from exc
+            request_payload = _local_context_repair_payload(
+                base_payload,
+                reason=(
+                    "上一轮模型调用未返回可用候选，请在相同语境下重新生成完整对象。"
+                ),
+                contract_error="",
+                invalid_candidate="",
+            )
+            continue
+
+        response_content = getattr(response, "content", "")
+        response_text = str(response_content)
+        parsed: object = {}
+        try:
+            if not isinstance(response_content, str):
+                raise LocalContextStageContractError(
+                    f"{stage_name}: raw output must be text"
+                )
+            try:
+                parsed = parse_llm_json_output(response_content)
+            except LocalContextValidationError as exc:
+                raise LocalContextStageContractError(str(exc)) from exc
+            if not isinstance(parsed, dict) or not parsed:
+                raise LocalContextStageContractError(
+                    f"{stage_name}: output must be a non-empty object"
+                )
+            try:
+                candidate_validator(parsed)
+            except LocalContextStageContractError:
+                raise
+            except LocalContextValidationError as exc:
+                raise LocalContextStageContractError(str(exc)) from exc
+        except LocalContextStageContractError as exc:
+            last_error = str(exc)
+            _record_failed_stage_trace(
+                stage_name=stage_name,
+                route_name=config.route_name,
+                model=config.model,
+                payload=request_payload,
+                raw_output=response_text,
+                error=exc,
+            )
+            await _record_local_context_trace(
+                stage_name=stage_name,
+                config=config,
+                messages=messages,
+                response_text=response_text,
+                parsed_output=parsed,
+                parse_status="contract_error",
+                status="failed",
+                attempt_index=attempt_index,
+                validation_error=last_error,
+                started_at=started_at,
+                output_state_fields=output_state_fields,
+            )
+            if attempt_index >= _LOCAL_CONTEXT_STAGE_ATTEMPT_LIMIT:
+                raise LocalContextStageContractError(
+                    f"{stage_name}: contract attempts exhausted: {last_error}"
+                ) from exc
+            request_payload = _local_context_repair_payload(
+                base_payload,
+                reason=(
+                    "上一份候选未通过当前阶段的字段、值类型或列表边界校验。"
+                ),
+                contract_error=last_error,
+                invalid_candidate=response_text,
+            )
+            continue
+
+        _record_stage_trace(
+            stage_name=stage_name,
+            route_name=config.route_name,
+            model=config.model,
+            payload=request_payload,
+            raw_output=response_text,
+            parsed_output=parsed,
+        )
+        await _record_local_context_trace(
+            stage_name=stage_name,
+            config=config,
+            messages=messages,
+            response_text=response_text,
+            parsed_output=parsed,
+            parse_status="succeeded",
+            status="succeeded",
+            attempt_index=attempt_index,
+            validation_error="",
+            started_at=started_at,
+            output_state_fields=output_state_fields,
+        )
+        return parsed
+
+    raise LocalContextStageContractError(
+        f"{stage_name}: contract attempts exhausted: {last_error}"
+    )
+
+
+def _local_context_repair_payload(
+    payload: dict[str, object],
+    *,
+    reason: str,
+    contract_error: str,
+    invalid_candidate: str,
+) -> dict[str, object]:
+    """Add exactly one bounded local-context contract-repair block."""
+
+    repair_payload = dict(payload)
+    repair_payload["contract_repair"] = {
+        "repair_instruction": _LOCAL_CONTEXT_REPAIR_INSTRUCTION,
+        "reason": reason,
+        "contract_error": contract_error[:_LOCAL_CONTEXT_ERROR_CAP],
+        "invalid_candidate": invalid_candidate[:_LOCAL_CONTEXT_REPAIR_OUTPUT_CAP],
+    }
+    return repair_payload
+
+
+async def _record_local_context_trace(
+    *,
+    stage_name: str,
+    config: LLMCallConfig,
+    messages: list[SystemMessage | HumanMessage],
+    response_text: str,
+    parsed_output: object,
+    parse_status: str,
+    status: str,
+    attempt_index: int,
+    validation_error: str,
+    started_at: float,
+    output_state_fields: tuple[str, ...],
+) -> None:
+    """Record one local-context model attempt through protected tracing."""
+
+    await llm_tracing.record_llm_trace_step(
+        trace_id=llm_tracing.current_trace_id(),
+        stage_name=stage_name,
+        route_name=config.route_name,
+        model_name=config.model,
+        messages=messages,
+        response_text=response_text,
+        parsed_output=parsed_output,
+        parse_status=parse_status,
+        status=status,
+        duration_ms=max(0, int((time.perf_counter() - started_at) * 1000)),
+        output_state_fields=output_state_fields,
+        sequence=attempt_index - 1,
+        call_config=config,
+        attempt_index=attempt_index,
+        validation_error=validation_error[:_LOCAL_CONTEXT_ERROR_CAP],
+        attempt_started_at=started_at,
     )
 
 
@@ -287,38 +434,23 @@ def planner_stage_cache_identity() -> dict[str, object]:
 
 async def plan_local_context_graph(
     payload: dict[str, object],
+    *,
+    candidate_validator: Callable[
+        [dict[str, object]],
+        None,
+    ],
 ) -> dict[str, object]:
     """Return a semantic local-context task decomposition."""
 
-    response = await _planner_llm.ainvoke(
-        [
-            SystemMessage(content=_PLANNER_PROMPT),
-            HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
-        ],
-        config=_planner_llm_config,
-    )
-    try:
-        parsed = _parse_stage_json_output(response.content, "planner stage")
-    except LocalContextValidationError as exc:
-        _record_failed_stage_trace(
-            stage_name="local_context_resolver.graph_planner",
-            route_name="RAG_PLANNER_LLM",
-            model=RAG_PLANNER_LLM_MODEL,
-            payload=payload,
-            raw_output=response.content,
-            error=exc,
-        )
-        raise
-    _record_stage_trace(
-        stage_name="local_context_resolver.graph_planner",
-        route_name="RAG_PLANNER_LLM",
-        model=RAG_PLANNER_LLM_MODEL,
+    return await _run_local_context_stage(
         payload=payload,
-        raw_output=response.content,
-        parsed_output=parsed,
+        system_prompt=_PLANNER_PROMPT,
+        llm=_planner_llm,
+        config=_planner_llm_config,
+        stage_name="local_context_resolver.graph_planner",
+        output_state_fields=("planner_response",),
+        candidate_validator=candidate_validator,
     )
-    result = parsed
-    return result
 
 
 _NODE_PROMPT = '''\
@@ -447,38 +579,23 @@ def active_node_stage_cache_identity() -> dict[str, object]:
 
 async def resolve_local_context_node(
     payload: dict[str, object],
+    *,
+    candidate_validator: Callable[
+        [dict[str, object]],
+        None,
+    ],
 ) -> dict[str, object]:
     """Return one active-node local evidence update."""
 
-    response = await _node_llm.ainvoke(
-        [
-            SystemMessage(content=_NODE_PROMPT),
-            HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
-        ],
-        config=_node_llm_config,
-    )
-    try:
-        parsed = _parse_stage_json_output(response.content, "node resolver stage")
-    except LocalContextValidationError as exc:
-        _record_failed_stage_trace(
-            stage_name="local_context_resolver.active_node_resolver",
-            route_name="RAG_SUBAGENT_LLM",
-            model=RAG_SUBAGENT_LLM_MODEL,
-            payload=payload,
-            raw_output=response.content,
-            error=exc,
-        )
-        raise
-    _record_stage_trace(
-        stage_name="local_context_resolver.active_node_resolver",
-        route_name="RAG_SUBAGENT_LLM",
-        model=RAG_SUBAGENT_LLM_MODEL,
+    return await _run_local_context_stage(
         payload=payload,
-        raw_output=response.content,
-        parsed_output=parsed,
+        system_prompt=_NODE_PROMPT,
+        llm=_node_llm,
+        config=_node_llm_config,
+        stage_name="local_context_resolver.active_node_resolver",
+        output_state_fields=("node_update", "artifacts"),
+        candidate_validator=candidate_validator,
     )
-    result = parsed
-    return result
 
 
 _COLLAPSE_PROMPT = '''\
@@ -522,38 +639,23 @@ _collapse_llm_config = LLMCallConfig(
 
 async def review_local_context_collapse(
     payload: dict[str, object],
+    *,
+    candidate_validator: Callable[
+        [dict[str, object]],
+        None,
+    ],
 ) -> dict[str, object]:
     """Return one bounded collapse decision."""
 
-    response = await _collapse_llm.ainvoke(
-        [
-            SystemMessage(content=_COLLAPSE_PROMPT),
-            HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
-        ],
-        config=_collapse_llm_config,
-    )
-    try:
-        parsed = _parse_stage_json_output(response.content, "collapse stage")
-    except LocalContextValidationError as exc:
-        _record_failed_stage_trace(
-            stage_name="local_context_resolver.collapse_review",
-            route_name="RAG_SUBAGENT_LLM",
-            model=RAG_SUBAGENT_LLM_MODEL,
-            payload=payload,
-            raw_output=response.content,
-            error=exc,
-        )
-        raise
-    _record_stage_trace(
-        stage_name="local_context_resolver.collapse_review",
-        route_name="RAG_SUBAGENT_LLM",
-        model=RAG_SUBAGENT_LLM_MODEL,
+    return await _run_local_context_stage(
         payload=payload,
-        raw_output=response.content,
-        parsed_output=parsed,
+        system_prompt=_COLLAPSE_PROMPT,
+        llm=_collapse_llm,
+        config=_collapse_llm_config,
+        stage_name="local_context_resolver.collapse_review",
+        output_state_fields=("collapse_decision",),
+        candidate_validator=candidate_validator,
     )
-    result = parsed
-    return result
 
 
 _SYNTHESIZER_PROMPT = '''\
@@ -612,35 +714,26 @@ _synthesizer_llm_config = LLMCallConfig(
 
 async def synthesize_local_context_packet(
     payload: dict[str, object],
+    *,
+    candidate_validator: Callable[
+        [dict[str, object]],
+        None,
+    ],
 ) -> dict[str, object]:
     """Return final semantic packet fields for one resolver run."""
 
-    response = await _synthesizer_llm.ainvoke(
-        [
-            SystemMessage(content=_SYNTHESIZER_PROMPT),
-            HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
-        ],
-        config=_synthesizer_llm_config,
-    )
-    try:
-        parsed = _parse_stage_json_output(response.content, "synthesizer stage")
-    except LocalContextValidationError as exc:
-        _record_failed_stage_trace(
-            stage_name="local_context_resolver.bottom_up_synthesis",
-            route_name="RAG_SUBAGENT_LLM",
-            model=RAG_SUBAGENT_LLM_MODEL,
-            payload=payload,
-            raw_output=response.content,
-            error=exc,
-        )
-        raise
-    _record_stage_trace(
-        stage_name="local_context_resolver.bottom_up_synthesis",
-        route_name="RAG_SUBAGENT_LLM",
-        model=RAG_SUBAGENT_LLM_MODEL,
+    return await _run_local_context_stage(
         payload=payload,
-        raw_output=response.content,
-        parsed_output=parsed,
+        system_prompt=_SYNTHESIZER_PROMPT,
+        llm=_synthesizer_llm,
+        config=_synthesizer_llm_config,
+        stage_name="local_context_resolver.bottom_up_synthesis",
+        output_state_fields=(
+            "investigation_summary",
+            "knowledge_we_know_so_far",
+            "knowledge_still_lacking",
+            "recommended_next_iteration",
+            "evidence_boundary_notes",
+        ),
+        candidate_validator=candidate_validator,
     )
-    result = parsed
-    return result

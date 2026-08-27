@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from types import SimpleNamespace
+
 import pytest
 
 from kazusa_ai_chatbot.local_context_resolver import (
@@ -29,12 +32,27 @@ class _StageInvoker:
         self._responses = list(responses)
         self.calls: list[dict[str, object]] = []
 
-    async def __call__(self, payload: dict[str, object]) -> dict[str, object]:
+    async def __call__(
+        self,
+        payload: dict[str, object],
+        *,
+        candidate_validator: Callable[
+            [dict[str, object]],
+            None,
+        ],
+    ) -> dict[str, object]:
         self.calls.append(payload)
         if not self._responses:
             raise AssertionError("unexpected stage invocation")
         response = self._responses.pop(0)
+        candidate_validator(response)
         return response
+
+
+def _accept_candidate(candidate: dict[str, object]) -> None:
+    """Accept a parsed candidate for direct stage-runner tests."""
+
+    del candidate
 
 
 @pytest.mark.asyncio
@@ -613,15 +631,80 @@ def test_collapse_response_does_not_hide_blocked_active_node() -> None:
     assert trace_summary["collapse_count"] == 0
 
 
-def test_stage_json_parser_escapes_control_characters_inside_strings() -> None:
-    """Parse model JSON with raw newline characters inside string literals."""
+@pytest.mark.asyncio
+async def test_local_context_stages_reuse_canonical_llm_json_parser(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Route every local stage through the shared canonical parser."""
 
-    parsed = resolver_stages._parse_stage_json_output(
-        '{"knowledge_we_know_so_far": ["first line\nsecond line"]}',
-        "unit test stage",
+    parser_inputs: list[str] = []
+    parsed_outputs = [
+        {"tasks": [{"objective": "one fact", "node_kind": "memory"}]},
+        {"node_update": {"status": "blocked"}, "artifacts": []},
+        {"collapse_decision": {
+            "should_collapse": False,
+            "target_candidate_ref": "",
+            "reason": "none",
+        }},
+        {
+            "investigation_summary": [],
+            "knowledge_we_know_so_far": [],
+            "knowledge_still_lacking": [],
+            "recommended_next_iteration": [],
+            "evidence_boundary_notes": [],
+        },
+    ]
+
+    def parse_output(raw_output: str, **kwargs: object) -> dict[str, object]:
+        assert kwargs == {}
+        parser_inputs.append(raw_output)
+        return parsed_outputs[len(parser_inputs) - 1]
+
+    class _StageLLM:
+        async def ainvoke(self, messages, *, config):
+            del messages, config
+            return SimpleNamespace(content='{"stage_output": true}')
+
+    async def record_trace(**kwargs: object) -> dict[str, object]:
+        del kwargs
+        return {}
+
+    monkeypatch.setattr(resolver_stages, "parse_llm_json_output", parse_output)
+    monkeypatch.setattr(
+        resolver_stages.llm_tracing,
+        "record_llm_trace_step",
+        record_trace,
+    )
+    fake_llm = _StageLLM()
+    monkeypatch.setattr(resolver_stages, "_planner_llm", fake_llm)
+    monkeypatch.setattr(resolver_stages, "_node_llm", fake_llm)
+    monkeypatch.setattr(resolver_stages, "_collapse_llm", fake_llm)
+    monkeypatch.setattr(resolver_stages, "_synthesizer_llm", fake_llm)
+
+    await resolver_stages.plan_local_context_graph(
+        {"stage": "planner"},
+        candidate_validator=_accept_candidate,
+    )
+    await resolver_stages.resolve_local_context_node(
+        {"stage": "node"},
+        candidate_validator=_accept_candidate,
+    )
+    await resolver_stages.review_local_context_collapse(
+        {"stage": "collapse"},
+        candidate_validator=_accept_candidate,
+    )
+    await resolver_stages.synthesize_local_context_packet(
+        {"stage": "synth"},
+        candidate_validator=_accept_candidate,
     )
 
-    assert parsed["knowledge_we_know_so_far"] == ["first line\nsecond line"]
+    assert parser_inputs == [
+        '{"stage_output": true}',
+        '{"stage_output": true}',
+        '{"stage_output": true}',
+        '{"stage_output": true}',
+    ]
+    assert not hasattr(resolver_stages, "_parse_stage_json_output")
 
 
 def test_stage_prompts_keep_source_field_and_time_boundaries() -> None:

@@ -129,6 +129,26 @@ class _FakeAsyncLLM:
         return SimpleNamespace(content=content)
 
 
+class _QueuedAsyncLLM:
+    """Return queued lifecycle responses and retain serialized payloads."""
+
+    def __init__(self, responses: list[object]) -> None:
+        self.responses = list(responses)
+        self.calls: list[dict[str, object]] = []
+
+    async def ainvoke(self, messages, *, config=None):
+        del config
+        self.calls.append(json.loads(messages[1].content))
+        if not self.responses:
+            raise AssertionError("unexpected lifecycle specialist invocation")
+        response = self.responses.pop(0)
+        if isinstance(response, BaseException):
+            raise response
+        if isinstance(response, dict):
+            response = json.dumps(response, ensure_ascii=False)
+        return SimpleNamespace(content=response)
+
+
 def test_prepare_review_aliases_first_12_commitments_without_prompt_ids() -> None:
     """Prompt payload should expose aliases only and keep overflow explicit."""
 
@@ -461,3 +481,130 @@ async def test_handler_consumes_route_and_materializes_apply_action(
     ]
     assert "unit_id" not in serialized_prompt
     assert "unit-001" not in serialized_prompt
+
+
+@pytest.mark.asyncio
+async def test_provider_exhaustion_degrades_to_skipped_lifecycle_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Provider exhaustion preserves non-lifecycle action specifications."""
+
+    state = _state_with_commitments([_commitment(1)])
+    state["action_specs"] = [
+        _speak_spec(),
+        _memory_lifecycle_route_spec(),
+    ]
+    fake_llm = _QueuedAsyncLLM([
+        RuntimeError("lifecycle provider unavailable"),
+        RuntimeError("lifecycle provider unavailable"),
+        RuntimeError("lifecycle provider unavailable"),
+    ])
+    monkeypatch.setattr(module, "_memory_lifecycle_specialist_llm", fake_llm)
+
+    async def record_trace(**kwargs: object) -> dict[str, object]:
+        del kwargs
+        return {}
+
+    monkeypatch.setattr(module.llm_tracing, "record_llm_trace_step", record_trace)
+
+    result = await module.call_memory_lifecycle_update_handler(state)
+
+    assert len(fake_llm.calls) == 3
+    assert [action["kind"] for action in result["action_specs"]] == [
+        SPEAK_CAPABILITY,
+    ]
+    assert result["memory_lifecycle_context"]["decision"] == "skipped"
+    assert result["attempt_diagnostics"] == [{
+        "schema_version": "episode_attempt_diagnostic.v1",
+        "stage": "memory_lifecycle_specialist",
+        "error_code": "memory_lifecycle_skipped",
+        "attempt_count": 3,
+        "safe_checkpoint": "post_cognition_commit",
+        "retryable": False,
+        "final_status": "skipped",
+    }]
+
+
+@pytest.mark.asyncio
+async def test_specialist_repair_prompt_carries_contract_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A lifecycle contract retry carries one bounded four-key repair block."""
+
+    state = _state_with_commitments([_commitment(1)])
+    state["action_specs"] = [_memory_lifecycle_route_spec()]
+    fake_llm = _QueuedAsyncLLM([
+        "{}",
+        {
+            "decision": "no_lifecycle_change",
+            "lifecycle_decisions": [],
+            "content_plan_roles": [],
+        },
+    ])
+    monkeypatch.setattr(module, "_memory_lifecycle_specialist_llm", fake_llm)
+
+    async def record_trace(**kwargs: object) -> dict[str, object]:
+        del kwargs
+        return {}
+
+    monkeypatch.setattr(module.llm_tracing, "record_llm_trace_step", record_trace)
+
+    result = await module.call_memory_lifecycle_update_handler(state)
+
+    assert len(fake_llm.calls) == 2
+    repair = fake_llm.calls[1]["contract_repair"]
+    assert set(repair) == {
+        "repair_instruction",
+        "reason",
+        "contract_error",
+        "invalid_candidate",
+    }
+    assert repair["invalid_candidate"] == "{}"
+    assert "JSON syntax" not in repair["repair_instruction"]
+    assert result["memory_lifecycle_context"]["decision"] == (
+        "no_lifecycle_change"
+    )
+
+
+@pytest.mark.asyncio
+async def test_post_surface_review_provider_failure_returns_empty_update(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Post-surface specialist exhaustion returns skipped lifecycle context."""
+
+    state = _state_with_commitments([])
+    state["final_dialog"] = ["The visible turn is complete."]
+    state["surface_outputs"] = [{
+        "schema_version": "surface_output.v1",
+        "surface_kind": "text",
+        "visibility": "user_visible",
+        "action_attempt_id": None,
+        "fragments": state["final_dialog"],
+        "artifact_refs": [],
+        "delivery_intent": "deliver_now",
+        "created_at": "2026-05-29T03:14:23+00:00",
+    }]
+    fake_llm = _QueuedAsyncLLM([
+        RuntimeError("post-surface provider unavailable"),
+        RuntimeError("post-surface provider unavailable"),
+        RuntimeError("post-surface provider unavailable"),
+    ])
+    monkeypatch.setattr(module, "_memory_lifecycle_specialist_llm", fake_llm)
+
+    async def record_trace(**kwargs: object) -> dict[str, object]:
+        del kwargs
+        return {}
+
+    monkeypatch.setattr(module.llm_tracing, "record_llm_trace_step", record_trace)
+
+    result = await module.call_post_surface_memory_lifecycle_review(
+        state,
+        [_no_due_commitment("unit-tiramisu", "User promised dessert.")],
+    )
+
+    assert len(fake_llm.calls) == 3
+    assert result["action_specs"] == []
+    assert result["memory_lifecycle_context"]["decision"] == "skipped"
+    assert result["attempt_diagnostics"][0]["error_code"] == (
+        "memory_lifecycle_skipped"
+    )

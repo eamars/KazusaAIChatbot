@@ -5,15 +5,23 @@ from __future__ import annotations
 import logging
 import sys
 from typing import Any
+from unittest.mock import patch
 
 import httpx
 import pytest
 
+from kazusa_ai_chatbot import llm_tracing
 from kazusa_ai_chatbot.action_spec.registry import (
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
 )
-from kazusa_ai_chatbot.config import COGNITION_LLM_BASE_URL
+from kazusa_ai_chatbot.config import (
+    COGNITION_LLM_BASE_URL,
+    LLM_TRACE_CAPTURE_MODE,
+)
+from kazusa_ai_chatbot.nodes import (
+    persona_supervisor2_memory_lifecycle as memory_lifecycle_module,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_memory_lifecycle import (
     call_memory_lifecycle_update_handler,
     call_post_surface_memory_lifecycle_review,
@@ -28,6 +36,35 @@ if hasattr(sys.stderr, "reconfigure"):
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_config(config: object) -> dict[str, object]:
+    """Project memory route configuration without credentials."""
+
+    thinking = getattr(config, "thinking", None)
+    return {
+        "stage_name": getattr(config, "stage_name", ""),
+        "route_name": getattr(config, "route_name", ""),
+        "base_url": getattr(config, "base_url", ""),
+        "model": getattr(config, "model", ""),
+        "temperature": getattr(config, "temperature", None),
+        "top_p": getattr(config, "top_p", None),
+        "top_k": getattr(config, "top_k", None),
+        "max_completion_tokens": getattr(
+            config,
+            "max_completion_tokens",
+            None,
+        ),
+        "presence_penalty": getattr(config, "presence_penalty", None),
+        "timeout_seconds": getattr(config, "timeout_seconds", None),
+        "thinking_enabled": getattr(thinking, "enabled", None),
+        "output_mode": getattr(config, "output_mode", None),
+        "context_window_tokens": getattr(
+            config,
+            "context_window_tokens",
+            None,
+        ),
+    }
 
 
 async def test_live_tiramisu_fulfilled() -> None:
@@ -50,8 +87,54 @@ async def test_live_tiramisu_fulfilled() -> None:
         ],
     )
 
-    result = await call_memory_lifecycle_update_handler(state)
-    trace_path = _write_trace("tiramisu_fulfilled", state, result)
+    trace_steps: list[dict[str, object]] = []
+    original_trace_recorder = llm_tracing.record_llm_trace_step
+
+    async def capture_trace_step(**kwargs: object) -> object:
+        """Capture protected lifecycle attempts while delegating recording."""
+
+        messages = kwargs.get("messages", [])
+        trace_steps.append({
+            "stage_name": kwargs.get("stage_name", ""),
+            "attempt_index": kwargs.get("attempt_index", 0),
+            "parse_status": kwargs.get("parse_status", ""),
+            "status": kwargs.get("status", ""),
+            "validation_error": kwargs.get("validation_error", ""),
+            "response_text": kwargs.get("response_text", ""),
+            "parsed_output": kwargs.get("parsed_output", {}),
+            "messages": [
+                {
+                    "type": message.__class__.__name__,
+                    "content": str(message.content),
+                }
+                for message in messages
+            ],
+        })
+        return await original_trace_recorder(**kwargs)
+
+    with patch.object(
+        llm_tracing,
+        "record_llm_trace_step",
+        capture_trace_step,
+    ):
+        result = await call_memory_lifecycle_update_handler(state)
+    trace_path = _write_trace(
+        "tiramisu_fulfilled",
+        state,
+        result,
+        model_config=_safe_config(
+            memory_lifecycle_module._memory_lifecycle_specialist_llm_config
+        ),
+        attempts=trace_steps,
+        capture_mode=LLM_TRACE_CAPTURE_MODE,
+        raw_capture_available=any(
+            bool(step.get("response_text")) for step in trace_steps
+        ),
+        judgment_note=(
+            "Real lifecycle specialist output was materialized and the "
+            "tiramisu commitment was fulfilled."
+        ),
+    )
 
     assert _apply_unit_ids(result) == ["unit-tiramisu"], f"trace={trace_path}"
     assert _context_decisions(result)[0]["decision"] == "fulfilled"
@@ -348,6 +431,12 @@ def _write_trace(
     case_id: str,
     state: dict[str, object],
     result: dict[str, object],
+    *,
+    model_config: dict[str, object] | None = None,
+    attempts: list[dict[str, object]] | None = None,
+    capture_mode: str = "",
+    raw_capture_available: bool = False,
+    judgment_note: str = "",
 ) -> object:
     """Write an inspectable trace for manual live-test review."""
 
@@ -364,6 +453,20 @@ def _write_trace(
             "result": result,
             "apply_unit_ids": _apply_unit_ids(result),
             "judgment": "manual_review_required_for_specialist_lifecycle_quality",
+            "case_input": {
+                "current_input": state["decontextualized_input"],
+                "active_commitments": (
+                    state["rag_result"]["user_image"][
+                        "user_memory_context"
+                    ]["active_commitments"]
+                ),
+            },
+            "model_config": model_config or {},
+            "attempts": attempts or [],
+            "capture_mode": capture_mode,
+            "raw_capture_available": raw_capture_available,
+            "final_result": result,
+            "judgment_note": judgment_note,
         },
     )
     logger.info(

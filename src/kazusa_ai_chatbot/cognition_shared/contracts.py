@@ -63,6 +63,10 @@ from kazusa_ai_chatbot.time_boundary import (
 )
 
 _CJK_IDEOGRAPH_RE = re.compile(r"[\u4e00-\u9fff]")
+_HTTP_URL_TOKEN_RE = re.compile(
+    r"https?://[^\s\\)>\]}\"']+",
+    re.IGNORECASE,
+)
 SCENE_PARTICIPANT_HANDLE_RE = re.compile(r"^p[1-9][0-9]*$")
 SURFACE_ROLE_HANDLE_RE = re.compile(r"^(?:current_user|self|p[1-9][0-9]*)$")
 MAX_OVERUSED_MOVE_ROWS = 4
@@ -1161,6 +1165,10 @@ def validate_text_surface_output(
         "selected_surface_intent",
     ):
         _require_text(payload[field_name], field_name, maximum=1000)
+    validate_terminal_text_seed(
+        payload["selected_surface_intent"],
+        "selected_surface_intent",
+    )
     _validate_delivery_profile(payload["delivery_profile"])
     requirements = payload["content_requirements"]
     if not isinstance(requirements, list) or not 1 <= len(requirements) <= 8:
@@ -3802,6 +3810,24 @@ def _require_text(value: Any, label: str, maximum: int = 500) -> None:
 
     if not isinstance(value, str) or not value.strip() or len(value) > maximum:
         raise CognitionContractError(f"{label} is invalid")
+
+
+def validate_terminal_text_seed(value: Any, label: str) -> str:
+    """Require authored text after removing HTTP URL tokens.
+
+    The invariant applies to semantic text that can become terminal visible
+    wording. URL tokens are provenance, not authored wording, so a URL-only
+    seed cannot satisfy this contract.
+    """
+
+    if not isinstance(value, str) or not value.strip():
+        raise CognitionContractError(f"{label} is invalid")
+    authored_text = _HTTP_URL_TOKEN_RE.sub("", value).strip()
+    if not authored_text:
+        raise CognitionContractError(
+            f"{label} must retain authored text after HTTP URL removal"
+        )
+    return value.strip()
 
 
 def _require_simplified_chinese_reason(

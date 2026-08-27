@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
 import json
 import logging
 import time
-from typing import Any, Literal, TypedDict
+from collections.abc import Mapping, Sequence
+from typing import Any, Literal
 
+import httpx
 from langchain_core.messages import HumanMessage, SystemMessage
+from openai import OpenAIError
 
 from kazusa_ai_chatbot import llm_tracing
 from kazusa_ai_chatbot.config import (
@@ -23,6 +25,10 @@ from kazusa_ai_chatbot.llm_interface import (
     LLMCallConfig,
     LLMThinkingConfig,
 )
+from kazusa_ai_chatbot.relevance.contracts import (
+    FrontlineDecision,
+    RelevanceEvaluationEnvelope,
+)
 from kazusa_ai_chatbot.relevance.participation_evidence import (
     ParticipationAssessment,
     build_interaction_evidence,
@@ -31,7 +37,6 @@ from kazusa_ai_chatbot.relevance.participation_evidence import (
 )
 from kazusa_ai_chatbot.utils import parse_llm_json_output
 
-
 logger = logging.getLogger(__name__)
 
 FRONTLINE_RELEVANCE_COMPLETION_TOKEN_CAP = 256
@@ -39,15 +44,7 @@ FRONTLINE_RELEVANCE_MAX_COMPLETION_TOKENS = min(
     RELEVANCE_AGENT_LLM_MAX_COMPLETION_TOKENS,
     FRONTLINE_RELEVANCE_COMPLETION_TOKEN_CAP,
 )
-
-
-class FrontlineDecision(TypedDict):
-    """Validated semantic action returned by the frontline route."""
-
-    intake_action: Literal["discard", "start", "append"]
-    append_target: Literal["none", "open_1", "open_2", "open_3"]
-    prelude_targets: list[Literal["prelude_1", "prelude_2"]]
-    reason: str
+FRONTLINE_RELEVANCE_TOTAL_ATTEMPTS = 2
 
 
 FrontlineState = Mapping[str, Any]
@@ -693,12 +690,100 @@ def _parse_frontline_response(
                 "interaction_evidence_refs": [],
                 "character_state_refs": [],
             }
-        parse_status = "invalid"
+        parse_status = "normalized"
     return decision, assessment, parse_status
 
 
-async def frontline_relevance_agent(state: FrontlineState) -> FrontlineDecision:
-    """Run the compact frontline route and return a validated action."""
+async def _record_frontline_trace_step(
+    *,
+    state: FrontlineState,
+    stage_name: str,
+    messages: Sequence[object],
+    response_text: str,
+    parsed_output: object,
+    parse_status: str,
+    status: str,
+    started_at: float,
+    attempt_index: int,
+    validation_error: str = "",
+) -> None:
+    """Record one frontline model attempt or deterministic disposition.
+
+    Args:
+        state: Frontline projection carrying the protected trace identifier.
+        stage_name: Stable semantic name for the model or deterministic step.
+        messages: Exact messages supplied to the model boundary.
+        response_text: Raw model text, or empty text for provider/degraded
+            outcomes.
+        parsed_output: Validated output or bounded failure metadata.
+        parse_status: Structural or deterministic disposition for the step.
+        status: Operational status retained by the trace writer.
+        started_at: Monotonic start marker for duration accounting.
+        attempt_index: One-based model attempt, or zero for no-model output.
+        validation_error: Provider or contract failure detail, when present.
+
+    Returns:
+        None.
+    """
+
+    await llm_tracing.record_llm_trace_step(
+        trace_id=str(state.get("llm_trace_id", "")),
+        stage_name=stage_name,
+        route_name="frontline_relevance",
+        model_name=RELEVANCE_AGENT_LLM_MODEL,
+        messages=list(messages),
+        response_text=response_text,
+        parsed_output=parsed_output,
+        parse_status=parse_status,
+        status=status,
+        duration_ms=max(0, int((time.perf_counter() - started_at) * 1000)),
+        output_state_fields=[
+            "intake_action",
+            "append_target",
+            "prelude_targets",
+            "reason",
+            "participation_assessment",
+        ],
+        call_config=_frontline_relevance_agent_llm_config,
+        attempt_index=attempt_index,
+        validation_error=validation_error,
+        attempt_started_at=started_at,
+    )
+
+
+def _frontline_degradation_diagnostic() -> dict[str, object]:
+    """Build the fixed row for a provider-exhausted frontline decision."""
+
+    return_value = {
+        "schema_version": "episode_attempt_diagnostic.v1",
+        "stage": "frontline_relevance",
+        "error_code": "frontline_relevance_deterministic_degraded",
+        "attempt_count": FRONTLINE_RELEVANCE_TOTAL_ATTEMPTS,
+        "safe_checkpoint": "pre_state_commit",
+        "retryable": False,
+        "final_status": "accepted_degraded",
+    }
+    return return_value
+
+
+def _frontline_envelope(
+    decision: FrontlineDecision,
+    *,
+    attempt_diagnostics: list[dict[str, object]] | None = None,
+) -> RelevanceEvaluationEnvelope:
+    """Return the exact decision-and-diagnostics relevance envelope."""
+
+    return_value: RelevanceEvaluationEnvelope = {
+        "decision": decision,
+        "attempt_diagnostics": list(attempt_diagnostics or []),
+    }
+    return return_value
+
+
+async def frontline_relevance_agent(
+    state: FrontlineState,
+) -> RelevanceEvaluationEnvelope:
+    """Run the compact frontline route and return its validated envelope."""
 
     messages = build_frontline_messages(state)
     model_payload = json.loads(str(messages[1].content))
@@ -710,40 +795,93 @@ async def frontline_relevance_agent(state: FrontlineState) -> FrontlineDecision:
         decision = _start_decision(
             "authoritative character participation"
         )
-        return decision
+        return _frontline_envelope(decision)
 
-    started_at = time.perf_counter()
-    response = await _frontline_relevance_agent_llm.ainvoke(
-        list(messages),
-        config=_frontline_relevance_agent_llm_config,
-    )
-    decision, assessment, parse_status = _parse_frontline_response(
-        str(response.content),
-        model_payload,
-    )
-    trace_output = {
-        **decision,
-        "participation_assessment": assessment,
-    }
+    request_messages = list(messages)
+    for attempt_index in range(1, FRONTLINE_RELEVANCE_TOTAL_ATTEMPTS + 1):
+        started_at = time.perf_counter()
+        try:
+            response = await _frontline_relevance_agent_llm.ainvoke(
+                request_messages,
+                config=_frontline_relevance_agent_llm_config,
+            )
+        except (
+            OpenAIError,
+            httpx.HTTPError,
+            ConnectionError,
+            OSError,
+            RuntimeError,
+            TimeoutError,
+        ) as exc:
+            await _record_frontline_trace_step(
+                state=state,
+                stage_name="frontline_relevance_agent",
+                messages=request_messages,
+                response_text="",
+                parsed_output={},
+                parse_status="provider_error",
+                status="failed",
+                started_at=started_at,
+                attempt_index=attempt_index,
+                validation_error=str(exc),
+            )
+            if attempt_index < FRONTLINE_RELEVANCE_TOTAL_ATTEMPTS:
+                continue
+            if _has_authoritative_participation(model_payload):
+                decision = _start_decision(
+                    "authoritative character participation"
+                )
+                assessment = _authoritative_frontline_assessment(
+                    model_payload
+                )
+            else:
+                decision = _discard_decision("frontline provider exhausted")
+                assessment = {
+                    "recipient_relation": "unknown",
+                    "admission_basis": "none",
+                    "interaction_evidence_refs": [],
+                    "character_state_refs": [],
+                }
+            await _record_frontline_trace_step(
+                state=state,
+                stage_name="frontline_relevance_agent.deterministic",
+                messages=request_messages,
+                response_text="",
+                parsed_output={
+                    **decision,
+                    "participation_assessment": assessment,
+                },
+                parse_status="deterministic",
+                status="accepted_degraded",
+                started_at=time.perf_counter(),
+                attempt_index=0,
+                validation_error=str(exc),
+            )
+            return _frontline_envelope(
+                decision,
+                attempt_diagnostics=[_frontline_degradation_diagnostic()],
+            )
 
-    await llm_tracing.record_llm_trace_step(
-        trace_id=str(state.get("llm_trace_id", "")),
-        stage_name="frontline_relevance_agent",
-        route_name="frontline_relevance",
-        model_name=RELEVANCE_AGENT_LLM_MODEL,
-        messages=list(messages),
-        response_text=str(response.content),
-        parsed_output=trace_output,
-        parse_status=parse_status,
-        status="succeeded",
-        duration_ms=max(0, int((time.perf_counter() - started_at) * 1000)),
-        output_state_fields=[
-            "intake_action",
-            "append_target",
-            "prelude_targets",
-            "reason",
-            "participation_assessment",
-        ],
-    )
+        response_text = str(response.content)
+        decision, assessment, parse_status = _parse_frontline_response(
+            response_text,
+            model_payload,
+        )
+        trace_output = {
+            **decision,
+            "participation_assessment": assessment,
+        }
+        await _record_frontline_trace_step(
+            state=state,
+            stage_name="frontline_relevance_agent",
+            messages=request_messages,
+            response_text=response_text,
+            parsed_output=trace_output,
+            parse_status=parse_status,
+            status="failed" if parse_status == "invalid" else "succeeded",
+            started_at=started_at,
+            attempt_index=attempt_index,
+        )
+        return _frontline_envelope(decision)
 
-    return decision
+    raise RuntimeError("frontline relevance attempt loop did not return")

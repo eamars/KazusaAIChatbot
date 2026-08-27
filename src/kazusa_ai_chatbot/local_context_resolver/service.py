@@ -2,18 +2,23 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import re
+from collections.abc import Callable
 
-from .constants import (
-    DEFAULT_OPTION_LIMITS,
-    ROOT_CHILD_DEPTH,
-    ROOT_NODE_DEPTH,
-    ROOT_NODE_ID,
-    SAFE_FAILURE_TEXT_LIMIT,
-    TEXT_ELLIPSIS,
+import httpx
+from openai import OpenAIError
+
+from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
+    V2_MODEL_TOTAL_ATTEMPTS,
 )
+from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
+from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
+    empty_user_memory_context,
+)
+
 from .cache import (
     RAG3_ACTIVE_NODE_CACHE_NAME,
     RAG3_PLANNER_CACHE_NAME,
@@ -21,6 +26,14 @@ from .cache import (
     build_active_node_cache_dependencies,
     build_active_node_cache_key,
     build_planner_cache_key,
+)
+from .constants import (
+    DEFAULT_OPTION_LIMITS,
+    ROOT_CHILD_DEPTH,
+    ROOT_NODE_DEPTH,
+    ROOT_NODE_ID,
+    SAFE_FAILURE_TEXT_LIMIT,
+    TEXT_ELLIPSIS,
 )
 from .contracts import (
     ALLOWED_NODE_KINDS,
@@ -47,19 +60,24 @@ from .contracts import (
     validate_local_context_resolver_request,
 )
 from .graph import find_next_active_node
-from .subagent import dispatch_subagent_for_node
 from .stages import (
+    LocalContextStageContractError,
     active_node_stage_cache_identity,
-    plan_local_context_graph as _planner_stage_handler,
     planner_stage_cache_identity,
+)
+from .stages import (
+    plan_local_context_graph as _planner_stage_handler,
+)
+from .stages import (
     resolve_local_context_node as _node_stage_handler,
+)
+from .stages import (
     review_local_context_collapse as _collapse_stage_handler,
+)
+from .stages import (
     synthesize_local_context_packet as _synthesizer_stage_handler,
 )
-from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
-from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
-    empty_user_memory_context,
-)
+from .subagent import dispatch_subagent_for_node
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +151,14 @@ _UNSAFE_UTC_TIMESTAMP_RE = re.compile(
     r"\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}"
     r"(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})\b"
 )
+_LOCAL_CONTEXT_PROVIDER_ERRORS = (
+    OpenAIError,
+    httpx.HTTPError,
+    ConnectionError,
+    OSError,
+    RuntimeError,
+    TimeoutError,
+)
 
 
 async def resolve_local_context(
@@ -185,7 +211,22 @@ async def _resolve_local_context_validated(
 
     trace_summary = _initial_trace_summary()
     artifacts: list[LocalContextArtifactV1] = []
-    graph = await _plan_graph(request, context, options, trace_summary)
+    try:
+        graph = await _plan_graph(request, context, options, trace_summary)
+    except LocalContextStageContractError as exc:
+        diagnostic = _local_context_diagnostic(
+            stage="local_context_resolver.graph_planner",
+            error_code="local_context_planner_blocked",
+        )
+        return _blocked_packet_from_reason(
+            objective=request["objective"],
+            reason=(
+                "local-context planner exhausted its bounded attempts: "
+                f"{_safe_failure_text(str(exc))}"
+            ),
+            failure_stage="planner",
+            attempt_diagnostics=[diagnostic],
+        )
     await _run_graph_traversal(
         request=request,
         context=context,
@@ -203,6 +244,34 @@ async def _resolve_local_context_validated(
         trace_summary=trace_summary,
     )
     return packet
+
+
+async def _run_local_context_stage_handler(
+    handler,
+    payload: dict[str, object],
+    stage_name: str,
+    *,
+    candidate_validator: Callable[
+        [dict[str, object]],
+        None,
+    ],
+) -> dict[str, object]:
+    """Convert only stage-owned provider and contract failures to typed errors."""
+
+    try:
+        response = await handler(
+            payload,
+            candidate_validator=candidate_validator,
+        )
+    except _LOCAL_CONTEXT_PROVIDER_ERRORS as exc:
+        raise LocalContextStageContractError(
+            f"{stage_name}: provider stage failure: {exc}"
+        ) from exc
+    except LocalContextValidationError as exc:
+        raise LocalContextStageContractError(
+            f"{stage_name}: stage contract failure: {exc}"
+        ) from exc
+    return response
 
 
 async def _plan_graph(
@@ -240,8 +309,18 @@ async def _plan_graph(
         _refresh_trace_counts(graph, trace_summary)
         return graph
 
-    response = await _planner_stage_handler(payload)
+    def validate_planner_candidate(
+        candidate: dict[str, object],
+    ) -> None:
+        _graph_from_planner_response(request, candidate, options)
+
     trace_summary["planner_calls"] = int(trace_summary["planner_calls"]) + 1
+    response = await _run_local_context_stage_handler(
+        _planner_stage_handler,
+        payload,
+        "local_context_resolver.graph_planner",
+        candidate_validator=validate_planner_candidate,
+    )
     graph = _graph_from_planner_response(request, response, options)
     await runtime.store(
         cache_key=cache_key,
@@ -359,14 +438,22 @@ async def _run_graph_traversal(
             break
         graph["active_node_id"] = active_node_id
         validate_local_context_graph(graph)
-        response = await _resolve_active_node(
-            request=request,
-            context=context,
-            options=options,
-            graph=graph,
-            active_node_id=active_node_id,
-            trace_summary=trace_summary,
-        )
+        try:
+            response = await _resolve_active_node(
+                request=request,
+                context=context,
+                options=options,
+                graph=graph,
+                active_node_id=active_node_id,
+                trace_summary=trace_summary,
+            )
+        except LocalContextStageContractError as exc:
+            _append_local_context_diagnostic(
+                trace_summary,
+                stage="local_context_resolver.active_node_resolver",
+                error_code="local_context_node_blocked",
+            )
+            response = _blocked_active_node_response(exc)
         _apply_active_node_response(
             graph=graph,
             active_node_id=active_node_id,
@@ -464,7 +551,29 @@ async def _resolve_active_node(
         "dependency_context": dependency_context,
         "limits": _option_limits(options),
     }
-    response = await _node_stage_handler(payload)
+
+    def validate_active_node_candidate(
+        candidate: dict[str, object],
+    ) -> None:
+        merged_candidate = _merge_subagent_response(
+            candidate,
+            subagent_payload,
+        )
+        _cacheable_active_node_response(
+            merged_candidate,
+            active_node_id,
+            source_artifacts=source_artifacts,
+        )
+
+    trace_summary["active_node_calls"] = int(
+        trace_summary["active_node_calls"]
+    ) + 1
+    response = await _run_local_context_stage_handler(
+        _node_stage_handler,
+        payload,
+        "local_context_resolver.active_node_resolver",
+        candidate_validator=validate_active_node_candidate,
+    )
     response = _merge_subagent_response(
         response,
         subagent_payload,
@@ -474,9 +583,6 @@ async def _resolve_active_node(
         active_node_id,
         source_artifacts=source_artifacts,
     )
-    trace_summary["active_node_calls"] = int(
-        trace_summary["active_node_calls"]
-    ) + 1
     if use_active_node_cache:
         await runtime.store(
             cache_key=cache_key,
@@ -756,7 +862,64 @@ async def _review_collapse(
         "candidates": candidates,
         "limits": _option_limits(options),
     }
-    response = await _collapse_stage_handler(payload)
+
+    def validate_collapse_candidate(
+        candidate: dict[str, object],
+    ) -> None:
+        decision = candidate.get("collapse_decision")
+        if not isinstance(decision, dict):
+            raise LocalContextValidationError(
+                "collapse_decision: expected object"
+            )
+        should_collapse = decision.get("should_collapse")
+        if not isinstance(should_collapse, bool):
+            raise LocalContextValidationError(
+                "collapse_decision.should_collapse: expected boolean"
+            )
+        target_candidate_ref = decision.get("target_candidate_ref")
+        if not isinstance(target_candidate_ref, str):
+            raise LocalContextValidationError(
+                "collapse_decision.target_candidate_ref: expected string"
+            )
+        reason = decision.get("reason")
+        if not isinstance(reason, str):
+            raise LocalContextValidationError(
+                "collapse_decision.reason: expected string"
+            )
+        probe_graph = copy.deepcopy(graph)
+        probe_trace_summary = {"collapse_count": 0}
+        _apply_collapse_response(
+            graph=probe_graph,
+            active_node_id=active_node_id,
+            response=candidate,
+            trace_summary=probe_trace_summary,
+        )
+
+    try:
+        response = await _run_local_context_stage_handler(
+            _collapse_stage_handler,
+            payload,
+            "local_context_resolver.collapse_review",
+            candidate_validator=validate_collapse_candidate,
+        )
+    except LocalContextStageContractError:
+        trace_summary["collapse_calls"] = int(
+            trace_summary["collapse_calls"]
+        ) + 1
+        _append_local_context_diagnostic(
+            trace_summary,
+            stage="local_context_resolver.collapse_review",
+            error_code="local_context_collapse_skipped",
+            final_status="skipped",
+        )
+        return_value = {
+            "collapse_decision": {
+                "should_collapse": False,
+                "target_candidate_ref": "",
+                "reason": "collapse review exhausted its bounded attempts",
+            },
+        }
+        return return_value
     trace_summary["collapse_calls"] = int(trace_summary["collapse_calls"]) + 1
     return response
 
@@ -826,9 +989,59 @@ async def _synthesize_packet(
             "unresolved_nodes": _unresolved_node_summaries(graph),
             "limits": _option_limits(options),
         }
-        response = await _synthesizer_stage_handler(payload)
-        trace_summary["synthesis_calls"] = int(trace_summary["synthesis_calls"]) + 1
-        synthesis = _semantic_synthesis_response(response, graph)
+
+        def validate_synthesis_candidate(
+            candidate: dict[str, object],
+        ) -> None:
+            for field_name in (
+                "investigation_summary",
+                "knowledge_we_know_so_far",
+                "knowledge_still_lacking",
+                "recommended_next_iteration",
+                "evidence_boundary_notes",
+            ):
+                field_value = candidate.get(field_name)
+                if isinstance(field_value, str):
+                    if not field_value.strip():
+                        raise LocalContextValidationError(
+                            f"{field_name}: expected non-empty text or list"
+                        )
+                    continue
+                if not isinstance(field_value, list):
+                    raise LocalContextValidationError(
+                        f"{field_name}: expected text or list"
+                    )
+                if any(
+                    not isinstance(item, str) or not item.strip()
+                    for item in field_value
+                ):
+                    raise LocalContextValidationError(
+                        f"{field_name}: expected non-empty strings"
+                    )
+            _semantic_synthesis_response(candidate, graph)
+
+        try:
+            response = await _run_local_context_stage_handler(
+                _synthesizer_stage_handler,
+                payload,
+                "local_context_resolver.bottom_up_synthesis",
+                candidate_validator=validate_synthesis_candidate,
+            )
+        except LocalContextStageContractError:
+            trace_summary["synthesis_calls"] = int(
+                trace_summary["synthesis_calls"]
+            ) + 1
+            _append_local_context_diagnostic(
+                trace_summary,
+                stage="local_context_resolver.bottom_up_synthesis",
+                error_code="local_context_synthesis_degraded",
+            )
+            synthesis = _deterministic_synthesis_response(graph)
+        else:
+            trace_summary["synthesis_calls"] = int(
+                trace_summary["synthesis_calls"]
+            ) + 1
+            synthesis = _semantic_synthesis_response(response, graph)
     _refresh_trace_counts(graph, trace_summary)
     rag_result = _rag_result_from_artifacts(
         artifacts=artifacts,
@@ -1379,11 +1592,72 @@ def _empty_rag_result(trace_summary: dict[str, object]) -> dict[str, object]:
     return rag_result
 
 
+def _blocked_active_node_response(
+    error: LocalContextStageContractError,
+) -> dict[str, object]:
+    """Return the deterministic node update used after stage exhaustion."""
+
+    safe_reason = _safe_failure_text(str(error))
+    response = {
+        "node_update": {
+            "status": "blocked",
+            "knowledge_still_lacking": [
+                "The active local-context node exhausted its bounded attempts: "
+                + safe_reason,
+            ],
+        },
+        "artifacts": [],
+    }
+    return response
+
+
+def _local_context_diagnostic(
+    *,
+    stage: str,
+    error_code: str,
+    final_status: str = "accepted_degraded",
+) -> dict[str, object]:
+    """Build one fixed local-context degradation diagnostic row."""
+
+    return {
+        "schema_version": "episode_attempt_diagnostic.v1",
+        "stage": stage,
+        "error_code": error_code,
+        "attempt_count": V2_MODEL_TOTAL_ATTEMPTS,
+        "safe_checkpoint": "pre_state_commit",
+        "retryable": False,
+        "final_status": final_status,
+    }
+
+
+def _append_local_context_diagnostic(
+    trace_summary: dict[str, object],
+    *,
+    stage: str,
+    error_code: str,
+    final_status: str = "accepted_degraded",
+) -> None:
+    """Append a fixed degradation row to resolver trace material."""
+
+    raw_diagnostics = trace_summary.get("attempt_diagnostics")
+    if not isinstance(raw_diagnostics, list):
+        raw_diagnostics = []
+        trace_summary["attempt_diagnostics"] = raw_diagnostics
+    raw_diagnostics.append(
+        _local_context_diagnostic(
+            stage=stage,
+            error_code=error_code,
+            final_status=final_status,
+        )
+    )
+
+
 def _blocked_packet_from_reason(
     *,
     objective: str,
     reason: str,
     failure_stage: str,
+    attempt_diagnostics: list[dict[str, object]] | None = None,
 ) -> LocalContextResolutionPacketV1:
     """Build a bounded blocked packet for malformed input or stage output."""
 
@@ -1410,6 +1684,10 @@ def _blocked_packet_from_reason(
     trace_summary = _initial_trace_summary()
     trace_summary["failure_stage"] = failure_stage
     trace_summary["failure_reason"] = safe_reason
+    if attempt_diagnostics:
+        trace_summary["attempt_diagnostics"] = [
+            dict(row) for row in attempt_diagnostics
+        ]
     _refresh_trace_counts(graph, trace_summary)
     rag_result = _empty_rag_result(trace_summary)
     packet = {

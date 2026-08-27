@@ -26,6 +26,7 @@ from fastapi import BackgroundTasks, FastAPI, Request
 from kazusa_ai_chatbot import event_logging, llm_tracing
 from kazusa_ai_chatbot.action_spec.execution import execute_action_specs_for_trace
 from kazusa_ai_chatbot.action_spec.results import (
+    EpisodeAttemptDiagnosticV1,
     has_consolidatable_output,
     project_episode_trace_for_consolidation,
 )
@@ -265,9 +266,6 @@ from kazusa_ai_chatbot.message_envelope import (
     MessageEnvelope,
     project_prompt_message_context,
     project_reply_attachment_summaries,
-)
-from kazusa_ai_chatbot.nodes.dialog_agent import (
-    DialogGenerationContractError,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2 import persona_supervisor2
 from kazusa_ai_chatbot.nodes.persona_supervisor2_memory_lifecycle import (
@@ -535,14 +533,13 @@ def _operational_failure_metadata(
         failure_attempt_count = 1
         retryable = False
         branch_id = ""
-    elif isinstance(
-        exc,
-        (
-            CognitionExecutionError,
-            DialogGenerationContractError,
-            SettledRelevanceContractError,
-        ),
-    ):
+    elif isinstance(exc, CognitionExecutionError):
+        error_code = "model_contract"
+        stage = str(getattr(exc, "stage", ""))
+        failure_attempt_count = int(getattr(exc, "attempt_count", 1))
+        retryable = bool(getattr(exc, "retryable", False))
+        branch_id = str(getattr(exc, "branch_id", ""))
+    elif isinstance(exc, SettledRelevanceContractError):
         error_code = str(getattr(exc, "error_code", "internal_invariant"))
         stage = str(getattr(exc, "stage", ""))
         failure_attempt_count = int(getattr(exc, "attempt_count", 1))
@@ -2021,24 +2018,29 @@ async def _frontline_intake_item(item: QueuedChatItem) -> None:
             frontline_state["current_message"] = (
                 _collapsed_private_frontline_message(fragments)
             )
-        decision = await _turn_settlement_coordinator.evaluate_frontline(
+        evaluation = await _turn_settlement_coordinator.evaluate_frontline(
             frontline_state,
         )
         outcome = await _turn_settlement_coordinator.apply_frontline_decision(
             leader_fragment,
-            decision,
+            evaluation,
         )
         if outcome.action == "discard":
-            discard_decision = {
-                "intake_action": "discard",
-                "append_target": "none",
-                "prelude_targets": [],
-                "reason": "collapsed private input follows discarded leader",
+            discard_evaluation = {
+                "decision": {
+                    "intake_action": "discard",
+                    "append_target": "none",
+                    "prelude_targets": [],
+                    "reason": (
+                        "collapsed private input follows discarded leader"
+                    ),
+                },
+                "attempt_diagnostics": [],
             }
             for fragment in fragments[1:]:
                 await _turn_settlement_coordinator.apply_frontline_decision(
                     fragment,
-                    discard_decision,
+                    discard_evaluation,
                 )
             for fragment in fragments:
                 queue_item = fragment.queue_item
@@ -2138,14 +2140,15 @@ async def _process_settlement_lease(
         settled_state["character_operational_predecessor_barrier"] = (
             predecessor_barrier
         )
-        decision = await _turn_settlement_coordinator.evaluate_settled(
+        evaluation = await _turn_settlement_coordinator.evaluate_settled(
             lease,
             settled_state,
         )
         outcome = await _turn_settlement_coordinator.apply_settled_decision(
             lease,
-            decision,
+            evaluation,
         )
+        decision = evaluation["decision"]
     except SettledRelevanceContractError as exc:
         logger.error(
             "Settled relevance contract failed: "
@@ -2153,18 +2156,23 @@ async def _process_settlement_lease(
             exc_info=True,
         )
         if lease.observation_status == "more_time_available":
-            wait_decision = {
-                "response_action": "wait",
-                "reason_to_respond": "settled relevance needs one reassessment",
-                "use_reply_feature": False,
-                "channel_topic": "",
-                "indirect_speech_context": "",
+            wait_evaluation = {
+                "decision": {
+                    "response_action": "wait",
+                    "reason_to_respond": (
+                        "settled relevance needs one reassessment"
+                    ),
+                    "use_reply_feature": False,
+                    "channel_topic": "",
+                    "indirect_speech_context": "",
+                },
+                "attempt_diagnostics": [],
             }
             try:
                 wait_outcome = (
                     await _turn_settlement_coordinator.apply_settled_decision(
                         lease,
-                        wait_decision,
+                        wait_evaluation,
                     )
                 )
             except Exception as wait_exc:
@@ -2219,6 +2227,7 @@ async def _process_settlement_lease(
             response_owner,
             settlement_fragments=list(lease.fragments),
             settled_decision=decision,
+            settled_attempt_diagnostics=outcome.attempt_diagnostics,
             settlement_turn_id=lease.turn_id,
             settlement_version=lease.version,
             settlement_claimed=True,
@@ -3155,6 +3164,7 @@ async def _deliver_accepted_task_result_episode(
             "chat_history_recent": chat_history_recent,
             "reply_context": {},
             "should_respond": True,
+            "attempt_diagnostics": [],
             "reason_to_respond": trigger_source,
             "use_reply_feature": False,
             "channel_topic": "",
@@ -3950,6 +3960,9 @@ async def _process_queued_chat_item(
     *,
     settlement_fragments: list[PersistedChatFragment] | None = None,
     settled_decision: Mapping[str, Any] | None = None,
+    settled_attempt_diagnostics: Sequence[
+        EpisodeAttemptDiagnosticV1
+    ] | None = None,
     settlement_turn_id: str = "",
     settlement_version: int = 0,
     settlement_claimed: bool = False,
@@ -4385,6 +4398,10 @@ async def _process_queued_chat_item(
             "turn_version": settlement_version,
             "cognition_claimed": settlement_claimed,
             "should_respond": initial_should_respond,
+            "attempt_diagnostics": [
+                dict(row)
+                for row in (settled_attempt_diagnostics or ())
+            ],
             "reason_to_respond": (
                 str(settled_decision.get("reason_to_respond", ""))
                 if isinstance(settled_decision, Mapping)
@@ -4476,7 +4493,8 @@ async def _process_queued_chat_item(
                     cognition_attempt_count,
                 ):
                     logger.warning(
-                        f"Retrying cognition after pre-commit state conflict: {exc}"
+                        "Retrying cognition after retryable pre-commit model "
+                        f"contract failure: {exc}"
                     )
                     clear_v2_shared_memory_prewarm_checkpoint()
                     continue

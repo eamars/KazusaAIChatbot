@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import replace
 from types import SimpleNamespace
@@ -453,3 +454,108 @@ async def test_l3_handler_binds_state_trace_for_text_and_visual_calls(
         assert l3_surface.llm_tracing.current_trace_id() == "outer-trace"
     finally:
         l3_surface.llm_tracing.reset_trace_id(outer_token)
+
+
+@pytest.mark.asyncio
+async def test_unexpected_visual_failure_is_omitted_and_text_surface_is_returned(
+    monkeypatch,
+) -> None:
+    """Any non-cancellation visual failure leaves the text surface usable."""
+
+    willingness = build_relational_decision()
+    input_payload = {
+        "episode": {"origin_metadata": {"debug_modes": {}}},
+        "relational_willingness": willingness,
+    }
+
+    async def load_style_context(state) -> str:
+        del state
+        return "style"
+
+    def build_input(state, *, interaction_style_context):
+        del state, interaction_style_context
+        return input_payload
+
+    async def run_text(payload, services):
+        del services
+        return {"relational_willingness": payload["relational_willingness"]}
+
+    async def run_visual(payload, services):
+        del payload, services
+        raise ValueError("visual contract failed")
+
+    monkeypatch.setattr(
+        l3_surface,
+        "_load_interaction_style_context",
+        load_style_context,
+    )
+    monkeypatch.setattr(
+        l3_surface,
+        "build_text_surface_input_from_global_state",
+        build_input,
+    )
+    monkeypatch.setattr(l3_surface, "run_text_surface_planning", run_text)
+    monkeypatch.setattr(l3_surface, "run_visual_surface_planning", run_visual)
+
+    result = await l3_surface.call_l3_text_surface_handler({
+        "llm_trace_id": "visual-failure-trace",
+    })
+
+    assert result["text_surface_output_v2"]["relational_willingness"] == (
+        willingness
+    )
+    assert "visual_surface_output_v2" not in result
+    assert result["attempt_diagnostics"] == [{
+        "schema_version": "episode_attempt_diagnostic.v1",
+        "stage": "surface.visual",
+        "error_code": "surface_visual_omitted",
+        "attempt_count": 3,
+        "safe_checkpoint": "post_cognition_commit",
+        "retryable": False,
+        "final_status": "accepted_degraded",
+    }]
+
+
+@pytest.mark.asyncio
+async def test_visual_cancellation_still_propagates(monkeypatch) -> None:
+    """Cancellation remains fatal to the in-flight surface operation."""
+
+    willingness = build_relational_decision()
+    input_payload = {
+        "episode": {"origin_metadata": {"debug_modes": {}}},
+        "relational_willingness": willingness,
+    }
+
+    async def load_style_context(state) -> str:
+        del state
+        return "style"
+
+    def build_input(state, *, interaction_style_context):
+        del state, interaction_style_context
+        return input_payload
+
+    async def run_text(payload, services):
+        del services
+        return {"relational_willingness": payload["relational_willingness"]}
+
+    async def run_visual(payload, services):
+        del payload, services
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(
+        l3_surface,
+        "_load_interaction_style_context",
+        load_style_context,
+    )
+    monkeypatch.setattr(
+        l3_surface,
+        "build_text_surface_input_from_global_state",
+        build_input,
+    )
+    monkeypatch.setattr(l3_surface, "run_text_surface_planning", run_text)
+    monkeypatch.setattr(l3_surface, "run_visual_surface_planning", run_visual)
+
+    with pytest.raises(asyncio.CancelledError):
+        await l3_surface.call_l3_text_surface_handler({
+            "llm_trace_id": "visual-cancel-trace",
+        })

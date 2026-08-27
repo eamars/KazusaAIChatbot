@@ -61,6 +61,7 @@
     "src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_projection.py",
     "src/kazusa_ai_chatbot/nodes/persona_supervisor2.py",
     "src/kazusa_ai_chatbot/nodes/persona_supervisor2_l3_surface.py",
+    "src/kazusa_ai_chatbot/nodes/persona_supervisor2_memory_lifecycle.py",
     "src/kazusa_ai_chatbot/nodes/persona_supervisor2_msg_decontextualizer.py",
     "src/kazusa_ai_chatbot/nodes/dialog_agent.py",
     "src/kazusa_ai_chatbot/nodes/persona_supervisor2_schema.py",
@@ -69,6 +70,7 @@
     "src/kazusa_ai_chatbot/brain_service/contracts.py",
     "src/kazusa_ai_chatbot/brain_service/cognition_observation_contracts.py",
     "src/kazusa_ai_chatbot/brain_service/cognition_observation_projection.py",
+    "src/kazusa_ai_chatbot/brain_service/turn_settlement.py",
     "src/kazusa_ai_chatbot/local_context_resolver/service.py",
     "src/kazusa_ai_chatbot/local_context_resolver/stages.py",
     "src/kazusa_ai_chatbot/service.py",
@@ -99,6 +101,11 @@
     "scripts/preflight_scheduled_future_speech_contract.py",
     "src/kazusa_ai_chatbot/cognition_core_v3",
     "src/kazusa_ai_chatbot/cognition_shared",
+    "src/kazusa_ai_chatbot/relevance/contracts.py",
+    "src/kazusa_ai_chatbot/relevance/__init__.py",
+    "src/kazusa_ai_chatbot/relevance/frontline_relevance_agent.py",
+    "src/kazusa_ai_chatbot/relevance/persona_relevance_agent.py",
+    "src/kazusa_ai_chatbot/state.py",
     "src/kazusa_ai_chatbot/rag/memory_evidence/workers/user_memory.py",
     "src/kazusa_ai_chatbot/rag/memory_retrieval_tools.py"
   ],
@@ -852,7 +859,10 @@
       "required_unit_tests": [
         "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_l3_surface_preserves_selected_response_operation",
         "tests/unit/nodes/test_persona_supervisor2_cognition_commit.py::test_persona_character_commit_reads_canonical_state_projection",
-        "tests/test_conversation_progress_group_scene.py::test_persona_supervisor_reports_group_scene_success_non_group_and_failure"
+        "tests/test_conversation_progress_group_scene.py::test_persona_supervisor_reports_group_scene_success_non_group_and_failure",
+        "tests/unit/nodes/test_persona_supervisor2_schema.py::test_persona_supervisor_returns_attempt_diagnostics",
+        "tests/unit/nodes/test_persona_supervisor2_schema.py::test_persona_supervisor_returns_only_new_diagnostic_delta",
+        "tests/unit/nodes/test_persona_supervisor2_schema.py::test_persona_supervisor_diagnostic_delta_respects_sixteen_row_cap"
       ],
       "supplemental_tests": [
         "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_persona_supervisor2_l3_surface_exposes_owned_contract"
@@ -879,6 +889,18 @@
         "tests/test_semantic_response_progression_live_llm.py::test_live_post_provider_reply_content_request_stays_bounded",
         "tests/test_semantic_response_progression_live_llm.py::test_live_post_provider_scoped_delegation_stays_bounded"
       ]
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/nodes/persona_supervisor2_memory_lifecycle.py",
+      "owner": "memory lifecycle specialist owner",
+      "contract": "bounded lifecycle specialist provider and contract exhaustion containment",
+      "required_unit_tests": [
+        "tests/test_memory_lifecycle_specialist.py::test_provider_exhaustion_degrades_to_skipped_lifecycle_context",
+        "tests/test_memory_lifecycle_specialist.py::test_specialist_repair_prompt_carries_contract_error",
+        "tests/test_memory_lifecycle_specialist.py::test_post_surface_review_provider_failure_returns_empty_update",
+        "tests/test_memory_lifecycle_specialist.py::test_handler_consumes_route_and_materializes_apply_action"
+      ],
+      "supplemental_tests": []
     },
     {
       "source": "src/kazusa_ai_chatbot/nodes/dialog_agent.py",
@@ -923,6 +945,83 @@
       ]
     },
     {
+      "source": "src/kazusa_ai_chatbot/relevance/contracts.py",
+      "owner": "canonical relevance contract owner",
+      "contract": "exact frontline and settled decision TypedDicts plus the two-key nested relevance evaluation envelope",
+      "required_unit_tests": [
+        "tests/test_relevance_turn_settlement.py::test_relevance_exports_canonical_decision_types_without_producer_duplicates",
+        "tests/test_relevance_turn_settlement.py::test_relevance_evaluation_envelope_has_nested_decision_and_diagnostics_only"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/relevance/__init__.py",
+      "owner": "public relevance contract facade owner",
+      "contract": "package facade re-exports the canonical relevance decision and envelope types",
+      "required_unit_tests": [
+        "tests/test_relevance_turn_settlement.py::test_relevance_exports_canonical_decision_types_without_producer_duplicates",
+        "tests/test_relevance_turn_settlement.py::test_relevance_evaluation_envelope_has_nested_decision_and_diagnostics_only"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/relevance/frontline_relevance_agent.py",
+      "owner": "frontline relevance stage owner",
+      "contract": "nested relevance envelope emission with T1 empty metadata and one fixed T3 degradation row",
+      "required_unit_tests": [
+        "tests/test_frontline_relevance_agent.py::test_frontline_agent_uses_structural_parser_and_returns_decision",
+        "tests/test_frontline_relevance_agent.py::test_frontline_provider_exhaustion_starts_authoritative_turn",
+        "tests/test_frontline_relevance_agent.py::test_frontline_provider_exhaustion_discards_non_authoritative_turn",
+        "tests/test_frontline_relevance_agent.py::test_frontline_direct_open_turn_rejects_discard_without_retry",
+        "tests/test_frontline_relevance_agent.py::test_frontline_agent_fails_closed_on_unsupplied_model_slot",
+        "tests/test_relevance_turn_settlement.py::test_relevance_exports_canonical_decision_types_without_producer_duplicates"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/relevance/persona_relevance_agent.py",
+      "owner": "settled relevance stage owner",
+      "contract": "nested settled envelope emission with T1 empty metadata and one fixed T3 degradation row",
+      "required_unit_tests": [
+        "tests/test_persona_relevance_agent.py::test_relevance_agent_malformed_json_degrades_to_available_disposition",
+        "tests/test_persona_relevance_agent.py::test_relevance_agent_raises_when_no_authoritative_disposition_remains",
+        "tests/test_persona_relevance_agent.py::test_settled_provider_exhaustion_degrades_without_raising",
+        "tests/test_persona_relevance_agent.py::test_non_authoritative_provider_exhaustion_returns_ignore",
+        "tests/test_persona_relevance_agent.py::test_authoritative_bad_evidence_does_not_trigger_repair",
+        "tests/test_persona_relevance_agent.py::test_relevance_repair_feedback_identifies_missing_required_field",
+        "tests/test_persona_relevance_agent.py::test_relevance_agent_fails_closed_on_invented_evidence_ref",
+        "tests/test_relevance_turn_settlement.py::test_relevance_exports_canonical_decision_types_without_producer_duplicates"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/brain_service/turn_settlement.py",
+      "owner": "relevance settlement envelope coordinator owner",
+      "contract": "mandatory nested envelope lifecycle, ordered metadata carrier, stale/wait/discard isolation, FIFO control flow, and latest-sixteen bound",
+      "required_unit_tests": [
+        "tests/test_relevance_turn_settlement.py::test_frontline_start_accumulates_relevance_diagnostics_in_order",
+        "tests/test_relevance_turn_settlement.py::test_frontline_append_accumulates_relevance_diagnostics_in_order",
+        "tests/test_relevance_turn_settlement.py::test_frontline_append_with_invalid_target_drops_diagnostics",
+        "tests/test_relevance_turn_settlement.py::test_relevance_validators_receive_only_nested_decision",
+        "tests/test_relevance_turn_settlement.py::test_settled_relevance_diagnostics_append_after_frontline",
+        "tests/test_relevance_turn_settlement.py::test_stale_settled_lease_diagnostics_do_not_pollute_current_version",
+        "tests/test_relevance_turn_settlement.py::test_wait_diagnostics_carry_once_before_next_settled_append",
+        "tests/test_relevance_turn_settlement.py::test_relevance_diagnostics_are_bounded_to_sixteen_in_occurrence_order",
+        "tests/test_relevance_turn_settlement.py::test_discarded_turn_keeps_protected_trace_without_episode_diagnostics",
+        "tests/test_relevance_turn_settlement.py::test_envelope_preserves_fifo_lease_and_claim_control_flow"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/state.py",
+      "owner": "attempt diagnostic reducer owner",
+      "contract": "one reducer retains the most recent chronological sixteen episode-attempt diagnostics",
+      "required_unit_tests": [
+        "tests/unit/brain_service/test_cognition_graph_projection.py::test_attempt_diagnostics_reducer_concatenates_within_bound"
+      ],
+      "supplemental_tests": []
+    },
+    {
       "source": "src/kazusa_ai_chatbot/service.py",
       "owner": "brain service cognition graph and runtime owner",
       "contract": "canonical cognition observation publication, latest storage, and current-attempt checkpoint propagation",
@@ -932,6 +1031,13 @@
         "tests/unit/brain_service/test_cognition_graph_projection.py::test_live_terminal_status_mapping_and_cancellation_are_exact",
         "tests/unit/brain_service/test_cognition_graph_projection.py::test_failed_run_uses_current_attempt_prewarm_checkpoint",
         "tests/unit/brain_service/test_cognition_graph_projection.py::test_legacy_cognition_graph_projection_symbols_are_absent_from_production",
+        "tests/unit/brain_service/test_cognition_graph_projection.py::test_cognition_contract_exhaustion_maps_to_model_contract_error_code",
+        "tests/unit/brain_service/test_cognition_graph_projection.py::test_pre_commit_contract_exhaustion_triggers_one_checkpoint_replay",
+        "tests/unit/brain_service/test_cognition_graph_projection.py::test_post_commit_degradations_do_not_trigger_replay",
+        "tests/unit/brain_service/test_cognition_graph_projection.py::test_initial_process_state_seeds_relevance_diagnostics_before_persona",
+        "tests/test_relevance_turn_settlement.py::test_service_consumes_only_settlement_outcome_diagnostics",
+        "tests/test_relevance_turn_settlement.py::test_settled_relevance_diagnostics_reach_episode_trace",
+        "tests/test_relevance_turn_settlement.py::test_discarded_turn_keeps_protected_trace_without_episode_diagnostics",
         "tests/test_service_background_consolidation.py::test_chat_response_tracks_deliverable_assistant_row"
       ],
       "supplemental_tests": [
@@ -988,7 +1094,9 @@
       "owner": "nodes owner",
       "contract": "typed prewarm and group-scene state carriers",
       "required_unit_tests": [
-        "tests/unit/nodes/test_persona_supervisor2_schema.py::test_persona_supervisor2_schema_exposes_owned_contract"
+        "tests/unit/nodes/test_persona_supervisor2_schema.py::test_persona_supervisor2_schema_exposes_owned_contract",
+        "tests/unit/nodes/test_persona_supervisor2_schema.py::test_persona_states_carry_attempt_diagnostics",
+        "tests/unit/nodes/test_persona_supervisor2_schema.py::test_persona_supervisor_diagnostic_delta_respects_sixteen_row_cap"
       ],
       "supplemental_tests": []
     },

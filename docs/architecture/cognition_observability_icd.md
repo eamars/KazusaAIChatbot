@@ -59,6 +59,85 @@ The shared-memory prewarm section reports one of the fixed reason codes:
 or `unsupported_episode`. The section status, retrieved count, merged count,
 and omission marker are derived from the typed prewarm outcome.
 
+## Live-response recovery ladder
+
+Every governed live-response stage applies the bounded recovery ladder in order.
+T1 (`recover`) performs deterministic normalization that adds no semantics and
+records `normalized`. T2 (`regenerate`) performs bounded same-context
+regeneration carrying the exact contract error and bounded rejected candidate;
+provider failure consumes one attempt and the no-candidate reason is used.
+T2's in-progress disposition is `regenerate`. T3 (`degrade`) delivers an
+already-available sibling result, retained candidate, or deterministic
+projection of already-validated upstream truth and records `accepted_degraded`
+or `skipped`. T4 (`replay`) raises a typed `CognitionExecutionError` with
+`retryable=True` and `safe_checkpoint="pre_state_commit"`, so the existing
+single service-level graph replay records `retry_graph` and starts from the
+settled-relevance and prewarm checkpoint. A stage without an assigned T3 or T4
+may fail through its typed boundary; dialog has T3 and no visible-path failure
+exit.
+
+The fixed final-status vocabulary is `accepted_degraded`, `skipped`,
+`exhausted`, `retry_graph`, and `normalized`. The fixed recovery error-code
+vocabulary is:
+
+- cognition: `cognition_a1_contract_exhausted`,
+  `cognition_a2_contract_exhausted`, `cognition_g_contract_exhausted`,
+  `cognition_p_contract_exhausted`, and
+  `cognition_turn_deadline_exhausted`;
+- dialog: `dialog_source_url_degraded` and
+  `dialog_surface_projection_degraded`;
+- lifecycle and visual: `memory_lifecycle_skipped` and
+  `surface_visual_omitted`;
+- local context: `local_context_planner_blocked`,
+  `local_context_node_blocked`, `local_context_collapse_skipped`, and
+  `local_context_synthesis_degraded`;
+- relevance: `settled_relevance_deterministic_degraded` and
+  `frontline_relevance_deterministic_degraded`.
+
+The Brain service maps an exhausted `CognitionExecutionError` to the
+public `model_contract` error category. It permits exactly one graph replay only when
+the failure is retryable and has `safe_checkpoint="pre_state_commit"`, using
+the existing `COGNITION_SAFE_RETRY_LIMIT`; a post-commit failure never replays.
+Each protected LLM trace retains the truthful provider, contract, normalized,
+repaired, or deterministic attempt disposition and any raw-attempt evidence
+allowed by the protected trace contract. Episode diagnostics are separate
+bounded `episode_attempt_diagnostic.v1` rows owned by the stage/carrier
+boundary; they never replace the protected trace. T1 results do not create an episode row, while assigned T3/T4 terminal metadata uses the fixed status and
+error-code vocabulary above.
+
+## Relevance diagnostic envelope
+
+The relevance producers return one canonical `RelevanceEvaluationEnvelope`
+with exactly two keys: `decision` and `attempt_diagnostics`. The unchanged
+`FrontlineDecision` or `SettledRelevanceDecision` is nested under `decision`
+and remains the only value consumed by its decision validator. T1 normalized
+results carry an empty diagnostic list. Only deterministic T3 relevance
+degradation carries one `episode_attempt_diagnostic.v1` row, using
+`frontline_relevance_deterministic_degraded` or
+`settled_relevance_deterministic_degraded`; a provider attempt is retained in
+the protected LLM trace and is not promoted as an episode row.
+
+The frontline envelope rows are stored on the pending turn in arrival order.
+Valid append rows follow start rows; invalid append targets and discard drop
+their rows. A settled row follows the retained frontline rows. A stale lease
+never merges its rows. A wait merges its rows once into the next pending lease,
+and a later settled result appends after them. Ignore drops the carrier with
+the turn. Only a current claimable `proceed` exposes rows through
+`SettlementOutcome.attempt_diagnostics`; the service passes that field
+separately into `IMProcessState` before persona work, and the existing
+`episode_trace.v2` post-turn consumer carries it into the final episode.
+
+`state.append_attempt_diagnostics` is the sole reducer and normalizer. It
+retains `combined[-MAX_EPISODE_ATTEMPT_DIAGNOSTICS:]`, namely the most recent 16
+rows in chronological order. The terminal dialog, surface, and cognition
+rows therefore remain discoverable after earlier relevance degradation rows;
+earlier relevance attempts remain available in protected traces. A discarded
+turn that never reaches a settled episode persists no episode diagnostic row,
+while its protected relevance trace remains authoritative. Persona starts its
+internal reducer-backed accumulator empty and returns only its downstream
+delta; the top-level reducer merges inherited relevance rows and this delta
+once, without a second cap or dedupe.
+
 ## V1 DTO boundary and budgets
 
 The wire models are `CognitionRunObservationV1`,

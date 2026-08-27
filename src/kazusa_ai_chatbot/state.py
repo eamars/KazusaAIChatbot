@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Annotated, Any, Literal, NotRequired, TypedDict
 
+from kazusa_ai_chatbot.action_spec.results import EpisodeAttemptDiagnosticV1
 from kazusa_ai_chatbot.cognition_episode import CognitiveEpisodeV1
 from kazusa_ai_chatbot.conversation_progress import (
     ConversationLogicalTurnV1,
@@ -78,6 +80,29 @@ def keep_false(current: bool | None, update: bool | None) -> bool:
     return return_value
 
 
+MAX_EPISODE_ATTEMPT_DIAGNOSTICS = 16
+
+
+def append_attempt_diagnostics(
+    current: list[EpisodeAttemptDiagnosticV1] | None,
+    update: list[EpisodeAttemptDiagnosticV1] | None,
+) -> list[EpisodeAttemptDiagnosticV1]:
+    """Append diagnostic rows and retain only the newest bounded suffix."""
+
+    current_rows = [] if current is None else current
+    update_rows = [] if update is None else update
+    if not isinstance(current_rows, list) or not isinstance(update_rows, list):
+        raise TypeError("attempt diagnostics updates must be lists")
+    combined = [*current_rows, *update_rows]
+    normalized: list[EpisodeAttemptDiagnosticV1] = []
+    for row in combined:
+        if not isinstance(row, Mapping):
+            raise TypeError("attempt diagnostic rows must be mappings")
+        normalized.append(dict(row))
+    return_value = normalized[-MAX_EPISODE_ATTEMPT_DIAGNOSTICS:]
+    return return_value
+
+
 class IMProcessState(TypedDict):
     storage_timestamp_utc: str
     local_time_context: LocalTimeContextDoc
@@ -125,6 +150,10 @@ class IMProcessState(TypedDict):
 
     # Relevance turn-settlement state
     response_action: NotRequired[Literal["ignore", "proceed", "wait"]]
+    attempt_diagnostics: Annotated[
+        list[EpisodeAttemptDiagnosticV1],
+        append_attempt_diagnostics,
+    ]
     observation_status: NotRequired[
         Literal["more_time_available", "observation_complete"]
     ]

@@ -36,7 +36,12 @@ from kazusa_ai_chatbot.cognition_core_v3.prompt import (
     build_turn_workspace_stage_contracts,
 )
 from kazusa_ai_chatbot.cognition_episode import build_user_message_episode
-from kazusa_ai_chatbot.cognition_shared.contracts import CognitionExecutionError
+from kazusa_ai_chatbot.cognition_shared.contracts import (
+    CognitionContractError,
+    CognitionExecutionError,
+    validate_terminal_text_seed,
+    validate_text_surface_output,
+)
 from kazusa_ai_chatbot.cognition_shared.emotion_derivation import (
     derive_persistent_emotion_activations,
 )
@@ -283,6 +288,45 @@ def test_canonical_stage_packets_are_handleless_and_disjoint() -> None:
         len(set(axes)) == len(axes)
         for axes in CANONICAL_FAMILY_AXES.values()
     )
+
+
+def test_terminal_text_seed_requires_authored_text_after_http_url_removal() -> None:
+    """The shared terminal invariant excludes URL-only semantic seeds."""
+
+    with pytest.raises(CognitionContractError):
+        validate_terminal_text_seed(
+            "https://unusable.example/only",
+            "semantic seed",
+        )
+    assert validate_terminal_text_seed(
+        "authored text https://allowed.example/reference",
+        "semantic seed",
+    ) == "authored text https://allowed.example/reference"
+
+
+def test_selected_surface_intent_uses_the_shared_terminal_text_invariant() -> None:
+    """The text-surface boundary rejects a URL-only selected intent."""
+
+    surface_output = {
+        "schema_version": "text_surface_output.v2",
+        "content_plan": "a bounded content plan",
+        "content_requirements": ["retain the current operation"],
+        "epistemic_boundary": "Keep unsupported details uncertain.",
+        "visible_boundaries": [],
+        "addressee_plan": [],
+        "delivery_profile": {
+            "lexical_register": "warm",
+            "sentence_shape": "concise",
+            "rhythm": "steady",
+            "hesitation": "light",
+            "punctuation": "restrained",
+        },
+        "selected_surface_intent": "https://unusable.example/only",
+        "permitted_action_results": [],
+    }
+
+    with pytest.raises(CognitionContractError):
+        validate_text_surface_output(surface_output)
 
 
 def test_canonical_input_requires_bounded_overused_moves_without_exposing_handles() -> None:

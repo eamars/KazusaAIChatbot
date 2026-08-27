@@ -3,30 +3,58 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass, field
 import heapq
 import itertools
 import time
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from kazusa_ai_chatbot.action_spec.results import EpisodeAttemptDiagnosticV1
 from kazusa_ai_chatbot.relevance import (
-    FrontlineDecision,
-    SettledRelevanceDecision,
     validate_frontline_decision,
     validate_settled_relevance_decision,
 )
-
+from kazusa_ai_chatbot.relevance.contracts import (
+    RelevanceEvaluationEnvelope,
+    SettledRelevanceDecision,
+)
+from kazusa_ai_chatbot.state import append_attempt_diagnostics
 
 Scope = tuple[str, str, str]
 _MAX_PRELUDE_SCOPES = 64
 _MAX_CONTINUITY_SCOPES = 512
 _BOT_CONTINUITY_ACTIVE_SECONDS = 180.0
-FrontlineEvaluator = Callable[[Mapping[str, Any]], Awaitable[FrontlineDecision]]
+FrontlineEvaluator = Callable[
+    [Mapping[str, Any]],
+    Awaitable[RelevanceEvaluationEnvelope],
+]
 SettledEvaluator = Callable[
     ["AssessmentLease", Mapping[str, Any]],
-    Awaitable[SettledRelevanceDecision],
+    Awaitable[RelevanceEvaluationEnvelope],
 ]
+
+
+def _require_relevance_envelope(
+    value: object,
+) -> RelevanceEvaluationEnvelope:
+    """Require the exact outer relevance envelope without semantic projection."""
+
+    if not isinstance(value, Mapping):
+        raise ValueError("relevance evaluation must be an object")
+    if set(value) != {"decision", "attempt_diagnostics"}:
+        raise ValueError("relevance evaluation fields are not exact")
+    diagnostics = value["attempt_diagnostics"]
+    if not isinstance(diagnostics, list):
+        raise ValueError("relevance attempt diagnostics must be a list")
+    return_value: RelevanceEvaluationEnvelope = {
+        "decision": value["decision"],
+        "attempt_diagnostics": [
+            dict(row) if isinstance(row, Mapping) else row
+            for row in diagnostics
+        ],
+    }
+    return return_value
 
 
 @dataclass(slots=True)
@@ -84,6 +112,9 @@ class _PendingTurn:
     settled_assessment_count: int = 0
     wait_used: bool = False
     last_decision: SettledRelevanceDecision | None = None
+    attempt_diagnostics: list[EpisodeAttemptDiagnosticV1] = field(
+        default_factory=list,
+    )
     accepts_fragments: bool = True
 
 
@@ -111,6 +142,7 @@ class AssessmentLease:
     response_owner_sequence: int
     fragments: tuple[PersistedChatFragment, ...] = ()
     latest_bot_continuity: str = ""
+    attempt_diagnostics: tuple[EpisodeAttemptDiagnosticV1, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +155,7 @@ class SettlementOutcome:
     wait_used: bool = False
     stale: bool = False
     claimable: bool = False
+    attempt_diagnostics: tuple[EpisodeAttemptDiagnosticV1, ...] = ()
 
 
 @dataclass(slots=True)
@@ -258,24 +291,29 @@ class TurnSettlementCoordinator:
     async def evaluate_frontline(
         self,
         state: Mapping[str, Any],
-    ) -> FrontlineDecision:
+    ) -> RelevanceEvaluationEnvelope:
         """Evaluate one message through the FIFO relevance executor."""
 
-        async def _evaluate() -> FrontlineDecision:
+        async def _evaluate() -> RelevanceEvaluationEnvelope:
             return await self._frontline_evaluator(state)
 
         result = await self._run_relevance_work(_evaluate)
-        return_value = validate_frontline_decision(result)
+        envelope = _require_relevance_envelope(result)
+        validated = validate_frontline_decision(envelope["decision"])
+        envelope["decision"] = validated
+        return_value = envelope
         return return_value
 
     async def apply_frontline_decision(
         self,
         fragment: PersistedChatFragment,
-        decision: FrontlineDecision,
+        evaluation: RelevanceEvaluationEnvelope,
     ) -> FrontlineOutcome:
         """Apply one validated frontline action to deterministic turn state."""
 
-        validated = validate_frontline_decision(decision)
+        envelope = _require_relevance_envelope(evaluation)
+        validated = validate_frontline_decision(envelope["decision"])
+        diagnostics = envelope["attempt_diagnostics"]
         async with self._state_condition:
             action = validated["intake_action"]
             if action == "discard":
@@ -296,7 +334,11 @@ class TurnSettlementCoordinator:
                     return_value = FrontlineOutcome(action="discard")
                     self._state_condition.notify_all()
                     return return_value
-                self._append_fragment_locked(pending_turn, fragment)
+                self._append_fragment_locked(
+                    pending_turn,
+                    fragment,
+                    attempt_diagnostics=diagnostics,
+                )
                 self._complete_ingress_locked(fragment.arrival_sequence)
                 return_value = FrontlineOutcome(
                     action="append",
@@ -314,6 +356,7 @@ class TurnSettlementCoordinator:
             pending_turn = self._create_turn_locked(
                 fragment,
                 promoted_preludes=promoted_preludes,
+                attempt_diagnostics=diagnostics,
             )
             self._complete_ingress_locked(fragment.arrival_sequence)
             return_value = FrontlineOutcome(
@@ -390,33 +433,40 @@ class TurnSettlementCoordinator:
         self,
         lease: AssessmentLease,
         state: Mapping[str, Any],
-    ) -> SettledRelevanceDecision:
+    ) -> RelevanceEvaluationEnvelope:
         """Evaluate one leased turn through the same FIFO relevance executor."""
 
         evaluation_state = dict(state)
         evaluation_state["observation_status"] = lease.observation_status
+        evaluation_state["attempt_diagnostics"] = list(
+            lease.attempt_diagnostics
+        )
 
-        async def _evaluate() -> SettledRelevanceDecision:
+        async def _evaluate() -> RelevanceEvaluationEnvelope:
             return await self._settled_evaluator(lease, evaluation_state)
 
         result = await self._run_relevance_work(_evaluate)
+        envelope = _require_relevance_envelope(result)
         validated = validate_settled_relevance_decision(
-            result,
+            envelope["decision"],
             observation_status=lease.observation_status,
         )
-        return validated
+        envelope["decision"] = validated
+        return envelope
 
     async def apply_settled_decision(
         self,
         lease: AssessmentLease,
-        decision: SettledRelevanceDecision,
+        evaluation: RelevanceEvaluationEnvelope,
     ) -> SettlementOutcome:
         """Apply settled relevance, wait once, or expose a claimable proceed."""
 
+        envelope = _require_relevance_envelope(evaluation)
         validated = validate_settled_relevance_decision(
-            decision,
+            envelope["decision"],
             observation_status=lease.observation_status,
         )
+        diagnostics = envelope["attempt_diagnostics"]
         async with self._state_condition:
             pending_turn = self._pending_turns.get(lease.turn_id)
             if pending_turn is None or pending_turn.status == "DONE":
@@ -448,6 +498,10 @@ class TurnSettlementCoordinator:
                 if pending_turn.wait_used:
                     raise ValueError("settled wait extension was already used")
                 pending_turn.wait_used = True
+                pending_turn.attempt_diagnostics = append_attempt_diagnostics(
+                    pending_turn.attempt_diagnostics,
+                    diagnostics,
+                )
                 pending_turn.status = "SETTLING"
                 pending_turn.eligible_at_monotonic = (
                     pending_turn.hard_deadline_monotonic
@@ -466,12 +520,24 @@ class TurnSettlementCoordinator:
             if validated["response_action"] == "ignore":
                 pending_turn.status = "DONE"
                 pending_turn.accepts_fragments = False
+            else:
+                pending_turn.attempt_diagnostics = (
+                    append_attempt_diagnostics(
+                        pending_turn.attempt_diagnostics,
+                        diagnostics,
+                    )
+                )
             return_value = SettlementOutcome(
                 response_action=validated["response_action"],
                 turn_id=pending_turn.turn_id,
                 version=pending_turn.version,
                 wait_used=pending_turn.wait_used,
                 claimable=validated["response_action"] == "proceed",
+                attempt_diagnostics=(
+                    tuple(pending_turn.attempt_diagnostics)
+                    if validated["response_action"] == "proceed"
+                    else ()
+                ),
             )
             if pending_turn.status == "DONE":
                 self._pending_turns.pop(pending_turn.turn_id, None)
@@ -612,6 +678,7 @@ class TurnSettlementCoordinator:
         fragment: PersistedChatFragment,
         *,
         promoted_preludes: tuple[PersistedChatFragment, ...] = (),
+        attempt_diagnostics: list[EpisodeAttemptDiagnosticV1] | None = None,
     ) -> _PendingTurn:
         """Create one candidate turn and schedule its first eligibility."""
 
@@ -642,6 +709,10 @@ class TurnSettlementCoordinator:
             last_fragment_at_monotonic=last_fragment_at,
             eligible_at_monotonic=eligible_at,
             hard_deadline_monotonic=hard_deadline,
+            attempt_diagnostics=append_attempt_diagnostics(
+                [],
+                attempt_diagnostics,
+            ),
         )
         self._pending_turns[turn_id] = pending_turn
         self._schedule_ready_locked(pending_turn)
@@ -651,9 +722,15 @@ class TurnSettlementCoordinator:
         self,
         pending_turn: _PendingTurn,
         fragment: PersistedChatFragment,
+        *,
+        attempt_diagnostics: list[EpisodeAttemptDiagnosticV1] | None = None,
     ) -> None:
         """Append one fragment and invalidate any prior assessment."""
 
+        pending_turn.attempt_diagnostics = append_attempt_diagnostics(
+            pending_turn.attempt_diagnostics,
+            attempt_diagnostics,
+        )
         pending_turn.fragments.append(fragment)
         pending_turn.last_fragment_at_monotonic = fragment.enqueue_monotonic
         pending_turn.version += 1
@@ -770,6 +847,7 @@ class TurnSettlementCoordinator:
                         pending_turn.author_platform_user_id,
                     ),
                 ),
+                attempt_diagnostics=tuple(pending_turn.attempt_diagnostics),
             )
             return return_value
         return None

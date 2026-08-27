@@ -188,3 +188,77 @@ def test_runtime_readmes_document_prewarm_and_observation_carriers() -> None:
         "typed shared-memory prewarm outcome",
     ):
         assert clause in nodes_readme, clause
+
+
+def test_icd_documents_relevance_diagnostic_envelope_flow() -> None:
+    """The observability ICD fixes the relevance metadata carrier boundary."""
+
+    icd = _read("docs/architecture/cognition_observability_icd.md")
+
+    for clause in (
+        "RelevanceEvaluationEnvelope",
+        "exactly two keys",
+        "FrontlineDecision",
+        "SettledRelevanceDecision",
+        "T1 normalized",
+        "frontline_relevance_deterministic_degraded",
+        "settled_relevance_deterministic_degraded",
+        "protected LLM trace",
+        "SettlementOutcome.attempt_diagnostics",
+        "IMProcessState",
+        "state.append_attempt_diagnostics",
+        "combined[-MAX_EPISODE_ATTEMPT_DIAGNOSTICS:]",
+        "most recent 16",
+        "stale lease",
+        "A discarded",
+        "Persona starts",
+    ):
+        assert clause in icd, clause
+
+
+def test_icd_documents_live_response_recovery_dispositions() -> None:
+    """The ICD fixes the complete bounded live-response ladder vocabulary."""
+
+    icd = _read("docs/architecture/cognition_observability_icd.md")
+
+    for clause in (
+        "Live-response recovery ladder",
+        "T1 (`recover`)",
+        "T2 (`regenerate`)",
+        "T3 (`degrade`)",
+        "T4 (`replay`)",
+        "same-context",
+        "accepted_degraded",
+        "skipped",
+        "exhausted",
+        "retry_graph",
+        "normalized",
+        "CognitionExecutionError",
+        "safe_checkpoint=\"pre_state_commit\"",
+        "COGNITION_SAFE_RETRY_LIMIT",
+        "public `model_contract`",
+        "post-commit failure never replays",
+        "protected LLM trace",
+        "episode_attempt_diagnostic.v1",
+        "T1 results do not create an episode row",
+    ):
+        assert clause in icd, clause
+
+    for error_code in (
+        "cognition_a1_contract_exhausted",
+        "cognition_a2_contract_exhausted",
+        "cognition_g_contract_exhausted",
+        "cognition_p_contract_exhausted",
+        "cognition_turn_deadline_exhausted",
+        "dialog_source_url_degraded",
+        "dialog_surface_projection_degraded",
+        "memory_lifecycle_skipped",
+        "surface_visual_omitted",
+        "local_context_planner_blocked",
+        "local_context_node_blocked",
+        "local_context_collapse_skipped",
+        "local_context_synthesis_degraded",
+        "settled_relevance_deterministic_degraded",
+        "frontline_relevance_deterministic_degraded",
+    ):
+        assert error_code in icd, error_code

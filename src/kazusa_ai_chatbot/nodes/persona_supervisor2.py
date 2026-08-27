@@ -1027,6 +1027,7 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "referents": [],
         "debug_modes": state["debug_modes"],
         "should_respond": state["should_respond"],
+        "attempt_diagnostics": [],
     }
     cognitive_episode = state.get("cognitive_episode")
     if cognitive_episode is not None:
@@ -1081,6 +1082,9 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         "surface_outputs": results.get("surface_outputs", []),
         "action_results": results.get("action_results", []),
         "episode_trace": results.get("episode_trace"),
+        "attempt_diagnostics": list(
+            results.get("attempt_diagnostics", [])
+        ),
         "llm_trace_id": state.get("llm_trace_id", ""),
         "character_profile": results["character_profile"],
         "character_identity_revision_number": results.get(

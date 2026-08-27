@@ -460,19 +460,25 @@ def _patch_chat_dependencies(
 
     async def _frontline(_state):
         return {
-            "intake_action": "start",
-            "append_target": "none",
-            "prelude_targets": [],
-            "reason": "deterministic service fixture",
+            "decision": {
+                "intake_action": "start",
+                "append_target": "none",
+                "prelude_targets": [],
+                "reason": "deterministic service fixture",
+            },
+            "attempt_diagnostics": [],
         }
 
     async def _settled(_state):
         return {
-            "response_action": "proceed",
-            "reason_to_respond": "deterministic service fixture",
-            "use_reply_feature": False,
-            "channel_topic": "",
-            "indirect_speech_context": "",
+            "decision": {
+                "response_action": "proceed",
+                "reason_to_respond": "deterministic service fixture",
+                "use_reply_feature": False,
+                "channel_topic": "",
+                "indirect_speech_context": "",
+            },
+            "attempt_diagnostics": [],
         }
 
     async def _media(state):

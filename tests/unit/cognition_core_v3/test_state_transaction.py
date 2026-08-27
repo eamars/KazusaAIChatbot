@@ -21,6 +21,7 @@ from kazusa_ai_chatbot.cognition_core_v3.facade import (
     _prepare_state_transaction,
     run_cognition,
 )
+from kazusa_ai_chatbot.cognition_shared.contracts import CognitionExecutionError
 from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_character_production_state,
     validate_cognition_state,
@@ -537,6 +538,10 @@ async def test_cognition_turn_deadline_bounds_full_chain(monkeypatch: pytest.Mon
         return await original_wait_for(awaitable, timeout=0.001)
 
     monkeypatch.setattr(facade_module.asyncio, "wait_for", bounded_wait)
-    with pytest.raises(asyncio.TimeoutError):
+    with pytest.raises(CognitionExecutionError) as error:
         await run_cognition(payload, _services(_SlowInvoker()))
     assert seen_timeouts == [240]
+    assert error.value.error_code == "cognition_turn_deadline_exhausted"
+    assert error.value.stage == "cognition_core_v3"
+    assert error.value.safe_checkpoint == "pre_state_commit"
+    assert error.value.retryable is False

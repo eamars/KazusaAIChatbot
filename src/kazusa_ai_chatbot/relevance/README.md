@@ -13,6 +13,7 @@
 - Public entrypoint: `kazusa_ai_chatbot.relevance`
 - Primary implementation files:
   - `participation_evidence.py`
+  - `contracts.py`
   - `frontline_relevance_agent.py`
   - `persona_relevance_agent.py`
 
@@ -84,14 +85,28 @@ Runtime callers import the public functions and validation types from
 
 - `frontline_relevance_agent(state)` consumes the bounded current-message,
   scope, active-character, open-turn, eligible-prelude, and recent-continuity
-  projection and returns a validated `FrontlineDecision`.
+  projection and returns a `RelevanceEvaluationEnvelope` whose nested
+  `decision` is a validated `FrontlineDecision` and whose
+  `attempt_diagnostics` list contains no row for a normal/T1 result or one
+  fixed row for a deterministic/T3 degradation.
 - `relevance_agent(state)` consumes the bounded settled-turn projection and
-  returns a validated settled decision plus the downstream
-  `should_respond` compatibility field.
+  returns the same exact two-key `RelevanceEvaluationEnvelope`, with a nested
+  validated `SettledRelevanceDecision` and bounded diagnostic metadata.
 - `validate_frontline_decision(...)` and
   `validate_settled_relevance_decision(...)` enforce closed semantic actions,
   bounded free-form fields, start-only prelude promotion, and the complete-phase
   no-`wait` rule.
+
+`FrontlineDecision`, `SettledRelevanceDecision`, and
+`RelevanceEvaluationEnvelope` are defined once in `relevance/contracts.py` and
+re-exported by this package. The envelope is the only metadata carrier:
+callers validate and consume `envelope["decision"]`, while
+`brain_service.turn_settlement` owns the ordered diagnostic lifecycle and
+`service` receives only the claimable `SettlementOutcome.attempt_diagnostics`
+handoff. No diagnostic row is emitted for T1 normalization; only a bounded
+deterministic T3 relevance degradation contributes one row. A discarded turn
+has no settled episode carrier, although its protected model trace remains
+authoritative.
 
 The frontline handler additionally validates append and prelude references
 against the exact candidate slots present after prompt-cap fitting. This is
@@ -107,7 +122,8 @@ evidence cannot terminate the pipeline. The resulting assessment is retained
 only in protected trace diagnostics and is stripped before returning the
 unchanged public decisions.
 
-The public facade exposes contract helpers and decision types. Prompt
+The public facade exposes contract helpers, canonical decision types, and the
+evaluation envelope type. Prompt
 constants, LLM instances, route configs, projections, trace details, and other
 implementation state remain private to the two agent modules.
 

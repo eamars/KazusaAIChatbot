@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
-from kazusa_ai_chatbot.relevance.frontline_relevance_agent import (
+from kazusa_ai_chatbot.relevance.contracts import (
     FrontlineDecision,
+    RelevanceEvaluationEnvelope,
+    SettledRelevanceDecision,
+)
+from kazusa_ai_chatbot.relevance.frontline_relevance_agent import (
     FrontlineState,
     build_frontline_messages,
     frontline_relevance_agent,
@@ -12,7 +16,6 @@ from kazusa_ai_chatbot.relevance.frontline_relevance_agent import (
 from kazusa_ai_chatbot.relevance.persona_relevance_agent import (
     SETTLED_RELEVANCE_MAX_COMPLETION_TOKENS,
     SETTLED_RELEVANCE_MAX_INPUT_CHARS,
-    SettledRelevanceDecision,
     SettledRelevanceContractError,
     SettledRelevanceState,
     build_group_attention_context,
@@ -21,9 +24,9 @@ from kazusa_ai_chatbot.relevance.persona_relevance_agent import (
     validate_settled_relevance_decision,
 )
 
-
 __all__ = [
     "FrontlineDecision",
+    "RelevanceEvaluationEnvelope",
     "FrontlineState",
     "SETTLED_RELEVANCE_MAX_COMPLETION_TOKENS",
     "SETTLED_RELEVANCE_MAX_INPUT_CHARS",
