@@ -676,6 +676,22 @@ in upstream prompts, schemas, or caller contracts.
 
 ## Evolution Paths
 
+## Resolution thread metadata
+
+Collection `resolution_threads` is owned by
+`kazusa_ai_chatbot.db.resolution_threads`. Raw Mongo selectors, update
+pipelines, indexes, semantic-operation admission, document revision CAS, and
+monotonic lease epochs remain in that module. The resolver controller consumes
+only its named public helpers.
+
+Documents carry strict thread, ordered segment, semantic operation,
+activation, lease, and DSH store-epoch metadata. An operation id is idempotent
+only with the same payload digest. Every live mutation checks activation id and
+lease epoch; expired takeover increments the epoch. DSH session events and
+receipts remain in the sidecar SQLite store and never enter Mongo. Retention
+may remove terminal thread metadata only after its continuation window and
+audit requirements expire.
+
 Adding a new database operation requires one of these paths:
 
 1. Add or extend a named helper in the appropriate `db` submodule and re-export

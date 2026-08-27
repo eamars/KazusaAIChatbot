@@ -101,45 +101,21 @@ def test_manifest_contains_agentic_resolver_owner_rows() -> None:
     }
     required_rows = {
         "src/agentic_resolver/__init__.py":
-            "tests/test_agentic_resolver_contracts.py::test_public_api_exposes_standalone_runtime_only",
+            "tests/test_agentic_resolver_decommission.py::test_old_resolver_contracts_facades_and_aliases_are_absent",
         "src/agentic_resolver/contracts.py":
-            "tests/test_agentic_resolver_contracts.py::test_request_and_result_contracts_are_strict_json_objects",
-        "src/agentic_resolver/json_protocol.py":
-            "tests/test_agentic_resolver_json_protocol.py::test_every_model_message_serializes_to_one_json_object",
-        "src/agentic_resolver/model.py":
-            "tests/test_agentic_resolver_contracts.py::test_agentic_model_client_requires_native_tool_chunk_stream",
-        "src/agentic_resolver/streaming.py":
-            "tests/test_agentic_resolver_streaming.py::test_stream_assembler_never_exposes_partial_tool_call",
-        "src/agentic_resolver/session.py":
-            "tests/test_agentic_resolver_session.py::test_compaction_preserves_reasoning_tool_call_and_result_atomically",
-        "src/agentic_resolver/context_budget.py":
-            "tests/test_agentic_resolver_context_budget.py::test_context_cap_returns_budget_exhausted_without_over_limit_model_call",
-        "src/agentic_resolver/tools.py":
-            "tests/test_agentic_resolver_tools.py::test_registry_validates_arguments_before_execution",
-        "src/agentic_resolver/skills.py":
-            "tests/test_agentic_resolver_skills.py::test_skill_frontmatter_uses_safe_yaml_loader",
-        "src/agentic_resolver/subagents.py":
-            "tests/test_agentic_resolver_subagents.py::test_child_registry_excludes_run_subagent",
-        "src/agentic_resolver/loop.py":
-            "tests/test_agentic_resolver_loop.py::test_loop_does_not_execute_interrupted_or_partial_tool_call",
+            "tests/test_agentic_resolver_contracts.py::test_public_contracts_expose_no_dsh_event_or_receipt_types",
         "src/agentic_resolver/runtime.py":
-            "tests/test_agentic_resolver_standalone.py::test_current_workflow_sources_do_not_import_agentic_resolver",
-        "src/agentic_resolver/integrations/__init__.py":
-            "tests/test_agentic_resolver_standalone.py::test_core_modules_keep_kazusa_imports_inside_integrations",
-        "src/agentic_resolver/integrations/llm_interface.py":
-            "tests/test_llm_interface_tool_stream.py::test_agentic_adapter_requires_supported_thinking_config",
-        "src/agentic_resolver/integrations/kazusa_tools.py":
-            "tests/test_agentic_resolver_kazusa_tools.py::test_kazusa_registry_exposes_four_existing_specialists",
+            "tests/test_agentic_resolver_runtime.py::test_resolve_preserves_standalone_entrypoint_and_returns_typed_exhaust",
         "src/kazusa_ai_chatbot/llm_interface/__init__.py":
-            "tests/test_llm_interface_tool_stream.py::test_native_tool_stream_contracts_are_public_exports",
+            "tests/test_agentic_resolver_decommission.py::test_old_native_tool_stream_surface_is_absent",
         "src/kazusa_ai_chatbot/llm_interface/contracts.py":
-            "tests/test_llm_interface_tool_stream.py::test_tool_stream_contracts_keep_reasoning_distinct_from_json_content",
+            "tests/test_agentic_resolver_decommission.py::test_old_native_tool_stream_surface_is_absent",
         "src/kazusa_ai_chatbot/llm_interface/interface.py":
-            "tests/test_llm_interface_tool_stream.py::test_astream_tools_preserves_reasoning_tool_arguments_and_usage",
+            "tests/test_agentic_resolver_decommission.py::test_old_native_tool_stream_surface_is_absent",
         "src/kazusa_ai_chatbot/llm_interface/providers/openai_compatible.py":
-            "tests/test_llm_interface_tool_stream.py::test_astream_tools_replays_tool_call_reasoning_and_drops_ignored_tool_free_reasoning",
+            "tests/test_llm_interface_openai_provider.py::test_provider_maps_config_to_chat_model_constructor",
         "src/kazusa_ai_chatbot/llm_interface/reload.py":
-            "tests/test_llm_interface_reload.py::test_astream_never_retries_after_first_emitted_chunk",
+            "tests/test_llm_interface_reload.py::test_async_unload_error_retries_same_call_once",
     }
 
     for source, node in required_rows.items():

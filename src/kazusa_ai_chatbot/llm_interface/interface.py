@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import Sequence
 
 from langchain_core.messages import BaseMessage
 
@@ -10,9 +10,6 @@ from kazusa_ai_chatbot.llm_interface.contracts import (
     BackendDescriptor,
     LLMCallConfig,
     LLMResponse,
-    LLMStreamChunk,
-    LLMToolDefinition,
-    LLMToolHistoryMessage,
 )
 from kazusa_ai_chatbot.llm_interface.session import InterfaceSessionCache
 
@@ -62,28 +59,6 @@ class LLInterface:
             backend=backend,
         )
         return response
-
-    async def astream_tools(
-        self,
-        messages: Sequence[LLMToolHistoryMessage],
-        *,
-        tools: Sequence[LLMToolDefinition],
-        config: LLMCallConfig,
-    ) -> AsyncIterator[LLMStreamChunk]:
-        """Stream a configured native-tool assistant turn."""
-
-        backend = self.describe_backend(config=config)
-        provider = self._session_cache.provider_for(
-            config=config,
-            descriptor=backend,
-        )
-        async for chunk in provider.astream_tools(
-            messages,
-            tools=tools,
-            config=config,
-            backend=backend,
-        ):
-            yield chunk
 
     def describe_backend(
         self,

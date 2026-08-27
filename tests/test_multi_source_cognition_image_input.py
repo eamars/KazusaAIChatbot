@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -12,17 +10,16 @@ import pytest
 
 from kazusa_ai_chatbot import chat_input_queue as queue_module
 from kazusa_ai_chatbot import service as service_module
-from tests.cognition_test_helpers import (
-    canonical_episode_identity_snapshot,
-    canonical_service_character_profile,
-    canonical_user_message_episode,
-)
 from kazusa_ai_chatbot.consolidation.origin import (
     build_user_message_consolidation_origin,
 )
 from kazusa_ai_chatbot.relevance import relevance_agent
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
-
+from tests.cognition_test_helpers import (
+    canonical_episode_identity_snapshot,
+    canonical_service_character_profile,
+    canonical_user_message_episode,
+)
 
 _TURN_CLOCK = build_turn_clock("2026-05-10 09:30:00")
 
@@ -304,6 +301,10 @@ async def test_relevance_keeps_image_descriptor_out_of_user_input() -> None:
     """Relevance should not make descriptor text look user-authored."""
     response = _llm_response(
         '{"response_action": "proceed", "reason_to_respond": "direct", '
+        '"recipient_relation": "group", '
+        '"admission_basis": "interaction_relevance", '
+        '"interaction_evidence_refs": ["message_1"], '
+        '"character_state_refs": [], '
         '"use_reply_feature": false, "channel_topic": "", '
         '"indirect_speech_context": ""}'
     )
@@ -317,7 +318,7 @@ async def test_relevance_keeps_image_descriptor_out_of_user_input() -> None:
     _, human_message = llm.ainvoke.await_args.args[0]
     human_payload = json.loads(human_message.content)
 
-    assert result["user_input"] == "Does this support my plan?"
+    assert result["decision"]["response_action"] == "proceed"
     assert human_payload["assembled_turn"]["fragments"][0]["body_text"] == (
         "Does this support my plan?"
     )

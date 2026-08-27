@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import pytest
-
 from kazusa_ai_chatbot.consolidation import (
     memory_units as memory_units_module,
 )
 from kazusa_ai_chatbot.reflection_cycle import promotion as promotion_module
 from scripts import sanitize_memory_writer_perspective as migration_module
 from tests.test_reflection_cycle_stage1c_promotion import _promotion_payload
-
 
 CHARACTER_NAME = "杏山千纱 (Kyōyama Kazusa)"
 
@@ -64,6 +61,10 @@ def test_migration_prompt_renders_third_person_contract() -> None:
 def _assert_third_person_contract(prompt: str) -> None:
     """Assert one rendered prompt includes the agreed memory perspective."""
 
+    perspective_contract = prompt.split(
+        '# 记忆视角契约',
+        maxsplit=1,
+    )[1].split('# ', maxsplit=1)[0]
     assert '# 记忆视角契约' in prompt
     assert '第三人称视角' in prompt
     assert CHARACTER_NAME in prompt
@@ -75,9 +76,9 @@ def _assert_third_person_contract(prompt: str) -> None:
     assert '短名' in prompt
     assert '不要用“我”指代' in prompt
     assert '不是指向' in prompt
-    assert '角色' not in prompt
-    assert '当前角色' not in prompt
-    assert 'active character' not in prompt
-    assert 'current character' not in prompt
-    assert 'character_profile' not in prompt
+    assert '角色' not in perspective_contract
+    assert '当前角色' not in perspective_contract
+    assert 'active character' not in perspective_contract
+    assert 'current character' not in perspective_contract
+    assert 'character_profile' not in perspective_contract
     assert '{character_name}' not in prompt

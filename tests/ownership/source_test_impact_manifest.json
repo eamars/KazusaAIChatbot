@@ -17,7 +17,14 @@
     "src/kazusa_ai_chatbot/config.py",
     "src/agentic_resolver/__init__.py",
     "src/agentic_resolver",
-    "src/agentic_resolver/integrations/__init__.py",
+    "sidecars/dsh_resolution/src/contracts.ts",
+    "sidecars/dsh_resolution/src/evidence.ts",
+    "sidecars/dsh_resolution/src/main.ts",
+    "sidecars/dsh_resolution/src/operations.ts",
+    "sidecars/dsh_resolution/src/profile.ts",
+    "sidecars/dsh_resolution/src/rpc.ts",
+    "sidecars/dsh_resolution/src/runtime.ts",
+    "sidecars/dsh_resolution/src/submit_resolution.ts",
     "src/kazusa_ai_chatbot/llm_interface/__init__.py",
     "src/kazusa_ai_chatbot/llm_interface/contracts.py",
     "src/kazusa_ai_chatbot/llm_interface/interface.py",
@@ -39,6 +46,7 @@
     "src/kazusa_ai_chatbot/db/accepted_tasks.py",
     "src/kazusa_ai_chatbot/db/internal_monologue_residue.py",
     "src/kazusa_ai_chatbot/db/schemas.py",
+    "src/kazusa_ai_chatbot/db/resolution_threads.py",
     "src/kazusa_ai_chatbot/llm_tracing",
     "src/kazusa_ai_chatbot/llm_tracing/__init__.py",
     "src/kazusa_ai_chatbot/db/self_cognition.py",
@@ -489,11 +497,9 @@
     {
       "source": "src/kazusa_ai_chatbot/llm_interface/contracts.py",
       "owner": "LLM invocation contract owner",
-      "contract": "ordinary invocation plus additive provider-neutral native-tool history and chunk stream contracts",
+      "contract": "ordinary invocation contracts without resolver-only native-tool stream DTOs",
       "required_unit_tests": [
-        "tests/test_llm_interface_tool_stream.py::test_tool_stream_contracts_keep_reasoning_distinct_from_json_content",
-        "tests/test_llm_interface_tool_stream.py::test_tool_call_deltas_are_indexed_and_arguments_remain_raw_until_assembly",
-        "tests/test_llm_interface_tool_stream.py::test_existing_ainvoke_contract_remains_unchanged",
+        "tests/test_agentic_resolver_decommission.py::test_old_native_tool_stream_surface_is_absent",
         "tests/test_llm_interface_contracts.py::test_call_config_declares_context_window_without_transporting_it"
       ],
       "supplemental_tests": [
@@ -1605,201 +1611,94 @@
     },
     {
       "source": "src/agentic_resolver/__init__.py",
-      "owner": "standalone agentic resolver package owner",
-      "contract": "minimal direct-call public facade without workflow exports",
+      "owner": "standalone DSH resolver package owner",
+      "contract": "canonical standalone runtime facade without compatibility exports",
       "required_unit_tests": [
-        "tests/test_agentic_resolver_contracts.py::test_public_api_exposes_standalone_runtime_only"
+        "tests/test_agentic_resolver_decommission.py::test_old_resolver_contracts_facades_and_aliases_are_absent"
       ],
       "supplemental_tests": []
     },
     {
       "source": "src/agentic_resolver/contracts.py",
-      "owner": "standalone agentic resolver contract owner",
-      "contract": "strict request result limits evidence and subagent contracts",
+      "owner": "standalone DSH resolver contract owner",
+      "contract": "strict versioned intake exhaust thread segment operation and fence DTOs",
       "required_unit_tests": [
-        "tests/test_agentic_resolver_contracts.py::test_request_and_result_contracts_are_strict_json_objects",
-        "tests/test_agentic_resolver_contracts.py::test_submit_result_rejects_unknown_status_and_missing_fields",
-        "tests/test_agentic_resolver_contracts.py::test_subagent_result_requires_parent_observation_and_private_child_evidence"
+        "tests/test_agentic_resolver_contracts.py::test_intake_v1_rejects_unknown_fields_and_keeps_runtime_out_of_model_input",
+        "tests/test_agentic_resolver_contracts.py::test_public_contracts_expose_no_dsh_event_or_receipt_types"
       ],
       "supplemental_tests": []
     },
     {
-      "source": "src/agentic_resolver/json_protocol.py",
-      "owner": "standalone agentic resolver JSON protocol owner",
-      "contract": "canonical object-rooted semantic messages without XML or prose control frames",
+      "source": "src/agentic_resolver/errors.py",
+      "owner": "standalone DSH resolver error owner",
+      "contract": "closed contract operation fence persistence transport and runtime fault codes",
       "required_unit_tests": [
-        "tests/test_agentic_resolver_json_protocol.py::test_every_model_message_serializes_to_one_json_object",
-        "tests/test_agentic_resolver_json_protocol.py::test_model_protocol_contains_no_xml_catalog_or_freeform_envelopes",
-        "tests/test_agentic_resolver_json_protocol.py::test_contract_error_and_compaction_messages_are_json",
-        "tests/test_agentic_resolver_json_protocol.py::test_subagent_result_protocol_exposes_parent_observation_scope"
+        "tests/test_agentic_resolver_contracts.py::test_typed_operation_fence_and_runtime_fault_codes_are_closed"
       ],
       "supplemental_tests": []
     },
     {
-      "source": "src/agentic_resolver/model.py",
-      "owner": "standalone agentic resolver model seam owner",
-      "contract": "provider-neutral thinking-enabled indexed native-tool stream",
+      "source": "src/agentic_resolver/fingerprints.py",
+      "owner": "standalone DSH resolver identity owner",
+      "contract": "canonical authority and semantic operation payload fingerprints",
       "required_unit_tests": [
-        "tests/test_agentic_resolver_contracts.py::test_agentic_model_client_requires_native_tool_chunk_stream",
-        "tests/test_agentic_resolver_contracts.py::test_agentic_model_client_requires_enabled_thinking_capabilities"
+        "tests/test_agentic_resolver_fingerprints.py::test_operation_payload_digest_is_canonical_and_excludes_transport_fields"
       ],
       "supplemental_tests": []
     },
     {
-      "source": "src/agentic_resolver/streaming.py",
-      "owner": "standalone agentic resolver stream assembly owner",
-      "contract": "complete indexed turn assembly before native tool exposure",
+      "source": "src/agentic_resolver/persistence.py",
+      "owner": "standalone DSH resolver repository owner",
+      "contract": "controller repository protocol and public Mongo helper adapter",
       "required_unit_tests": [
-        "tests/test_agentic_resolver_streaming.py::test_stream_assembler_reconstructs_reasoning_text_and_one_tool_call",
-        "tests/test_agentic_resolver_streaming.py::test_stream_assembler_rejects_malformed_block_order",
-        "tests/test_agentic_resolver_streaming.py::test_stream_assembler_never_exposes_partial_tool_call"
+        "tests/test_agentic_resolver_persistence.py::test_operation_admission_is_idempotent_only_for_matching_digest"
       ],
       "supplemental_tests": []
     },
     {
-      "source": "src/agentic_resolver/session.py",
-      "owner": "standalone agentic resolver session owner",
-      "contract": "append-only thought-text-free metadata and reasoning-aware provider history",
+      "source": "src/agentic_resolver/rpc.py",
+      "owner": "standalone DSH resolver transport owner",
+      "contract": "authenticated loopback JSON-RPC and ambiguous outcome reconciliation",
       "required_unit_tests": [
-        "tests/test_agentic_resolver_session.py::test_session_log_records_chunks_and_reconstructs_assistant_history",
-        "tests/test_agentic_resolver_session.py::test_compaction_preserves_reasoning_tool_call_and_result_atomically"
+        "tests/test_agentic_resolver_rpc.py::test_disconnect_after_terminal_commit_reconciles_exact_exhaust_without_model_call"
       ],
       "supplemental_tests": []
     },
     {
-      "source": "src/agentic_resolver/context_budget.py",
-      "owner": "standalone agentic resolver context budget owner",
-      "contract": "fixed ceiling reserve reasoning accounting and atomic compaction",
+      "source": "src/agentic_resolver/controller.py",
+      "owner": "standalone DSH resolver lifecycle owner",
+      "contract": "thread segment operation lease and activation orchestration",
       "required_unit_tests": [
-        "tests/test_agentic_resolver_context_budget.py::test_context_meter_counts_system_catalog_tools_history_and_reserved_completion",
-        "tests/test_agentic_resolver_context_budget.py::test_context_meter_counts_retained_reasoning_and_provider_replay_once",
-        "tests/test_agentic_resolver_context_budget.py::test_context_meter_compacts_old_tool_results_before_hard_stop",
-        "tests/test_agentic_resolver_context_budget.py::test_context_cap_returns_budget_exhausted_without_over_limit_model_call"
+        "tests/test_agentic_resolver_controller.py::test_stale_activation_or_lease_epoch_rejects_every_live_control"
       ],
       "supplemental_tests": []
-    },
-    {
-      "source": "src/agentic_resolver/tools.py",
-      "owner": "standalone agentic resolver tool registry owner",
-      "contract": "frozen schemas reserved names permissions execution bounds and sanitized failures",
-      "required_unit_tests": [
-        "tests/test_agentic_resolver_tools.py::test_registry_freezes_sorted_unique_json_schemas",
-        "tests/test_agentic_resolver_tools.py::test_core_model_definitions_use_grammar_safe_caps_and_strict_objects",
-        "tests/test_agentic_resolver_tools.py::test_submit_result_schema_places_observation_handles_only_in_evidence",
-        "tests/test_agentic_resolver_tools.py::test_registry_validates_arguments_before_execution",
-        "tests/test_agentic_resolver_tools.py::test_tool_exception_becomes_bounded_json_error"
-      ],
-      "supplemental_tests": []
-    },
-    {
-      "source": "src/agentic_resolver/skills.py",
-      "owner": "standalone agentic resolver skill catalog owner",
-      "contract": "safe contained one-level discovery immutable summaries and lazy Markdown loading",
-      "required_unit_tests": [
-        "tests/test_agentic_resolver_skills.py::test_startup_scan_discovers_one_level_skill_bundles",
-        "tests/test_agentic_resolver_skills.py::test_catalog_injection_is_json_name_description_only",
-        "tests/test_agentic_resolver_skills.py::test_skill_tool_loads_full_body_lazily",
-        "tests/test_agentic_resolver_skills.py::test_malformed_duplicate_or_oversized_skills_fail_startup",
-        "tests/test_agentic_resolver_skills.py::test_skill_discovery_rejects_symlink_escape",
-        "tests/test_agentic_resolver_skills.py::test_skill_frontmatter_uses_safe_yaml_loader"
-      ],
-      "supplemental_tests": []
-    },
-    {
-      "source": "src/agentic_resolver/subagents.py",
-      "owner": "standalone agentic resolver subagent owner",
-      "contract": "same-runtime isolated depth-one children with bounded typed projection",
-      "required_unit_tests": [
-        "tests/test_agentic_resolver_subagents.py::test_run_subagent_uses_same_runtime_with_isolated_session",
-        "tests/test_agentic_resolver_subagents.py::test_child_registry_excludes_run_subagent",
-        "tests/test_agentic_resolver_subagents.py::test_child_inherits_tools_skills_permissions_json_and_thinking_stream",
-        "tests/test_agentic_resolver_subagents.py::test_parent_receives_only_bounded_typed_child_result",
-        "tests/test_agentic_resolver_subagents.py::test_subagent_run_cap_fails_closed",
-        "tests/test_agentic_resolver_loop.py::test_parent_submits_evidence_using_parent_child_observation_projection"
-      ],
-      "supplemental_tests": [
-        "tests/test_agentic_resolver_live_llm.py::test_standalone_resolver_streams_thinking_tool_and_subagent_then_submits_json_result"
-      ]
-    },
-    {
-      "source": "src/agentic_resolver/loop.py",
-      "owner": "standalone agentic resolver serialized loop owner",
-      "contract": "complete-stream one-call steps bounded replacement and submit-result terminalization",
-      "required_unit_tests": [
-        "tests/test_agentic_resolver_loop.py::test_loop_consumes_stream_before_executing_one_complete_native_tool_call",
-        "tests/test_agentic_resolver_loop.py::test_loop_does_not_execute_interrupted_or_partial_tool_call",
-        "tests/test_agentic_resolver_loop.py::test_loop_rejects_zero_or_multiple_tool_calls_with_bounded_json_feedback",
-        "tests/test_agentic_resolver_loop.py::test_loop_stops_at_step_tool_and_contract_caps",
-        "tests/test_agentic_resolver_loop.py::test_parent_converges_multiple_subagent_results_into_terminal_result",
-        "tests/test_agentic_resolver_loop.py::test_parent_submits_evidence_using_parent_child_observation_projection",
-        "tests/test_agentic_resolver_loop.py::test_submit_result_replaces_misplaced_observation_handle"
-      ],
-      "supplemental_tests": [
-        "tests/test_agentic_resolver_live_llm.py::test_standalone_resolver_streams_thinking_tool_and_subagent_then_submits_json_result"
-      ]
     },
     {
       "source": "src/agentic_resolver/runtime.py",
-      "owner": "standalone agentic resolver runtime owner",
-      "contract": "explicit direct construction mandatory thinking deadline and isolated root lifecycle",
+      "owner": "standalone DSH resolver runtime owner",
+      "contract": "preserved standalone resolve entry point delegated to the controller",
       "required_unit_tests": [
-        "tests/test_agentic_resolver_standalone.py::test_runtime_resolves_without_brain_service_or_cognition_imports",
-        "tests/test_agentic_resolver_standalone.py::test_runtime_factory_requires_explicit_model_tools_and_skill_roots",
-        "tests/test_agentic_resolver_standalone.py::test_runtime_rejects_disabled_or_unsupported_thinking",
-        "tests/test_agentic_resolver_standalone.py::test_current_workflow_sources_do_not_import_agentic_resolver"
+        "tests/test_agentic_resolver_runtime.py::test_resolve_preserves_standalone_entrypoint_and_returns_typed_exhaust"
       ],
       "supplemental_tests": [
-        "tests/test_agentic_resolver_live_llm.py::test_standalone_resolver_streams_thinking_tool_and_subagent_then_submits_json_result"
+        "tests/test_agentic_resolver_live_llm.py::test_live_standalone_sidecar_resolution_reaches_submit_resolution"
       ]
     },
     {
-      "source": "src/agentic_resolver/integrations/__init__.py",
-      "owner": "standalone agentic resolver integration facade owner",
-      "contract": "explicit downward-only optional Kazusa composition exports",
-      "required_unit_tests": [
-        "tests/test_agentic_resolver_standalone.py::test_core_modules_keep_kazusa_imports_inside_integrations"
-      ],
-      "supplemental_tests": []
-    },
-    {
-      "source": "src/agentic_resolver/integrations/llm_interface.py",
-      "owner": "standalone agentic resolver LLInterface adapter owner",
-      "contract": "mandatory-thinking mapping from shared normalized native-tool stream",
-      "required_unit_tests": [
-        "tests/test_llm_interface_tool_stream.py::test_agentic_adapter_maps_reasoning_and_tool_chunks_without_provider_objects",
-        "tests/test_llm_interface_tool_stream.py::test_agentic_adapter_preserves_reasoning_as_typed_assistant_history",
-        "tests/test_llm_interface_tool_stream.py::test_agentic_adapter_requires_supported_thinking_config"
-      ],
-      "supplemental_tests": []
-    },
-    {
-      "source": "src/agentic_resolver/integrations/kazusa_tools.py",
-      "owner": "standalone agentic resolver Kazusa capability adapter owner",
-      "contract": "exact four retained task-specialist handler boundaries",
-      "required_unit_tests": [
-        "tests/test_agentic_resolver_kazusa_tools.py::test_kazusa_registry_exposes_four_existing_specialists",
-        "tests/test_agentic_resolver_kazusa_tools.py::test_kazusa_adapters_call_existing_handlers_without_modifying_contracts",
-        "tests/test_agentic_resolver_kazusa_tools.py::test_public_research_tool_retains_existing_web_agent_ownership",
-        "tests/test_agentic_resolver_kazusa_tools.py::test_coding_tool_retains_existing_approval_lifecycle"
-      ],
-      "supplemental_tests": []
-    },
-    {
       "source": "src/kazusa_ai_chatbot/llm_interface/__init__.py",
-      "owner": "LLM interface native-tool public facade owner",
-      "contract": "additive public history and native-tool stream exports",
+      "owner": "ordinary LLM interface public facade owner",
+      "contract": "ordinary invocation contracts without resolver-only stream exports",
       "required_unit_tests": [
-        "tests/test_llm_interface_tool_stream.py::test_native_tool_stream_contracts_are_public_exports"
+        "tests/test_agentic_resolver_decommission.py::test_old_native_tool_stream_surface_is_absent"
       ],
       "supplemental_tests": []
     },
     {
       "source": "src/kazusa_ai_chatbot/llm_interface/interface.py",
-      "owner": "LLM interface native-tool dispatch owner",
-      "contract": "additive explicit-config astream_tools dispatch with ordinary invocation preservation",
+      "owner": "ordinary LLM interface dispatch owner",
+      "contract": "ordinary explicit-config invocation without resolver-only streaming",
       "required_unit_tests": [
-        "tests/test_llm_interface_tool_stream.py::test_astream_tools_preserves_reasoning_tool_arguments_and_usage",
-        "tests/test_llm_interface_tool_stream.py::test_existing_ainvoke_contract_remains_unchanged"
+        "tests/test_agentic_resolver_decommission.py::test_old_native_tool_stream_surface_is_absent"
       ],
       "supplemental_tests": [
         "tests/test_llm_interface_contracts.py::test_backend_descriptor_cache_is_per_interface_and_invalidated"
@@ -1807,35 +1706,105 @@
     },
     {
       "source": "src/kazusa_ai_chatbot/llm_interface/providers/openai_compatible.py",
-      "owner": "OpenAI-compatible thinking native-tool stream owner",
-      "contract": "native schema binding cache partition reasoning replay and normalized indexed stream",
+      "owner": "ordinary OpenAI-compatible provider owner",
+      "contract": "ordinary invocation thinking and JSON response behavior",
       "required_unit_tests": [
-        "tests/test_llm_interface_tool_stream.py::test_astream_tools_uses_distinct_tool_schema_cache_key",
-        "tests/test_llm_interface_tool_stream.py::test_astream_tools_requires_one_tool_call_and_disables_parallel_tool_calls",
-        "tests/test_llm_interface_tool_stream.py::test_qwen_tool_stream_requests_deepseek_reasoning_format",
-        "tests/test_llm_interface_tool_stream.py::test_chat_model_preserves_raw_reasoning_content_only",
-        "tests/test_llm_interface_tool_stream.py::test_qwen_tool_stream_does_not_append_legacy_thinking_prefill",
-        "tests/test_llm_interface_tool_stream.py::test_non_qwen_tool_stream_keeps_existing_thinking_payload",
-        "tests/test_llm_interface_tool_stream.py::test_astream_tools_replays_tool_call_reasoning_and_drops_ignored_tool_free_reasoning",
-        "tests/test_llm_interface_tool_stream.py::test_astream_tools_preserves_required_empty_reasoning_field_for_tool_call_turn",
-        "tests/test_llm_interface_tool_stream.py::test_astream_tools_does_not_set_json_response_format"
-      ],
-      "supplemental_tests": [
         "tests/test_llm_interface_openai_provider.py::test_provider_maps_config_to_chat_model_constructor",
         "tests/test_llm_interface_openai_provider.py::test_provider_retries_unsupported_json_object_with_json_schema"
-      ]
+      ],
+      "supplemental_tests": []
     },
     {
       "source": "src/kazusa_ai_chatbot/llm_interface/reload.py",
-      "owner": "LLM interface stream-safe reload owner",
-      "contract": "single confirmed-unload retry only before first emitted stream chunk",
+      "owner": "LLM interface reload owner",
+      "contract": "single confirmed-unload retry for ordinary invocation",
       "required_unit_tests": [
-        "tests/test_llm_interface_reload.py::test_astream_retries_confirmed_unload_before_first_chunk",
-        "tests/test_llm_interface_reload.py::test_astream_never_retries_after_first_emitted_chunk"
+        "tests/test_llm_interface_reload.py::test_async_unload_error_retries_same_call_once"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "src/kazusa_ai_chatbot/db/resolution_threads.py",
+      "owner": "resolution thread MongoDB owner",
+      "contract": "operation idempotency lease fencing rotation and cold resume helpers",
+      "required_unit_tests": [
+        "tests/test_agentic_resolver_persistence.py::test_thread_segment_operation_lease_epoch_and_store_epoch_round_trip"
       ],
       "supplemental_tests": [
-        "tests/test_llm_interface_reload.py::test_async_unload_error_retries_same_call_once"
+        "tests/test_agentic_resolver_live_db.py::test_resolution_thread_store_enforces_operation_idempotency_lease_fencing_rotation_and_cold_resume"
       ]
+    },
+    {
+      "source": "sidecars/dsh_resolution/src/main.ts",
+      "owner": "DSH sidecar process owner",
+      "contract": "loopback configuration process lifecycle and versioned storage",
+      "required_unit_tests": [
+        "tests/test_agentic_resolver_sidecar_process.py::test_sidecar_requires_loopback_auth_data_root_model_and_versioned_store_path"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "sidecars/dsh_resolution/src/contracts.ts",
+      "owner": "DSH sidecar contract owner",
+      "contract": "strict RPC intake exhaust fence and durable receipt validation",
+      "required_unit_tests": [
+        "tests/test_agentic_resolver_sidecar_process.py::test_missing_or_invalid_terminal_receipt_never_returns_terminal_exhaust"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "sidecars/dsh_resolution/src/rpc.ts",
+      "owner": "DSH sidecar transport owner",
+      "contract": "concurrent authenticated dispatch and semantic duplicate handling",
+      "required_unit_tests": [
+        "tests/test_agentic_resolver_rpc.py::test_same_operation_id_and_digest_reconciles_one_admission"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "sidecars/dsh_resolution/src/operations.ts",
+      "owner": "DSH sidecar operation owner",
+      "contract": "semantic operation admission inspection and committed disposition registry",
+      "required_unit_tests": [
+        "tests/test_agentic_resolver_rpc.py::test_operation_id_reuse_with_different_digest_fails_closed"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "sidecars/dsh_resolution/src/runtime.ts",
+      "owner": "DSH sidecar lifecycle owner",
+      "contract": "fenced agent activation control and versioned session lifecycle",
+      "required_unit_tests": [
+        "tests/test_agentic_resolver_sidecar_process.py::test_second_http_request_checkpoints_and_cancels_pending_execution"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "sidecars/dsh_resolution/src/profile.ts",
+      "owner": "DSH resolver profile owner",
+      "contract": "strict least-privilege resolver profile and dependency diagnostic",
+      "required_unit_tests": [
+        "tests/test_agentic_resolver_sidecar_process.py::test_sidecar_profile_factory_and_dependency_graph_fail_closed"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "sidecars/dsh_resolution/src/evidence.ts",
+      "owner": "DSH evidence receipt owner",
+      "contract": "bounded supported tool result metadata and evidence ledger rebuild",
+      "required_unit_tests": [
+        "tests/test_agentic_resolver_evidence.py::test_public_exhaust_preserves_validated_evidence_references_after_sidecar_restart"
+      ],
+      "supplemental_tests": []
+    },
+    {
+      "source": "sidecars/dsh_resolution/src/submit_resolution.ts",
+      "owner": "DSH terminal operation owner",
+      "contract": "durable terminal receipt commit ordering and exact replay",
+      "required_unit_tests": [
+        "tests/test_agentic_resolver_sidecar_process.py::test_kill_after_terminal_commit_before_http_response_replays_exact_exhaust"
+      ],
+      "supplemental_tests": []
     },
     {
       "source": "src/kazusa_ai_chatbot/cognition_shared/transition_guards.py",

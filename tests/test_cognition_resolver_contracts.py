@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from tests.cognition_test_helpers import canonical_user_message_episode
+from kazusa_ai_chatbot.cognition_episode import build_goal_continuation_ref
+from kazusa_ai_chatbot.cognition_resolver.capabilities import (
+    project_resolver_observation_for_cognition,
+)
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     MAX_RESOLVER_SUMMARY_CHARS,
     MAX_RESOLVER_TRACE_CHARS,
@@ -26,9 +29,6 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     validate_resolver_pending_resolution,
     validate_resolver_pending_resume,
 )
-from kazusa_ai_chatbot.cognition_resolver.capabilities import (
-    project_resolver_observation_for_cognition,
-)
 from kazusa_ai_chatbot.cognition_resolver.state import (
     MAX_PROJECTED_RESOLVER_OBSERVATIONS,
     append_cycle_trace,
@@ -39,6 +39,20 @@ from kazusa_ai_chatbot.cognition_resolver.state import (
     project_resolver_context,
 )
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
+from tests.cognition_test_helpers import canonical_user_message_episode
+
+
+def _goal_continuation_ref() -> dict:
+    return build_goal_continuation_ref(
+        source_episode_id="resolver-test-episode",
+        source_message_id="resolver-test-message",
+        branch_id="task_resolution",
+        goal_ref={
+            "scope": "user",
+            "kind": "goal",
+            "entity_id": "resolver-test-goal",
+        },
+    )
 
 
 def _capability_request() -> dict:
@@ -48,6 +62,7 @@ def _capability_request() -> dict:
         "objective": "Retrieve relationship evidence for the current question.",
         "reason": "The current cognition cycle lacks enough evidence.",
         "priority": "now",
+        "goal_continuation_ref": _goal_continuation_ref(),
     }
 
 
@@ -97,6 +112,7 @@ def _observation() -> dict:
             "state": "complete",
             "remaining_needs": [],
         },
+        "goal_continuation_ref": _goal_continuation_ref(),
         "created_at_utc": "2026-05-30T00:00:00+00:00",
     }
 

@@ -1,5 +1,23 @@
 # Kazusa AI Chatbot HOWTO
 
+## Run the standalone DSH resolution sidecar
+
+```powershell
+corepack pnpm@11.7.0 --dir sidecars/dsh_resolution install --frozen-lockfile
+corepack pnpm@11.7.0 --dir sidecars/dsh_resolution build
+$env:KAZUSA_DSH_SIDECAR_URL = "http://127.0.0.1:8791/rpc"
+$env:KAZUSA_DSH_RPC_TOKEN = "replace-with-an-opaque-token"
+$env:KAZUSA_DSH_DATA_ROOT = "C:\\kazusa-data"
+$env:KAZUSA_DSH_MODEL = "resolver-model"
+node sidecars/dsh_resolution/dist/src/main.js
+```
+
+Send authenticated JSON-RPC method `system.health` to `/rpc`. The response
+identifies profile `kazusa-resolver-v1`, DSH `0.1.1-rc.2`, and the versioned
+SQLite store. Ctrl+C stops only the sidecar. Python callers construct
+`AgenticResolverRuntime.from_environment()` and pass one strict
+`dsh_resolution_intake.v1` value to `resolve(...)`.
+
 This document keeps setup, operations, and test commands out of the project
 README while preserving the practical details needed to run the brain.
 

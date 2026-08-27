@@ -733,8 +733,8 @@ def test_response_content_provider_is_reply_content_fact_across_all_stages() -> 
         for field in hidden_fields
     )
     for stage in ("A1", "A2", "G", "P"):
-        orientation = packets[stage]["orientation"]
-        assert all(field not in orientation for field in hidden_fields)
+        rendered_packet = str(packets[stage])
+        assert all(field not in rendered_packet for field in hidden_fields)
         assert all(field not in packets[stage]["guidance"] for field in hidden_fields)
         assert all(
             field not in facade_module._STAGE_SYSTEM_PROMPTS[stage]
@@ -751,7 +751,7 @@ def test_a2_existential_drive_keeps_character_experience_distinct_from_user_stat
         "",
     ).strip()
 
-    required_invariants = ("existential_drive", "current_observation")
+    required_invariants = ("existential_drive", "独立当前事实")
     assert contract
     assert all(invariant in contract for invariant in required_invariants)
     assert A2_QUESTION_GUIDANCE.count(contract) == 1

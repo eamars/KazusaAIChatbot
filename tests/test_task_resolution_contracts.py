@@ -9,6 +9,11 @@ from typing import get_type_hints
 
 import pytest
 
+from tests.test_task_resolution_orchestrator import (
+    _goal_continuation_ref,
+    _scene_context,
+)
+
 
 PUBLIC_EXPORTS = (
     "TaskResolutionCheckpointV1",
@@ -41,7 +46,13 @@ def _evidence() -> dict[str, object]:
 def _result(*, status: str, evidence: list[dict[str, object]]) -> dict[str, object]:
     return {
         "schema_version": "task_resolution_result.v1",
+        "semantic_objective": "Resolve the user's bounded task.",
         "status": status,
+        "scene_context": _scene_context(),
+        "goal_continuation_ref": _goal_continuation_ref(),
+        "evidence_state": "partial",
+        "evidence_excerpts": [str(item["summary"]) for item in evidence],
+        "evidence_handles": [str(item["evidence_id"]) for item in evidence],
         "prompt_safe_summary": "One relevant fact was recovered.",
         "evidence": evidence,
         "completed_subgoals": [],

@@ -145,6 +145,7 @@ def _state() -> dict[str, Any]:
             "supervisor_trace": {"unknown_slots": [], "loop_count": 0},
         },
         "existing_dedup_keys": set(),
+        "enabled_consolidation_write_lanes": ["user_memory_units"],
         "decontextualized_input": "Internal thought about a missed promise.",
         "chat_history_recent": [],
         "consolidation_origin": _internal_thought_origin(),

@@ -7,7 +7,6 @@ from typing import Any
 import pytest
 
 from kazusa_ai_chatbot.local_context_resolver import (
-    LOCAL_CONTEXT_ARTIFACT_VERSION,
     LOCAL_CONTEXT_RESOLVER_CONTEXT_VERSION,
     LOCAL_CONTEXT_RESOLVER_OPTIONS_VERSION,
     LOCAL_CONTEXT_RESOLVER_REQUEST_VERSION,
@@ -25,9 +24,11 @@ from kazusa_ai_chatbot.local_context_resolver.cache import (
     build_active_node_cache_key,
     build_planner_cache_key,
 )
-from kazusa_ai_chatbot.rag.cache2_runtime import RAGCache2Runtime
 from kazusa_ai_chatbot.rag.cache2_events import CacheInvalidationEvent
-from kazusa_ai_chatbot.rag.cache2_runtime import dependency_matches_event
+from kazusa_ai_chatbot.rag.cache2_runtime import (
+    RAGCache2Runtime,
+    dependency_matches_event,
+)
 
 
 class _StageInvoker:
@@ -37,7 +38,11 @@ class _StageInvoker:
         self._responses = list(responses)
         self.calls: list[dict[str, object]] = []
 
-    async def __call__(self, payload: dict[str, object]) -> dict[str, object]:
+    async def __call__(
+        self,
+        payload: dict[str, object],
+        **_kwargs: object,
+    ) -> dict[str, object]:
         self.calls.append(payload)
         if not self._responses:
             raise AssertionError("unexpected stage invocation")
@@ -250,6 +255,14 @@ def _context() -> dict[str, Any]:
         "platform_channel_id": "group-1",
         "global_user_id": "user-1",
         "user_name": "operator",
+        "scene_context": {
+            "channel_scope": "group",
+            "character_role": "active participant",
+            "semantic_scene": "The operator asks about a local command.",
+            "public_group_scene": "A bounded group command discussion.",
+            "conversation_continuity": "The command question is current.",
+            "semantic_temporal_context": "Current local conversation.",
+        },
         "local_time_context": {"local_date": "2026-07-04"},
         "prompt_message_context": {
             "message_text": "@active character #napcat",
@@ -305,10 +318,8 @@ def _node_response() -> dict[str, object]:
             "evidence_boundary_notes": [],
         },
         "artifacts": [{
-            "schema_version": LOCAL_CONTEXT_ARTIFACT_VERSION,
             "artifact_id": "artifact_1",
             "artifact_type": "memory_ref",
-            "producer_node_id": "active_node",
             "summary": "#napcat is a playful local command anchor.",
             "projection_payload": {
                 "memory_evidence": [{
@@ -317,7 +328,6 @@ def _node_response() -> dict[str, object]:
                 }],
             },
             "source_policy": "shared_memory",
-            "prompt_visible": True,
         }],
     }
     return response

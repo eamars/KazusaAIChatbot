@@ -116,6 +116,8 @@ def test_canonical_self_cognition_readme_documents_outcome_dimensions() -> None:
         "atomic source-window reservation",
     ):
         assert phrase in content
-    assert "canonical speak capability remains excluded" in _read_text(
-        _COGNITION_README
-    )
+    cognition_content = _read_text(_COGNITION_README)
+    assert (
+        "response mechanics cannot become semantic evidence or an "
+        "orientation field"
+    ) in cognition_content

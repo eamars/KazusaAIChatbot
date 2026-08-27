@@ -1,677 +1,788 @@
-"""Strict public and internal contracts for the agentic resolver."""
+"""Strict versioned Kazusa DTOs for the standalone DSH sidecar."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
-from typing import Literal
+from dataclasses import dataclass
+from typing import Any, ClassVar
 
-REQUEST_SCHEMA_VERSION = "agentic_resolver_request.v1"
-RESULT_SCHEMA_VERSION = "agentic_resolver_result.v1"
-SUBAGENT_RESULT_SCHEMA_VERSION = "agentic_resolver_subagent_result.v1"
+from agentic_resolver.errors import ResolverContractError, RuntimeFaultCode
 
-PROJECT_CONTEXT_TOKEN_CAP = 50_000
-COMPLETION_RESERVE_TOKEN_CAP = 8_000
-MODEL_STEP_HARD_CAP = 16
-TOOL_CALL_HARD_CAP = 12
-STRUCTURAL_REPLACEMENT_CAP = 2
-ROOT_SUBAGENT_RUN_CAP = 3
-MODEL_VISIBLE_RESULT_CHAR_CAP = 8_000
-SKILL_COUNT_CAP = 64
-SKILL_DESCRIPTION_CHAR_CAP = 500
-SKILL_BODY_CHAR_CAP = 16_000
-SESSION_TIMEOUT_HARD_CAP_SECONDS = 600.0
-TOOL_TIMEOUT_HARD_CAP_SECONDS = 180.0
+RPC_PROTOCOL_VERSION = "kazusa.dsh-resolution-rpc.v1"
+INTAKE_SCHEMA_VERSION = "dsh_resolution_intake.v1"
+THREAD_SCHEMA_VERSION = "resolution_thread_store.v1"
+SEGMENT_SCHEMA_VERSION = "resolver_session_segment.v1"
+PROFILE_VERSION = "kazusa-resolver-v1"
+DSH_RELEASE = "0.1.1-rc.2"
+SESSION_STORE_EPOCH = "dsh-sqlite-0.1.1-rc.2-v1"
 
-MAX_CONTEXT_ITEMS = 32
-MAX_CONTEXT_TEXT_CHARS = 2_000
-MAX_SUMMARY_CHARS = 4_000
-MAX_RESULT_ITEMS = 16
-MAX_SUBAGENT_DESCRIPTION_CHARS = 200
-MAX_SUBAGENT_OBJECTIVE_CHARS = 4_000
 
-ResolverStatus = Literal[
-    "resolved",
-    "partial",
-    "needs_user_input",
-    "approval_required",
-    "unavailable",
-    "budget_exhausted",
-    "failed",
-]
-RESOLVER_STATUSES = frozenset({
-    "resolved",
-    "partial",
-    "needs_user_input",
-    "approval_required",
-    "unavailable",
-    "budget_exhausted",
-    "failed",
-})
-
-
-class AgenticResolverContractError(ValueError):
-    """Identify a strict resolver contract violation with a stable code."""
-
-    def __init__(self, message: str, *, code: str = "invalid_contract") -> None:
-        super().__init__(message)
-        self.code = code
-
-
-@dataclass(frozen=True)
-class AgenticResolverContextV1:
-    """Prompt-safe context supplied with one semantic objective."""
-
-    facts: tuple[str, ...] = ()
-    constraints: tuple[str, ...] = ()
-    desired_output: str = ""
-
-    @classmethod
-    def from_mapping(cls, value: object) -> AgenticResolverContextV1:
-        """Validate an exact JSON context object.
-
-        Args:
-            value: Candidate caller-authored prompt-safe context.
-
-        Returns:
-            An immutable context with bounded strings and arrays.
-        """
-
-        data = _exact_mapping(
-            value,
-            {"facts", "constraints", "desired_output"},
-            "context",
-        )
-        context = cls(
-            facts=_text_tuple(
-                data["facts"],
-                "context.facts",
-                maximum_items=MAX_CONTEXT_ITEMS,
-                maximum_chars=MAX_CONTEXT_TEXT_CHARS,
-            ),
-            constraints=_text_tuple(
-                data["constraints"],
-                "context.constraints",
-                maximum_items=MAX_CONTEXT_ITEMS,
-                maximum_chars=MAX_CONTEXT_TEXT_CHARS,
-            ),
-            desired_output=_text(
-                data["desired_output"],
-                "context.desired_output",
-                maximum=MAX_CONTEXT_TEXT_CHARS,
-                allow_empty=True,
-            ),
-        )
-        return context
-
-    def to_dict(self) -> dict[str, object]:
-        """Return the JSON object used by the task protocol."""
-
-        value = {
-            "facts": list(self.facts),
-            "constraints": list(self.constraints),
-            "desired_output": self.desired_output,
-        }
-        return value
-
-
-@dataclass(frozen=True)
-class AgenticResolverRequestV1:
-    """One bounded semantic request accepted by the public runtime."""
-
-    objective: str
-    context: AgenticResolverContextV1 = field(
-        default_factory=AgenticResolverContextV1
-    )
-    schema_version: str = field(default=REQUEST_SCHEMA_VERSION, init=False)
-
-    def __post_init__(self) -> None:
-        bounded_objective = _text(
-            self.objective,
-            "objective",
-            maximum=MAX_SUBAGENT_OBJECTIVE_CHARS,
-        )
-        object.__setattr__(self, "objective", bounded_objective)
-        if not isinstance(self.context, AgenticResolverContextV1):
-            raise AgenticResolverContractError(
-                "context: expected AgenticResolverContextV1"
-            )
-
-    @classmethod
-    def from_mapping(cls, value: object) -> AgenticResolverRequestV1:
-        """Validate one exact public request JSON object."""
-
-        data = _exact_mapping(
-            value,
-            {"schema_version", "objective", "context"},
-            "agentic_resolver_request",
-        )
-        if data["schema_version"] != REQUEST_SCHEMA_VERSION:
-            raise AgenticResolverContractError(
-                f"schema_version: expected {REQUEST_SCHEMA_VERSION}"
-            )
-        context = AgenticResolverContextV1.from_mapping(data["context"])
-        request = cls(
-            objective=_text(
-                data["objective"],
-                "objective",
-                maximum=MAX_SUBAGENT_OBJECTIVE_CHARS,
-            ),
-            context=context,
-        )
-        return request
-
-    def to_dict(self) -> dict[str, object]:
-        """Return the exact public request JSON object."""
-
-        value = {
-            "schema_version": self.schema_version,
-            "objective": self.objective,
-            "context": self.context.to_dict(),
-        }
-        return value
-
-
-@dataclass(frozen=True)
-class AgenticResolverEvidenceV1:
-    """One terminal evidence claim bound to an accepted observation."""
-
-    observation_id: str
-    summary: str
-    provenance_refs: tuple[str, ...]
-    limitations: tuple[str, ...]
-
-    @classmethod
-    def from_mapping(cls, value: object) -> AgenticResolverEvidenceV1:
-        """Validate one exact terminal evidence JSON row."""
-
-        data = _exact_mapping(
-            value,
-            {
-                "observation_id",
-                "summary",
-                "provenance_refs",
-                "limitations",
-            },
-            "submit_result.evidence",
-        )
-        evidence = cls(
-            observation_id=_text(
-                data["observation_id"],
-                "evidence.observation_id",
-                maximum=200,
-            ),
-            summary=_text(
-                data["summary"],
-                "evidence.summary",
-                maximum=MAX_CONTEXT_TEXT_CHARS,
-            ),
-            provenance_refs=_text_tuple(
-                data["provenance_refs"],
-                "evidence.provenance_refs",
-                maximum_items=MAX_RESULT_ITEMS,
-                maximum_chars=MAX_CONTEXT_TEXT_CHARS,
-            ),
-            limitations=_text_tuple(
-                data["limitations"],
-                "evidence.limitations",
-                maximum_items=MAX_RESULT_ITEMS,
-                maximum_chars=MAX_CONTEXT_TEXT_CHARS,
-            ),
-        )
-        return evidence
-
-    def to_dict(self) -> dict[str, object]:
-        """Return the public evidence JSON projection."""
-
-        value = {
-            "observation_id": self.observation_id,
-            "summary": self.summary,
-            "provenance_refs": list(self.provenance_refs),
-            "limitations": list(self.limitations),
-        }
-        return value
-
-
-@dataclass(frozen=True)
-class SubmitResultV1:
-    """Model-authored semantic terminal fields for submit_result."""
-
-    status: ResolverStatus
-    summary: str
-    evidence: tuple[AgenticResolverEvidenceV1, ...]
-    completed_tasks: tuple[str, ...]
-    remaining_needs: tuple[str, ...]
-
-    @classmethod
-    def from_mapping(cls, value: object) -> SubmitResultV1:
-        """Validate terminal arguments without changing semantic channels."""
-
-        data = _exact_mapping(
-            value,
-            {
-                "status",
-                "summary",
-                "evidence",
-                "completed_tasks",
-                "remaining_needs",
-            },
-            "submit_result",
-        )
-        status = _text(data["status"], "submit_result.status", maximum=40)
-        if status not in RESOLVER_STATUSES:
-            raise AgenticResolverContractError(
-                "submit_result.status: unsupported value"
-            )
-        evidence_rows = _mapping_sequence(
-            data["evidence"],
-            "submit_result.evidence",
-            maximum=MAX_RESULT_ITEMS,
-        )
-        evidence = tuple(
-            AgenticResolverEvidenceV1.from_mapping(row)
-            for row in evidence_rows
-        )
-        completed_tasks = _text_tuple(
-            data["completed_tasks"],
-            "submit_result.completed_tasks",
-            maximum_items=MAX_RESULT_ITEMS,
-            maximum_chars=MAX_CONTEXT_TEXT_CHARS,
-        )
-        remaining_needs = _text_tuple(
-            data["remaining_needs"],
-            "submit_result.remaining_needs",
-            maximum_items=MAX_RESULT_ITEMS,
-            maximum_chars=MAX_CONTEXT_TEXT_CHARS,
-        )
-        if status == "resolved" and remaining_needs:
-            raise AgenticResolverContractError(
-                "submit_result: resolved cannot retain remaining_needs"
-            )
-        if status == "partial" and (not evidence or not remaining_needs):
-            raise AgenticResolverContractError(
-                "submit_result: partial requires evidence and remaining_needs"
-            )
-        result = cls(
-            status=status,
-            summary=_text(
-                data["summary"],
-                "submit_result.summary",
-                maximum=MAX_SUMMARY_CHARS,
-            ),
-            evidence=evidence,
-            completed_tasks=completed_tasks,
-            remaining_needs=remaining_needs,
-        )
-        return result
-
-
-@dataclass
-class AgenticResolverUsageV1:
-    """Code-owned counters and provider usage for one resolver session."""
-
-    model_steps: int = 0
-    tool_calls: int = 0
-    subagent_runs: int = 0
-    contract_errors: int = 0
-    compactions: int = 0
-    estimated_context_tokens_peak: int = 0
-    provider_usage: dict[str, int] = field(default_factory=dict)
-
-    def to_dict(self) -> dict[str, object]:
-        """Return the bounded public usage JSON object."""
-
-        value = {
-            "model_steps": self.model_steps,
-            "tool_calls": self.tool_calls,
-            "subagent_runs": self.subagent_runs,
-            "contract_errors": self.contract_errors,
-            "compactions": self.compactions,
-            "estimated_context_tokens_peak": (
-                self.estimated_context_tokens_peak
-            ),
-            "provider_usage": dict(self.provider_usage),
-        }
-        return value
-
-
-@dataclass(frozen=True)
-class AgenticResolverResultV1:
-    """Validated public terminal result returned by resolve."""
-
-    session_id: str
-    status: ResolverStatus
-    summary: str
-    evidence: tuple[AgenticResolverEvidenceV1, ...]
-    completed_tasks: tuple[str, ...]
-    remaining_needs: tuple[str, ...]
-    usage: AgenticResolverUsageV1
-    schema_version: str = field(default=RESULT_SCHEMA_VERSION, init=False)
-
-    def to_dict(self) -> dict[str, object]:
-        """Return the exact public terminal JSON projection."""
-
-        value = {
-            "schema_version": self.schema_version,
-            "session_id": self.session_id,
-            "status": self.status,
-            "summary": self.summary,
-            "evidence": [row.to_dict() for row in self.evidence],
-            "completed_tasks": list(self.completed_tasks),
-            "remaining_needs": list(self.remaining_needs),
-            "usage": self.usage.to_dict(),
-        }
-        return value
-
-
-@dataclass(frozen=True)
-class AgenticResolverSubagentTaskV1:
-    """Model-authored self-contained child task accepted by run_subagent."""
-
-    description: str
-    objective: str
-    context: AgenticResolverContextV1
-
-    @classmethod
-    def from_mapping(cls, value: object) -> AgenticResolverSubagentTaskV1:
-        """Validate one exact child task without inheriting parent history."""
-
-        data = _exact_mapping(
-            value,
-            {"description", "objective", "context"},
-            "run_subagent",
-        )
-        task = cls(
-            description=_text(
-                data["description"],
-                "run_subagent.description",
-                maximum=MAX_SUBAGENT_DESCRIPTION_CHARS,
-            ),
-            objective=_text(
-                data["objective"],
-                "run_subagent.objective",
-                maximum=MAX_SUBAGENT_OBJECTIVE_CHARS,
-            ),
-            context=AgenticResolverContextV1.from_mapping(data["context"]),
-        )
-        return task
-
-
-@dataclass(frozen=True)
-class AgenticResolverSubagentEvidenceV1:
-    """Child evidence details projected without a parent observation handle."""
-
-    summary: str
-    provenance_refs: tuple[str, ...]
-    limitations: tuple[str, ...]
-
-    @classmethod
-    def from_terminal_evidence(
-        cls,
-        evidence: AgenticResolverEvidenceV1,
-    ) -> AgenticResolverSubagentEvidenceV1:
-        """Project child terminal evidence while dropping its private ID."""
-
-        projected = cls(
-            summary=evidence.summary,
-            provenance_refs=evidence.provenance_refs,
-            limitations=evidence.limitations,
-        )
-        return projected
-
-    def to_dict(self) -> dict[str, object]:
-        """Return the parent-visible child evidence detail object."""
-
-        value = {
-            "summary": self.summary,
-            "provenance_refs": list(self.provenance_refs),
-            "limitations": list(self.limitations),
-        }
-        return value
-
-
-@dataclass(frozen=True)
-class AgenticResolverSubagentResultV1:
-    """Bounded typed child projection returned to the parent session."""
-
-    subagent_id: str
-    observation_id: str
-    description: str
-    status: ResolverStatus
-    summary: str
-    evidence: tuple[AgenticResolverSubagentEvidenceV1, ...]
-    remaining_needs: tuple[str, ...]
-    schema_version: str = field(
-        default=SUBAGENT_RESULT_SCHEMA_VERSION,
-        init=False,
-    )
-    message_type: str = field(default="subagent_result", init=False)
-
-    def to_dict(self) -> dict[str, object]:
-        """Return the parent-visible child result JSON object."""
-
-        value = {
-            "schema_version": self.schema_version,
-            "message_type": self.message_type,
-            "subagent_id": self.subagent_id,
-            "observation_id": self.observation_id,
-            "description": self.description,
-            "status": self.status,
-            "summary": self.summary,
-            "evidence": [row.to_dict() for row in self.evidence],
-            "remaining_needs": list(self.remaining_needs),
-        }
-        return value
-
-
-@dataclass(frozen=True)
-class AgenticResolverLimitsV1:
-    """Caller-lowerable resolver limits bounded by fixed project maxima."""
-
-    context_window_tokens: int = PROJECT_CONTEXT_TOKEN_CAP
-    completion_reserve_tokens: int = COMPLETION_RESERVE_TOKEN_CAP
-    max_model_steps: int = 8
-    max_tool_calls: int = 6
-    max_contract_replacements: int = STRUCTURAL_REPLACEMENT_CAP
-    max_subagent_runs: int = ROOT_SUBAGENT_RUN_CAP
-    max_tool_result_characters: int = MODEL_VISIBLE_RESULT_CHAR_CAP
-    max_subagent_result_characters: int = MODEL_VISIBLE_RESULT_CHAR_CAP
-    max_skills: int = SKILL_COUNT_CAP
-    max_skill_description_characters: int = SKILL_DESCRIPTION_CHAR_CAP
-    max_skill_body_characters: int = SKILL_BODY_CHAR_CAP
-    session_timeout_seconds: float = 300.0
-    tool_timeout_seconds: float = TOOL_TIMEOUT_HARD_CAP_SECONDS
-
-    def __post_init__(self) -> None:
-        _bounded_positive_int(
-            self.context_window_tokens,
-            "context_window_tokens",
-            PROJECT_CONTEXT_TOKEN_CAP,
-        )
-        _bounded_positive_int(
-            self.completion_reserve_tokens,
-            "completion_reserve_tokens",
-            COMPLETION_RESERVE_TOKEN_CAP,
-        )
-        if self.completion_reserve_tokens >= self.context_window_tokens:
-            raise AgenticResolverContractError(
-                "completion_reserve_tokens must be below context_window_tokens"
-            )
-        _bounded_positive_int(
-            self.max_model_steps,
-            "max_model_steps",
-            MODEL_STEP_HARD_CAP,
-        )
-        _bounded_positive_int(
-            self.max_tool_calls,
-            "max_tool_calls",
-            TOOL_CALL_HARD_CAP,
-        )
-        _bounded_positive_int(
-            self.max_contract_replacements,
-            "max_contract_replacements",
-            STRUCTURAL_REPLACEMENT_CAP,
-        )
-        _bounded_positive_int(
-            self.max_subagent_runs,
-            "max_subagent_runs",
-            ROOT_SUBAGENT_RUN_CAP,
-        )
-        _bounded_positive_int(
-            self.max_tool_result_characters,
-            "max_tool_result_characters",
-            MODEL_VISIBLE_RESULT_CHAR_CAP,
-        )
-        _bounded_positive_int(
-            self.max_subagent_result_characters,
-            "max_subagent_result_characters",
-            MODEL_VISIBLE_RESULT_CHAR_CAP,
-        )
-        _bounded_positive_int(self.max_skills, "max_skills", SKILL_COUNT_CAP)
-        _bounded_positive_int(
-            self.max_skill_description_characters,
-            "max_skill_description_characters",
-            SKILL_DESCRIPTION_CHAR_CAP,
-        )
-        _bounded_positive_int(
-            self.max_skill_body_characters,
-            "max_skill_body_characters",
-            SKILL_BODY_CHAR_CAP,
-        )
-        _bounded_positive_number(
-            self.session_timeout_seconds,
-            "session_timeout_seconds",
-            SESSION_TIMEOUT_HARD_CAP_SECONDS,
-        )
-        _bounded_positive_number(
-            self.tool_timeout_seconds,
-            "tool_timeout_seconds",
-            TOOL_TIMEOUT_HARD_CAP_SECONDS,
-        )
-
-    @property
-    def input_ceiling_tokens(self) -> int:
-        """Return the context capacity remaining after completion reserve."""
-
-        ceiling = self.context_window_tokens - self.completion_reserve_tokens
-        return ceiling
-
-
-def validated_request(value: object) -> AgenticResolverRequestV1:
-    """Return a validated public request from a typed or JSON value."""
-
-    if isinstance(value, AgenticResolverRequestV1):
-        return value
-    request = AgenticResolverRequestV1.from_mapping(value)
-    return request
-
-
-def _exact_mapping(
-    value: object,
-    expected_keys: set[str],
-    label: str,
-) -> Mapping[str, object]:
-    """Require one mapping with exactly the declared contract keys."""
-
+def _mapping(value: object, context: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
-        raise AgenticResolverContractError(f"{label}: expected object")
-    actual_keys = set(value)
-    if actual_keys != expected_keys:
-        missing = sorted(expected_keys - actual_keys)
-        unknown = sorted(actual_keys - expected_keys)
-        raise AgenticResolverContractError(
-            f"{label}: missing={missing} unknown={unknown}"
-        )
+        raise ResolverContractError(f"{context} must be an object")
+    if not all(isinstance(key, str) for key in value):
+        raise ResolverContractError(f"{context} keys must be strings")
     return value
 
 
-def _text(
-    value: object,
-    label: str,
-    *,
-    maximum: int,
-    allow_empty: bool = False,
-) -> str:
-    """Require one bounded string without silently truncating it."""
-
-    if not isinstance(value, str):
-        raise AgenticResolverContractError(f"{label}: expected string")
-    normalized = value.strip()
-    if not normalized and not allow_empty:
-        raise AgenticResolverContractError(f"{label}: expected non-empty string")
-    if len(normalized) > maximum:
-        raise AgenticResolverContractError(
-            f"{label}: exceeds {maximum} characters"
+def _strict(value: object, keys: set[str], context: str) -> Mapping[str, Any]:
+    result = _mapping(value, context)
+    unknown = set(result) - keys
+    missing = keys - set(result)
+    if unknown:
+        raise ResolverContractError(
+            f"{context} has unknown fields: {sorted(unknown)}"
         )
-    return normalized
-
-
-def _text_tuple(
-    value: object,
-    label: str,
-    *,
-    maximum_items: int,
-    maximum_chars: int,
-) -> tuple[str, ...]:
-    """Require one bounded sequence of non-empty strings."""
-
-    if (
-        not isinstance(value, Sequence)
-        or isinstance(value, (str, bytes, bytearray))
-    ):
-        raise AgenticResolverContractError(f"{label}: expected string list")
-    if len(value) > maximum_items:
-        raise AgenticResolverContractError(
-            f"{label}: exceeds {maximum_items} items"
+    if missing:
+        raise ResolverContractError(
+            f"{context} is missing fields: {sorted(missing)}"
         )
-    items = tuple(
-        _text(item, f"{label}[{index}]", maximum=maximum_chars)
-        for index, item in enumerate(value)
-    )
-    return items
+    return result
 
 
-def _mapping_sequence(
-    value: object,
-    label: str,
-    *,
-    maximum: int,
-) -> list[Mapping[str, object]]:
-    """Require one bounded list of mapping rows."""
+def _text(value: object, field: str, *, allow_empty: bool = False) -> str:
+    if not isinstance(value, str) or (not value and not allow_empty):
+        raise ResolverContractError(f"{field} must be a non-empty string")
+    return value
 
-    if not isinstance(value, list):
-        raise AgenticResolverContractError(f"{label}: expected list")
-    if len(value) > maximum:
-        raise AgenticResolverContractError(
-            f"{label}: exceeds {maximum} items"
+
+def _integer(value: object, field: str, minimum: int = 0) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+        raise ResolverContractError(f"{field} must be an integer >= {minimum}")
+    return value
+
+
+def _texts(value: object, field: str, *, maximum: int = 64) -> tuple[str, ...]:
+    if not isinstance(value, list) or len(value) > maximum:
+        raise ResolverContractError(f"{field} must be a bounded list")
+    result = tuple(_text(item, field) for item in value)
+    if len(result) != len(set(result)):
+        raise ResolverContractError(f"{field} must contain unique values")
+    return result
+
+
+def _optional_mapping(value: object, field: str) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    return dict(_mapping(value, field))
+
+
+@dataclass(frozen=True, slots=True)
+class DSHResolutionRuntimeV1:
+    """Deterministic operation authority excluded from model-visible input."""
+
+    PRIORITIES: ClassVar[frozenset[str]] = frozenset({"now", "background"})
+    request_id: str
+    operation_id: str
+    operation_payload_digest: str
+    resolution_thread_id: str
+    segment_id: str
+    priority: str
+    soft_deadline_at: str
+    hard_deadline_at: str
+    max_model_steps: int
+    max_tool_calls: int
+    max_tool_bytes: int
+    capability_token: str
+    scope_fingerprint: str
+    audience_fingerprint: str
+    resolver_profile_version: str
+    dsh_release: str
+    session_store_epoch: str
+    model_route: str
+    tool_catalog_digest: str
+    policy_epoch: str
+
+    @classmethod
+    def from_mapping(cls, value: object) -> DSHResolutionRuntimeV1:
+        keys = {
+            "request_id", "operation_id", "operation_payload_digest",
+            "resolution_thread_id", "segment_id", "priority",
+            "soft_deadline_at", "hard_deadline_at", "max_model_steps",
+            "max_tool_calls", "max_tool_bytes", "capability_token",
+            "scope_fingerprint", "audience_fingerprint",
+            "resolver_profile_version", "dsh_release", "session_store_epoch",
+            "model_route", "tool_catalog_digest", "policy_epoch",
+        }
+        data = _strict(value, keys, "runtime")
+        priority = _text(data["priority"], "runtime.priority")
+        if priority not in cls.PRIORITIES:
+            raise ResolverContractError("runtime.priority is unsupported")
+        profile = _text(
+            data["resolver_profile_version"], "runtime.resolver_profile_version"
         )
-    rows: list[Mapping[str, object]] = []
-    for index, item in enumerate(value):
-        if not isinstance(item, Mapping):
-            raise AgenticResolverContractError(
-                f"{label}[{index}]: expected object"
+        if profile != PROFILE_VERSION:
+            raise ResolverContractError("resolver_profile_version is unsupported")
+        release = _text(data["dsh_release"], "runtime.dsh_release")
+        if release != DSH_RELEASE:
+            raise ResolverContractError("dsh_release is unsupported")
+        store_epoch = _text(
+            data["session_store_epoch"], "runtime.session_store_epoch"
+        )
+        if store_epoch != SESSION_STORE_EPOCH:
+            raise ResolverContractError("session_store_epoch is unsupported")
+        return cls(
+            request_id=_text(data["request_id"], "runtime.request_id"),
+            operation_id=_text(data["operation_id"], "runtime.operation_id"),
+            operation_payload_digest=_text(
+                data["operation_payload_digest"],
+                "runtime.operation_payload_digest",
+            ),
+            resolution_thread_id=_text(
+                data["resolution_thread_id"], "runtime.resolution_thread_id"
+            ),
+            segment_id=_text(data["segment_id"], "runtime.segment_id"),
+            priority=priority,
+            soft_deadline_at=_text(
+                data["soft_deadline_at"], "runtime.soft_deadline_at"
+            ),
+            hard_deadline_at=_text(
+                data["hard_deadline_at"], "runtime.hard_deadline_at"
+            ),
+            max_model_steps=_integer(
+                data["max_model_steps"], "runtime.max_model_steps", 1
+            ),
+            max_tool_calls=_integer(
+                data["max_tool_calls"], "runtime.max_tool_calls", 1
+            ),
+            max_tool_bytes=_integer(
+                data["max_tool_bytes"], "runtime.max_tool_bytes", 1
+            ),
+            capability_token=_text(
+                data["capability_token"], "runtime.capability_token"
+            ),
+            scope_fingerprint=_text(
+                data["scope_fingerprint"], "runtime.scope_fingerprint"
+            ),
+            audience_fingerprint=_text(
+                data["audience_fingerprint"], "runtime.audience_fingerprint"
+            ),
+            resolver_profile_version=profile,
+            dsh_release=release,
+            session_store_epoch=store_epoch,
+            model_route=_text(data["model_route"], "runtime.model_route"),
+            tool_catalog_digest=_text(
+                data["tool_catalog_digest"], "runtime.tool_catalog_digest"
+            ),
+            policy_epoch=_text(data["policy_epoch"], "runtime.policy_epoch"),
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            field: getattr(self, field)
+            for field in self.__dataclass_fields__
+            if field != "PRIORITIES"
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class DSHResolutionModelInputV1:
+    """Bounded semantic material rendered into the DSH waking message."""
+
+    objective: str
+    constraints: tuple[str, ...]
+    success_criteria: tuple[str, ...]
+    known_facts: tuple[str, ...]
+    uncertainty: tuple[str, ...]
+    literal_inputs: tuple[str, ...]
+    continuation_delta: str | None
+    prior_resolution_refs: tuple[str, ...]
+    requested_evidence_quality: str
+    notes: tuple[str, ...]
+
+    @classmethod
+    def from_mapping(cls, value: object) -> DSHResolutionModelInputV1:
+        keys = {
+            "objective", "constraints", "success_criteria", "known_facts",
+            "uncertainty", "literal_inputs", "continuation_delta",
+            "prior_resolution_refs", "requested_evidence_quality", "notes",
+        }
+        data = _strict(value, keys, "model_input")
+        delta = data["continuation_delta"]
+        if delta is not None:
+            delta = _text(delta, "model_input.continuation_delta")
+        return cls(
+            objective=_text(data["objective"], "model_input.objective"),
+            constraints=_texts(data["constraints"], "model_input.constraints"),
+            success_criteria=_texts(
+                data["success_criteria"], "model_input.success_criteria"
+            ),
+            known_facts=_texts(data["known_facts"], "model_input.known_facts"),
+            uncertainty=_texts(data["uncertainty"], "model_input.uncertainty"),
+            literal_inputs=_texts(
+                data["literal_inputs"], "model_input.literal_inputs"
+            ),
+            continuation_delta=delta,
+            prior_resolution_refs=_texts(
+                data["prior_resolution_refs"],
+                "model_input.prior_resolution_refs",
+            ),
+            requested_evidence_quality=_text(
+                data["requested_evidence_quality"],
+                "model_input.requested_evidence_quality",
+            ),
+            notes=_texts(data["notes"], "model_input.notes"),
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "objective": self.objective,
+            "constraints": list(self.constraints),
+            "success_criteria": list(self.success_criteria),
+            "known_facts": list(self.known_facts),
+            "uncertainty": list(self.uncertainty),
+            "literal_inputs": list(self.literal_inputs),
+            "continuation_delta": self.continuation_delta,
+            "prior_resolution_refs": list(self.prior_resolution_refs),
+            "requested_evidence_quality": self.requested_evidence_quality,
+            "notes": list(self.notes),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class DSHResolutionIntakeV1:
+    """Canonical standalone sidecar intake."""
+
+    MODES: ClassVar[frozenset[str]] = frozenset({"start", "continue"})
+    schema_version: str
+    mode: str
+    runtime: DSHResolutionRuntimeV1
+    model_input: DSHResolutionModelInputV1
+
+    @classmethod
+    def from_mapping(cls, value: object) -> DSHResolutionIntakeV1:
+        data = _strict(
+            value,
+            {"schema_version", "mode", "runtime", "model_input"},
+            "intake",
+        )
+        version = _text(data["schema_version"], "intake.schema_version")
+        if version != INTAKE_SCHEMA_VERSION:
+            raise ResolverContractError("intake.schema_version is unsupported")
+        mode = _text(data["mode"], "intake.mode")
+        if mode not in cls.MODES:
+            raise ResolverContractError("intake.mode is unsupported")
+        return cls(
+            schema_version=version,
+            mode=mode,
+            runtime=DSHResolutionRuntimeV1.from_mapping(data["runtime"]),
+            model_input=DSHResolutionModelInputV1.from_mapping(
+                data["model_input"]
+            ),
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": self.schema_version,
+            "mode": self.mode,
+            "runtime": self.runtime.to_dict(),
+            "model_input": self.model_input.to_dict(),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class SubmitResolutionV1:
+    """Validated terminal semantic product returned by the terminal action."""
+
+    STATUSES: ClassVar[frozenset[str]] = frozenset({
+        "resolved", "partial", "needs_user_input", "approval_required",
+        "unavailable", "failed",
+    })
+    status: str
+    summary: str
+    findings: tuple[dict[str, Any], ...]
+    completed_subgoals: tuple[str, ...]
+    remaining_needs: tuple[str, ...]
+    clarification_request: dict[str, Any] | None
+    approval_request: dict[str, Any] | None
+    artifact_refs: tuple[str, ...]
+    warnings: tuple[str, ...]
+
+    @classmethod
+    def from_mapping(cls, value: object) -> SubmitResolutionV1:
+        keys = {
+            "status", "summary", "findings", "completed_subgoals",
+            "remaining_needs", "clarification_request", "approval_request",
+            "artifact_refs", "warnings",
+        }
+        data = _strict(value, keys, "submit_resolution")
+        status = _text(data["status"], "submit_resolution.status")
+        if status not in cls.STATUSES:
+            raise ResolverContractError("submit_resolution.status is unsupported")
+        findings_value = data["findings"]
+        if not isinstance(findings_value, list) or len(findings_value) > 64:
+            raise ResolverContractError(
+                "submit_resolution.findings must be a bounded list"
             )
-        rows.append(item)
-    return rows
+        findings = tuple(
+            dict(_mapping(item, "submit_resolution.findings item"))
+            for item in findings_value
+        )
+        clarification = _optional_mapping(
+            data["clarification_request"],
+            "submit_resolution.clarification_request",
+        )
+        approval = _optional_mapping(
+            data["approval_request"], "submit_resolution.approval_request"
+        )
+        if status == "needs_user_input" and clarification is None:
+            raise ResolverContractError(
+                "clarification_request is required for needs_user_input"
+            )
+        if status == "approval_required" and approval is None:
+            raise ResolverContractError(
+                "approval_request is required for approval_required"
+            )
+        if status != "needs_user_input" and clarification is not None:
+            raise ResolverContractError(
+                "clarification_request is status-specific"
+            )
+        if status != "approval_required" and approval is not None:
+            raise ResolverContractError("approval_request is status-specific")
+        return cls(
+            status=status,
+            summary=_text(data["summary"], "submit_resolution.summary"),
+            findings=findings,
+            completed_subgoals=_texts(
+                data["completed_subgoals"],
+                "submit_resolution.completed_subgoals",
+            ),
+            remaining_needs=_texts(
+                data["remaining_needs"], "submit_resolution.remaining_needs"
+            ),
+            clarification_request=clarification,
+            approval_request=approval,
+            artifact_refs=_texts(
+                data["artifact_refs"], "submit_resolution.artifact_refs"
+            ),
+            warnings=_texts(data["warnings"], "submit_resolution.warnings"),
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "status": self.status,
+            "summary": self.summary,
+            "findings": [dict(item) for item in self.findings],
+            "completed_subgoals": list(self.completed_subgoals),
+            "remaining_needs": list(self.remaining_needs),
+            "clarification_request": self.clarification_request,
+            "approval_request": self.approval_request,
+            "artifact_refs": list(self.artifact_refs),
+            "warnings": list(self.warnings),
+        }
 
 
-def _bounded_positive_int(value: int, label: str, maximum: int) -> None:
-    """Require a positive non-boolean integer within a hard maximum."""
+@dataclass(frozen=True, slots=True)
+class EvidenceReferenceV1:
+    """Bounded public evidence identity projected from sidecar validation."""
 
-    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-        raise AgenticResolverContractError(f"{label}: expected positive integer")
-    if value > maximum:
-        raise AgenticResolverContractError(f"{label}: exceeds hard maximum")
+    schema_version: str
+    evidence_id: str
+    resolution_thread_id: str
+    segment_id: str
+    scope_fingerprint: str
+    audience_fingerprint: str
+    policy_epoch: str
+    tool_name: str
+    source_kind: str
+    source_id: str
+    content_digest: str
+
+    @classmethod
+    def from_mapping(cls, value: object) -> EvidenceReferenceV1:
+        keys = {
+            "schema_version", "evidence_id", "resolution_thread_id",
+            "segment_id", "scope_fingerprint", "audience_fingerprint",
+            "policy_epoch", "tool_name", "source_kind", "source_id",
+            "content_digest",
+        }
+        data = _strict(value, keys, "evidence_reference")
+        version = _text(
+            data["schema_version"], "evidence_reference.schema_version"
+        )
+        if version != "evidence_reference.v1":
+            raise ResolverContractError(
+                "evidence_reference.schema_version is unsupported"
+            )
+        return cls(**{
+            key: _text(data[key], f"evidence_reference.{key}")
+            for key in keys
+        })
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            field: getattr(self, field)
+            for field in self.__dataclass_fields__
+        }
 
 
-def _bounded_positive_number(
-    value: float,
-    label: str,
-    maximum: float,
-) -> None:
-    """Require a positive timeout within its hard maximum."""
+@dataclass(frozen=True, slots=True)
+class DSHResolutionExhaustV1:
+    """Canonical terminal, checkpointed, or runtime-fault exhaust."""
 
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
-        raise AgenticResolverContractError(f"{label}: expected positive number")
-    if value > maximum:
-        raise AgenticResolverContractError(f"{label}: exceeds hard maximum")
+    KINDS: ClassVar[set[str]] = {
+        "terminal", "checkpointed", "runtime_fault"
+    }
+    kind: str
+    terminal: SubmitResolutionV1 | None = None
+    evidence: tuple[EvidenceReferenceV1, ...] = ()
+    identity: dict[str, Any] | None = None
+    usage: dict[str, Any] | None = None
+    last_committed_seq: int | None = None
+    checkpoint: dict[str, Any] | None = None
+    fault: dict[str, Any] | None = None
+
+    @classmethod
+    def from_mapping(cls, value: object) -> DSHResolutionExhaustV1:
+        data = _mapping(value, "exhaust")
+        kind = _text(data.get("kind"), "exhaust.kind")
+        if kind not in cls.KINDS:
+            raise ResolverContractError("exhaust.kind is unsupported")
+        allowed = {"kind"}
+        if kind == "terminal":
+            allowed |= {
+                "terminal", "evidence", "identity", "usage",
+                "last_committed_seq",
+            }
+        elif kind == "checkpointed":
+            allowed |= {"checkpoint", "identity", "last_committed_seq"}
+        else:
+            allowed |= {"fault", "identity", "last_committed_seq"}
+        unknown = set(data) - allowed
+        if unknown:
+            raise ResolverContractError(
+                f"exhaust has unknown fields: {sorted(unknown)}"
+            )
+        terminal = None
+        evidence: tuple[EvidenceReferenceV1, ...] = ()
+        if kind == "terminal":
+            terminal = SubmitResolutionV1.from_mapping(data.get("terminal"))
+            evidence_value = data.get("evidence", [])
+            if not isinstance(evidence_value, list) or len(evidence_value) > 64:
+                raise ResolverContractError("exhaust.evidence must be bounded")
+            evidence = tuple(
+                EvidenceReferenceV1.from_mapping(item)
+                for item in evidence_value
+            )
+        identity = _optional_mapping(data.get("identity"), "exhaust.identity")
+        if identity is not None and evidence:
+            cls.check_evidence_bindings(
+                evidence,
+                resolution_thread_id=_text(
+                    identity.get("resolution_thread_id"),
+                    "exhaust.identity.resolution_thread_id",
+                ),
+                segment_id=_text(
+                    identity.get("segment_id"), "exhaust.identity.segment_id"
+                ),
+                scope_fingerprint=_text(
+                    identity.get("scope_fingerprint"),
+                    "exhaust.identity.scope_fingerprint",
+                ),
+                audience_fingerprint=_text(
+                    identity.get("audience_fingerprint"),
+                    "exhaust.identity.audience_fingerprint",
+                ),
+                policy_epoch=_text(
+                    identity.get("policy_epoch"),
+                    "exhaust.identity.policy_epoch",
+                ),
+            )
+        sequence = data.get("last_committed_seq")
+        if sequence is not None:
+            sequence = _integer(sequence, "exhaust.last_committed_seq")
+        return cls(
+            kind=kind,
+            terminal=terminal,
+            evidence=evidence,
+            identity=identity,
+            usage=_optional_mapping(data.get("usage"), "exhaust.usage"),
+            last_committed_seq=sequence,
+            checkpoint=_optional_mapping(
+                data.get("checkpoint"), "exhaust.checkpoint"
+            ),
+            fault=_optional_mapping(data.get("fault"), "exhaust.fault"),
+        )
+
+    @classmethod
+    def from_terminal(
+        cls,
+        *,
+        operation_id: str,
+        operation_payload_digest: str,
+        request_id: str,
+        resolution_thread_id: str,
+        segment_id: str,
+        activation_id: str,
+        lease_epoch: int,
+        scope_fingerprint: str,
+        audience_fingerprint: str,
+        resolver_profile_version: str,
+        dsh_release: str,
+        session_store_epoch: str,
+        model_route: str,
+        tool_catalog_digest: str,
+        policy_epoch: str,
+        terminal: SubmitResolutionV1,
+        evidence: Sequence[EvidenceReferenceV1],
+        last_committed_seq: int,
+        usage: Mapping[str, Any] | None = None,
+    ) -> DSHResolutionExhaustV1:
+        identity = {
+            "operation_id": operation_id,
+            "operation_payload_digest": operation_payload_digest,
+            "request_id": request_id,
+            "resolution_thread_id": resolution_thread_id,
+            "segment_id": segment_id,
+            "activation_id": activation_id,
+            "lease_epoch": lease_epoch,
+            "scope_fingerprint": scope_fingerprint,
+            "audience_fingerprint": audience_fingerprint,
+            "resolver_profile_version": resolver_profile_version,
+            "dsh_release": dsh_release,
+            "session_store_epoch": session_store_epoch,
+            "model_route": model_route,
+            "tool_catalog_digest": tool_catalog_digest,
+            "policy_epoch": policy_epoch,
+        }
+        cls.check_evidence_bindings(
+            evidence,
+            resolution_thread_id=resolution_thread_id,
+            segment_id=segment_id,
+            scope_fingerprint=scope_fingerprint,
+            audience_fingerprint=audience_fingerprint,
+            policy_epoch=policy_epoch,
+        )
+        return cls(
+            kind="terminal",
+            terminal=terminal,
+            evidence=tuple(evidence),
+            identity=identity,
+            usage=dict(usage or {}),
+            last_committed_seq=last_committed_seq,
+        )
+
+    @staticmethod
+    def check_evidence_bindings(
+        evidence: Sequence[EvidenceReferenceV1],
+        *,
+        resolution_thread_id: str,
+        segment_id: str,
+        scope_fingerprint: str,
+        audience_fingerprint: str,
+        policy_epoch: str,
+    ) -> None:
+        expected = (
+            resolution_thread_id, segment_id, scope_fingerprint,
+            audience_fingerprint, policy_epoch,
+        )
+        for reference in evidence:
+            actual = (
+                reference.resolution_thread_id, reference.segment_id,
+                reference.scope_fingerprint, reference.audience_fingerprint,
+                reference.policy_epoch,
+            )
+            if actual != expected:
+                raise ResolverContractError("evidence authority binding mismatch")
+
+    def to_dict(self) -> dict[str, object]:
+        result: dict[str, object] = {"kind": self.kind}
+        if self.kind == "terminal":
+            result.update({
+                "terminal": self.terminal.to_dict() if self.terminal else None,
+                "evidence": [item.to_dict() for item in self.evidence],
+                "identity": self.identity or {},
+                "usage": self.usage or {},
+                "last_committed_seq": self.last_committed_seq,
+            })
+        elif self.kind == "checkpointed":
+            result["checkpoint"] = self.checkpoint or {}
+            if self.identity is not None:
+                result["identity"] = self.identity
+            if self.last_committed_seq is not None:
+                result["last_committed_seq"] = self.last_committed_seq
+        else:
+            result["fault"] = self.fault or {
+                "code": RuntimeFaultCode.RPC_CONTRACT_ERROR.value
+            }
+            if self.identity is not None:
+                result["identity"] = self.identity
+            if self.last_committed_seq is not None:
+                result["last_committed_seq"] = self.last_committed_seq
+        return result
+
+
+@dataclass(frozen=True, slots=True)
+class ResolutionThreadRecordV1:
+    """Strict lifecycle metadata document stored by the Mongo owner."""
+
+    schema_version: str
+    resolution_thread_id: str
+    brain_conversation_ref: str
+    root_goal_ref: str
+    current_segment_id: str
+    state: str
+    priority: str
+    audience_fingerprint: str
+    scope_fingerprint: str
+    created_at: str
+    updated_at: str
+    last_terminal_status: str | None
+    continuation_eligible_until: str
+    document_revision: int
+    lease_epoch: int
+    current_lease: dict[str, Any] | None
+    segments: tuple[dict[str, Any], ...]
+    operations: tuple[dict[str, Any], ...]
+
+    @classmethod
+    def from_mapping(cls, value: object) -> ResolutionThreadRecordV1:
+        keys = {
+            "schema_version", "resolution_thread_id",
+            "brain_conversation_ref", "root_goal_ref", "current_segment_id",
+            "state", "priority", "audience_fingerprint",
+            "scope_fingerprint", "created_at", "updated_at",
+            "last_terminal_status", "continuation_eligible_until",
+            "document_revision", "lease_epoch", "current_lease", "segments",
+            "operations",
+        }
+        data = _strict(value, keys, "resolution_thread")
+        if data["schema_version"] != THREAD_SCHEMA_VERSION:
+            raise ResolverContractError(
+                "resolution_thread.schema_version is unsupported"
+            )
+        segments_value = data["segments"]
+        operations_value = data["operations"]
+        if not isinstance(segments_value, list) or not segments_value:
+            raise ResolverContractError(
+                "resolution_thread.segments must be a non-empty list"
+            )
+        if not isinstance(operations_value, list):
+            raise ResolverContractError(
+                "resolution_thread.operations must be a list"
+            )
+        segments = tuple(
+            cls._validate_segment(item) for item in segments_value
+        )
+        current_segment_id = _text(
+            data["current_segment_id"],
+            "resolution_thread.current_segment_id",
+        )
+        if current_segment_id not in {
+            segment["segment_id"] for segment in segments
+        }:
+            raise ResolverContractError("current_segment_id is not present")
+        lease_epoch = _integer(
+            data["lease_epoch"], "resolution_thread.lease_epoch"
+        )
+        current_lease = _optional_mapping(
+            data["current_lease"], "resolution_thread.current_lease"
+        )
+        if current_lease is not None:
+            expected_lease_keys = {
+                "activation_id", "lease_epoch", "owner_id", "expires_at"
+            }
+            current_lease = dict(_strict(
+                current_lease,
+                expected_lease_keys,
+                "resolution_thread.current_lease",
+            ))
+            if _integer(
+                current_lease["lease_epoch"],
+                "resolution_thread.current_lease.lease_epoch",
+                1,
+            ) != lease_epoch:
+                raise ResolverContractError("current lease epoch does not match")
+        terminal_status = data["last_terminal_status"]
+        if terminal_status is not None:
+            terminal_status = _text(
+                terminal_status, "resolution_thread.last_terminal_status"
+            )
+        return cls(
+            schema_version=THREAD_SCHEMA_VERSION,
+            resolution_thread_id=_text(
+                data["resolution_thread_id"],
+                "resolution_thread.resolution_thread_id",
+            ),
+            brain_conversation_ref=_text(
+                data["brain_conversation_ref"],
+                "resolution_thread.brain_conversation_ref",
+            ),
+            root_goal_ref=_text(
+                data["root_goal_ref"], "resolution_thread.root_goal_ref"
+            ),
+            current_segment_id=current_segment_id,
+            state=_text(data["state"], "resolution_thread.state"),
+            priority=_text(data["priority"], "resolution_thread.priority"),
+            audience_fingerprint=_text(
+                data["audience_fingerprint"],
+                "resolution_thread.audience_fingerprint",
+            ),
+            scope_fingerprint=_text(
+                data["scope_fingerprint"],
+                "resolution_thread.scope_fingerprint",
+            ),
+            created_at=_text(data["created_at"], "resolution_thread.created_at"),
+            updated_at=_text(data["updated_at"], "resolution_thread.updated_at"),
+            last_terminal_status=terminal_status,
+            continuation_eligible_until=_text(
+                data["continuation_eligible_until"],
+                "resolution_thread.continuation_eligible_until",
+            ),
+            document_revision=_integer(
+                data["document_revision"],
+                "resolution_thread.document_revision",
+            ),
+            lease_epoch=lease_epoch,
+            current_lease=current_lease,
+            segments=segments,
+            operations=tuple(
+                dict(_mapping(item, "resolution_thread.operation"))
+                for item in operations_value
+            ),
+        )
+
+    @staticmethod
+    def _validate_segment(value: object) -> dict[str, Any]:
+        keys = {
+            "schema_version", "segment_id", "resolution_thread_id",
+            "dsh_session_id", "resolver_profile_version", "dsh_release",
+            "session_store_epoch", "tool_catalog_digest", "policy_epoch",
+            "scope_fingerprint", "audience_fingerprint", "model_route",
+            "state", "last_committed_seq", "parent_segment_id",
+            "rotation_reason", "created_at", "last_used_at",
+        }
+        data = dict(_strict(value, keys, "resolution_thread.segment"))
+        if data["schema_version"] != SEGMENT_SCHEMA_VERSION:
+            raise ResolverContractError("segment.schema_version is unsupported")
+        _integer(data["last_committed_seq"], "segment.last_committed_seq")
+        for key in keys - {
+            "last_committed_seq", "parent_segment_id", "rotation_reason"
+        }:
+            _text(data[key], f"segment.{key}")
+        for key in ("parent_segment_id", "rotation_reason"):
+            if data[key] is not None:
+                _text(data[key], f"segment.{key}")
+        return data
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": self.schema_version,
+            "resolution_thread_id": self.resolution_thread_id,
+            "brain_conversation_ref": self.brain_conversation_ref,
+            "root_goal_ref": self.root_goal_ref,
+            "current_segment_id": self.current_segment_id,
+            "state": self.state,
+            "priority": self.priority,
+            "audience_fingerprint": self.audience_fingerprint,
+            "scope_fingerprint": self.scope_fingerprint,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "last_terminal_status": self.last_terminal_status,
+            "continuation_eligible_until": self.continuation_eligible_until,
+            "document_revision": self.document_revision,
+            "lease_epoch": self.lease_epoch,
+            "current_lease": self.current_lease,
+            "segments": [dict(segment) for segment in self.segments],
+            "operations": [dict(operation) for operation in self.operations],
+        }

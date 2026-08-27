@@ -10,12 +10,15 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from kazusa_ai_chatbot.cognition_resolver import capabilities as capabilities_module
-from tests.cognition_test_helpers import canonical_user_message_episode
+from kazusa_ai_chatbot.conversation_progress.projection import (
+    empty_progress_prompt,
+)
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as supervisor_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_dispatch as dispatch_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_supervisor2 as rag2_module
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
+from tests.cognition_test_helpers import canonical_user_message_episode
 
 
 class _StaticLLM:
@@ -72,6 +75,14 @@ def _stage_1_state(*, referents: list[dict[str, object]]) -> dict[str, object]:
     """Build a persona state slice for direct stage-one RAG tests."""
 
     turn_clock = build_turn_clock("2026-04-27 00:00:00")
+    conversation_progress = empty_progress_prompt(
+        interaction_logical_turns=[],
+    )
+    conversation_progress.update({
+        "status": "active",
+        "continuity": "same_episode",
+        "current_thread": "private thread",
+    })
     state = {
         "decontextualized_input": "private query text",
         "referents": referents,
@@ -101,11 +112,7 @@ def _stage_1_state(*, referents: list[dict[str, object]]) -> dict[str, object]:
         "chat_history_wide": [],
         "reply_context": {},
         "indirect_speech_context": "",
-        "conversation_progress": {
-            "status": "active",
-            "continuity": "same_episode",
-            "current_thread": "private thread",
-        },
+        "conversation_progress": conversation_progress,
         "conversation_episode_state": {
             "updated_at": "2026-04-26T23:00:00+00:00",
             "turn_count": 1,

@@ -6,12 +6,19 @@ import importlib
 
 import pytest
 
+from tests.test_task_resolution_orchestrator import (
+    _goal_continuation_ref,
+    _scene_context,
+)
+
 
 def _checkpoint() -> dict[str, object]:
     return {
         "schema_version": "task_resolution_checkpoint.v1",
         "session_id": "session-1",
         "semantic_objective": "Resolve the user's bounded task.",
+        "scene_context": _scene_context(),
+        "goal_continuation_ref": _goal_continuation_ref(),
         "source_scope": {
             "trigger_source": "user_message",
             "platform": "debug",

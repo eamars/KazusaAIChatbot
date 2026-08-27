@@ -567,7 +567,7 @@ Runtime modules own:
 - cognition or dialog policy;
 - JSON repair semantics beyond sync invocation support;
 - embeddings;
-- resolver-loop policy, complete-turn assembly, and tool execution;
+- standalone resolver policy, complete-turn assembly, and tool execution;
 - batch calls;
 - native Anthropic API support.
 
@@ -579,8 +579,6 @@ Runtime modules own:
   module-owned configs to migrate together.
 - Adding caller-owned optional metadata is compatible when provider adapters
   continue to omit it from transport.
-- The additive `astream_tools(...)` contract is compatible only while
-  ordinary `ainvoke(...)` and `invoke(...)` behavior remains unchanged.
 - Renaming `max_completion_tokens` or adding public `max_tokens` is breaking
   for this ICD.
 - Exposing provider-specific kwargs to runtime modules is breaking.
@@ -626,10 +624,6 @@ Required deterministic coverage includes:
 - provider request mapping and message pass-through;
 - per-interface descriptor caching and route invalidation;
 - LM Studio reload retry and waiter behavior;
-- additive native-tool stream normalization and indexed argument deltas;
-- tool-schema cache partitioning and omission of ordinary response format;
-- provider-required reasoning replay and tool-call-free omission;
-- pre-output stream unload retry and post-output no-retry behavior;
 - static migration checks for removed `get_llm()` and provider-boundary
   imports;
 - representative message/config equivalence for migrated call sites.

@@ -1,33 +1,47 @@
-"""Standalone bounded native-tool resolver package."""
+"""Canonical public facade for the standalone DSH resolver."""
 
 from agentic_resolver.contracts import (
-    AgenticResolverContractError,
-    AgenticResolverLimitsV1,
-    AgenticResolverRequestV1,
-    AgenticResolverResultV1,
+    DSHResolutionExhaustV1,
+    DSHResolutionIntakeV1,
+    DSHResolutionModelInputV1,
+    DSHResolutionRuntimeV1,
+    EvidenceReferenceV1,
+    ResolutionThreadRecordV1,
+    SubmitResolutionV1,
 )
-from agentic_resolver.model import (
-    AgenticModelCapabilitiesV1,
-    AgenticModelClient,
-    ModelStreamChunk,
+from agentic_resolver.controller import ResolutionController
+from agentic_resolver.errors import (
+    AgenticResolverError,
+    DuplicateActivationError,
+    OperationIdReuseMismatchError,
+    OperationOutcomeUncertainError,
+    ResolverContractError,
+    RpcAuthenticationError,
+    RpcContractError,
+    RpcTransportError,
+    RuntimeFaultCode,
+    StaleActivationOrLeaseError,
 )
 from agentic_resolver.runtime import AgenticResolverRuntime
-from agentic_resolver.skills import SkillCatalog, discover_skills
-from agentic_resolver.streaming import ModelStreamAssembler
-from agentic_resolver.tools import ToolDefinition, ToolRegistry
 
 __all__ = [
-    "AgenticModelCapabilitiesV1",
-    "AgenticModelClient",
-    "AgenticResolverContractError",
-    "AgenticResolverLimitsV1",
-    "AgenticResolverRequestV1",
-    "AgenticResolverResultV1",
+    "AgenticResolverError",
     "AgenticResolverRuntime",
-    "ModelStreamAssembler",
-    "ModelStreamChunk",
-    "SkillCatalog",
-    "ToolDefinition",
-    "ToolRegistry",
-    "discover_skills",
+    "DSHResolutionExhaustV1",
+    "DSHResolutionIntakeV1",
+    "DSHResolutionModelInputV1",
+    "DSHResolutionRuntimeV1",
+    "DuplicateActivationError",
+    "EvidenceReferenceV1",
+    "OperationIdReuseMismatchError",
+    "OperationOutcomeUncertainError",
+    "ResolutionController",
+    "ResolutionThreadRecordV1",
+    "ResolverContractError",
+    "RpcAuthenticationError",
+    "RpcContractError",
+    "RpcTransportError",
+    "RuntimeFaultCode",
+    "StaleActivationOrLeaseError",
+    "SubmitResolutionV1",
 ]

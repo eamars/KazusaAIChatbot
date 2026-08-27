@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
 from kazusa_ai_chatbot.action_spec.registry import (
     ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
@@ -128,6 +126,8 @@ def _action_spec(kind: str) -> dict:
         "schema_version": "action_spec.v1",
         "kind": kind,
         "cognition_mode": "deliberative",
+        "surface_role": "ordinary",
+        "goal_continuation_ref": None,
         "source_refs": _source_refs_for_kind(kind),
         "target": _target_for_kind(kind),
         "params": _params_for_kind(kind),
@@ -156,6 +156,8 @@ def _accepted_task_status_action_spec() -> dict:
         "schema_version": "action_spec.v1",
         "kind": ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
         "cognition_mode": "deliberative",
+        "surface_role": "ordinary",
+        "goal_continuation_ref": None,
         "source_refs": [_cognitive_source_ref()],
         "target": {
             "schema_version": "action_target.v1",

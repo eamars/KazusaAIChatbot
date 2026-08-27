@@ -846,3 +846,89 @@ class SelfCognitionGroupReviewWindowDoc(TypedDict, total=False):
     selected_route: str | None
     dispatch_status: str | None
     skip_reason: str | None
+
+
+class ResolutionLeaseDoc(TypedDict):
+    """Current fenced activation lease embedded in a resolution thread."""
+
+    activation_id: str
+    lease_epoch: int
+    owner_id: str
+    expires_at: str
+
+
+class ResolutionOperationDoc(TypedDict):
+    """Bounded semantic operation ledger row without model-visible content."""
+
+    operation_id: str
+    operation_payload_digest: str
+    method: Literal[
+        "resolution.open",
+        "resolution.continue",
+        "resolution.amend",
+        "resolution.request_checkpoint",
+        "resolution.cancel",
+        "resolution.dispose_activation",
+    ]
+    resolution_thread_id: str
+    segment_id: str
+    activation_id: str | None
+    lease_epoch: int | None
+    dsh_message_source_id: str | None
+    disposition: Literal[
+        "prepared",
+        "admitted_active",
+        "checkpointed",
+        "terminal",
+        "canceled",
+        "faulted",
+    ]
+    last_committed_seq: int | None
+    outcome_digest: str | None
+    fault_code: str | None
+
+
+class ResolverSessionSegmentDoc(TypedDict):
+    """One exact-compatible DSH session segment in a thread lineage."""
+
+    schema_version: Literal["resolver_session_segment.v1"]
+    segment_id: str
+    resolution_thread_id: str
+    dsh_session_id: str
+    resolver_profile_version: Literal["kazusa-resolver-v1"]
+    dsh_release: Literal["0.1.1-rc.2"]
+    session_store_epoch: Literal["dsh-sqlite-0.1.1-rc.2-v1"]
+    tool_catalog_digest: str
+    policy_epoch: str
+    scope_fingerprint: str
+    audience_fingerprint: str
+    model_route: str
+    state: Literal["live", "checkpointed", "terminal", "canceled", "faulted"]
+    last_committed_seq: int
+    parent_segment_id: str | None
+    rotation_reason: str | None
+    created_at: str
+    last_used_at: str
+
+
+class ResolutionThreadDoc(TypedDict):
+    """Strict standalone resolution thread lifecycle document."""
+
+    schema_version: Literal["resolution_thread_store.v1"]
+    resolution_thread_id: str
+    brain_conversation_ref: str
+    root_goal_ref: str
+    current_segment_id: str
+    state: Literal["active", "checkpointed", "terminal", "canceled", "faulted"]
+    priority: Literal["now", "background"]
+    audience_fingerprint: str
+    scope_fingerprint: str
+    created_at: str
+    updated_at: str
+    last_terminal_status: str | None
+    continuation_eligible_until: str
+    document_revision: int
+    lease_epoch: int
+    current_lease: ResolutionLeaseDoc | None
+    segments: list[ResolverSessionSegmentDoc]
+    operations: list[ResolutionOperationDoc]

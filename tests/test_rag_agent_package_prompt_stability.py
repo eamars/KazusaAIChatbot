@@ -115,7 +115,7 @@ def _prompt_text(value: object) -> str:
 
 def _message_record(message: object) -> dict[str, Any]:
     """Project a LangChain message into a stable JSON-serializable record."""
-    raw_content = getattr(message, "content")
+    raw_content = message.content
     content = _prompt_text(raw_content)
     try:
         parsed_json = json.loads(content)

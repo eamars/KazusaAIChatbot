@@ -1259,3 +1259,34 @@ This gives Kazusa the benefit of a reusable agent harness while keeping the arch
 - **[DSH-WEB-FETCH]** Deferred SSRF protection decision: https://github.com/deepseek-ai/deepseek-harness/blob/master/.agents/notes/implemented/architecture/2026-06-24-web-capability-seam.md
 - **[DSH-SDK]** Python SDK: https://github.com/deepseek-ai/deepseek-harness/blob/master/python/sdk/README.md
 - **[DSH-SDK-WIRE]** Current SDK JSON-RPC lifecycle limitations: https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/sdk/server/README.md
+# Frozen Plan 1 standalone resolution boundary
+
+Plan 1 runs one independent long-lived Node sidecar on an authenticated
+loopback HTTP JSON-RPC `/rpc` transport. The strict protocol is
+`kazusa.dsh-resolution-rpc.v1`. Python never imports DSH and the Brain never
+imports or starts the sidecar. Python owns thread metadata and sends versioned
+Kazusa DTOs; the sidecar exclusively owns DSH agents, sessions, events,
+checkpoints, tool bodies, and receipts.
+
+Every admitted mutation has a semantic `operation_id` and canonical payload
+digest. Equal pairs attach to the existing admission; reused ids with a changed
+digest fail closed. Ambiguous transport loss is reconciled with
+`resolution.inspect` before any replay. Live controls additionally carry an
+activation id and monotonic lease epoch.
+
+The profile is `kazusa-resolver-v1`, pinned to DSH `0.1.1-rc.2` at upstream
+revision `b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`, Cordis `4.0.1`, and
+Schemastery `3.18.1`. Its versioned store epoch is
+`dsh-sqlite-0.1.1-rc.2-v1`, stored at
+`<data-root>/dsh/0.1.1-rc.2/sessions.sqlite`. Scope, audience, profile,
+release, store, model, catalog, or policy mismatch rotates the segment.
+
+Runtime authority stays outside `model_input`. Production exposes no semantic
+tools; `submit_resolution` is the single controller-owned terminal action and
+each model step must contain exactly one action. The only durable authority is
+bounded public DSH `tool/result.meta.kazusa` evidence or terminal metadata.
+No custom DSH event kind is introduced. Terminal exhaust is reconstructed only
+from a complete validated terminal receipt flushed before the RPC response.
+
+This is a staged standalone seam. It creates no cognition, task-resolution,
+RAG, coding-agent, or Brain call edge.

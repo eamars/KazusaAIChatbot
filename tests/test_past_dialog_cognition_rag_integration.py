@@ -250,6 +250,7 @@ async def test_resolver_loop_attaches_rag_residual_to_private_cognition_state(
                 "state": "complete",
                 "remaining_needs": [],
             },
+            "goal_continuation_ref": request["goal_continuation_ref"],
             "created_at_utc": "2026-05-29T21:00:00+00:00",
         }
 

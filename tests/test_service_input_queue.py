@@ -364,28 +364,47 @@ def _patch_common_dependencies(monkeypatch, graph) -> None:
         open_turns = _state.get("open_turns") or []
         if open_turns:
             return {
-                "intake_action": "append",
-                "append_target": "open_1",
-                "prelude_targets": [],
-                "reason": "fixture continuation",
+                "decision": {
+                    "intake_action": "append",
+                    "append_target": "open_1",
+                    "prelude_targets": [],
+                    "reason": "fixture continuation",
+                },
+                "attempt_diagnostics": [],
             }
         return {
-            "intake_action": "start",
-            "append_target": "none",
-            "prelude_targets": [],
-            "reason": "fixture candidate",
+            "decision": {
+                "intake_action": "start",
+                "append_target": "none",
+                "prelude_targets": [],
+                "reason": "fixture candidate",
+            },
+            "attempt_diagnostics": [],
         }
 
     async def _settled(_state):
         """Allow deterministic service fixtures to reach their fake graph."""
 
         return {
-            "response_action": "proceed",
-            "reason_to_respond": "fixture response",
-            "use_reply_feature": False,
-            "channel_topic": "",
-            "indirect_speech_context": "",
+            "decision": {
+                "response_action": "proceed",
+                "reason_to_respond": "fixture response",
+                "use_reply_feature": False,
+                "channel_topic": "",
+                "indirect_speech_context": "",
+            },
+            "attempt_diagnostics": [],
         }
+
+    async def _settled_evaluator(_lease, state):
+        """Adapt the module evaluator fixture to the coordinator call shape."""
+
+        return await service_module.relevance_agent(state)
+
+    async def _frontline_evaluator(state):
+        """Delegate through the replaceable module frontline fixture."""
+
+        return await service_module.frontline_relevance_agent(state)
 
     async def _media(state):
         """Keep deterministic media fixtures out of the vision endpoint."""
@@ -404,6 +423,16 @@ def _patch_common_dependencies(monkeypatch, graph) -> None:
 
     monkeypatch.setattr(service_module, "frontline_relevance_agent", _frontline)
     monkeypatch.setattr(service_module, "relevance_agent", _settled)
+    monkeypatch.setattr(
+        service_module._turn_settlement_coordinator,
+        "_frontline_evaluator",
+        _frontline_evaluator,
+    )
+    monkeypatch.setattr(
+        service_module._turn_settlement_coordinator,
+        "_settled_evaluator",
+        _settled_evaluator,
+    )
     monkeypatch.setattr(service_module, "multimedia_descriptor_agent", _media)
     monkeypatch.setattr(service_module, "_graph", graph)
 
@@ -1120,7 +1149,7 @@ async def test_first_settled_contract_failure_uses_bounded_wait(
 
     coordinator.apply_settled_decision.assert_awaited_once()
     applied_decision = coordinator.apply_settled_decision.await_args.args[1]
-    assert applied_decision["response_action"] == "wait"
+    assert applied_decision["decision"]["response_action"] == "wait"
     coordinator.complete_failed_assessment.assert_not_awaited()
     assert item.future.done() is False
     ambient_history.assert_awaited_once_with(
@@ -2693,10 +2722,13 @@ async def test_frontline_discard_keeps_precommitted_receipt_without_duplicate(
         """Discard every deterministic fixture at the frontline boundary."""
 
         return {
-            "intake_action": "discard",
-            "append_target": "none",
-            "prelude_targets": [],
-            "reason": "fixture discard",
+            "decision": {
+                "intake_action": "discard",
+                "append_target": "none",
+                "prelude_targets": [],
+                "reason": "fixture discard",
+            },
+            "attempt_diagnostics": [],
         }
 
     _patch_common_dependencies(monkeypatch, AsyncMock())
@@ -2876,7 +2908,7 @@ async def test_enqueue_requests_same_scope_background_cancellation(
     )
     assert coordinator.started[0]["precedence"] == "foreground"
     assert coordinator.started[0]["run_kind"] == "chat"
-    assert getattr(queued_item, "pipeline_run_handle") is coordinator.handle
+    assert queued_item.pipeline_run_handle is coordinator.handle
 
     queued_item.future.set_result(service_module.ChatResponse())
     response = await asyncio.wait_for(enqueue_task, timeout=1.0)
@@ -2924,7 +2956,7 @@ async def test_cancelled_enqueue_wait_keeps_foreground_handle(
         await enqueue_task
 
     queued_item = service_module._chat_input_queue.pop_left_for_test()
-    assert getattr(queued_item, "pipeline_run_handle") is coordinator.handle
+    assert queued_item.pipeline_run_handle is coordinator.handle
     assert coordinator.handle.closed is False
 
     await queued_item.pipeline_run_handle.__aexit__(None, None, None)
@@ -3305,10 +3337,13 @@ async def test_private_frontline_sees_complete_coalesced_logical_input(
     async def _frontline(state):
         captured_frontline_state.update(state)
         return {
-            "intake_action": "start",
-            "append_target": "none",
-            "prelude_targets": [],
-            "reason": "complete private request",
+            "decision": {
+                "intake_action": "start",
+                "append_target": "none",
+                "prelude_targets": [],
+                "reason": "complete private request",
+            },
+            "attempt_diagnostics": [],
         }
 
     monkeypatch.setattr(service_module, "save_conversation", _save_conversation)

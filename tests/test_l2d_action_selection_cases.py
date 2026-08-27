@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
 from tests.l2d_action_selection_cases import (
-    L2D_ROUTING_CASE_SET_SCHEMA_VERSION,
     L2D_ROUTING_CASE_SCHEMA_VERSION,
+    L2D_ROUTING_CASE_SET_SCHEMA_VERSION,
     compare_action_specs_to_expectations,
     load_l2d_routing_case_set,
     select_l2d_routing_case,
@@ -255,6 +254,8 @@ def _action_spec(kind: str, visibility: str) -> dict[str, object]:
         "params": params,
         "urgency": "now",
         "visibility": visibility,
+        "surface_role": "ordinary",
+        "goal_continuation_ref": None,
         "deadline": None,
         "continuation": {
             "schema_version": "action_continuation.v1",

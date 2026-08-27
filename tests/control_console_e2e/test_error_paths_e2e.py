@@ -66,7 +66,7 @@ def test_debug_chat_error_paths_are_visible_and_actionable(
             page.wait_for_selector("#chat-history .message:nth-child(2)")
             assert "brain_unavailable" in page.locator("#chat-history").inner_text()
             assert page.locator("#debug-cognition-status").inner_text() == (
-                "not reported"
+                "unavailable"
             )
 
             summary = e2e_summary_writer(
@@ -74,7 +74,7 @@ def test_debug_chat_error_paths_are_visible_and_actionable(
                 conclusion="pass",
                 details={
                     "stopped_brain": "send disabled plus API brain_unavailable",
-                    "brain_500": "history row with brain_unavailable and graph not reported",
+                    "brain_500": "history row with brain_unavailable and graph unavailable",
                 },
             )
 

@@ -5,6 +5,16 @@
 
 <p><strong>A self-evolving character cognition runtime for persistent digital presence.</strong></p>
 
+<h2>Standalone DSH resolution sidecar</h2>
+
+<p>The optional resolver is an independent Node process with no Brain startup
+edge. Install and build it with
+<code>corepack pnpm@11.7.0 --dir sidecars/dsh_resolution install --frozen-lockfile</code>
+and <code>corepack pnpm@11.7.0 --dir sidecars/dsh_resolution build</code>. Set
+<code>KAZUSA_DSH_SIDECAR_URL</code>, <code>KAZUSA_DSH_RPC_TOKEN</code>,
+<code>KAZUSA_DSH_DATA_ROOT</code>, and <code>KAZUSA_DSH_MODEL</code>, then run
+<code>node sidecars/dsh_resolution/dist/src/main.js</code>.</p>
+
 <p>
     <a href="README_CN.md">简体中文</a>
     ·

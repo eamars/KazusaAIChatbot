@@ -182,6 +182,8 @@ def _settled_visible_trace() -> dict:
             "fragments": ["ok"],
             "artifact_refs": [],
             "delivery_intent": "deliver_now",
+            "surface_role": "ordinary",
+            "goal_continuation_ref": None,
             "created_at": _CONSOLIDATION_TURN_CLOCK[
                 "storage_timestamp_utc"
             ],
@@ -526,6 +528,11 @@ def _patch_chat_dependencies(
     monkeypatch.setattr(
         service_module,
         "upsert_post_turn_lifecycle_record",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_run_internal_monologue_residue_record_background",
         AsyncMock(),
     )
     if patch_post_turn_lifecycle:
