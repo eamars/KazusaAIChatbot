@@ -45,8 +45,8 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
-| [dsh_semantic_tools_and_coding_capability_plan_2026-08-26.md](active/short_term/dsh_semantic_tools_and_coding_capability_plan_2026-08-26.md) | Plan 2 coarse standalone Kazusa semantic tools and DSH-native coding capability expansion | draft; refine after Plan 1 closure |
-| [dsh_brain_bigbang_cutover_and_legacy_resolution_decommission_plan_2026-08-26.md](active/short_term/dsh_brain_bigbang_cutover_and_legacy_resolution_decommission_plan_2026-08-26.md) | Plan 3 coarse DSH-only Brain big-bang cutover and legacy resolution/coding design decommission | draft; refine after Plan 2 closure |
+| [dsh_semantic_tools_and_coding_capability_plan_2026-08-26.md](active/short_term/dsh_semantic_tools_and_coding_capability_plan_2026-08-26.md) | Plan 2 DSH Standard, storage-independent semantic Brain/memory capabilities, default native web/coding, autonomous runtime, and Brain judgment bridge | approved; implementation requires an explicit production command |
+| [dsh_brain_bigbang_cutover_and_legacy_resolution_decommission_plan_2026-08-26.md](active/short_term/dsh_brain_bigbang_cutover_and_legacy_resolution_decommission_plan_2026-08-26.md) | Plan 3 preserved post-selector Brain handover with a DSH task-execution edge and scoped legacy executor/coding decommission | draft; preservation boundary approved, exact post-Plan 2 inventory pending |
 
 ### Superseded Plans
 
