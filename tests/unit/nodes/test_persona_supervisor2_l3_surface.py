@@ -15,6 +15,9 @@ from kazusa_ai_chatbot.cognition_shared.contracts import (
     TextSurfaceServicesV2,
     validate_text_surface_input_canonical,
 )
+from kazusa_ai_chatbot.cognition_shared.state_projection import (
+    validate_prompt_projection,
+)
 from kazusa_ai_chatbot.llm_interface import LLMCallConfig, LLMThinkingConfig
 from kazusa_ai_chatbot.nodes import dialog_agent
 from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_surface
@@ -108,6 +111,38 @@ def test_l3_surface_preserves_selected_response_operation() -> None:
     assert payload["response_plan"]["response_goal"] == (
         "acknowledge the grounded episode"
     )
+
+
+def test_l3_surface_omits_brain_owned_dsh_decision_from_prompt_projection() -> None:
+    """Keep the DSH decision for Brain enactment outside L3 prompt input."""
+
+    state = build_surface_state(build_relational_decision())
+    cognition_output = state["cognition_core_output"]
+    assert isinstance(cognition_output, dict)
+    response_plan = cognition_output["response_plan"]
+    assert isinstance(response_plan, dict)
+    ordinary_response_plan = dict(response_plan)
+    dsh_decision = {
+        "interaction_id": "dsh-surface-interaction",
+        "kind": "approval",
+        "decision": "allow_once",
+        "answer": None,
+        "response_goal": None,
+        "relay_mode": None,
+        "reason": "The requested operation is permitted once.",
+    }
+    response_plan["dsh_interaction_decision"] = dsh_decision
+
+    payload = l3_surface.build_text_surface_input_from_global_state(
+        state,
+        interaction_style_context="brief and natural",
+    )
+
+    assert payload["response_plan"] == ordinary_response_plan
+    assert "dsh_interaction_decision" not in payload["response_plan"]
+    assert response_plan["dsh_interaction_decision"] == dsh_decision
+    prompt_payload = surface._project_surface_payload(payload)
+    validate_prompt_projection(prompt_payload)
 
 
 def test_l3_surface_projects_subjective_context_and_authoritative_addressee() -> None:

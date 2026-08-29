@@ -40,6 +40,12 @@ _QUERY_FIELDS = {
     "lineage_id",
     "exclude_memory_unit_ids",
 }
+_LIFECYCLE_TARGET_STATUSES = {
+    "activate": MemoryStatus.ACTIVE,
+    "complete": MemoryStatus.FULFILLED,
+    "cancel": MemoryStatus.REJECTED,
+    "archive": MemoryStatus.EXPIRED,
+}
 
 
 def now_iso() -> str:
@@ -187,6 +193,14 @@ async def document_with_embedding(document: EvolvingMemoryDoc) -> EvolvingMemory
         "embedding": embedding,
     }
     return return_value
+
+
+async def read_memory_unit(memory_unit_id: str) -> EvolvingMemoryDoc | None:
+    """Read one memory unit through the repository-owned DB interface."""
+    if not isinstance(memory_unit_id, str) or not memory_unit_id.strip():
+        raise ValueError("memory_unit_id is required")
+    document = await memory_store.find_memory_unit_by_id(memory_unit_id.strip())
+    return None if document is None else dict(document)
 
 
 async def invalidate_memory_cache(
@@ -391,6 +405,77 @@ async def reject_memory_unit(
             reason=clean_reason,
         )
         return_value: EvolvingMemoryDoc = dict(rejected)
+        return return_value
+    finally:
+        await memory_store.release_memory_write_lock()
+
+
+async def transition_memory_lifecycle(
+    *,
+    memory_unit_id: str,
+    transition: str,
+    reason: str,
+    storage_timestamp_utc: str | None = None,
+) -> EvolvingMemoryDoc:
+    """Apply one guarded, idempotent lifecycle transition and read it back.
+
+    Args:
+        memory_unit_id: Stable memory-unit id to transition.
+        transition: Semantic action mapped to the target lifecycle status.
+        reason: Audit and cache-invalidation context for the transition.
+        storage_timestamp_utc: Optional storage timestamp for deterministic
+            callers; production callers use the current storage UTC time.
+
+    Returns:
+        The persisted memory document after the transition.
+    """
+    if not isinstance(memory_unit_id, str) or not memory_unit_id.strip():
+        raise ValueError("memory_unit_id is required")
+    if not isinstance(transition, str) or transition not in _LIFECYCLE_TARGET_STATUSES:
+        raise ValueError("unsupported memory lifecycle transition")
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValueError("reason is required")
+
+    write_time = (
+        storage_timestamp_utc.strip()
+        if isinstance(storage_timestamp_utc, str) and storage_timestamp_utc.strip()
+        else now_iso()
+    )
+    _parse_timestamp(write_time)
+    target_status = _LIFECYCLE_TARGET_STATUSES[transition]
+    await _acquire_memory_write_guard("transition_memory_lifecycle", write_time)
+    try:
+        target = await memory_store.find_memory_unit_by_id(memory_unit_id.strip())
+        if target is None:
+            raise ValueError(f"memory unit not found: {memory_unit_id!r}")
+        current_status = str(target.get("status", ""))
+        if current_status not in VALID_MEMORY_STATUSES:
+            raise ValueError("memory unit lifecycle status is invalid")
+        if current_status == MemoryStatus.SUPERSEDED:
+            raise ValueError("superseded memory units are immutable")
+        if current_status == target_status:
+            return_value: EvolvingMemoryDoc = dict(target)
+            return return_value
+
+        await memory_store.update_memory_unit_fields(
+            memory_unit_id.strip(),
+            {
+                "status": target_status,
+                "updated_at": write_time,
+            },
+        )
+        persisted = await memory_store.find_memory_unit_by_id(
+            memory_unit_id.strip(),
+        )
+        if persisted is None:
+            raise RuntimeError("memory lifecycle transition read-back failed")
+        if str(persisted.get("status", "")) != target_status:
+            raise RuntimeError("memory lifecycle transition was not committed")
+        await invalidate_memory_cache(
+            document=persisted,
+            reason=reason.strip(),
+        )
+        return_value = dict(persisted)
         return return_value
     finally:
         await memory_store.release_memory_write_lock()

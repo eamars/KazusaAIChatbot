@@ -5,15 +5,24 @@
 
 <p><strong>A self-evolving character cognition runtime for persistent digital presence.</strong></p>
 
-<h2>Standalone DSH resolution sidecar</h2>
+<h2>Plan 2 DSH Standard semantic runtime</h2>
 
-<p>The optional resolver is an independent Node process with no Brain startup
-edge. Install and build it with
+<p>The accepted Plan 2 runtime combines the Python Brain interaction bridge
+with a separately built Node DSH Standard sidecar. The processes have
+independent lifecycles, while sidecar readiness depends on the Brain's durable
+DSH interaction store and cognition judge. Build the sidecar with
 <code>corepack pnpm@11.7.0 --dir sidecars/dsh_resolution install --frozen-lockfile</code>
-and <code>corepack pnpm@11.7.0 --dir sidecars/dsh_resolution build</code>. Set
-<code>KAZUSA_DSH_SIDECAR_URL</code>, <code>KAZUSA_DSH_RPC_TOKEN</code>,
-<code>KAZUSA_DSH_DATA_ROOT</code>, and <code>KAZUSA_DSH_MODEL</code>, then run
-<code>node sidecars/dsh_resolution/dist/src/main.js</code>.</p>
+and <code>corepack pnpm@11.7.0 --dir sidecars/dsh_resolution build</code>,
+then start <code>node sidecars/dsh_resolution/dist/src/main.js</code> after
+the Brain is ready.</p>
+
+<p>Plan 2 uses the V2 RPC/intake contracts, profile
+<code>kazusa-resolver-standard-v2</code>, and the pinned DSH release
+<code>0.1.1-rc.2</code>. Operators configure the sidecar URL, authenticated
+RPC/Brain/gateway secrets, absolute data/workspace/Python paths, and the six
+<code>AGENTIC_RESOLVER_LLM_*</code> route fields in <a
+href="docs/HOWTO.md#run-the-plan-2-dsh-standard-sidecar">the HOWTO</a>;
+secrets are never committed.</p>
 
 <p>
     <a href="README_CN.md">简体中文</a>
@@ -48,6 +57,49 @@ QQ, or debug-wire syntax.
 For local setup, jump to [Quick Start](#quick-start) and the
 [HOWTO](docs/HOWTO.md). For subsystem ownership, use
 [Runtime Layers](#runtime-layers).
+
+## Plan 2 DSH runtime
+
+Plan 2 is capability-ready standalone infrastructure; it does not change the
+production `task_resolution_request` or its accepted/background routing. The
+wire contracts are `kazusa.dsh-resolution-rpc.v2` and
+`dsh_resolution_intake.v2`. DSH session data is stored at
+`<KAZUSA_DSH_DATA_ROOT>/dsh/0.1.1-rc.2/sessions.sqlite`; replayable semantic
+outcomes use the adjacent `semantic-outcomes.sqlite`. The profile/store
+identity is `kazusa-resolver-standard-v2` /
+`dsh-sqlite-0.1.1-rc.2-standard-v2`.
+
+The official DSH base and Standard preset are mounted by reference. Standard
+native filesystem, shell, coding, jobs, tests, web, approval, and sandbox
+tools take name precedence. Kazusa adds exactly these thirteen
+storage-independent semantic tools:
+
+`kazusa_search_conversation_history`, `kazusa_read_conversation_entries`,
+`kazusa_summarize_conversation_participants`, `kazusa_search_memories`,
+`kazusa_read_memories`, `kazusa_remember_information`,
+`kazusa_revise_memory`, `kazusa_change_memory_lifecycle`,
+`kazusa_find_people_by_name`, `kazusa_read_person_profiles`,
+`kazusa_recall_active_context`, `kazusa_read_calendar_context`, and
+`kazusa_inspect_attached_media`. The controller-owned `submit_resolution` is
+the sole model-owned terminal operation. Results expose semantic entities,
+opaque references, and evidence receipts; the framed Python worker owns
+service calls, idempotent mutations, and outcome replay.
+
+For approval, question, or plan-review requests, the authenticated Brain
+judge receives a targeted runtime-authored observation and pending semantic
+context. It returns an immediate answer/rejection/one-shot decision or a
+`relay_to_user` checkpoint. Normal dialog and adapter delivery handle visible
+wording; an exact reply resumes the same thread and segment, and deterministic
+code atomically matches and consumes a one-shot grant for the same tool,
+arguments, workspace, scope, and policy. Transient DSH detail remains pending
+runtime context rather than user-authored evidence. A multi-tool turn ends
+only after a structurally valid, evidence-bound `submit_resolution` receipt is
+committed.
+
+See the [DSH integration architecture](docs/architecture/dsh_integration_architecture.md),
+[Agentic Resolver architecture](docs/architecture/agentic_resolver_architecture.md),
+[DSH interaction README](src/kazusa_ai_chatbot/dsh_interaction/README.md), and
+[semantic gateway README](src/kazusa_ai_chatbot/dsh_tool_gateway/README.md).
 
 Core terms used throughout this README:
 
@@ -675,6 +727,9 @@ cognition, and calendar scheduling remain in the platform-neutral core.
 | Adapters                 | Discord, NapCat QQ, debug UI transport and platform rendering                           | [Adapter ICD](src/adapters/README.md), [HOWTO](docs/HOWTO.md#adapters)                |
 | Control console          | Local operator auth, service lifecycle, process logs, audit, static UI, debug-chat handoff | [Control Console ICD](src/control_console/README.md)                                  |
 | Brain service            | HTTP API, queue, graph startup, health, delivery receipts, runtime adapter registration | [Brain Service ICD](src/kazusa_ai_chatbot/brain_service/README.md)                     |
+| DSH interaction          | Brain-owned approval/question/plan-review judgment, lineage, checkpoints, and one-shot grants | [DSH interaction](src/kazusa_ai_chatbot/dsh_interaction/README.md) |
+| DSH semantic gateway     | Typed storage-independent semantic tools, opaque references, evidence, and replay-safe worker | [DSH tool gateway](src/kazusa_ai_chatbot/dsh_tool_gateway/README.md) |
+| DSH Standard sidecar     | Mounted official DSH runtime, native tools, sessions, checkpoints, and terminal receipts | [Sidecar README](sidecars/dsh_resolution/README.md) |
 | Message envelope         | Typed inbound content, mentions, replies, attachments, addressees, broadcast state      | [Message Envelope ICD](src/kazusa_ai_chatbot/message_envelope/README.md)               |
 | LLM interface            | Backend-compatible chat LLM invocation, provider sessions, diagnostics, and reload retry | [LLM Interface ICD](src/kazusa_ai_chatbot/llm_interface/README.md)                    |
 | Conversation progress    | Short-term episode state used by cognition to avoid loops and stale reopenings          | [Conversation Progress](src/kazusa_ai_chatbot/conversation_progress/README.md)         |
@@ -774,6 +829,16 @@ venv\Scripts\python -m pytest -q tests/integration/cognition_core_v3/test_chain_
 venv\Scripts\python -m scripts.validate_test_impact --base-ref HEAD
 ```
 
+### DSH Standard startup
+
+Start the Brain with MongoDB and wait for `/health` plus authenticated
+`/runtime/dsh/health` to report its durable DSH store and cognition judge.
+Build/start `sidecars/dsh_resolution` as a separate process, then require
+authenticated `system.health` to report `route`, `standard`,
+`semantic_worker`, `web`, and `brain` readiness. The sidecar and Brain may be
+restarted independently; readiness still follows that dependency. Required
+DSH and route settings are in the [HOWTO DSH runbook](docs/HOWTO.md#run-the-plan-2-dsh-standard-sidecar).
+
 Run the browser debug adapter:
 
 ```powershell
@@ -790,6 +855,8 @@ src/
   adapters/                    Platform adapters and debug UI
   kazusa_ai_chatbot/
     brain_service/             Service API, graph, intake, health, post-turn glue
+    dsh_interaction/           Brain-owned DSH judgment, checkpoint, reply, and grant lineage
+    dsh_tool_gateway/          Typed semantic catalog and framed worker boundary
     message_envelope/          Typed adapter-to-brain message contract
     llm_interface/             Chat LLM invocation compatibility layer and ICD
     cognition_resolver/        Bounded resolver loop, capability observations, HIL state
@@ -815,6 +882,8 @@ src/
     character_profile.py       Canonical manual-seed profile validation
     db/internal_action_latches.py  Durable internal-thought continuation latches
   scripts/                     Operator and maintenance CLIs
+sidecars/
+  dsh_resolution/              Mounted official DSH Standard runtime and RPC sidecar
 docs/
   HOWTO.md                     Setup, runtime commands, environment, tests
   FUTURE_ARCHITECTURE.md       Independently maintained future architecture

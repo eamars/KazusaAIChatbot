@@ -19,8 +19,8 @@ describe("runtime", () => {
     expect(checkpoint.disposition).toBe("checkpointed");
     await pending;
     const continuation = validIntake();
-    continuation.runtime.operation_id = "op_continue";
-    continuation.runtime.operation_payload_digest = "sha256:continue";
+    continuation.operation_id = "op_continue";
+    continuation.operation_payload_digest = "sha256:continue";
     expect((await runtime.continue(continuation, "act_2", 2)).session_id).toBe(checkpoint.session_id);
   });
 
@@ -41,7 +41,7 @@ describe("runtime", () => {
     expect((await runtime.open(validIntake(), "act_1", 1)).exhaust).toMatchObject({ kind: "runtime_fault", fault: { code: "RESOLVER_ACTION_CONTRACT_EXHAUSTED" } });
   });
 
-  it("executes zero tool bodies for multi-call output and exhausts the shared correction budget", async () => {
+  it("accepts multi-call output and leaves terminal completion to a sole submit step", async () => {
     let executions = 0;
     const runtime = ResolutionSidecarRuntime.forTests([
       { calls: [{ name: "a" }, { name: "b" }] },
@@ -49,12 +49,53 @@ describe("runtime", () => {
       { calls: [{ name: "a" }, { name: "b" }] },
     ], () => { executions += 1; });
     expect((await runtime.open(validIntake(), "act_1", 1)).exhaust.kind).toBe("runtime_fault");
-    expect(executions).toBe(0);
+    expect(executions).toBe(6);
   });
 
   it("rejects stale activation and lease epochs before DSH mutation", async () => {
     const runtime = ResolutionSidecarRuntime.forTests([{ wait: true }]);
     void runtime.open(validIntake(), "act_1", 2);
     await expect(runtime.cancel("res_1", "seg_1", "act_1", 1)).rejects.toThrow(/STALE_ACTIVATION_OR_LEASE/);
+  });
+});
+
+describe("V2 runtime protocol", () => {
+  it("executes normal multi-tool steps before sole terminal", async () => {
+    const runtime = ResolutionSidecarRuntime.forTests([
+      { calls: [{ name: "read_file", arguments: { path: "README.md" } }] },
+      { name: "submit_resolution", arguments: {
+        status: "resolved",
+        summary: "done",
+        findings: [],
+        completed_subgoals: [],
+        remaining_needs: [],
+        clarification_request: null,
+        approval_request: null,
+        artifact_refs: [],
+        warnings: [],
+      } },
+    ]);
+    const result = await runtime.open({
+      schema_version: "dsh_resolution_intake.v2",
+      mode: "start",
+      request_id: "request-v2",
+      operation_id: "operation-v2",
+      operation_payload_digest: "sha256:operation-v2",
+      resolution_thread_id: "thread-v2",
+      segment_id: "segment-v2",
+      brain_conversation_ref: "chat:debug:one",
+      workspace_root: "C:/workspace/project",
+      route_digest: "sha256:route",
+      model_input: { objective: "inspect and resolve", facts: [] },
+      semantic_tool_authority: { catalog_digest: "sha256:catalog", token: "opaque" },
+      interaction_authority: {
+        issuer: "dsh-sidecar",
+        scope_fingerprint: "sha256:scope",
+        audience_fingerprint: "sha256:audience",
+      },
+    }, "activation-v2", 1);
+    expect(result.exhaust.kind).toBe("terminal");
+    expect(result.diagnostics.tool_executions).toBe(2);
+    expect(result.diagnostics.terminal_tool_executions).toBe(1);
   });
 });

@@ -1,20 +1,24 @@
-"""Strict versioned Kazusa DTOs for the standalone DSH sidecar."""
+"""Strict DTOs for the standalone DSH V2 resolver boundary."""
 
 from __future__ import annotations
 
+import ntpath
+import posixpath
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from agentic_resolver.errors import ResolverContractError, RuntimeFaultCode
 
-RPC_PROTOCOL_VERSION = "kazusa.dsh-resolution-rpc.v1"
-INTAKE_SCHEMA_VERSION = "dsh_resolution_intake.v1"
-THREAD_SCHEMA_VERSION = "resolution_thread_store.v1"
-SEGMENT_SCHEMA_VERSION = "resolver_session_segment.v1"
-PROFILE_VERSION = "kazusa-resolver-v1"
+RPC_PROTOCOL_VERSION_V2 = "kazusa.dsh-resolution-rpc.v2"
+RPC_PROTOCOL_VERSION = RPC_PROTOCOL_VERSION_V2
+INTAKE_SCHEMA_VERSION = "dsh_resolution_intake.v2"
+THREAD_SCHEMA_VERSION = "resolution_thread_store.v2"
+SEGMENT_SCHEMA_VERSION = "resolver_session_segment.v2"
+PROFILE_VERSION = "kazusa-resolver-standard-v2"
 DSH_RELEASE = "0.1.1-rc.2"
-SESSION_STORE_EPOCH = "dsh-sqlite-0.1.1-rc.2-v1"
+SESSION_STORE_EPOCH = "dsh-sqlite-0.1.1-rc.2-standard-v2"
+EVIDENCE_SCHEMA_VERSION = "evidence_receipt.v2"
 
 
 def _mapping(value: object, context: str) -> Mapping[str, Any]:
@@ -67,60 +71,85 @@ def _optional_mapping(value: object, field: str) -> dict[str, Any] | None:
     return dict(_mapping(value, field))
 
 
-@dataclass(frozen=True, slots=True)
-class DSHResolutionRuntimeV1:
-    """Deterministic operation authority excluded from model-visible input."""
+def _canonical_workspace(value: object, field: str) -> str:
+    path = _text(value, field)
+    windows_absolute = ntpath.isabs(path)
+    posix_absolute = posixpath.isabs(path)
+    if not windows_absolute and not posix_absolute:
+        raise ResolverContractError(f"{field} must be an absolute path")
+    normalizer = ntpath.normpath if windows_absolute else posixpath.normpath
+    normalized = normalizer(path)
+    if normalized.replace("\\", "/") != path.replace("\\", "/"):
+        raise ResolverContractError(f"{field} must be canonical")
+    return path.replace("\\", "/")
 
-    PRIORITIES: ClassVar[frozenset[str]] = frozenset({"now", "background"})
+
+class DSHResolutionModelInputV2(dict[str, object]):
+    """The only model-visible input accepted by the V2 resolver."""
+
+    @classmethod
+    def from_mapping(cls, value: object) -> DSHResolutionModelInputV2:
+        data = _strict(value, {"objective", "facts"}, "model_input")
+        return cls(
+            objective=_text(data["objective"], "model_input.objective"),
+            facts=list(_texts(data["facts"], "model_input.facts")),
+        )
+
+    @property
+    def objective(self) -> str:
+        return str(self["objective"])
+
+    @property
+    def facts(self) -> tuple[str, ...]:
+        value = self["facts"]
+        if not isinstance(value, list):
+            raise ResolverContractError("model_input.facts must be a list")
+        return tuple(value)
+
+    def to_dict(self) -> dict[str, object]:
+        return {"objective": self.objective, "facts": list(self.facts)}
+
+
+@dataclass(frozen=True, slots=True)
+class DSHResolutionRuntimeV2:
+    """Model-hidden V2 authority identity carried by an intake."""
+
     request_id: str
     operation_id: str
     operation_payload_digest: str
     resolution_thread_id: str
     segment_id: str
-    priority: str
-    soft_deadline_at: str
-    hard_deadline_at: str
-    max_model_steps: int
-    max_tool_calls: int
-    max_tool_bytes: int
-    capability_token: str
-    scope_fingerprint: str
-    audience_fingerprint: str
-    resolver_profile_version: str
-    dsh_release: str
-    session_store_epoch: str
-    model_route: str
-    tool_catalog_digest: str
-    policy_epoch: str
+    brain_conversation_ref: str
+    workspace_root: str
+    route_digest: str
+    semantic_tool_authority: dict[str, str]
+    interaction_authority: dict[str, str]
 
     @classmethod
-    def from_mapping(cls, value: object) -> DSHResolutionRuntimeV1:
+    def from_mapping(cls, value: object) -> DSHResolutionRuntimeV2:
         keys = {
-            "request_id", "operation_id", "operation_payload_digest",
-            "resolution_thread_id", "segment_id", "priority",
-            "soft_deadline_at", "hard_deadline_at", "max_model_steps",
-            "max_tool_calls", "max_tool_bytes", "capability_token",
-            "scope_fingerprint", "audience_fingerprint",
-            "resolver_profile_version", "dsh_release", "session_store_epoch",
-            "model_route", "tool_catalog_digest", "policy_epoch",
+            "request_id",
+            "operation_id",
+            "operation_payload_digest",
+            "resolution_thread_id",
+            "segment_id",
+            "brain_conversation_ref",
+            "workspace_root",
+            "route_digest",
+            "semantic_tool_authority",
+            "interaction_authority",
         }
         data = _strict(value, keys, "runtime")
-        priority = _text(data["priority"], "runtime.priority")
-        if priority not in cls.PRIORITIES:
-            raise ResolverContractError("runtime.priority is unsupported")
-        profile = _text(
-            data["resolver_profile_version"], "runtime.resolver_profile_version"
+        semantic = _strict(
+            data["semantic_tool_authority"],
+            {"catalog_digest", "token"},
+            "runtime.semantic_tool_authority",
         )
-        if profile != PROFILE_VERSION:
-            raise ResolverContractError("resolver_profile_version is unsupported")
-        release = _text(data["dsh_release"], "runtime.dsh_release")
-        if release != DSH_RELEASE:
-            raise ResolverContractError("dsh_release is unsupported")
-        store_epoch = _text(
-            data["session_store_epoch"], "runtime.session_store_epoch"
+        interaction = _strict(
+            data["interaction_authority"],
+            {"issuer", "scope_fingerprint", "audience_fingerprint"},
+            "runtime.interaction_authority",
         )
-        if store_epoch != SESSION_STORE_EPOCH:
-            raise ResolverContractError("session_store_epoch is unsupported")
         return cls(
             request_id=_text(data["request_id"], "runtime.request_id"),
             operation_id=_text(data["operation_id"], "runtime.operation_id"),
@@ -129,164 +158,175 @@ class DSHResolutionRuntimeV1:
                 "runtime.operation_payload_digest",
             ),
             resolution_thread_id=_text(
-                data["resolution_thread_id"], "runtime.resolution_thread_id"
+                data["resolution_thread_id"],
+                "runtime.resolution_thread_id",
             ),
             segment_id=_text(data["segment_id"], "runtime.segment_id"),
-            priority=priority,
-            soft_deadline_at=_text(
-                data["soft_deadline_at"], "runtime.soft_deadline_at"
+            brain_conversation_ref=_text(
+                data["brain_conversation_ref"],
+                "runtime.brain_conversation_ref",
             ),
-            hard_deadline_at=_text(
-                data["hard_deadline_at"], "runtime.hard_deadline_at"
+            workspace_root=_canonical_workspace(
+                data["workspace_root"], "runtime.workspace_root"
             ),
-            max_model_steps=_integer(
-                data["max_model_steps"], "runtime.max_model_steps", 1
-            ),
-            max_tool_calls=_integer(
-                data["max_tool_calls"], "runtime.max_tool_calls", 1
-            ),
-            max_tool_bytes=_integer(
-                data["max_tool_bytes"], "runtime.max_tool_bytes", 1
-            ),
-            capability_token=_text(
-                data["capability_token"], "runtime.capability_token"
-            ),
-            scope_fingerprint=_text(
-                data["scope_fingerprint"], "runtime.scope_fingerprint"
-            ),
-            audience_fingerprint=_text(
-                data["audience_fingerprint"], "runtime.audience_fingerprint"
-            ),
-            resolver_profile_version=profile,
-            dsh_release=release,
-            session_store_epoch=store_epoch,
-            model_route=_text(data["model_route"], "runtime.model_route"),
-            tool_catalog_digest=_text(
-                data["tool_catalog_digest"], "runtime.tool_catalog_digest"
-            ),
-            policy_epoch=_text(data["policy_epoch"], "runtime.policy_epoch"),
+            route_digest=_text(data["route_digest"], "runtime.route_digest"),
+            semantic_tool_authority={
+                "catalog_digest": _text(
+                    semantic["catalog_digest"],
+                    "runtime.semantic_tool_authority.catalog_digest",
+                ),
+                "token": _text(
+                    semantic["token"],
+                    "runtime.semantic_tool_authority.token",
+                ),
+            },
+            interaction_authority={
+                "issuer": _text(
+                    interaction["issuer"],
+                    "runtime.interaction_authority.issuer",
+                ),
+                "scope_fingerprint": _text(
+                    interaction["scope_fingerprint"],
+                    "runtime.interaction_authority.scope_fingerprint",
+                ),
+                "audience_fingerprint": _text(
+                    interaction["audience_fingerprint"],
+                    "runtime.interaction_authority.audience_fingerprint",
+                ),
+            },
         )
 
     def to_dict(self) -> dict[str, object]:
         return {
-            field: getattr(self, field)
-            for field in self.__dataclass_fields__
-            if field != "PRIORITIES"
+            "request_id": self.request_id,
+            "operation_id": self.operation_id,
+            "operation_payload_digest": self.operation_payload_digest,
+            "resolution_thread_id": self.resolution_thread_id,
+            "segment_id": self.segment_id,
+            "brain_conversation_ref": self.brain_conversation_ref,
+            "workspace_root": self.workspace_root,
+            "route_digest": self.route_digest,
+            "semantic_tool_authority": dict(self.semantic_tool_authority),
+            "interaction_authority": dict(self.interaction_authority),
         }
 
 
 @dataclass(frozen=True, slots=True)
-class DSHResolutionModelInputV1:
-    """Bounded semantic material rendered into the DSH waking message."""
-
-    objective: str
-    constraints: tuple[str, ...]
-    success_criteria: tuple[str, ...]
-    known_facts: tuple[str, ...]
-    uncertainty: tuple[str, ...]
-    literal_inputs: tuple[str, ...]
-    continuation_delta: str | None
-    prior_resolution_refs: tuple[str, ...]
-    requested_evidence_quality: str
-    notes: tuple[str, ...]
-
-    @classmethod
-    def from_mapping(cls, value: object) -> DSHResolutionModelInputV1:
-        keys = {
-            "objective", "constraints", "success_criteria", "known_facts",
-            "uncertainty", "literal_inputs", "continuation_delta",
-            "prior_resolution_refs", "requested_evidence_quality", "notes",
-        }
-        data = _strict(value, keys, "model_input")
-        delta = data["continuation_delta"]
-        if delta is not None:
-            delta = _text(delta, "model_input.continuation_delta")
-        return cls(
-            objective=_text(data["objective"], "model_input.objective"),
-            constraints=_texts(data["constraints"], "model_input.constraints"),
-            success_criteria=_texts(
-                data["success_criteria"], "model_input.success_criteria"
-            ),
-            known_facts=_texts(data["known_facts"], "model_input.known_facts"),
-            uncertainty=_texts(data["uncertainty"], "model_input.uncertainty"),
-            literal_inputs=_texts(
-                data["literal_inputs"], "model_input.literal_inputs"
-            ),
-            continuation_delta=delta,
-            prior_resolution_refs=_texts(
-                data["prior_resolution_refs"],
-                "model_input.prior_resolution_refs",
-            ),
-            requested_evidence_quality=_text(
-                data["requested_evidence_quality"],
-                "model_input.requested_evidence_quality",
-            ),
-            notes=_texts(data["notes"], "model_input.notes"),
-        )
-
-    def to_dict(self) -> dict[str, object]:
-        return {
-            "objective": self.objective,
-            "constraints": list(self.constraints),
-            "success_criteria": list(self.success_criteria),
-            "known_facts": list(self.known_facts),
-            "uncertainty": list(self.uncertainty),
-            "literal_inputs": list(self.literal_inputs),
-            "continuation_delta": self.continuation_delta,
-            "prior_resolution_refs": list(self.prior_resolution_refs),
-            "requested_evidence_quality": self.requested_evidence_quality,
-            "notes": list(self.notes),
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class DSHResolutionIntakeV1:
-    """Canonical standalone sidecar intake."""
+class DSHResolutionIntakeV2:
+    """Strict V2 sidecar intake separating host authority from model input."""
 
     MODES: ClassVar[frozenset[str]] = frozenset({"start", "continue"})
     schema_version: str
     mode: str
-    runtime: DSHResolutionRuntimeV1
-    model_input: DSHResolutionModelInputV1
+    request_id: str
+    operation_id: str
+    operation_payload_digest: str
+    resolution_thread_id: str
+    segment_id: str
+    brain_conversation_ref: str
+    workspace_root: str
+    route_digest: str
+    model_input: DSHResolutionModelInputV2
+    semantic_tool_authority: dict[str, str]
+    interaction_authority: dict[str, str]
 
     @classmethod
-    def from_mapping(cls, value: object) -> DSHResolutionIntakeV1:
-        data = _strict(
-            value,
-            {"schema_version", "mode", "runtime", "model_input"},
-            "intake",
-        )
+    def from_mapping(cls, value: object) -> DSHResolutionIntakeV2:
+        keys = {
+            "schema_version",
+            "mode",
+            "request_id",
+            "operation_id",
+            "operation_payload_digest",
+            "resolution_thread_id",
+            "segment_id",
+            "brain_conversation_ref",
+            "workspace_root",
+            "route_digest",
+            "model_input",
+            "semantic_tool_authority",
+            "interaction_authority",
+        }
+        data = _strict(value, keys, "intake")
         version = _text(data["schema_version"], "intake.schema_version")
         if version != INTAKE_SCHEMA_VERSION:
             raise ResolverContractError("intake.schema_version is unsupported")
         mode = _text(data["mode"], "intake.mode")
         if mode not in cls.MODES:
             raise ResolverContractError("intake.mode is unsupported")
+        runtime = DSHResolutionRuntimeV2.from_mapping({
+            key: data[key]
+            for key in (
+                "request_id",
+                "operation_id",
+                "operation_payload_digest",
+                "resolution_thread_id",
+                "segment_id",
+                "brain_conversation_ref",
+                "workspace_root",
+                "route_digest",
+                "semantic_tool_authority",
+                "interaction_authority",
+            )
+        })
         return cls(
             schema_version=version,
             mode=mode,
-            runtime=DSHResolutionRuntimeV1.from_mapping(data["runtime"]),
-            model_input=DSHResolutionModelInputV1.from_mapping(
+            request_id=runtime.request_id,
+            operation_id=runtime.operation_id,
+            operation_payload_digest=runtime.operation_payload_digest,
+            resolution_thread_id=runtime.resolution_thread_id,
+            segment_id=runtime.segment_id,
+            brain_conversation_ref=runtime.brain_conversation_ref,
+            workspace_root=runtime.workspace_root,
+            route_digest=runtime.route_digest,
+            model_input=DSHResolutionModelInputV2.from_mapping(
                 data["model_input"]
             ),
+            semantic_tool_authority=dict(runtime.semantic_tool_authority),
+            interaction_authority=dict(runtime.interaction_authority),
+        )
+
+    @property
+    def model_visible_input(self) -> dict[str, object]:
+        """Return the deliberately small model-visible projection."""
+
+        return self.model_input.to_dict()
+
+    def runtime_authority(self) -> DSHResolutionRuntimeV2:
+        return DSHResolutionRuntimeV2(
+            request_id=self.request_id,
+            operation_id=self.operation_id,
+            operation_payload_digest=self.operation_payload_digest,
+            resolution_thread_id=self.resolution_thread_id,
+            segment_id=self.segment_id,
+            brain_conversation_ref=self.brain_conversation_ref,
+            workspace_root=self.workspace_root,
+            route_digest=self.route_digest,
+            semantic_tool_authority=dict(self.semantic_tool_authority),
+            interaction_authority=dict(self.interaction_authority),
         )
 
     def to_dict(self) -> dict[str, object]:
         return {
             "schema_version": self.schema_version,
             "mode": self.mode,
-            "runtime": self.runtime.to_dict(),
+            **self.runtime_authority().to_dict(),
             "model_input": self.model_input.to_dict(),
         }
 
 
 @dataclass(frozen=True, slots=True)
-class SubmitResolutionV1:
+class SubmitResolutionV2:
     """Validated terminal semantic product returned by the terminal action."""
 
     STATUSES: ClassVar[frozenset[str]] = frozenset({
-        "resolved", "partial", "needs_user_input", "approval_required",
-        "unavailable", "failed",
+        "resolved",
+        "partial",
+        "needs_user_input",
+        "approval_required",
+        "unavailable",
+        "failed",
     })
     status: str
     summary: str
@@ -299,11 +339,17 @@ class SubmitResolutionV1:
     warnings: tuple[str, ...]
 
     @classmethod
-    def from_mapping(cls, value: object) -> SubmitResolutionV1:
+    def from_mapping(cls, value: object) -> SubmitResolutionV2:
         keys = {
-            "status", "summary", "findings", "completed_subgoals",
-            "remaining_needs", "clarification_request", "approval_request",
-            "artifact_refs", "warnings",
+            "status",
+            "summary",
+            "findings",
+            "completed_subgoals",
+            "remaining_needs",
+            "clarification_request",
+            "approval_request",
+            "artifact_refs",
+            "warnings",
         }
         data = _strict(value, keys, "submit_resolution")
         status = _text(data["status"], "submit_resolution.status")
@@ -323,7 +369,8 @@ class SubmitResolutionV1:
             "submit_resolution.clarification_request",
         )
         approval = _optional_mapping(
-            data["approval_request"], "submit_resolution.approval_request"
+            data["approval_request"],
+            "submit_resolution.approval_request",
         )
         if status == "needs_user_input" and clarification is None:
             raise ResolverContractError(
@@ -348,12 +395,14 @@ class SubmitResolutionV1:
                 "submit_resolution.completed_subgoals",
             ),
             remaining_needs=_texts(
-                data["remaining_needs"], "submit_resolution.remaining_needs"
+                data["remaining_needs"],
+                "submit_resolution.remaining_needs",
             ),
             clarification_request=clarification,
             approval_request=approval,
             artifact_refs=_texts(
-                data["artifact_refs"], "submit_resolution.artifact_refs"
+                data["artifact_refs"],
+                "submit_resolution.artifact_refs",
             ),
             warnings=_texts(data["warnings"], "submit_resolution.warnings"),
         )
@@ -373,59 +422,109 @@ class SubmitResolutionV1:
 
 
 @dataclass(frozen=True, slots=True)
-class EvidenceReferenceV1:
-    """Bounded public evidence identity projected from sidecar validation."""
+class EvidenceReceiptV2:
+    """Public evidence projection with no backend identifiers."""
 
     schema_version: str
-    evidence_id: str
     resolution_thread_id: str
     segment_id: str
     scope_fingerprint: str
     audience_fingerprint: str
     policy_epoch: str
-    tool_name: str
+    evidence_id: str
     source_kind: str
-    source_id: str
+    semantic_ref: str
     content_digest: str
+    provenance: dict[str, str]
 
     @classmethod
-    def from_mapping(cls, value: object) -> EvidenceReferenceV1:
+    def from_mapping(cls, value: object) -> EvidenceReceiptV2:
         keys = {
-            "schema_version", "evidence_id", "resolution_thread_id",
-            "segment_id", "scope_fingerprint", "audience_fingerprint",
-            "policy_epoch", "tool_name", "source_kind", "source_id",
+            "schema_version",
+            "resolution_thread_id",
+            "segment_id",
+            "scope_fingerprint",
+            "audience_fingerprint",
+            "policy_epoch",
+            "evidence_id",
+            "source_kind",
+            "semantic_ref",
             "content_digest",
+            "provenance",
         }
-        data = _strict(value, keys, "evidence_reference")
+        data = _strict(value, keys, "evidence_receipt")
         version = _text(
-            data["schema_version"], "evidence_reference.schema_version"
+            data["schema_version"], "evidence_receipt.schema_version"
         )
-        if version != "evidence_reference.v1":
+        if version != EVIDENCE_SCHEMA_VERSION:
             raise ResolverContractError(
-                "evidence_reference.schema_version is unsupported"
+                "evidence_receipt.schema_version is unsupported"
             )
-        return cls(**{
-            key: _text(data[key], f"evidence_reference.{key}")
-            for key in keys
-        })
+        provenance = _strict(
+            data["provenance"], {"tool_name"}, "evidence_receipt.provenance"
+        )
+        return cls(
+            schema_version=version,
+            resolution_thread_id=_text(
+                data["resolution_thread_id"],
+                "evidence_receipt.resolution_thread_id",
+            ),
+            segment_id=_text(data["segment_id"], "evidence_receipt.segment_id"),
+            scope_fingerprint=_text(
+                data["scope_fingerprint"],
+                "evidence_receipt.scope_fingerprint",
+            ),
+            audience_fingerprint=_text(
+                data["audience_fingerprint"],
+                "evidence_receipt.audience_fingerprint",
+            ),
+            policy_epoch=_text(
+                data["policy_epoch"], "evidence_receipt.policy_epoch"
+            ),
+            evidence_id=_text(data["evidence_id"], "evidence_receipt.evidence_id"),
+            source_kind=_text(
+                data["source_kind"], "evidence_receipt.source_kind"
+            ),
+            semantic_ref=_text(
+                data["semantic_ref"], "evidence_receipt.semantic_ref"
+            ),
+            content_digest=_text(
+                data["content_digest"], "evidence_receipt.content_digest"
+            ),
+            provenance={
+                "tool_name": _text(
+                    provenance["tool_name"],
+                    "evidence_receipt.provenance.tool_name",
+                )
+            },
+        )
 
-    def to_dict(self) -> dict[str, str]:
+    def to_dict(self) -> dict[str, object]:
         return {
-            field: getattr(self, field)
-            for field in self.__dataclass_fields__
+            "schema_version": self.schema_version,
+            "resolution_thread_id": self.resolution_thread_id,
+            "segment_id": self.segment_id,
+            "scope_fingerprint": self.scope_fingerprint,
+            "audience_fingerprint": self.audience_fingerprint,
+            "policy_epoch": self.policy_epoch,
+            "evidence_id": self.evidence_id,
+            "source_kind": self.source_kind,
+            "semantic_ref": self.semantic_ref,
+            "content_digest": self.content_digest,
+            "provenance": dict(self.provenance),
         }
 
 
 @dataclass(frozen=True, slots=True)
-class DSHResolutionExhaustV1:
-    """Canonical terminal, checkpointed, or runtime-fault exhaust."""
+class DSHResolutionExhaustV2:
+    """Canonical terminal, checkpointed, canceled, or faulted exhaust."""
 
-    KINDS: ClassVar[set[str]] = {
-        "terminal", "checkpointed", "runtime_fault"
-    }
+    KINDS: ClassVar[frozenset[str]] = frozenset({
+        "terminal", "checkpointed", "runtime_fault", "canceled"
+    })
     kind: str
-    terminal: SubmitResolutionV1 | None = None
-    evidence: tuple[EvidenceReferenceV1, ...] = ()
+    terminal: SubmitResolutionV2 | None = None
+    evidence: tuple[EvidenceReceiptV2, ...] = ()
     identity: dict[str, Any] | None = None
     usage: dict[str, Any] | None = None
     last_committed_seq: int | None = None
@@ -433,7 +532,7 @@ class DSHResolutionExhaustV1:
     fault: dict[str, Any] | None = None
 
     @classmethod
-    def from_mapping(cls, value: object) -> DSHResolutionExhaustV1:
+    def from_mapping(cls, value: object) -> DSHResolutionExhaustV2:
         data = _mapping(value, "exhaust")
         kind = _text(data.get("kind"), "exhaust.kind")
         if kind not in cls.KINDS:
@@ -446,6 +545,8 @@ class DSHResolutionExhaustV1:
             }
         elif kind == "checkpointed":
             allowed |= {"checkpoint", "identity", "last_committed_seq"}
+        elif kind == "canceled":
+            allowed |= {"identity", "last_committed_seq"}
         else:
             allowed |= {"fault", "identity", "last_committed_seq"}
         unknown = set(data) - allowed
@@ -454,40 +555,30 @@ class DSHResolutionExhaustV1:
                 f"exhaust has unknown fields: {sorted(unknown)}"
             )
         terminal = None
-        evidence: tuple[EvidenceReferenceV1, ...] = ()
+        evidence: tuple[EvidenceReceiptV2, ...] = ()
         if kind == "terminal":
-            terminal = SubmitResolutionV1.from_mapping(data.get("terminal"))
-            evidence_value = data.get("evidence", [])
+            terminal = SubmitResolutionV2.from_mapping(data.get("terminal"))
+            evidence_value = data.get("evidence")
             if not isinstance(evidence_value, list) or len(evidence_value) > 64:
                 raise ResolverContractError("exhaust.evidence must be bounded")
             evidence = tuple(
-                EvidenceReferenceV1.from_mapping(item)
-                for item in evidence_value
+                EvidenceReceiptV2.from_mapping(item) for item in evidence_value
             )
         identity = _optional_mapping(data.get("identity"), "exhaust.identity")
         if identity is not None and evidence:
-            cls.check_evidence_bindings(
-                evidence,
-                resolution_thread_id=_text(
-                    identity.get("resolution_thread_id"),
-                    "exhaust.identity.resolution_thread_id",
-                ),
-                segment_id=_text(
-                    identity.get("segment_id"), "exhaust.identity.segment_id"
-                ),
-                scope_fingerprint=_text(
-                    identity.get("scope_fingerprint"),
-                    "exhaust.identity.scope_fingerprint",
-                ),
-                audience_fingerprint=_text(
-                    identity.get("audience_fingerprint"),
-                    "exhaust.identity.audience_fingerprint",
-                ),
-                policy_epoch=_text(
-                    identity.get("policy_epoch"),
-                    "exhaust.identity.policy_epoch",
-                ),
-            )
+            required = {
+                key: _text(identity.get(key), f"exhaust.identity.{key}")
+                for key in (
+                    "resolution_thread_id",
+                    "segment_id",
+                    "scope_fingerprint",
+                    "audience_fingerprint",
+                    "policy_epoch",
+                )
+                if key in identity
+            }
+            if len(required) == 5:
+                cls.check_evidence_bindings(evidence, **required)
         sequence = data.get("last_committed_seq")
         if sequence is not None:
             sequence = _integer(sequence, "exhaust.last_committed_seq")
@@ -508,63 +599,58 @@ class DSHResolutionExhaustV1:
     def from_terminal(
         cls,
         *,
-        operation_id: str,
-        operation_payload_digest: str,
-        request_id: str,
         resolution_thread_id: str,
         segment_id: str,
-        activation_id: str,
-        lease_epoch: int,
         scope_fingerprint: str,
         audience_fingerprint: str,
-        resolver_profile_version: str,
-        dsh_release: str,
-        session_store_epoch: str,
-        model_route: str,
-        tool_catalog_digest: str,
         policy_epoch: str,
-        terminal: SubmitResolutionV1,
-        evidence: Sequence[EvidenceReferenceV1],
-        last_committed_seq: int,
-        usage: Mapping[str, Any] | None = None,
-    ) -> DSHResolutionExhaustV1:
-        identity = {
-            "operation_id": operation_id,
-            "operation_payload_digest": operation_payload_digest,
-            "request_id": request_id,
-            "resolution_thread_id": resolution_thread_id,
-            "segment_id": segment_id,
-            "activation_id": activation_id,
-            "lease_epoch": lease_epoch,
-            "scope_fingerprint": scope_fingerprint,
-            "audience_fingerprint": audience_fingerprint,
-            "resolver_profile_version": resolver_profile_version,
-            "dsh_release": dsh_release,
-            "session_store_epoch": session_store_epoch,
-            "model_route": model_route,
-            "tool_catalog_digest": tool_catalog_digest,
-            "policy_epoch": policy_epoch,
-        }
+        terminal: SubmitResolutionV2,
+        evidence: Sequence[EvidenceReceiptV2],
+        last_committed_seq: int | None = None,
+        **claims: object,
+    ) -> DSHResolutionExhaustV2:
+        thread = _text(resolution_thread_id, "resolution_thread_id")
+        segment = _text(segment_id, "segment_id")
+        scope = _text(scope_fingerprint, "scope_fingerprint")
+        audience = _text(audience_fingerprint, "audience_fingerprint")
+        policy = _text(policy_epoch, "policy_epoch")
+        if not isinstance(terminal, SubmitResolutionV2):
+            raise ResolverContractError("terminal must be SubmitResolutionV2")
+        references = tuple(evidence)
         cls.check_evidence_bindings(
-            evidence,
-            resolution_thread_id=resolution_thread_id,
-            segment_id=segment_id,
-            scope_fingerprint=scope_fingerprint,
-            audience_fingerprint=audience_fingerprint,
-            policy_epoch=policy_epoch,
+            references,
+            resolution_thread_id=thread,
+            segment_id=segment,
+            scope_fingerprint=scope,
+            audience_fingerprint=audience,
+            policy_epoch=policy,
         )
+        identity: dict[str, Any] = {
+            "resolution_thread_id": thread,
+            "segment_id": segment,
+            "scope_fingerprint": scope,
+            "audience_fingerprint": audience,
+            "policy_epoch": policy,
+        }
+        for key, value in claims.items():
+            if value is not None:
+                identity[key] = value
         return cls(
             kind="terminal",
             terminal=terminal,
-            evidence=tuple(evidence),
+            evidence=references,
             identity=identity,
-            usage=dict(usage or {}),
-            last_committed_seq=last_committed_seq,
+            usage={},
+            last_committed_seq=(
+                _integer(last_committed_seq, "last_committed_seq")
+                if last_committed_seq is not None
+                else None
+            ),
         )
 
     @staticmethod
     def check_evidence_bindings(
-        evidence: Sequence[EvidenceReferenceV1],
+        evidence: Sequence[EvidenceReceiptV2],
         *,
         resolution_thread_id: str,
         segment_id: str,
@@ -573,13 +659,20 @@ class DSHResolutionExhaustV1:
         policy_epoch: str,
     ) -> None:
         expected = (
-            resolution_thread_id, segment_id, scope_fingerprint,
-            audience_fingerprint, policy_epoch,
+            resolution_thread_id,
+            segment_id,
+            scope_fingerprint,
+            audience_fingerprint,
+            policy_epoch,
         )
         for reference in evidence:
+            if not isinstance(reference, EvidenceReceiptV2):
+                raise ResolverContractError("evidence reference is invalid")
             actual = (
-                reference.resolution_thread_id, reference.segment_id,
-                reference.scope_fingerprint, reference.audience_fingerprint,
+                reference.resolution_thread_id,
+                reference.segment_id,
+                reference.scope_fingerprint,
+                reference.audience_fingerprint,
                 reference.policy_epoch,
             )
             if actual != expected:
@@ -601,6 +694,11 @@ class DSHResolutionExhaustV1:
                 result["identity"] = self.identity
             if self.last_committed_seq is not None:
                 result["last_committed_seq"] = self.last_committed_seq
+        elif self.kind == "canceled":
+            if self.identity is not None:
+                result["identity"] = self.identity
+            if self.last_committed_seq is not None:
+                result["last_committed_seq"] = self.last_committed_seq
         else:
             result["fault"] = self.fault or {
                 "code": RuntimeFaultCode.RPC_CONTRACT_ERROR.value
@@ -613,9 +711,10 @@ class DSHResolutionExhaustV1:
 
 
 @dataclass(frozen=True, slots=True)
-class ResolutionThreadRecordV1:
-    """Strict lifecycle metadata document stored by the Mongo owner."""
+class ResolutionThreadRecordV2:
+    """Strict durable continuity metadata for the V2 Mongo owner."""
 
+    PRIORITIES: ClassVar[frozenset[str]] = frozenset({"now", "background"})
     schema_version: str
     resolution_thread_id: str
     brain_conversation_ref: str
@@ -623,8 +722,18 @@ class ResolutionThreadRecordV1:
     current_segment_id: str
     state: str
     priority: str
-    audience_fingerprint: str
+    workspace_root: str
+    workspace_fingerprint: str
+    route_digest: str
+    profile_version: str
+    dsh_release: str
+    session_store_epoch: str
+    standard_catalog_digest: str
+    semantic_catalog_digest: str
+    policy_epoch: str
     scope_fingerprint: str
+    audience_fingerprint: str
+    interaction_id: str
     created_at: str
     updated_at: str
     last_terminal_status: str | None
@@ -636,14 +745,35 @@ class ResolutionThreadRecordV1:
     operations: tuple[dict[str, Any], ...]
 
     @classmethod
-    def from_mapping(cls, value: object) -> ResolutionThreadRecordV1:
+    def from_mapping(cls, value: object) -> ResolutionThreadRecordV2:
         keys = {
-            "schema_version", "resolution_thread_id",
-            "brain_conversation_ref", "root_goal_ref", "current_segment_id",
-            "state", "priority", "audience_fingerprint",
-            "scope_fingerprint", "created_at", "updated_at",
-            "last_terminal_status", "continuation_eligible_until",
-            "document_revision", "lease_epoch", "current_lease", "segments",
+            "schema_version",
+            "resolution_thread_id",
+            "brain_conversation_ref",
+            "root_goal_ref",
+            "current_segment_id",
+            "state",
+            "priority",
+            "workspace_root",
+            "workspace_fingerprint",
+            "route_digest",
+            "profile_version",
+            "dsh_release",
+            "session_store_epoch",
+            "standard_catalog_digest",
+            "semantic_catalog_digest",
+            "policy_epoch",
+            "scope_fingerprint",
+            "audience_fingerprint",
+            "interaction_id",
+            "created_at",
+            "updated_at",
+            "last_terminal_status",
+            "continuation_eligible_until",
+            "document_revision",
+            "lease_epoch",
+            "current_lease",
+            "segments",
             "operations",
         }
         data = _strict(value, keys, "resolution_thread")
@@ -651,6 +781,9 @@ class ResolutionThreadRecordV1:
             raise ResolverContractError(
                 "resolution_thread.schema_version is unsupported"
             )
+        priority = _text(data["priority"], "resolution_thread.priority")
+        if priority not in cls.PRIORITIES:
+            raise ResolverContractError("resolution_thread.priority is unsupported")
         segments_value = data["segments"]
         operations_value = data["operations"]
         if not isinstance(segments_value, list) or not segments_value:
@@ -661,9 +794,7 @@ class ResolutionThreadRecordV1:
             raise ResolverContractError(
                 "resolution_thread.operations must be a list"
             )
-        segments = tuple(
-            cls._validate_segment(item) for item in segments_value
-        )
+        segments = tuple(cls._validate_segment(item) for item in segments_value)
         current_segment_id = _text(
             data["current_segment_id"],
             "resolution_thread.current_segment_id",
@@ -679,12 +810,9 @@ class ResolutionThreadRecordV1:
             data["current_lease"], "resolution_thread.current_lease"
         )
         if current_lease is not None:
-            expected_lease_keys = {
-                "activation_id", "lease_epoch", "owner_id", "expires_at"
-            }
             current_lease = dict(_strict(
                 current_lease,
-                expected_lease_keys,
+                {"activation_id", "lease_epoch", "owner_id", "expires_at"},
                 "resolution_thread.current_lease",
             ))
             if _integer(
@@ -698,40 +826,74 @@ class ResolutionThreadRecordV1:
             terminal_status = _text(
                 terminal_status, "resolution_thread.last_terminal_status"
             )
+        text_fields = (
+            "resolution_thread.resolution_thread_id",
+            "resolution_thread.brain_conversation_ref",
+            "resolution_thread.root_goal_ref",
+            "resolution_thread.workspace_fingerprint",
+            "resolution_thread.route_digest",
+            "resolution_thread.profile_version",
+            "resolution_thread.dsh_release",
+            "resolution_thread.session_store_epoch",
+            "resolution_thread.standard_catalog_digest",
+            "resolution_thread.semantic_catalog_digest",
+            "resolution_thread.policy_epoch",
+            "resolution_thread.scope_fingerprint",
+            "resolution_thread.audience_fingerprint",
+            "resolution_thread.interaction_id",
+            "resolution_thread.created_at",
+            "resolution_thread.updated_at",
+            "resolution_thread.continuation_eligible_until",
+        )
+        values = (
+            data["resolution_thread_id"],
+            data["brain_conversation_ref"],
+            data["root_goal_ref"],
+            data["workspace_fingerprint"],
+            data["route_digest"],
+            data["profile_version"],
+            data["dsh_release"],
+            data["session_store_epoch"],
+            data["standard_catalog_digest"],
+            data["semantic_catalog_digest"],
+            data["policy_epoch"],
+            data["scope_fingerprint"],
+            data["audience_fingerprint"],
+            data["interaction_id"],
+            data["created_at"],
+            data["updated_at"],
+            data["continuation_eligible_until"],
+        )
+        for value_item, field in zip(values, text_fields, strict=True):
+            _text(value_item, field)
         return cls(
             schema_version=THREAD_SCHEMA_VERSION,
-            resolution_thread_id=_text(
-                data["resolution_thread_id"],
-                "resolution_thread.resolution_thread_id",
-            ),
-            brain_conversation_ref=_text(
-                data["brain_conversation_ref"],
-                "resolution_thread.brain_conversation_ref",
-            ),
-            root_goal_ref=_text(
-                data["root_goal_ref"], "resolution_thread.root_goal_ref"
-            ),
+            resolution_thread_id=str(data["resolution_thread_id"]),
+            brain_conversation_ref=str(data["brain_conversation_ref"]),
+            root_goal_ref=str(data["root_goal_ref"]),
             current_segment_id=current_segment_id,
             state=_text(data["state"], "resolution_thread.state"),
-            priority=_text(data["priority"], "resolution_thread.priority"),
-            audience_fingerprint=_text(
-                data["audience_fingerprint"],
-                "resolution_thread.audience_fingerprint",
+            priority=priority,
+            workspace_root=_canonical_workspace(
+                data["workspace_root"], "resolution_thread.workspace_root"
             ),
-            scope_fingerprint=_text(
-                data["scope_fingerprint"],
-                "resolution_thread.scope_fingerprint",
-            ),
-            created_at=_text(data["created_at"], "resolution_thread.created_at"),
-            updated_at=_text(data["updated_at"], "resolution_thread.updated_at"),
+            workspace_fingerprint=str(data["workspace_fingerprint"]),
+            route_digest=str(data["route_digest"]),
+            profile_version=str(data["profile_version"]),
+            dsh_release=str(data["dsh_release"]),
+            session_store_epoch=str(data["session_store_epoch"]),
+            standard_catalog_digest=str(data["standard_catalog_digest"]),
+            semantic_catalog_digest=str(data["semantic_catalog_digest"]),
+            policy_epoch=str(data["policy_epoch"]),
+            scope_fingerprint=str(data["scope_fingerprint"]),
+            audience_fingerprint=str(data["audience_fingerprint"]),
+            interaction_id=str(data["interaction_id"]),
+            created_at=str(data["created_at"]),
+            updated_at=str(data["updated_at"]),
             last_terminal_status=terminal_status,
-            continuation_eligible_until=_text(
-                data["continuation_eligible_until"],
-                "resolution_thread.continuation_eligible_until",
-            ),
+            continuation_eligible_until=str(data["continuation_eligible_until"]),
             document_revision=_integer(
-                data["document_revision"],
-                "resolution_thread.document_revision",
+                data["document_revision"], "resolution_thread.document_revision"
             ),
             lease_epoch=lease_epoch,
             current_lease=current_lease,
@@ -745,22 +907,39 @@ class ResolutionThreadRecordV1:
     @staticmethod
     def _validate_segment(value: object) -> dict[str, Any]:
         keys = {
-            "schema_version", "segment_id", "resolution_thread_id",
-            "dsh_session_id", "resolver_profile_version", "dsh_release",
-            "session_store_epoch", "tool_catalog_digest", "policy_epoch",
-            "scope_fingerprint", "audience_fingerprint", "model_route",
-            "state", "last_committed_seq", "parent_segment_id",
-            "rotation_reason", "created_at", "last_used_at",
+            "schema_version",
+            "segment_id",
+            "resolution_thread_id",
+            "dsh_session_id",
+            "brain_conversation_ref",
+            "workspace_root",
+            "workspace_fingerprint",
+            "route_digest",
+            "resolver_profile_version",
+            "dsh_release",
+            "session_store_epoch",
+            "standard_catalog_digest",
+            "semantic_catalog_digest",
+            "policy_epoch",
+            "scope_fingerprint",
+            "audience_fingerprint",
+            "interaction_id",
+            "state",
+            "last_committed_seq",
+            "parent_segment_id",
+            "rotation_reason",
+            "created_at",
+            "last_used_at",
         }
         data = dict(_strict(value, keys, "resolution_thread.segment"))
         if data["schema_version"] != SEGMENT_SCHEMA_VERSION:
             raise ResolverContractError("segment.schema_version is unsupported")
         _integer(data["last_committed_seq"], "segment.last_committed_seq")
-        for key in keys - {
-            "last_committed_seq", "parent_segment_id", "rotation_reason"
-        }:
+        _canonical_workspace(data["workspace_root"], "segment.workspace_root")
+        nullable = {"parent_segment_id", "rotation_reason"}
+        for key in keys - nullable - {"last_committed_seq", "workspace_root"}:
             _text(data[key], f"segment.{key}")
-        for key in ("parent_segment_id", "rotation_reason"):
+        for key in nullable:
             if data[key] is not None:
                 _text(data[key], f"segment.{key}")
         return data
@@ -774,8 +953,18 @@ class ResolutionThreadRecordV1:
             "current_segment_id": self.current_segment_id,
             "state": self.state,
             "priority": self.priority,
-            "audience_fingerprint": self.audience_fingerprint,
+            "workspace_root": self.workspace_root,
+            "workspace_fingerprint": self.workspace_fingerprint,
+            "route_digest": self.route_digest,
+            "profile_version": self.profile_version,
+            "dsh_release": self.dsh_release,
+            "session_store_epoch": self.session_store_epoch,
+            "standard_catalog_digest": self.standard_catalog_digest,
+            "semantic_catalog_digest": self.semantic_catalog_digest,
+            "policy_epoch": self.policy_epoch,
             "scope_fingerprint": self.scope_fingerprint,
+            "audience_fingerprint": self.audience_fingerprint,
+            "interaction_id": self.interaction_id,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "last_terminal_status": self.last_terminal_status,

@@ -14,7 +14,7 @@ from kazusa_ai_chatbot.db._client import get_db
 from kazusa_ai_chatbot.db.errors import DatabaseOperationError
 
 RESOLUTION_THREADS_COLLECTION = "resolution_thread_store"
-RESOLUTION_THREAD_SCHEMA_VERSION = "resolution_thread_store.v1"
+RESOLUTION_THREAD_SCHEMA_VERSION = "resolution_thread_store.v2"
 
 
 async def _collection() -> Any:
@@ -46,17 +46,26 @@ async def ensure_indexes() -> None:
         ) from exc
 
 
-async def create_thread(
+async def create_thread_v2(
+    *,
     resolution_thread_id: str,
     brain_conversation_ref: str,
     root_goal_ref: str,
     priority: str,
+    workspace_root: str,
+    workspace_fingerprint: str,
+    route_digest: str,
+    profile_version: str,
+    standard_catalog_digest: str,
+    semantic_catalog_digest: str,
     scope_fingerprint: str,
     audience_fingerprint: str,
+    policy_epoch: str,
+    interaction_id: str,
     segment: Mapping[str, Any],
     now: str,
 ) -> dict[str, Any]:
-    """Insert one strict new thread document idempotently by thread id."""
+    """Insert one strict V2 thread document idempotently by thread id."""
 
     collection = await _collection()
     continuation = (
@@ -71,8 +80,18 @@ async def create_thread(
         "current_segment_id": segment["segment_id"],
         "state": "active",
         "priority": priority,
+        "workspace_root": workspace_root,
+        "workspace_fingerprint": workspace_fingerprint,
+        "route_digest": route_digest,
+        "profile_version": profile_version,
+        "dsh_release": "0.1.1-rc.2",
+        "session_store_epoch": "dsh-sqlite-0.1.1-rc.2-standard-v2",
+        "standard_catalog_digest": standard_catalog_digest,
+        "semantic_catalog_digest": semantic_catalog_digest,
+        "policy_epoch": policy_epoch,
         "audience_fingerprint": audience_fingerprint,
         "scope_fingerprint": scope_fingerprint,
+        "interaction_id": interaction_id,
         "created_at": now,
         "updated_at": now,
         "last_terminal_status": None,
@@ -100,12 +119,15 @@ async def create_thread(
 
 
 async def get_thread(resolution_thread_id: str) -> dict[str, Any] | None:
-    """Load one thread without exposing the Mongo object id."""
+    """Load one V2 thread without exposing the Mongo object id."""
 
     collection = await _collection()
     try:
         row = await collection.find_one(
-            {"resolution_thread_id": resolution_thread_id},
+            {
+                "resolution_thread_id": resolution_thread_id,
+                "schema_version": RESOLUTION_THREAD_SCHEMA_VERSION,
+            },
             projection={"_id": 0},
         )
     except PyMongoError as exc:
@@ -123,6 +145,7 @@ async def get_operation(
         row = await collection.find_one(
             {
                 "resolution_thread_id": resolution_thread_id,
+                "schema_version": RESOLUTION_THREAD_SCHEMA_VERSION,
                 "operations.operation_id": operation_id,
             },
             projection={"_id": 0, "operations.$": 1},
@@ -149,6 +172,7 @@ async def prepare_operation(
     existing = await collection.find_one(
         {
             "resolution_thread_id": resolution_thread_id,
+            "schema_version": RESOLUTION_THREAD_SCHEMA_VERSION,
             "operations.operation_id": operation_id,
         },
         projection={"_id": 0, "operations.$": 1},
@@ -176,6 +200,7 @@ async def prepare_operation(
         updated = await collection.find_one_and_update(
             {
                 "resolution_thread_id": resolution_thread_id,
+                "schema_version": RESOLUTION_THREAD_SCHEMA_VERSION,
                 "operations.operation_id": {"$ne": operation_id},
             },
             {
@@ -189,13 +214,13 @@ async def prepare_operation(
         raise DatabaseOperationError("failed to prepare operation") from exc
     if updated is None:
         concurrent = await prepare_operation(
-            resolution_thread_id,
-            operation_id,
-            payload_digest,
-            method,
-            segment_id,
-            activation_id,
-            lease_epoch,
+            resolution_thread_id=resolution_thread_id,
+            operation_id=operation_id,
+            payload_digest=payload_digest,
+            method=method,
+            segment_id=segment_id,
+            activation_id=activation_id,
+            lease_epoch=lease_epoch,
         )
         return concurrent
     return operation
@@ -215,6 +240,7 @@ async def acquire_lease(
         document = await collection.find_one_and_update(
             {
                 "resolution_thread_id": resolution_thread_id,
+                "schema_version": RESOLUTION_THREAD_SCHEMA_VERSION,
                 "$or": [
                     {"current_lease": None},
                     {"current_lease.expires_at": {"$lte": now}},
@@ -276,6 +302,7 @@ async def update_operation(
         document = await collection.find_one_and_update(
             {
                 "resolution_thread_id": resolution_thread_id,
+                "schema_version": RESOLUTION_THREAD_SCHEMA_VERSION,
                 "operations.operation_id": operation_id,
             },
             {"$set": fields, "$inc": {"document_revision": 1}},
@@ -305,6 +332,7 @@ async def renew_lease(
     document = await collection.find_one_and_update(
         {
             "resolution_thread_id": resolution_thread_id,
+            "schema_version": RESOLUTION_THREAD_SCHEMA_VERSION,
             "current_lease.activation_id": activation_id,
             "current_lease.lease_epoch": lease_epoch,
         },
@@ -329,6 +357,7 @@ async def release_lease(
     result = await collection.update_one(
         {
             "resolution_thread_id": resolution_thread_id,
+            "schema_version": RESOLUTION_THREAD_SCHEMA_VERSION,
             "current_lease.activation_id": activation_id,
             "current_lease.lease_epoch": lease_epoch,
         },
@@ -347,6 +376,7 @@ async def validate_fence(
     document = await collection.find_one(
         {
             "resolution_thread_id": resolution_thread_id,
+            "schema_version": RESOLUTION_THREAD_SCHEMA_VERSION,
             "current_lease.activation_id": activation_id,
             "current_lease.lease_epoch": lease_epoch,
         },
@@ -372,6 +402,7 @@ async def rotate_segment(
     document = await collection.find_one_and_update(
         {
             "resolution_thread_id": resolution_thread_id,
+            "schema_version": RESOLUTION_THREAD_SCHEMA_VERSION,
             "current_segment_id": current["current_segment_id"],
             "document_revision": current["document_revision"],
         },
@@ -404,6 +435,7 @@ async def update_segment(
     document = await collection.find_one_and_update(
         {
             "resolution_thread_id": resolution_thread_id,
+            "schema_version": RESOLUTION_THREAD_SCHEMA_VERSION,
             "segments.segment_id": segment_id,
         },
         {"$set": fields, "$inc": {"document_revision": 1}},

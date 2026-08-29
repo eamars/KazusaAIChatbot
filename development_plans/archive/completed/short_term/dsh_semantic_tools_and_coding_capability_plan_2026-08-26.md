@@ -2,9 +2,14 @@
 
 ## Plan Status And Ownership
 
-- **Status:** `approved` — architecture and execution contract approved by the
-  user on 2026-08-28; production execution still follows the repository's
-  explicit implementation authorization boundary.
+- **Status:** `completed` — completed on 2026-08-29 with P2-P0–P3 and
+  P2-G1–G10 passed without waiver. Architecture and execution contract approved by
+  the user on 2026-08-28; production execution explicitly started on
+  2026-08-28. The user approved the narrowly scoped memory-lifecycle ownership
+  amendment on 2026-08-29 after implementation traced the required write
+  invariants to their repository owner. On 2026-08-29, the user authorized the
+  Gate 5 carrier and terminal-policy inventory reconciliation discovered during
+  live execution.
 - **Plan class:** multi-process capability expansion, model-route migration,
   and narrow Brain interaction integration.
 - **Predecessor:**
@@ -607,11 +612,13 @@ after ten minutes.
 - `sidecars/dsh_resolution/src/secret_broker.ts`
 - `sidecars/dsh_resolution/src/semantic_gateway.ts`
 - `sidecars/dsh_resolution/src/brain_interaction.ts`
+- `sidecars/dsh_resolution/src/terminal_policy.ts`
 
 ### Modify — Production And Configuration
 
 - `src/kazusa_ai_chatbot/config.py`
 - `src/kazusa_ai_chatbot/db/resolution_threads.py`
+- `src/kazusa_ai_chatbot/memory_evolution/repository.py`
 - `src/agentic_resolver/__init__.py`
 - `src/agentic_resolver/contracts.py`
 - `src/agentic_resolver/controller.py`
@@ -624,6 +631,9 @@ after ten minutes.
 - `src/kazusa_ai_chatbot/service.py`
 - `src/kazusa_ai_chatbot/nodes/persona_supervisor2_schema.py`
 - `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition.py`
+- `src/kazusa_ai_chatbot/nodes/persona_supervisor2.py`
+- `src/kazusa_ai_chatbot/nodes/persona_supervisor2_l3_surface.py`
+- `src/kazusa_ai_chatbot/state.py`
 - `src/kazusa_ai_chatbot/cognition_core_v3/contracts.py`
 - `src/kazusa_ai_chatbot/cognition_core_v3/facade.py`
 - `src/kazusa_ai_chatbot/cognition_core_v3/prompt.py`
@@ -708,6 +718,7 @@ Static tests allow imports only from the listed deterministic leaf owners.
 - Create `tests/test_dsh_tool_gateway_authority.py`.
 - Create `tests/test_dsh_tool_gateway_conversation.py`.
 - Create `tests/test_dsh_tool_gateway_memory.py`.
+- Modify `tests/test_memory_evolution_repository.py`.
 - Create `tests/test_dsh_tool_gateway_people.py`.
 - Create `tests/test_dsh_tool_gateway_recall_calendar.py`.
 - Create `tests/test_dsh_tool_gateway_media.py`.
@@ -719,6 +730,8 @@ Static tests allow imports only from the listed deterministic leaf owners.
 - Create `tests/test_dsh_brain_interaction_pending.py`.
 - Create `tests/test_dsh_brain_interaction_resume.py`.
 - Create `tests/test_dsh_brain_interaction_service.py`.
+- Modify `tests/test_relevance_turn_settlement_graph.py`.
+- Modify `tests/unit/nodes/test_persona_supervisor2_l3_surface.py`.
 - Create `tests/unit/cognition_core_v3/test_dsh_interaction_contract.py`.
 - Create `tests/test_dsh_standard_profile_live_llm.py`.
 - Create `tests/test_dsh_brain_interaction_live_llm.py`.
@@ -765,6 +778,7 @@ contract and must collect before Phase 1 closes.
 | `src/kazusa_ai_chatbot/config.py` | `tests/test_config.py::test_agentic_resolver_route_settings_are_strict_and_load_initial_qwen_route` |
 | `src/kazusa_ai_chatbot/db/resolution_threads.py` | `tests/test_agentic_resolver_persistence.py::test_v2_thread_persists_brain_workspace_route_and_interaction_identity` |
 | `src/kazusa_ai_chatbot/db/dsh_interactions.py` | `tests/test_dsh_brain_interaction_persistence.py::test_interaction_store_indexes_reply_lookup_and_atomic_one_shot_grant_consumption` |
+| `src/kazusa_ai_chatbot/memory_evolution/repository.py` | `tests/test_memory_evolution_repository.py::test_lifecycle_transitions_are_guarded_idempotent_and_invalidate_cache` |
 | `src/agentic_resolver/__init__.py` | `tests/test_agentic_resolver_contracts.py::test_public_resolver_exports_only_v2_product_contracts` |
 | `src/agentic_resolver/contracts.py` | `tests/test_agentic_resolver_contracts.py::test_v2_intake_separates_model_input_from_workspace_tool_and_brain_authority` |
 | `src/agentic_resolver/controller.py` | `tests/test_agentic_resolver_controller.py::test_interaction_checkpoint_and_resume_preserve_exact_thread_segment_and_fence` |
@@ -795,6 +809,9 @@ contract and must collect before Phase 1 closes.
 | `src/kazusa_ai_chatbot/service.py` | `tests/test_dsh_brain_interaction_service.py::test_service_relay_uses_cognition_dialog_dispatcher_then_resumes_after_normal_chat_commit` |
 | `src/kazusa_ai_chatbot/nodes/persona_supervisor2_schema.py` | `tests/test_dsh_brain_interaction_decision.py::test_global_state_carries_typed_pending_interaction_and_semantic_decision` |
 | `src/kazusa_ai_chatbot/nodes/persona_supervisor2_cognition.py` | `tests/test_dsh_brain_interaction_decision.py::test_persona_projects_pending_dsh_context_and_returns_canonical_p_stage_decision` |
+| `src/kazusa_ai_chatbot/nodes/persona_supervisor2.py` | `tests/test_relevance_turn_settlement_graph.py::test_dsh_fields_cross_top_level_graph_boundary` |
+| `src/kazusa_ai_chatbot/nodes/persona_supervisor2_l3_surface.py` | `tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_l3_surface_omits_brain_owned_dsh_decision_from_prompt_projection` |
+| `src/kazusa_ai_chatbot/state.py` | `tests/test_relevance_turn_settlement_graph.py::test_dsh_fields_cross_top_level_graph_boundary` |
 | `src/kazusa_ai_chatbot/cognition_core_v3/contracts.py` | `tests/unit/cognition_core_v3/test_dsh_interaction_contract.py::test_response_plan_requires_exact_kind_compatible_dsh_decision_only_when_context_exists` |
 | `src/kazusa_ai_chatbot/cognition_core_v3/facade.py` | `tests/unit/cognition_core_v3/test_dsh_interaction_contract.py::test_p_stage_decision_survives_canonical_output_without_deterministic_semantic_rewrite` |
 | `src/kazusa_ai_chatbot/cognition_core_v3/prompt.py` | `tests/unit/cognition_core_v3/test_dsh_interaction_contract.py::test_p_prompt_assigns_decision_to_brain_and_visible_wording_to_dialog` |
@@ -812,11 +829,21 @@ contract and must collect before Phase 1 closes.
 | `sidecars/dsh_resolution/src/secret_broker.ts` | `sidecars/dsh_resolution/tests/secret_broker.spec.ts > secret isolation > native shell cannot read host credentials tokens or bridge secrets` |
 | `sidecars/dsh_resolution/src/semantic_gateway.ts` | `sidecars/dsh_resolution/tests/semantic_gateway.spec.ts > semantic gateway > attaches invisible authority and persists bounded evidence receipts` |
 | `sidecars/dsh_resolution/src/brain_interaction.ts` | `sidecars/dsh_resolution/tests/brain_interaction.spec.ts > Brain interaction > maps decisions exactly and checkpoints relay without direct user surface` |
+| `sidecars/dsh_resolution/src/terminal_policy.ts` | `sidecars/dsh_resolution/tests/terminal_policy.spec.ts > autonomous multi-tool runtime > applies no Kazusa step call byte or deadline budget and accepts only sole terminal submit` |
 
 `tests/ownership/source_test_impact_manifest.json` gains one row for every new
 Python source owner and retains exact existing rows for modified sources. The
 manifest validator itself is gated by
 `tests/test_test_impact_manifest.py::test_manifest_covers_strict_cognition_source_boundary`.
+
+### Gate P2-G6 inventory reconciliation
+
+The 2026-08-29 Gate 5 live execution exposed three accountability gaps within
+the already-approved interaction boundary: TypedDict graph boundaries were
+dropping the already-approved DSH decision fields, L3 was leaking a Brain-only
+key, and the standalone terminal predicate required its own source owner.
+These inventory and source-test rows close traceability for those existing
+contracts. They add no new product capability and create no Plan 3 path.
 
 ## Cross-Boundary And Live Acceptance Nodes
 
@@ -1071,6 +1098,153 @@ through a DSH tool.
 
 **Gate P2-P3:** documentation matches the accepted runtime; every release gate
 below is green without waiver; the final diff contains only planned paths.
+
+## Release-Candidate Execution Evidence — 2026-08-29
+
+This record captures the accepted Plan 2 release candidate before independent
+review. Secrets in the health evidence were redacted.
+
+### Toolchain and runtime identity
+
+- DSH `0.1.1-rc.2`; profile `kazusa-resolver-standard-v2`; RPC
+  `kazusa.dsh-resolution-rpc.v2`; intake `dsh_resolution_intake.v2`; store
+  epoch `dsh-sqlite-0.1.1-rc.2-standard-v2`; policy epoch
+  `dsh-standard-policy-v2`.
+- Installed official digests verified by the profile invariant:
+  - base: `sha256:9870a518274194c0e1ebd870cee2737fbc2ffc04ae36887871ffe6fcf74beac1`
+  - Standard preset: `sha256:3c61b4ce68e5dd5cb2c099693fdcb30b91d5f22bbbef546e233321b0fa68f0e4`
+  - Standard agent: `sha256:fa14feb98daef20b810fef30bb7239a89a786de3c45c602b37743f7100d9a5af`
+- Redacted ready health: Brain `ok` with Mongo `true`; Brain DSH
+  `ready/configured=true/durable_store=true/cognition_judge=true`; sidecar
+  route, Standard, semantic worker, web, and Brain links all `ready`.
+  The route is `qwen27b-5090` with digest
+  `sha256:61a1cf315a6b041aec1ed8946d05d2cfeb4b06198d2a19b5d80cdde47d4cd2f8`;
+  native catalog digest is
+  `sha256:421733a7fad7ac6ac72f53544fc90f102ed2d582355d31ff38eb2075e454292b`;
+  semantic catalog digest is
+  `sha256:495baf34779da92da5d554e70e51dc47579fb88f6af2c0a7992c46b2f88e02d4`;
+  published catalog digest is
+  `sha256:93973eff02f8ca382d055ccda4abba2ef3ea3b1b35162d65d0cfd318f7a15864`.
+
+### Deterministic candidate
+
+- Frozen install, TypeScript typecheck/build, Python compileall, and the
+  documentation acceptance checks passed.
+- Sidecar Vitest passed: 14 files, 91 tests. Agentic resolver batch passed:
+  133 tests; gateway/memory batch passed: 31 tests; Brain/cognition/graph
+  batch passed: 61 tests; impact validation passed: 14 tests.
+- The final scoped diff check was clean apart from expected line-ending
+  warnings.
+
+### Complete advertised-feature live and live-DB matrix
+
+Each node was run individually against the configured local model and services.
+
+| Coverage node | Result |
+|---|---|
+| Conversation, people, and memory reads | Passed in 97.74s |
+| Memory write, revision, lifecycle, and readback | Passed in 46.58s |
+| Active recall, calendar, and attached media | Passed in 42.60s |
+| Description-stripped semantic plus native selection | Passed in 55.55s |
+| Native coding, first auditable run | Fixture edit and external pytest passed, but the terminal-status assertion failed after 301.93s when a post-completion Windows ACL escalation produced a partial outcome. |
+| Native coding, faithful reproducer | Passed in 385.77s with resolved terminal and successful external pytest; this preserves the first run as a non-reproduced semantic/native-policy variance. |
+| Outside-workspace Brain approval | Passed in 77.50s |
+| Immediate Brain answer/reject | Passed in 26.61s |
+| Brain relay and reply interpretation | Passed in 57.32s |
+| V2 resolver round trip | Passed in 51.37s |
+| Unchanged production inline path | Passed in 3.36s |
+| Live-DB semantic idempotency | Passed in 0.98s |
+| Live-DB restart and one-shot-grant durability | Passed in 0.94s |
+
+The seven-row read-only diagnostic correlation artifact for the first coding
+run is retained at
+`test_artifacts/diagnostics/dsh_native_coding_interactions_20260829.json`.
+
+### Final five E2E sign-off
+
+| Gate | Result |
+|---|---|
+| 1. Context, people, memory, recall, and calendar | Passed in 156.25s |
+| 2. Memory lifecycle | Passed in 43.17s |
+| 3. Attached media, native web, and semantic evidence | Passed in 55.99s |
+| 4. Native coding and verification | Passed in 378.13s |
+| 5. Brain checkpoint, relay, reply, one-shot resume, and terminal | Passed in 169.47s |
+
+Gate 5 seeded ordinary conversation context, then recorded the first exact
+native `pwsh` approval as `asked -> relay_to_user` with a durable checkpoint
+delivery. The ordinary adapter/chat reply matched that delivery, and a fresh
+approval request on the same thread and segment was judged `allow_once`; the
+matching one-shot grant was consumed for the retry with the original
+activation/lease binding. The native read returned the marker, the terminal
+was resolved, and cleanup completed with one checkpoint hook/terminal lineage.
+
+### Candidate gate assessment
+
+P2-P0 through P2-P3 are green at implementation-owner level. G1-G10 are green
+without waiver, subject to independent review. No Plan 3 route, cutover, or
+deletion was introduced; Plan 3 remains a separately deferred boundary.
+
+Residual risk is limited to the pinned DSH Windows workspace ACL
+initialization, which can raise native approval for an otherwise read-only
+command. Brain correctly relays absent user authorization and the model can
+continue; native DSH owns this policy. The evidence contains one
+non-reproduced partial coding run and two resolved coding gates. Kazusa adds no
+sandbox or policy overlay.
+
+### Independent-review remediation evidence — 2026-08-29
+
+The independent review blocked sign-off because the one-shot grant did not
+bind `activation_id` and `lease_epoch` through its DTO, durable atomic lookup,
+or sidecar response validation. The review also found stale V1 intake/exhaust
+and Kazusa-owned DSH loop-budget descriptions in the architecture documents.
+
+The canonical big-bang remediation makes activation and lease required grant
+fields, projects them from both immediate and relayed grant builders,
+denormalizes and indexes them for atomic consumption, and requires exact
+activation/lease matches in Mongo, in-memory, continuation, Brain-service, and
+sidecar paths. Stale activation or lease requests leave the original grant
+available and proceed through ordinary cognition. The architecture documents
+now describe the standalone V2 Standard runtime, autonomous native loop, sole
+`submit_resolution` terminal call, and the absence of a Kazusa loop-budget,
+sandbox, or policy overlay; future Plan 3 text is explicitly non-current.
+
+Deterministic remediation evidence: sidecar build and typecheck passed; all 14
+Vitest files and 92 tests passed; 30 focused Python interaction tests passed;
+Python compileall passed; and the source-impact plus documentation/static
+acceptance matrix passed 88 tests. The stale V1/budget scan is clean. The plan
+remains active and awaits independent re-review; it is not completed or
+archived by this remediation owner.
+
+Operational closure evidence: the expanded canonical Mongo grant lookup uses
+the fenced name `dsh_interaction_grant_lookup_v2`, so a pre-release index with
+the earlier key specification cannot block startup. No old index is dropped
+and no migration or fallback path is installed. The focused persistence test
+passed in 0.86s and the 14-test source-impact validator passed in 0.89s. After
+a clean Brain and sidecar reload, the advertised live-DB restart and one-shot
+grant durability node passed in 2.16s. Gate 5 then passed in 177.49s on DSH
+session `kazusa-resolution-68eb30d6a817154eefad0292f03e6500`: thread
+`res_2a342e4b9af5495f89ec6bfd6f6de157`, segment
+`seg_d26d05652cc44e14bf8a458e4934b2f1`, activation
+`act_3f534157d983985a98c5a1a9e2b33a17`, and lease epoch `1` remained exact
+through checkpoint and continuation. The original approval was cancelled at
+the single checkpoint hook; the fresh matching approval was allowed once, the
+grant was consumed, the native marker read succeeded, and the terminal was
+resolved. Runtime secrets remain redacted. The plan stays `in_progress` for
+independent re-review.
+
+### Independent Review Sign-off — 2026-08-29
+
+The executor-independent, read-only review initially returned FAIL because
+one-shot grants lacked exact activation/lease fencing and the architecture
+documents retained stale V1 and Kazusa-owned loop-budget descriptions. The
+implementation owner added the canonical activation/lease binding across DTO,
+durable atomic lookup, continuation, and sidecar validation; fenced the Mongo
+lookup under `dsh_interaction_grant_lookup_v2`; corrected the V2 architecture
+record; and reran deterministic, live-DB, and Gate 5 evidence. A fresh
+executor-independent, read-only review returned PASS on 2026-08-29. P2-P0–P3
+and P2-G1–G10 passed without waiver. The advisory residual is the pinned DSH
+Windows workspace ACL initialization behavior already recorded above; native
+DSH owns that policy and the Brain approval path remains effective.
 
 ## Functional Release Gates
 

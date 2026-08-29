@@ -12,7 +12,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
-from agentic_resolver.contracts import RPC_PROTOCOL_VERSION
+from agentic_resolver.contracts import RPC_PROTOCOL_VERSION_V2
 from agentic_resolver.errors import (
     OperationIdReuseMismatchError,
     OperationOutcomeUncertainError,
@@ -26,7 +26,38 @@ _METHODS = frozenset({
     "resolution.amend", "resolution.request_checkpoint", "resolution.cancel",
     "resolution.inspect", "resolution.dispose_activation",
 })
+_ALLOWED_PARAMS: dict[str, frozenset[str]] = {
+    "system.health": frozenset(),
+    "resolution.open": frozenset({
+        "operation_id", "operation_payload_digest", "activation_id",
+        "lease_epoch", "intake",
+    }),
+    "resolution.continue": frozenset({
+        "operation_id", "operation_payload_digest", "activation_id",
+        "lease_epoch", "intake",
+    }),
+    "resolution.amend": frozenset({
+        "operation_id", "operation_payload_digest", "resolution_thread_id",
+        "segment_id", "activation_id", "lease_epoch", "amendment",
+    }),
+    "resolution.request_checkpoint": frozenset({
+        "operation_id", "operation_payload_digest", "resolution_thread_id",
+        "segment_id", "activation_id", "lease_epoch",
+    }),
+    "resolution.cancel": frozenset({
+        "operation_id", "operation_payload_digest", "resolution_thread_id",
+        "segment_id", "activation_id", "lease_epoch",
+    }),
+    "resolution.inspect": frozenset({
+        "operation_id", "operation_payload_digest",
+    }),
+    "resolution.dispose_activation": frozenset({
+        "operation_id", "operation_payload_digest", "resolution_thread_id",
+        "segment_id", "activation_id", "lease_epoch",
+    }),
+}
 _MUTATING = _METHODS - {"system.health", "resolution.inspect"}
+_LONG_RUNNING = frozenset({"resolution.open", "resolution.continue"})
 _COMMITTED = frozenset({"checkpointed", "terminal", "canceled", "faulted"})
 
 
@@ -116,13 +147,17 @@ class DSHRpcServer:
             raise RpcContractError("RPC method is unsupported")
         if not isinstance(params, Mapping):
             raise RpcContractError("RPC params must be an object")
-        if params.get("protocol_version") != RPC_PROTOCOL_VERSION:
+        if params.get("protocol_version") != RPC_PROTOCOL_VERSION_V2:
             raise RpcContractError("RPC protocol version is unsupported")
-        result = self._dispatch_method(method, dict(params))
+        payload = dict(params)
+        del payload["protocol_version"]
+        if set(payload) != _ALLOWED_PARAMS[method]:
+            raise RpcContractError("RPC method params are invalid")
+        result = self._dispatch_method(method, payload)
         return {
             "jsonrpc": "2.0",
             "id": frame.get("id"),
-            "protocol_version": RPC_PROTOCOL_VERSION,
+            "protocol_version": RPC_PROTOCOL_VERSION_V2,
             "result": result,
         }
 
@@ -130,13 +165,13 @@ class DSHRpcServer:
         self, method: str, params: dict[str, Any]
     ) -> dict[str, Any]:
         if method == "system.health":
-            return {"protocol_version": RPC_PROTOCOL_VERSION, "status": "ok"}
+            return {"protocol_version": RPC_PROTOCOL_VERSION_V2, "status": "ok"}
         if method == "resolution.inspect":
             operation_id = params.get("operation_id")
             if not isinstance(operation_id, str):
                 raise RpcContractError("operation_id is required")
             return {
-                "protocol_version": RPC_PROTOCOL_VERSION,
+                "protocol_version": RPC_PROTOCOL_VERSION_V2,
                 **self.operations.inspect(operation_id),
             }
         operation_id = params.get("operation_id")
@@ -157,7 +192,8 @@ class DSHRpcServer:
             intake = params.get("intake")
             if not isinstance(intake, Mapping):
                 raise RpcContractError("intake is required")
-            runtime = intake.get("runtime", {})
+            if intake.get("schema_version") != "dsh_resolution_intake.v2":
+                raise RpcContractError("V2 intake is required")
             terminal = {
                 "status": "resolved",
                 "summary": "resolved by deterministic RPC fixture",
@@ -170,7 +206,7 @@ class DSHRpcServer:
                 "warnings": [],
             }
             result = {
-                "protocol_version": RPC_PROTOCOL_VERSION,
+                "protocol_version": RPC_PROTOCOL_VERSION_V2,
                 "disposition": "terminal",
                 "intake": dict(intake),
                 "exhaust": {
@@ -178,16 +214,31 @@ class DSHRpcServer:
                     "terminal": terminal,
                     "evidence": [],
                     "identity": {
-                        key: runtime[key]
+                        key: intake[key]
                         for key in (
                             "operation_id", "operation_payload_digest",
                             "request_id", "resolution_thread_id", "segment_id",
-                            "scope_fingerprint", "audience_fingerprint",
-                            "resolver_profile_version", "dsh_release",
-                            "session_store_epoch", "model_route",
-                            "tool_catalog_digest", "policy_epoch",
+                            "brain_conversation_ref", "workspace_root",
+                            "route_digest",
                         )
-                    } | {"activation_id": params.get("activation_id", "act_1"), "lease_epoch": params.get("lease_epoch", 1)},
+                    }
+                    | {
+                        "scope_fingerprint": intake[
+                            "interaction_authority"
+                        ]["scope_fingerprint"],
+                        "audience_fingerprint": intake[
+                            "interaction_authority"
+                        ]["audience_fingerprint"],
+                        "catalog_digest": intake[
+                            "semantic_tool_authority"
+                        ]["catalog_digest"],
+                        "interaction_issuer": intake[
+                            "interaction_authority"
+                        ]["issuer"],
+                        "policy_epoch": "dsh-standard-policy-v2",
+                        "activation_id": params.get("activation_id", "act_1"),
+                        "lease_epoch": params.get("lease_epoch", 1),
+                    },
                     "usage": {},
                     "last_committed_seq": 1,
                 },
@@ -199,7 +250,7 @@ class DSHRpcServer:
                 "resolution.dispose_activation": "canceled",
             }.get(method, "admitted_active")
             result = {
-                "protocol_version": RPC_PROTOCOL_VERSION,
+                "protocol_version": RPC_PROTOCOL_VERSION_V2,
                 "disposition": disposition,
             }
         operation.disposition = str(result.get("disposition", "admitted_active"))
@@ -226,9 +277,9 @@ class InMemoryRpcTransport:
                 return {
                     "jsonrpc": "2.0",
                     "id": frame.get("id"),
-                    "protocol_version": RPC_PROTOCOL_VERSION,
+                    "protocol_version": RPC_PROTOCOL_VERSION_V2,
                     "result": {
-                        "protocol_version": RPC_PROTOCOL_VERSION,
+                        "protocol_version": RPC_PROTOCOL_VERSION_V2,
                         "disposition": "unknown",
                     },
                 }
@@ -249,7 +300,7 @@ class InMemoryRpcTransport:
 class _HttpRpcTransport:
     def __init__(self, endpoint: str, timeout: float) -> None:
         self._endpoint = endpoint
-        self._timeout = timeout
+        self._control_timeout = timeout
 
     async def send(
         self, frame: Mapping[str, Any], authorization: str
@@ -268,8 +319,13 @@ class _HttpRpcTransport:
             },
             method="POST",
         )
+        timeout = (
+            None
+            if frame.get("method") in _LONG_RUNNING
+            else self._control_timeout
+        )
         try:
-            with urlopen(request, timeout=self._timeout) as response:
+            with urlopen(request, timeout=timeout) as response:
                 value = json.loads(response.read())
         except (HTTPError, URLError, TimeoutError, OSError) as exc:
             raise RpcTransportError("sidecar loopback transport failed") from exc
@@ -312,7 +368,7 @@ class DSHRpcClient:
         if method not in _METHODS:
             raise RpcContractError("RPC method is unsupported")
         payload = dict(params)
-        payload["protocol_version"] = RPC_PROTOCOL_VERSION
+        payload["protocol_version"] = RPC_PROTOCOL_VERSION_V2
         if operation_id is not None:
             payload["operation_id"] = operation_id
         if operation_payload_digest is not None:
@@ -400,7 +456,7 @@ class DSHRpcClient:
     ) -> dict[str, Any]:
         if response.get("jsonrpc") != "2.0" or response.get("id") != request_id:
             raise RpcContractError("RPC response identity mismatch")
-        if response.get("protocol_version") != RPC_PROTOCOL_VERSION:
+        if response.get("protocol_version") != RPC_PROTOCOL_VERSION_V2:
             raise RpcContractError("RPC response protocol mismatch")
         if "error" in response:
             error = response["error"]

@@ -1,18 +1,74 @@
-# DeepSeek Harness Integration Target Architecture
+# DSH Plan 2 Standard Runtime Integration
 
 ## Document control
 
 | Field | Value |
 |---|---|
-| Status | Proposed target architecture for review |
+| Status | Current accepted Plan 2 runtime boundary; Plan 3 cutover remains future/draft |
 | Date | 2026-08-26 |
-| Scope | Integration of DeepSeek Harness (DSH) as Kazusa's bounded resolution runtime |
-| Stable caller | Kazusa brain action selector through `task_resolution_request` |
+| Scope | DSH Standard capability-ready sidecar and Brain interaction bridge |
+| Stable production boundary | `task_resolution_request` and existing accepted/background routing remain unchanged |
 | Related architecture | `docs/architecture/agentic_resolver_architecture.md` |
 | Decision owner | Kazusa architecture |
-| DSH baseline | DeepSeek Harness `master`, reviewed 2026-08-26; deployment MUST pin an exact upstream revision |
+| DSH baseline | DeepSeek Harness `0.1.1-rc.2`, composed from the installed official base and Standard preset |
 
-## 1. Executive decision
+## Current Plan 2 boundary
+
+Plan 2 is the accepted, capability-ready DSH Standard runtime. It is a
+separately built Node sidecar plus a Python control plane and Brain-owned
+interaction bridge. The process lifecycles are independent, but the sidecar
+reports ready only when the Brain's authenticated interaction health is ready.
+Plan 3 remains the future/draft production cutover: it does not yet route
+`task_resolution_request`, accepted/background work, legacy resolvers or
+coding callers through DSH, and it does not change their exhaust mapping.
+
+The pinned contracts are RPC `kazusa.dsh-resolution-rpc.v2`, intake
+`dsh_resolution_intake.v2`, profile `kazusa-resolver-standard-v2`, DSH
+`0.1.1-rc.2`, and store epoch `dsh-sqlite-0.1.1-rc.2-standard-v2`. Session
+data lives at
+`<KAZUSA_DSH_DATA_ROOT>/dsh/0.1.1-rc.2/sessions.sqlite`; the framed semantic
+worker owns the adjacent `semantic-outcomes.sqlite`.
+
+The official DSH base and Standard preset are mounted by reference. Standard
+native filesystem, shell, coding, jobs, tests, public web, approval, and
+sandbox tools take name precedence. Kazusa adds exactly thirteen
+storage-independent semantic tools: `kazusa_search_conversation_history`,
+`kazusa_read_conversation_entries`,
+`kazusa_summarize_conversation_participants`, `kazusa_search_memories`,
+`kazusa_read_memories`, `kazusa_remember_information`,
+`kazusa_revise_memory`, `kazusa_change_memory_lifecycle`,
+`kazusa_find_people_by_name`, `kazusa_read_person_profiles`,
+`kazusa_recall_active_context`, `kazusa_read_calendar_context`, and
+`kazusa_inspect_attached_media`. `submit_resolution` is controller-owned and
+is the sole model-owned terminal operation. Kazusa adds no coding/web wrapper,
+command filter, DSH budget, sandbox overlay, or generic workflow tool.
+
+For approval, question, or plan-review requests, an authenticated Brain
+request becomes a targeted runtime-authored cognition observation plus
+pending semantic context, not a user permission. P-stage owns the semantic
+answer/reject/allow-once/relay decision. `relay_to_user` uses normal dialog
+and adapter delivery; an exact reply resumes the same thread and segment, and
+deterministic code atomically matches tool, executable arguments, workspace,
+scope, and policy before consuming a one-shot grant. Checkpoint, restart,
+replay, and transport-loss recovery remain durable control-plane concerns.
+
+### Plan 2 startup and readiness
+
+Configure the required DSH sidecar, RPC, absolute data/workspace/Python,
+loopback Brain, shared-secret, tool-gateway, and six
+`AGENTIC_RESOLVER_LLM_*` environment fields; the initial documented route is
+qwen27b-5090 with 50,176 context tokens, 8,192 completion tokens, and
+thinking enabled. Start Brain with its durable Mongo DSH interaction store
+and cognition judge, build/start the sidecar separately, then require
+authenticated `system.health=ready` with `route`, `standard`,
+`semantic_worker`, `web`, and `brain` readiness. Brain
+`GET /runtime/dsh/health` reports configured, durable-store, and
+cognition-judge readiness. See the [HOWTO](../HOWTO.md#run-the-plan-2-dsh-standard-sidecar).
+
+## 1. Executive decision (future Plan 3 cutover)
+
+The following ownership and topology describe the future Plan 3 cutover; they
+are not the current production routing boundary.
 
 Kazusa SHOULD integrate DeepSeek Harness as the **agent runtime inside the existing brain-owned task-resolution boundary**. DSH does not become the chatbot framework and does not own cognition, dialog, memory policy, user delivery, foreground/background priority, approval UX, or background scheduling.
 
@@ -48,6 +104,9 @@ This architecture introduces two explicit integration planes:
 The brain never consumes DSH assistant prose as an authoritative answer. A resolution becomes authoritative only when the DSH resolver invokes the Kazusa-defined `submit_resolution` terminal tool, or when deterministic runtime code returns a brain-owned non-terminal runtime outcome such as `deferred`.
 
 ## 2. Goals and non-goals
+
+The goals and exclusions in this section describe the future Plan 3 cutover;
+the current Plan 2 operational boundary is frozen above.
 
 ### 2.1 Goals
 
@@ -119,7 +178,7 @@ One waking DSH turn driven by an initial objective, a Kazusa continuation, or a 
 | Audience/visibility policy | Kazusa | Critical resume boundary |
 | Character/persona state | Kazusa brain | Not a DSH responsibility |
 | Action selection | Kazusa brain | Determines whether resolution is invoked |
-| Foreground/background priority | Kazusa brain/runtime | DSH receives a budget, not authority to choose priority |
+| Foreground/background priority | Kazusa brain/runtime | Priority and checkpoint timing remain outside the autonomous Standard loop |
 | ResolutionThread identity | Kazusa Resolution Controller | Stable semantic task lineage |
 | DSH session ID | DSH adapter under Kazusa control | Internal implementation identity |
 | DSH event log | DSH | Durable source of agent/tool history |
@@ -162,17 +221,17 @@ One waking DSH turn driven by an initial objective, a Kazusa continuation, or a 
 |  - agent/session/tool spine                                   |
 |  - persistence + checkpoint policy                            |
 |  - Kazusa resolver profile                                    |
-|  - one-call-per-step policy                                   |
+|  - autonomous Standard multi-tool loop                       |
 |  - tool proxy + evidence ledger                               |
 |  - submit_resolution -> concludeTurn()                        |
-|  - optional bounded web_search provider                       |
+|  - mounted Standard native web provider                       |
 |                                                               |
-|  NO: dialog, unrestricted bash/fs, user approval UI,          |
-|      DSH background jobs as product scheduler                 |
+|  NO: duplicate Kazusa shell/fs/coding/web wrappers,           |
+|      Kazusa loop budget/sandbox/policy overlay                |
 +------------------------+-------------------+------------------+
                          |                   |
                          v                   v
-              Kazusa Leaf Tool Gateway    Public Web
+              Kazusa Semantic Gateway     DSH Standard native web
               conversation/memory/etc.    search provider
 ```
 
@@ -184,13 +243,17 @@ The production bridge SHOULD be a Kazusa-specific protocol over DSH's public age
 
 ### 6.1 Profile objective
 
-Create a minimal, stable, resolver-only DSH composition named conceptually:
+Plan 2 uses a thin Kazusa overlay on the installed official DSH base and
+Standard preset:
 
 ```text
-kazusa-resolver-v1
+kazusa-resolver-standard-v2
 ```
 
-It SHOULD maximize prompt-prefix stability and minimize capabilities unrelated to evidence resolution.
+It retains the Standard autonomous multi-tool loop and native capabilities for
+filesystem, shell, coding, jobs, tests, public web, questions, approval
+policy, and sandbox execution. Kazusa contributes the semantic gateway, Brain
+interaction bridge, evidence ledger, and terminal-integrity validation.
 
 ### 6.2 Required components
 
@@ -201,29 +264,29 @@ The profile SHOULD include:
 - DSH semantic checkpoint policy;
 - the chosen LLM adapter/model route;
 - tool registry and tool timeout policy;
-- Kazusa one-call-per-step enforcement;
+- Kazusa semantic gateway and Brain interaction bridge;
 - Kazusa semantic tool proxy;
 - Kazusa evidence-ledger integration;
 - `submit_resolution` terminal tool;
-- selected web search provider if public research is allowed;
+- mounted Standard native web provider if public research is allowed;
 - context compaction only for genuinely long resolution sessions;
 - observability hooks for session events and usage.
 
 ### 6.3 Explicit exclusions
 
-The default resolver profile SHOULD NOT expose:
+The thin Kazusa overlay excludes duplicate or bypass capability paths:
 
-- persistent Bash;
-- arbitrary filesystem editor access;
-- unrestricted subprocesses;
-- DSH interactive user-question UI;
-- DSH approval UX;
-- DSH job tools as Kazusa's scheduler;
-- model-facing goal mutation tools;
-- automatic goal-round continuation;
-- unrestricted HTTP fetch in a network environment that can reach sensitive internal targets.
+- custom shell, filesystem, coding, or public-web wrappers;
+- custom question or approval UX that bypasses the Brain interaction bridge;
+- custom jobs, goals, scheduler, or generic workflow tools;
+- command filters, sandbox overlays, or DSH budget overlays;
+- alternate agent-loop or continuation policy.
 
-DSH web search is suitable as a provider-neutral discovery seam. The stock HTTP fetch provider currently documents deferred SSRF/private-network protection and no PDF body arm, so Kazusa SHOULD either disable stock `web_fetch`, run it in a network sandbox that cannot reach internal resources, or expose a hardened Kazusa-owned `web_read` leaf instead.
+The installed Standard preset remains autonomous and exposes its native
+filesystem, shell, coding, jobs, tests, public web, questions, approval, and
+sandbox capabilities under native DSH policy. The Brain remains the owner of
+user-facing interaction and grant decisions. Native provider limitations are
+returned as typed DSH outcomes rather than hidden by the semantic gateway.
 
 ### 6.4 Profile pinning
 
@@ -297,11 +360,11 @@ If a prior session contains evidence retrieved under a private or narrower audie
 
 Kazusa SHOULD persist thread metadata independently of DSH storage.
 
-### 8.1 ResolutionThreadRecordV1
+### 8.1 ResolutionThreadRecordV2
 
 ```json
 {
-  "schema_version": "1",
+  "schema_version": "resolution_thread_store.v2",
   "resolution_thread_id": "res_...",
   "brain_conversation_ref": "conv_...",
   "root_goal_ref": "goal_...",
@@ -317,15 +380,15 @@ Kazusa SHOULD persist thread metadata independently of DSH storage.
 }
 ```
 
-### 8.2 ResolverSessionSegmentV1
+### 8.2 ResolverSessionSegmentV2
 
 ```json
 {
-  "schema_version": "1",
+  "schema_version": "resolver_session_segment.v2",
   "segment_id": "seg_...",
   "resolution_thread_id": "res_...",
   "dsh_session_id": "dsh_...",
-  "resolver_profile_version": "kazusa-resolver-v1",
+  "resolver_profile_version": "kazusa-resolver-standard-v2",
   "dsh_revision": "<pinned revision>",
   "tool_catalog_digest": "sha256:...",
   "policy_epoch": "2026-08-26.1",
@@ -396,57 +459,37 @@ The intake is divided into two classes:
 - **runtime-only authority** — consumed by deterministic sidecar/tool code and never treated as model instructions;
 - **model-visible resolution content** — the minimum information the resolver model needs to pursue the task.
 
-### 10.2 DSHResolutionIntakeV1
+### 10.2 Current standalone `DSHResolutionIntakeV2`
+
+Plan 2 already implements this exact standalone intake. A future Plan 3
+production routing cutover must consume this canonical contract or replace it
+atomically under a separately approved plan; this document does not define a
+parallel V1 shape.
 
 ```json
 {
-  "schema_version": "1",
+  "schema_version": "dsh_resolution_intake.v2",
+  "mode": "start|continue",
   "request_id": "rrq_...",
+  "operation_id": "operation_...",
+  "operation_payload_digest": "sha256:...",
   "resolution_thread_id": "res_...",
   "segment_id": "seg_...",
-  "mode": "start|continue|resume|amend",
-
-  "runtime": {
-    "priority": "now|background",
-    "execution_budget": {
-      "soft_deadline_at": "...",
-      "hard_deadline_at": "...",
-      "max_model_steps": 24,
-      "max_tool_calls": 24,
-      "max_tool_bytes": 2000000
-    },
-    "trusted_scope": {
-      "capability_token": "opaque-runtime-token",
-      "scope_fingerprint": "sha256:...",
-      "audience_fingerprint": "sha256:..."
-    },
-    "resolver_profile_version": "kazusa-resolver-v1",
-    "tool_catalog_digest": "sha256:..."
-  },
-
+  "brain_conversation_ref": "chat:...",
+  "workspace_root": "C:/absolute/workspace",
+  "route_digest": "sha256:...",
   "model_input": {
     "objective": "Determine ...",
-    "continuation_delta": null,
-    "constraints": [
-      "Use only authorized evidence tools.",
-      "Do not perform external writes."
-    ],
-    "literal_inputs": [
-      {
-        "kind": "url|quoted_text|identifier|code|name",
-        "value": "..."
-      }
-    ],
-    "scene_facts": [
-      {
-        "key": "current_time",
-        "value": "2026-08-26T12:00:00+12:00",
-        "authority": "brain"
-      }
-    ],
-    "prior_resolution_refs": [],
-    "requested_evidence_quality": "normal|high",
-    "notes": []
+    "facts": []
+  },
+  "semantic_tool_authority": {
+    "catalog_digest": "sha256:...",
+    "token": "opaque-runtime-token"
+  },
+  "interaction_authority": {
+    "issuer": "dsh-sidecar",
+    "scope_fingerprint": "sha256:...",
+    "audience_fingerprint": "sha256:..."
   }
 }
 ```
@@ -491,7 +534,9 @@ The resolver SHOULD NOT receive by default:
 - background scheduling metadata beyond bounded execution hints;
 - the final response style requested by dialog.
 
-If conversation history is needed, the resolver uses `conversation_search` and `conversation_list` under trusted scope.
+If conversation history is needed, the resolver uses
+`kazusa_search_conversation_history` and
+`kazusa_read_conversation_entries` under trusted scope.
 
 ### 10.6 Raw user message policy
 
@@ -555,28 +600,28 @@ The DSH goal-round driver SHOULD remain disabled so that Kazusa, not DSH, decide
 
 ### 11.1 Canonical semantic tools
 
-Kazusa SHOULD expose base-level semantic operations such as:
+Plan 2 exposes this fixed set of base-level semantic operations:
 
 ```text
-conversation_search
-conversation_list
-conversation_aggregate
-memory_search
-memory_read
-person_resolve
-profile_read
-active_recall
-calendar_read
-web_search
-web_read
-media_read
-coding_read
-coding_propose
-transform_text
+kazusa_search_conversation_history
+kazusa_read_conversation_entries
+kazusa_summarize_conversation_participants
+kazusa_search_memories
+kazusa_read_memories
+kazusa_remember_information
+kazusa_revise_memory
+kazusa_change_memory_lifecycle
+kazusa_find_people_by_name
+kazusa_read_person_profiles
+kazusa_recall_active_context
+kazusa_read_calendar_context
+kazusa_inspect_attached_media
 submit_resolution
 ```
 
-The exact catalog is capability-complete but authorized per thread.
+The exact catalog is capability-complete but authorized per thread. Native
+DSH Standard tools are mounted separately and take name precedence; Kazusa
+does not wrap coding or public web.
 
 ### 11.2 Tool proxy
 
@@ -584,7 +629,7 @@ The model calls canonical names. The DSH sidecar proxy attaches runtime authorit
 
 ```text
 model
-  -> memory_search(query="summer holiday")
+  -> kazusa_search_memories(query="summer holiday")
 
 sidecar
   -> Kazusa Tool Gateway
@@ -601,7 +646,7 @@ Each tool SHOULD return a validated envelope:
 ```json
 {
   "call_id": "call_...",
-  "tool": "conversation_search",
+  "tool": "kazusa_search_conversation_history",
   "tool_version": "1",
   "status": "succeeded",
   "data": {},
@@ -622,11 +667,23 @@ Each tool SHOULD return a validated envelope:
 
 The evidence ledger registers `evidence_id` values before results become usable by `submit_resolution`.
 
-### 11.4 One complete model-owned call per step
+### 11.4 Autonomous multi-tool turns and singleton terminal
 
-Kazusa's first integrated release retains the existing invariant: one complete native tool call or one `submit_resolution` call per model step.
+DSH Standard may emit and execute multiple native and Kazusa semantic tool
+calls in one autonomous turn, within the native DSH policy and the
+deterministic authority, frame, and evidence bounds. Kazusa validates each
+call/result pair and preserves its event and evidence correlation.
 
-Setting DSH tool concurrency to one is not sufficient because the model may still emit multiple calls in one response. The Kazusa DSH profile SHOULD enforce the stronger rule before dispatch: if more than one model-owned call is present, reject the step as a typed contract violation and allow bounded regeneration. No subset of a multi-call response is silently executed.
+`submit_resolution` is the only terminal call. A turn that contains it must
+contain that sole call and no native or semantic sibling calls. The terminal
+result and every cited evidence receipt are validated before
+`ToolExecution.concludeTurn()` commits the terminal exhaust.
+
+If a call, result, or terminal structure is invalid, the boundary returns a
+typed structural rejection to the autonomous DSH loop. DSH decides whether
+and how to continue under its own loop policy; Kazusa does not silently
+execute a subset or decide whether the loop continues. Runtime failure remains
+fail-closed when the session cannot continue safely.
 
 ## 12. Exhaust interface: DSH to Kazusa brain
 
@@ -671,7 +728,12 @@ For `needs_user_input`, `clarification_request` is required. For `approval_requi
 
 On successful validation, the tool calls DSH `ToolExecution.concludeTurn()`. This marks the tool result as terminal for the current DSH turn. Free-form assistant text does not terminate resolution.
 
-### 12.3 ClarificationRequestV1
+`needs_user_input` and `approval_required` remain valid terminal statuses in
+the schema. Live Standard native question and approval hooks normally use the
+authenticated Brain interaction checkpoint path, so they can pause and
+resume the autonomous DSH loop without requiring a terminal status.
+
+### 12.3 `clarification_request` field
 
 ```json
 {
@@ -686,7 +748,7 @@ On successful validation, the tool calls DSH `ToolExecution.concludeTurn()`. Thi
 
 Kazusa cognition/dialog decides whether and how to ask it.
 
-### 12.4 ApprovalRequestV1
+### 12.4 `approval_request` field
 
 ```json
 {
@@ -701,23 +763,19 @@ Kazusa cognition/dialog decides whether and how to ask it.
 
 The model SHOULD NOT receive authority merely because it emitted this request. Kazusa obtains approval and later resumes the thread with an approval result and a fresh capability decision.
 
-### 12.5 DSHResolutionExhaustV1
+### 12.5 Current standalone `DSHResolutionExhaustV2`
 
-The sidecar maps the terminal tool and runtime/session metadata into:
+The sidecar maps the terminal tool and runtime/session metadata into the
+canonical V2 exhaust. Its kinds are `terminal`, `checkpointed`,
+`runtime_fault`, and `canceled`:
 
 ```json
 {
-  "schema_version": "1",
-  "resolution_thread_id": "res_...",
-  "segment_id": "seg_...",
-  "dsh_session_id": "dsh_...",
   "kind": "terminal",
   "terminal": {
     "status": "resolved",
-    "semantic_objective": "...",
-    "prompt_safe_summary": "...",
+    "summary": "...",
     "findings": [],
-    "evidence_refs": [],
     "completed_subgoals": [],
     "remaining_needs": [],
     "clarification_request": null,
@@ -725,23 +783,23 @@ The sidecar maps the terminal tool and runtime/session metadata into:
     "artifact_refs": [],
     "warnings": []
   },
-  "checkpoint": {
-    "last_committed_seq": 173,
-    "resolver_profile_version": "kazusa-resolver-v1",
-    "tool_catalog_digest": "sha256:...",
+  "evidence": [],
+  "identity": {
+    "resolution_thread_id": "res_...",
+    "segment_id": "seg_...",
     "scope_fingerprint": "sha256:...",
-    "audience_fingerprint": "sha256:..."
+    "audience_fingerprint": "sha256:...",
+    "policy_epoch": "dsh-standard-policy-v2"
   },
-  "usage": {
-    "model_steps": 8,
-    "tool_calls": 7,
-    "input_tokens": 0,
-    "output_tokens": 0
-  }
+  "usage": {},
+  "last_committed_seq": 173
 }
 ```
 
-The Resolution Controller projects this into the existing `TaskResolutionResultV1` so the brain-facing public contract remains stable.
+Plan 2 returns this standalone exhaust directly to its current callers. The
+future Plan 3 draft would project it into the existing brain-facing
+`TaskResolutionResultV1`; that production routing and projection are not part
+of the current Plan 2 runtime.
 
 ### 12.6 Checkpointed/deferred exhaust
 
@@ -749,22 +807,20 @@ The Resolution Controller projects this into the existing `TaskResolutionResultV
 
 ```json
 {
-  "schema_version": "1",
-  "resolution_thread_id": "res_...",
   "kind": "checkpointed",
-  "reason": "foreground_deadline",
   "checkpoint": {
+    "reason": "foreground_deadline",
     "dsh_session_id": "dsh_...",
     "last_committed_seq": 173,
     "segment_id": "seg_...",
     "scope_fingerprint": "sha256:...",
     "tool_catalog_digest": "sha256:..."
   },
-  "progress": {
-    "prompt_safe_summary": "Research is incomplete; sources A and B have been inspected.",
-    "completed_subgoals": [],
-    "remaining_needs": []
-  }
+  "identity": {
+    "resolution_thread_id": "res_...",
+    "segment_id": "seg_..."
+  },
+  "last_committed_seq": 173
 }
 ```
 
@@ -1011,13 +1067,13 @@ Compaction MUST NOT invalidate evidence IDs or erase the external evidence ledge
 
 Kazusa retains ownership of conversation/memory storage and deterministic retrieval executors. DSH owns the **choice and sequence** of semantic RAG operations.
 
-Example:
+Example using the current Plan 2 semantic names:
 
 ```text
-conversation_search
-    -> conversation_list
-    -> person_resolve
-    -> memory_search
+kazusa_search_conversation_history
+    -> kazusa_read_conversation_entries
+    -> kazusa_find_people_by_name
+    -> kazusa_search_memories
     -> submit_resolution
 ```
 
@@ -1025,19 +1081,25 @@ A leaf may perform embedding search, lexical search, pagination, filtering, or p
 
 ### 17.2 Public web
 
-DSH's provider-neutral `ctx.web` is a good internal capability seam for web discovery. Kazusa MAY use DSH's web search providers while still wrapping the model-facing tool in the Kazusa `StandardToolResult`/evidence contract.
+DSH Standard's native web provider is the public discovery seam. Kazusa does
+not wrap it as a semantic gateway tool; native results still remain subject
+to the Standard policy and the DSH evidence/terminal boundary.
 
 Recommended production profile:
 
 ```text
-DSH web_search provider  -> enabled when public research is authorized
-stock unrestricted fetch -> disabled unless sandboxed
-Kazusa hardened web_read -> preferred for page retrieval
+DSH Standard native web -> enabled when public research is authorized
+native fetch            -> governed by the Standard sandbox and policy
+Kazusa semantic gateway -> remains storage/private-context only
 ```
 
 This keeps provenance, network policy, and result shape consistent with private RAG.
 
-## 18. Status mapping to the existing brain contract
+## 18. Future Plan 3 draft status mapping (non-current)
+
+This mapping describes the deferred Plan 3 production cutover. Current Plan 2
+remains a standalone V2 runtime and does not replace the existing brain-facing
+result path.
 
 | DSH/Kazusa integration outcome | Brain-facing `TaskResolutionResultV1` |
 |---|---|
@@ -1116,14 +1178,19 @@ Observability MUST distinguish model reasoning diagnostics from authoritative ev
 
 ## 21. Recommended implementation sequence
 
+The sequence below is retained as the future Plan 3 cutover checklist. Plan 2
+already supplies the sidecar control plane, ResolutionThread lifecycle, and
+full semantic gateway described above; production task-resolution routing
+remains unchanged until the separate Plan 3 decision.
+
 ### Phase 1 - integration spike
 
 Use the official Python SDK only to validate resolver behavior with a custom Cordis composition. Disable Bash/filesystem and expose a very small set of tools:
 
 ```text
-conversation_search
-memory_search
-web_search
+kazusa_search_conversation_history
+kazusa_search_memories
+DSH Standard native web
 submit_resolution
 ```
 
@@ -1156,7 +1223,8 @@ Implement:
 
 ### Phase 4 - full semantic tool bridge
 
-Expose the capability-complete Kazusa leaf catalog with manifests, trusted scopes, evidence ledger, idempotency and outcome verification.
+Plan 2 exposes the capability-complete Kazusa leaf catalog with manifests,
+trusted scopes, evidence ledger, idempotency, and outcome verification.
 
 ### Phase 5 - foreground/background cutover
 
@@ -1171,7 +1239,7 @@ Move the existing brain-owned inline/deferred/background lifecycle to the same D
 
 Test:
 
-- multiple model tool calls in one step;
+- multiple model tool calls in one autonomous turn;
 - forged scope/tool arguments;
 - forged evidence IDs;
 - group-chat audience change;
@@ -1259,34 +1327,11 @@ This gives Kazusa the benefit of a reusable agent harness while keeping the arch
 - **[DSH-WEB-FETCH]** Deferred SSRF protection decision: https://github.com/deepseek-ai/deepseek-harness/blob/master/.agents/notes/implemented/architecture/2026-06-24-web-capability-seam.md
 - **[DSH-SDK]** Python SDK: https://github.com/deepseek-ai/deepseek-harness/blob/master/python/sdk/README.md
 - **[DSH-SDK-WIRE]** Current SDK JSON-RPC lifecycle limitations: https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/sdk/server/README.md
-# Frozen Plan 1 standalone resolution boundary
+## Historical Plan 1 boundary (superseded by Plan 2)
 
-Plan 1 runs one independent long-lived Node sidecar on an authenticated
-loopback HTTP JSON-RPC `/rpc` transport. The strict protocol is
-`kazusa.dsh-resolution-rpc.v1`. Python never imports DSH and the Brain never
-imports or starts the sidecar. Python owns thread metadata and sends versioned
-Kazusa DTOs; the sidecar exclusively owns DSH agents, sessions, events,
-checkpoints, tool bodies, and receipts.
-
-Every admitted mutation has a semantic `operation_id` and canonical payload
-digest. Equal pairs attach to the existing admission; reused ids with a changed
-digest fail closed. Ambiguous transport loss is reconciled with
-`resolution.inspect` before any replay. Live controls additionally carry an
-activation id and monotonic lease epoch.
-
-The profile is `kazusa-resolver-v1`, pinned to DSH `0.1.1-rc.2` at upstream
-revision `b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`, Cordis `4.0.1`, and
-Schemastery `3.18.1`. Its versioned store epoch is
-`dsh-sqlite-0.1.1-rc.2-v1`, stored at
-`<data-root>/dsh/0.1.1-rc.2/sessions.sqlite`. Scope, audience, profile,
-release, store, model, catalog, or policy mismatch rotates the segment.
-
-Runtime authority stays outside `model_input`. Production exposes no semantic
-tools; `submit_resolution` is the single controller-owned terminal action and
-each model step must contain exactly one action. The only durable authority is
-bounded public DSH `tool/result.meta.kazusa` evidence or terminal metadata.
-No custom DSH event kind is introduced. Terminal exhaust is reconstructed only
-from a complete validated terminal receipt flushed before the RPC response.
-
-This is a staged standalone seam. It creates no cognition, task-resolution,
-RAG, coding-agent, or Brain call edge.
+The first prototype used an independent authenticated loopback sidecar and a
+pre-V2 RPC, profile, intake, and store vocabulary. That prototype was a
+staged control-plane seam without semantic gateway tools or a Brain
+interaction edge. It is retained here only as historical context; the current
+operational contract is the Plan 2 boundary in this document and the [V2
+control-plane README](../../src/agentic_resolver/README.md).

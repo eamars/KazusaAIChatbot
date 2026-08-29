@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
+from typing import Self
+
 import pytest
 
 from agentic_resolver.contracts import (
     RPC_PROTOCOL_VERSION,
-    DSHResolutionExhaustV1,
-    DSHResolutionIntakeV1,
+    DSHResolutionExhaustV2,
+    DSHResolutionIntakeV2,
 )
 from agentic_resolver.errors import (
     OperationIdReuseMismatchError,
@@ -24,42 +27,40 @@ from agentic_resolver.rpc import (
 
 def _intake() -> dict[str, object]:
     return {
-        "schema_version": "dsh_resolution_intake.v1",
+        "schema_version": "dsh_resolution_intake.v2",
         "mode": "start",
-        "runtime": {
-            "request_id": "rrq_rpc",
-            "operation_id": "op_rpc",
-            "operation_payload_digest": "sha256:payload",
-            "resolution_thread_id": "res_rpc",
-            "segment_id": "seg_rpc",
-            "priority": "now",
-            "soft_deadline_at": "2026-08-28T00:00:10Z",
-            "hard_deadline_at": "2026-08-28T00:00:30Z",
-            "max_model_steps": 2,
-            "max_tool_calls": 2,
-            "max_tool_bytes": 4096,
-            "capability_token": "opaque",
+        "request_id": "rrq_rpc",
+        "operation_id": "op_rpc",
+        "operation_payload_digest": "sha256:payload",
+        "resolution_thread_id": "res_rpc",
+        "segment_id": "seg_rpc",
+        "brain_conversation_ref": "chat:debug:rpc",
+        "workspace_root": "C:/workspace/project",
+        "route_digest": "sha256:route",
+        "semantic_tool_authority": {
+            "catalog_digest": "sha256:catalog",
+            "token": "opaque",
+        },
+        "interaction_authority": {
+            "issuer": "dsh-sidecar",
             "scope_fingerprint": "sha256:scope",
             "audience_fingerprint": "sha256:audience",
-            "resolver_profile_version": "kazusa-resolver-v1",
-            "dsh_release": "0.1.1-rc.2",
-            "session_store_epoch": "dsh-sqlite-0.1.1-rc.2-v1",
-            "model_route": "resolver-model",
-            "tool_catalog_digest": "sha256:catalog",
-            "policy_epoch": "2026-08-28.1",
         },
-        "model_input": {
-            "objective": "finish",
-            "constraints": [],
-            "success_criteria": [],
-            "known_facts": [],
-            "uncertainty": [],
-            "literal_inputs": [],
-            "continuation_delta": None,
-            "prior_resolution_refs": [],
-            "requested_evidence_quality": "normal",
-            "notes": [],
-        },
+        "model_input": {"objective": "finish", "facts": []},
+    }
+
+
+def _open_params(
+    operation_id: str = "op_rpc",
+    payload_digest: str = "sha256:payload",
+) -> dict[str, object]:
+    intake = _intake()
+    intake["operation_id"] = operation_id
+    intake["operation_payload_digest"] = payload_digest
+    return {
+        "intake": intake,
+        "activation_id": f"activation-{operation_id}",
+        "lease_epoch": 1,
     }
 
 
@@ -95,15 +96,15 @@ def test_rpc_round_trip_preserves_typed_intake_and_exhaust() -> None:
     )
     value = client.call_sync(
         "resolution.open",
-        {"intake": _intake()},
+        _open_params(),
         operation_id="op_rpc",
         operation_payload_digest="sha256:payload",
     )
     assert isinstance(value, dict)
     assert value["protocol_version"] == RPC_PROTOCOL_VERSION
-    DSHResolutionIntakeV1.from_mapping(value["intake"])
+    DSHResolutionIntakeV2.from_mapping(value["intake"])
     assert "exhaust" in value
-    DSHResolutionExhaustV1.from_mapping(value["exhaust"])
+    DSHResolutionExhaustV2.from_mapping(value["exhaust"])
 
 
 def test_same_operation_id_and_digest_reconciles_one_admission() -> None:
@@ -112,13 +113,13 @@ def test_same_operation_id_and_digest_reconciles_one_admission() -> None:
     client = DSHRpcClient("http://127.0.0.1:8081/rpc", "rpc-secret", transport=transport)
     first = client.call_sync(
         "resolution.open",
-        {"intake": _intake()},
+        _open_params(),
         operation_id="op_rpc",
         operation_payload_digest="sha256:payload",
     )
     second = client.call_sync(
         "resolution.open",
-        {"intake": _intake()},
+        _open_params(),
         operation_id="op_rpc",
         operation_payload_digest="sha256:payload",
     )
@@ -132,14 +133,14 @@ def test_operation_id_reuse_with_different_digest_fails_closed() -> None:
     client = DSHRpcClient("http://127.0.0.1:8081/rpc", "rpc-secret", transport=transport)
     client.call_sync(
         "resolution.open",
-        {"intake": _intake()},
+        _open_params(),
         operation_id="op_rpc",
         operation_payload_digest="sha256:payload",
     )
     with pytest.raises(OperationIdReuseMismatchError):
         client.call_sync(
             "resolution.open",
-            {"intake": _intake()},
+            _open_params(payload_digest="sha256:other"),
             operation_id="op_rpc",
             operation_payload_digest="sha256:other",
         )
@@ -152,7 +153,7 @@ def test_disconnect_before_admission_inspects_then_replays_same_operation_once()
     client = DSHRpcClient("http://127.0.0.1:8081/rpc", "rpc-secret", transport=transport)
     result = client.call_sync(
         "resolution.open",
-        {"intake": _intake()},
+        _open_params(),
         operation_id="op_rpc",
         operation_payload_digest="sha256:payload",
     )
@@ -167,7 +168,7 @@ def test_disconnect_after_admission_attaches_to_active_operation() -> None:
     client = DSHRpcClient("http://127.0.0.1:8081/rpc", "rpc-secret", transport=transport)
     result = client.call_sync(
         "resolution.open",
-        {"intake": _intake()},
+        _open_params(),
         operation_id="op_rpc",
         operation_payload_digest="sha256:payload",
     )
@@ -182,7 +183,7 @@ def test_disconnect_after_terminal_commit_reconciles_exact_exhaust_without_model
     client = DSHRpcClient("http://127.0.0.1:8081/rpc", "rpc-secret", transport=transport)
     first = client.call_sync(
         "resolution.open",
-        {"intake": _intake()},
+        _open_params(),
         operation_id="op_rpc",
         operation_payload_digest="sha256:payload",
     )
@@ -202,7 +203,7 @@ def test_controller_restart_reconciles_admitted_operation_without_duplicate_mode
     first = DSHRpcClient("http://127.0.0.1:8081/rpc", "rpc-secret", transport=transport)
     first.call_sync(
         "resolution.open",
-        {"intake": _intake()},
+        _open_params(),
         operation_id="op_rpc",
         operation_payload_digest="sha256:payload",
     )
@@ -224,11 +225,64 @@ def test_unknown_operation_outcome_returns_uncertain_fault_without_new_admission
     with pytest.raises(OperationOutcomeUncertainError):
         client.call_sync(
             "resolution.open",
-            {"intake": _intake()},
+            _open_params(
+                operation_id="op_unknown",
+                payload_digest="sha256:unknown",
+            ),
             operation_id="op_unknown",
             operation_payload_digest="sha256:unknown",
         )
     assert server.operations.admission_count("op_unknown") == 0
+
+
+def test_http_transport_has_no_dsh_execution_deadline_and_bounds_control(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Long model execution has no Kazusa deadline; control RPC remains bounded."""
+
+    observed_timeouts: list[float | None] = []
+
+    class Response:
+        def __init__(self, value: dict[str, object]) -> None:
+            self._value = value
+
+        def __enter__(self) -> Self:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return json.dumps(self._value).encode("utf-8")
+
+    def fake_urlopen(request: object, *, timeout: float | None) -> Response:
+        observed_timeouts.append(timeout)
+        body = json.loads(request.data)
+        return Response({
+            "jsonrpc": "2.0",
+            "id": body["id"],
+            "protocol_version": RPC_PROTOCOL_VERSION,
+            "result": {
+                "protocol_version": RPC_PROTOCOL_VERSION,
+                "disposition": "terminal",
+            },
+        })
+
+    monkeypatch.setattr("agentic_resolver.rpc.urlopen", fake_urlopen)
+    client = DSHRpcClient(
+        "http://127.0.0.1:8081/rpc",
+        "rpc-secret",
+        timeout=17,
+    )
+    client.call_sync(
+        "resolution.open",
+        _open_params(),
+        operation_id="op_rpc",
+        operation_payload_digest="sha256:payload",
+    )
+    client.call_sync("system.health", {})
+
+    assert observed_timeouts == [None, 17]
 
 
 @pytest.mark.asyncio
@@ -244,3 +298,40 @@ async def test_rpc_client_async_call_is_available_for_controller() -> None:
         {},
     )
     assert result["protocol_version"] == RPC_PROTOCOL_VERSION
+
+
+def test_v2_rpc_reconciles_committed_interaction_checkpoint_without_duplicate_execution() -> None:
+    """A committed interaction checkpoint is replayed exactly after transport loss."""
+
+    from agentic_resolver.contracts import RPC_PROTOCOL_VERSION_V2
+    from agentic_resolver.rpc import DSHRpcClient, DSHRpcServer, InMemoryRpcTransport
+
+    server = DSHRpcServer(token="rpc-secret")
+    transport = InMemoryRpcTransport(server)
+    client = DSHRpcClient(
+        "http://127.0.0.1:8081/rpc",
+        "rpc-secret",
+        transport=transport,
+    )
+    params = {
+        "resolution_thread_id": "thread-v2",
+        "segment_id": "segment-v2",
+        "activation_id": "activation-v2",
+        "lease_epoch": 2,
+    }
+    first = client.call_sync(
+        "resolution.request_checkpoint",
+        params,
+        operation_id="interaction-v2",
+        operation_payload_digest="sha256:pending",
+    )
+    second = client.call_sync(
+        "resolution.request_checkpoint",
+        params,
+        operation_id="interaction-v2",
+        operation_payload_digest="sha256:pending",
+    )
+    assert first == second
+    assert first["protocol_version"] == RPC_PROTOCOL_VERSION_V2
+    assert first["disposition"] == "checkpointed"
+    assert server.operations.execution_count("interaction-v2") == 1

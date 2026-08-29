@@ -134,6 +134,19 @@ Model packets use semantic descriptors and contain no storage identifiers,
 handles, evidence IDs, target paths, or runtime metadata. The caller binds
 accepted qualitative axis shifts to native state roots after generation.
 
+## DSH interaction judgment
+
+For the Plan 2 DSH runtime, Brain sends approval, question, and plan-review
+requests through the canonical A1/A2/G/P chain. P receives a targeted,
+runtime-authored observation plus pending semantic interaction context; that
+observation is not a user utterance and does not establish user permission.
+The P decision remains typed and is returned to deterministic Brain/DSH
+enactment. Brain owns authorization, exact lineage, expiry, persistence, and
+one-shot grant matching; dialog and L3 own visible wording. Transient DSH
+detail stays in the pending interaction path and is not promoted to
+user-authored evidence. See the [Brain–DSH interaction
+boundary](../dsh_interaction/README.md).
+
 ## State and affect ownership
 
 All 51 registered appraisal axes remain available. The caller-owned binder

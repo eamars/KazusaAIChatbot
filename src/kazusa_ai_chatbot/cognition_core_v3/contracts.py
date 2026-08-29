@@ -81,6 +81,7 @@ class CanonicalResponsePlan:
     resolver_requests: tuple[Mapping[str, object], ...]
     epistemic_boundary: str
     self_cognition_response: Mapping[str, object] | None = None
+    dsh_interaction_decision: Mapping[str, object] | None = None
 
 @dataclass(frozen=True)
 class CanonicalCognitionOutput:
@@ -131,6 +132,10 @@ class CanonicalCognitionOutput:
         if self.response_plan.self_cognition_response is not None:
             result["response_plan"]["self_cognition_response"] = dict(
                 self.response_plan.self_cognition_response
+            )
+        if self.response_plan.dsh_interaction_decision is not None:
+            result["response_plan"]["dsh_interaction_decision"] = dict(
+                self.response_plan.dsh_interaction_decision
             )
         return result
 

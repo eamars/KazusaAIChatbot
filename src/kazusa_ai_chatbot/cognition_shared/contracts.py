@@ -166,6 +166,120 @@ class CognitionContextLimitError(CognitionContractError):
     """Raised when required model context remains over its frozen cap."""
 
 
+class DshPendingInteractionContext(TypedDict, total=False):
+    """Bounded, untrusted DSH interaction context for cognition input."""
+
+    schema_version: Literal["dsh_brain_interaction.v1"]
+    interaction_id: str
+    kind: Literal["approval", "question", "plan_review"]
+    resolution_thread_id: str
+    segment_id: str
+    activation_id: str
+    lease_epoch: int
+    dsh_call_id: str
+    tool_name: str | None
+    operation_id: str
+    operation_payload_digest: str
+    arguments_digest: str
+    transient_detail: str
+    brain_conversation_ref: str
+    platform: str
+    platform_channel_id: str
+    global_user_id: str
+    scope_fingerprint: str
+    audience_fingerprint: str
+    profile_version: str
+    catalog_digest: str
+    model_route_digest: str
+    workspace_fingerprint: str
+    policy_epoch: str
+    issued_reference_digest: str
+    issuer: str
+    nonce: str
+    issued_at: str
+    expires_at: str
+
+
+def validate_pending_dsh_interaction(value: object) -> DshPendingInteractionContext:
+    """Validate bounded interaction context without making a semantic decision."""
+
+    if not isinstance(value, Mapping):
+        raise CognitionContractError("pending_dsh_interaction must be an object")
+    required = {
+        "schema_version", "interaction_id", "kind", "resolution_thread_id",
+        "segment_id", "activation_id", "lease_epoch", "dsh_call_id", "tool_name",
+        "operation_id", "operation_payload_digest", "arguments_digest",
+        "transient_detail", "brain_conversation_ref", "platform",
+        "platform_channel_id", "global_user_id", "scope_fingerprint",
+        "audience_fingerprint", "profile_version", "catalog_digest",
+        "model_route_digest", "workspace_fingerprint", "policy_epoch",
+        "issued_reference_digest", "issuer", "nonce", "issued_at", "expires_at",
+    }
+    allowed = required
+    if set(value) - allowed or required - set(value):
+        raise CognitionContractError("pending_dsh_interaction fields are not exact")
+    schema_version = value.get("schema_version")
+    if schema_version != "dsh_brain_interaction.v1":
+        raise CognitionContractError("pending_dsh_interaction schema is invalid")
+    kind = value["kind"]
+    if kind not in {"approval", "question", "plan_review"}:
+        raise CognitionContractError("pending_dsh_interaction kind is invalid")
+    for field in required - {"kind", "schema_version", "lease_epoch", "tool_name"}:
+        _require_text(value[field], f"pending_dsh_interaction.{field}", 8_000)
+    lease_epoch = value["lease_epoch"]
+    if isinstance(lease_epoch, bool) or not isinstance(lease_epoch, int) or lease_epoch < 1:
+        raise CognitionContractError("pending_dsh_interaction lease_epoch is invalid")
+    tool_name = value["tool_name"]
+    if tool_name is not None:
+        _require_text(tool_name, "pending_dsh_interaction.tool_name", 8_000)
+    result: DshPendingInteractionContext = dict(value)
+    return result
+
+
+def project_pending_dsh_interaction_for_prompt(
+    value: Mapping[str, object],
+) -> dict[str, object]:
+    """Project only semantic interaction facts into the model workspace.
+
+    The authenticated request remains complete in the deterministic owner. The
+    cognition prompt receives the schema marker, interaction handle, kind,
+    optional tool name, and bounded semantic detail; transport, scope, route,
+    lease, and replay fields stay outside the model-facing packet.
+    """
+
+    prompt_fields = {
+        "schema_version", "interaction_id", "kind", "tool_name",
+        "transient_detail",
+    }
+    if set(value) == prompt_fields:
+        if value["schema_version"] != "dsh_brain_interaction.v1":
+            raise CognitionContractError("pending_dsh_interaction schema is invalid")
+        if value["kind"] not in {"approval", "question", "plan_review"}:
+            raise CognitionContractError("pending_dsh_interaction kind is invalid")
+        _require_text(
+            value["interaction_id"],
+            "pending_dsh_interaction.interaction_id",
+            8_000,
+        )
+        _require_text(
+            value["transient_detail"],
+            "pending_dsh_interaction.transient_detail",
+            8_000,
+        )
+        tool_name = value["tool_name"]
+        if tool_name is not None:
+            _require_text(tool_name, "pending_dsh_interaction.tool_name", 8_000)
+        return dict(value)
+    validated = validate_pending_dsh_interaction(value)
+    return {
+        "schema_version": validated["schema_version"],
+        "interaction_id": validated["interaction_id"],
+        "kind": validated["kind"],
+        "tool_name": validated["tool_name"],
+        "transient_detail": str(validated["transient_detail"])[:8_000],
+    }
+
+
 def classify_cognition_failure(exception: BaseException) -> str:
     """Return the bounded error category for one cognition-stage failure."""
 

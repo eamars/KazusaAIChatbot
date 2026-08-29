@@ -47,12 +47,28 @@ def profile_fingerprint(profile: Mapping[str, Any]) -> str:
     return _digest(profile)
 
 
+def workspace_fingerprint(workspace_root: str) -> str:
+    """Digest the canonical workspace identity without exposing its contents."""
+
+    if not isinstance(workspace_root, str) or not workspace_root:
+        raise ResolverContractError("workspace root is required")
+    return _digest({"workspace_root": workspace_root})
+
+
 def tool_catalog_digest(catalog: Sequence[Mapping[str, Any]]) -> str:
     return _digest(catalog)
 
 
 def policy_fingerprint(policy: Mapping[str, Any]) -> str:
     return _digest(policy)
+
+
+def v2_authority_digest(identity: Mapping[str, Any]) -> str:
+    """Digest the complete immutable V2 compatibility identity."""
+
+    if not isinstance(identity, Mapping) or not identity:
+        raise ResolverContractError("V2 authority identity must be an object")
+    return _digest(dict(identity))
 
 
 def operation_payload_digest(frame: Mapping[str, Any]) -> str:

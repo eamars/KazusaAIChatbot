@@ -1,22 +1,62 @@
-# Agentic Resolver Target Architecture
+# Agentic Resolver Architecture
 
 ## Document control
 
 | Field | Value |
 | --- | --- |
-| Status | Target architecture for review |
+| Status | Plan 2 capability-ready implementation with a future Plan 3 cutover |
 | Date | 2026-08-25 |
-| Scope | Replacement of Kazusa task-resolution DAGs |
+| Scope | Plan 2 DSH Standard runtime and the future resolution-layer cutover |
 | Current implementation ICD | src/agentic_resolver/README.md |
 | Stable caller | Kazusa brain action selector through task_resolution_request |
 | Supersedes | Standalone-first, four-facade, and DAG-backed resolver direction |
 
-This document defines the renewed target architecture. It is not a statement
-that the target is already implemented. Until a cutover is approved and
-completed, src/agentic_resolver/README.md remains the implementation contract
-for the current standalone prototype.
+Plan 2 is implemented as a capability-ready DSH Standard sidecar and Brain
+interaction bridge. It remains a standalone runtime boundary for now: the
+production `task_resolution_request`, accepted/background routing, legacy
+resolvers and coding callers, and their exhaust mapping remain unchanged.
+Plan 3 is the future/draft big-bang cutover decision. This document records
+the target ownership model while the [agentic resolver implementation
+README](../../src/agentic_resolver/README.md) records the current V2 control
+plane contract.
 
-## Executive decision
+## Current Plan 2 implementation boundary
+
+The current runtime uses authenticated `kazusa.dsh-resolution-rpc.v2` and
+`dsh_resolution_intake.v2`, profile `kazusa-resolver-standard-v2`, DSH
+`0.1.1-rc.2`, and store epoch `dsh-sqlite-0.1.1-rc.2-standard-v2`. DSH
+sessions are stored at
+`<KAZUSA_DSH_DATA_ROOT>/dsh/0.1.1-rc.2/sessions.sqlite`; the framed semantic
+worker uses the adjacent `semantic-outcomes.sqlite`. Required sidecar,
+workspace, Brain, gateway, Python-executable, and six
+`AGENTIC_RESOLVER_LLM_*` settings are listed in the [HOWTO](../HOWTO.md#run-the-plan-2-dsh-standard-sidecar).
+
+The official DSH base and Standard preset are mounted by reference, with
+Standard native tools taking name precedence. Kazusa's fixed semantic catalog
+contains exactly the thirteen names in `dsh_tool_gateway/catalog.py`, plus
+controller-owned `submit_resolution`: conversation history and entries,
+participant summaries, memories and memory lifecycle, people and profiles,
+active context, calendar context, and attached media. The exact names and
+ownership are in the [gateway README](../../src/kazusa_ai_chatbot/dsh_tool_gateway/README.md).
+
+Approval, question, and plan-review requests go through the authenticated
+Brain judge. Cognition receives a targeted runtime-authored observation and
+pending semantic context; a semantic P-stage decision is immediate or a
+`relay_to_user` checkpoint. Normal dialog/adapter delivery owns wording. An
+exact reply resumes the same thread and segment, and deterministic code
+matches and atomically consumes a one-shot grant for the same tool,
+executable arguments, workspace, scope, and policy. Runtime DSH detail is not
+user-authored evidence. A DSH multi-tool turn terminates only after a sole,
+structurally valid, evidence-bound `submit_resolution` receipt is committed.
+Checkpoint, restart, replay, and transport-loss recovery are durable control
+plane concerns; Brain owns semantic judgment and dialog remains the visible
+surface owner.
+
+## Future Plan 3 draft target (non-current)
+
+The sections below describe the separately deferred production routing
+cutover. They do not change the current standalone Plan 2 V2 runtime or its
+unchanged production callers.
 
 Kazusa will use one agentic resolver as the resolution engine behind the
 existing brain-owned task-resolution boundary.
@@ -76,7 +116,7 @@ Deterministic runtime code owns:
 
 - schema validation and catalog construction;
 - code-bound scope, permission, and target checks;
-- tool dispatch, timeouts, quotas, and result-size limits;
+- tool dispatch, timeouts, schema/page/frame bounds, and result-size limits;
 - durable event recording and call/result correlation;
 - idempotency, outcome verification, and crash recovery;
 - foreground deadlines, background scheduling, and delivery;
@@ -87,7 +127,7 @@ Deterministic runtime code owns:
 The following previous design choices are superseded wherever they conflict
 with this document:
 
-1. A standalone resolver as the long-term product boundary.
+1. Treating the Plan 2 sidecar as the production task-resolution cutover.
 2. A fixed four-tool facade made of local_context, public_research, coding,
    and text_computation.
 3. Keeping task, RAG, complex, or web DAGs hidden behind those facade tools.
@@ -104,15 +144,15 @@ and facade-only compatibility mappings do not remain on the live target path.
 
 ## Smallest model-owned contract
 
-For each model step, the resolver model does exactly one of these:
+For each nonterminal model turn, the resolver may emit one or more
+schema-valid eligible native or Kazusa semantic tool calls. The model may
+finish a turn with the sole terminal `submit_resolution` call when the
+evidence-bound result is ready. The installed Standard loop remains
+autonomous; a session can make many successive multi-tool turns.
 
-- call one named tool using schema-valid arguments;
-- call skill to load one curated skill version;
-- call submit_resolution with the terminal structured outcome.
-
-The first integrated release accepts one complete native tool call per model
-step. A session can make many successive calls. This makes local-model output
-easier to validate and replay without removing the model's freedom to explore.
+The runtime validates each call and result, preserves correlation and
+authority bounds, and leaves sequencing to DSH. This keeps local-model output
+inspectable without removing the model's freedom to explore.
 
 Assistant prose is not runtime control. Private reasoning may be streamed for
 diagnostics, but only a validated native call changes state.
@@ -128,6 +168,11 @@ submit_resolution is the normal terminal operation. Its outcome is one of:
 
 These are the existing TaskResolutionResult terminal statuses. deferred is
 runtime-owned and is never selected through submit_resolution.
+
+The statuses remain part of the current terminal schema. Live Standard native
+question and approval hooks normally use the Brain interaction checkpoint
+path, allowing the DSH loop to pause and resume without requiring a terminal
+status.
 
 The controller projects the validated terminal call into the existing
 TaskResolutionResultV1 fields: semantic objective, status, scene context, goal
@@ -195,7 +240,7 @@ Every exposed tool has one canonical manifest:
 | approval_policy | None, brain approval, or explicit user approval |
 | idempotency | Retry rule and key behavior |
 | outcome_verification | How an uncertain side effect is checked |
-| timeout_and_limits | Duration, calls, bytes, rows, and page bounds |
+| timeout_and_limits | Per-operation duration, rows, page, and result-frame bounds |
 | provenance | Source identifiers, timestamps, and freshness semantics |
 | executor | The deterministic implementation boundary |
 | refusal_contract | Typed reasons the executor can decline |
@@ -204,35 +249,32 @@ Trusted scope is injected by runtime code from the brain request and
 authorization context. The model cannot broaden a user, character, channel,
 conversation, workspace, or network scope by placing new values in arguments.
 
-### Initial leaf catalog
+### Current Plan 2 semantic catalog
 
-The target first catalog contains at least these semantic leaf tools:
+The Plan 2 catalog is fixed in `src/kazusa_ai_chatbot/dsh_tool_gateway/catalog.py`;
+the names below are the complete Kazusa semantic addition. DSH Standard native
+filesystem, shell, coding, jobs, tests, public web, approval, and sandbox
+tools are mounted separately and take name precedence.
 
 | Tool | Operation |
 | --- | --- |
-| conversation_search | Search scoped conversation turns by semantic or lexical query |
-| conversation_list | Read bounded turns around known matches or a time window |
-| conversation_aggregate | Compute a bounded participant, topic, or event summary over selected turns |
-| memory_search | Search durable scoped memories and their provenance |
-| memory_read | Read selected memory records and supporting source references |
-| person_resolve | Resolve mentioned people to scoped person identities |
-| profile_read | Read allowed profile facts for resolved people |
-| active_recall | Read active agreements, commitments, reminders, and open loops |
-| current_context_read | Read current scene and conversation context owned by the brain |
-| calendar_read | Read authorized calendar facts needed by the task |
-| web_search | Discover public sources for a stated query |
-| web_read | Fetch and extract one authorized public source |
-| media_inspect | Inspect one supplied or authorized media object |
-| calculate | Perform deterministic arithmetic or structured computation |
-| transform_text | Perform bounded text transformation without external retrieval |
-| coding_read | Inspect authorized repository files and diagnostics |
-| coding_propose | Produce a bounded code-change proposal or patch artifact |
-| accepted_task_status | Read the status of a brain-owned accepted task |
-| skill | Load one curated, versioned skill body into the session |
-| submit_resolution | Submit the terminal typed resolution |
+| `kazusa_search_conversation_history` | Find relevant conversation entries by meaning and optional time range |
+| `kazusa_read_conversation_entries` | Read complete conversation entries by opaque references |
+| `kazusa_summarize_conversation_participants` | Summarize participants in a bounded conversation range |
+| `kazusa_search_memories` | Search semantic memories by query and subject scope |
+| `kazusa_read_memories` | Read complete semantic memories by opaque references |
+| `kazusa_remember_information` | Retain information with explicit subject, kind, reason, and provenance |
+| `kazusa_revise_memory` | Revise one semantic memory by opaque reference |
+| `kazusa_change_memory_lifecycle` | Apply one explicit memory lifecycle transition |
+| `kazusa_find_people_by_name` | Find people by display name and relation matching |
+| `kazusa_read_person_profiles` | Read semantic profiles by opaque person references |
+| `kazusa_recall_active_context` | Recall active commitments, progress, history, or calendar context |
+| `kazusa_read_calendar_context` | Read schedule or calendar-run context by view |
+| `kazusa_inspect_attached_media` | Inspect attached media by opaque reference and question |
 
-The list grows as eligible Kazusa interfaces are identified. Adding a tool
-does not require adding a graph branch.
+`submit_resolution` is the separate controller-owned terminal operation. The
+catalog grows only through an explicit contract update; adding a tool never
+adds a hidden graph branch.
 
 ### Leaf-tool rule
 
@@ -257,7 +299,8 @@ A leaf tool does not:
 - hide graph state, graph checkpoints, or graph fallback behavior.
 
 Search choices that materially affect meaning are explicit arguments. For
-example, conversation_search exposes semantic, lexical, hybrid, time, sender,
+example, `kazusa_search_conversation_history` exposes semantic, lexical,
+hybrid, time, sender,
 and channel constraints rather than internally routing among opaque RAG
 branches.
 
@@ -267,7 +310,7 @@ Each executor returns a typed envelope equivalent to:
 
     {
       "call_id": "call_...",
-      "tool": "conversation_search",
+      "tool": "kazusa_search_conversation_history",
       "tool_version": "1",
       "status": "succeeded",
       "data": {},
@@ -295,34 +338,36 @@ The conceptual loop is:
     build authorized tool catalog
     assemble bounded model context
 
-    while step budget remains:
-        request one native call from the resolver model
-        validate name, schema, scope, permission, and budget
+    let the Standard runtime request the next native/semantic call set
+    validate each name, schema, scope, permission, and result frame
 
-        if call is submit_resolution:
-            validate terminal result and evidence references
-            persist terminal event
-            return TaskResolutionResult to the brain
+    if the call set contains submit_resolution:
+        require submit_resolution to be the sole call in the set
+        validate terminal result and evidence references
+        persist terminal event
+        return the V2 terminal exhaust
 
-        persist tool/call before dispatch
-        execute the leaf tool
-        persist paired tool/result
+    otherwise:
+        persist every tool/call before dispatch
+        execute the eligible tools
+        persist each paired tool/result
         append bounded result context
 
-        if foreground deadline is reached:
-            checkpoint the same session
-            return the existing deferred result to brain-owned promotion
-
-    submit a typed budget-exhausted failure
+    if the brain-owned foreground boundary requests a checkpoint:
+        checkpoint the same session
+        return the V2 checkpointed exhaust
 
 The model can revise its search based on evidence. For example, a vague memory
-query may lead to conversation_search, then conversation_list around two
-matches, then person_resolve, then memory_read, before submit_resolution.
+query may lead to `kazusa_search_conversation_history`, then
+`kazusa_read_conversation_entries` around two matches, then
+`kazusa_find_people_by_name`, then `kazusa_read_memories`, before
+`submit_resolution`.
 
-The loop has explicit caps for model steps, calls per tool, total tool calls,
-wall time, model tokens, evidence bytes, and repeated equivalent calls.
-Repetition protection reports the observed duplicate to the model once and
-terminates after the configured bound.
+Kazusa does not add a DSH model-step, total-call, tool-byte, repetition,
+sandbox, or loop-continuation budget. The installed Standard runtime owns its
+native loop and policy. Kazusa validates exact authority, schemas, individual
+frame/page bounds, durable event correlation, and singleton terminal
+integrity.
 
 ## DeepSeek Harness evidence and session contract
 
@@ -443,8 +488,8 @@ The current calling mechanism is preserved.
 3. Existing queue and worker mechanics run the agentic session.
 4. Completion returns through the existing resume and delivery path.
 
-The resolver sees an execution budget and checkpoint signal. It does not
-select, override, or reinterpret priority.
+The resolver receives the bounded objective and the native checkpoint signal.
+It does not select, override, or reinterpret brain-owned priority.
 
 ## Context policy for a local model
 
@@ -455,7 +500,7 @@ The model receives only the context needed for the current decision:
 - loaded skill instructions;
 - recent native calls and normalized results;
 - a compact evidence ledger with stable evidence IDs;
-- the remaining deterministic budgets;
+- the latest checkpoint and interaction state;
 - the latest checkpoint summary.
 
 Large conversation turns, memory bodies, pages, media, and code remain in tool
@@ -496,7 +541,7 @@ A skill cannot:
 
 - grant a permission or broaden trusted scope;
 - introduce an undeclared tool;
-- bypass validation, approval, or budgets;
+- bypass validation, approval, or native DSH policy;
 - claim facts about the user, character, or world;
 - decide foreground/background priority or visible wording.
 
@@ -550,11 +595,11 @@ User request:
 
 Possible resolver loop:
 
-1. conversation_search with the distinctive phrase and a broad authorized
+1. `kazusa_search_conversation_history` with the distinctive phrase and a broad authorized
    time range;
-2. conversation_list around the strongest matches;
-3. person_resolve if pronouns or group identities are ambiguous;
-4. profile_read only if relationship identity is relevant;
+2. `kazusa_read_conversation_entries` around the strongest matches;
+3. `kazusa_find_people_by_name` if pronouns or group identities are ambiguous;
+4. `kazusa_read_person_profiles` only if relationship identity is relevant;
 5. submit_resolution with the event, uncertainty, and cited turn IDs.
 
 The model decides whether more digging is useful. Conversation retrieval
@@ -569,9 +614,9 @@ User request:
 
 Possible loop:
 
-1. memory_search for local-model preference;
-2. memory_read for the selected memory and provenance;
-3. conversation_search against the source period if the reason is incomplete
+1. `kazusa_search_memories` for local-model preference;
+2. `kazusa_read_memories` for the selected memory and provenance;
+3. `kazusa_search_conversation_history` against the source period if the reason is incomplete
    or two memories conflict;
 4. submit_resolution with both the preference and provenance.
 
@@ -583,9 +628,9 @@ User request:
 
 Possible loop:
 
-1. active_recall for current commitments;
-2. calendar_read for authorized due-time context;
-3. conversation_search if the commitment has conflicting revisions;
+1. `kazusa_recall_active_context` for current commitments;
+2. `kazusa_read_calendar_context` for authorized due-time context;
+3. `kazusa_search_conversation_history` if the commitment has conflicting revisions;
 4. submit_resolution with status and source references.
 
 This does not create, edit, or complete the commitment. Those mutations remain
@@ -599,9 +644,9 @@ User request:
 
 Possible loop:
 
-1. web_search restricted toward first-party sources;
-2. web_read the launch and current official specification pages;
-3. calculate if units or deltas need normalization;
+1. native DSH `web_search` restricted toward first-party sources;
+2. native DSH `web_read` for the launch and current official specification pages;
+3. native DSH `calculate` if units or deltas need normalization;
 4. submit_resolution with dated sources and discrepancies.
 
 No public_research DAG selects branches behind the call. The resolver makes
@@ -615,10 +660,10 @@ User request:
 
 Possible loop:
 
-1. conversation_search for each topic;
-2. conversation_aggregate over the matched turn IDs;
-3. person_resolve for display identities;
-4. conversation_list around ambiguous statements;
+1. `kazusa_search_conversation_history` for each topic;
+2. `kazusa_summarize_conversation_participants` over the matched turn IDs;
+3. `kazusa_find_people_by_name` for display identities;
+4. `kazusa_read_conversation_entries` around ambiguous statements;
 5. submit_resolution with participant-level evidence.
 
 ### 6. Recover from a blocked public source
@@ -629,8 +674,8 @@ User request:
 
 Possible loop:
 
-1. web_read the supplied URL;
-2. if blocked, web_search for the same title, authorized mirrors, or primary
+1. native DSH `web_read` for the supplied URL;
+2. if blocked, native DSH `web_search` for the same title, authorized mirrors, or primary
    sources cited by the thread;
 3. read useful alternatives;
 4. submit resolved with explicit source differences, or needs_user_input when
@@ -646,9 +691,9 @@ repository investigation.
 Possible resolver loop after the existing queue resumes it:
 
 1. load a repository investigation skill;
-2. coding_read the relevant contracts and files;
-3. coding_read diagnostics or allowed tests;
-4. coding_propose a bounded change artifact;
+2. native DSH `coding_read` for the relevant contracts and files;
+3. native DSH `coding_read` for diagnostics or allowed tests;
+4. native DSH `coding_propose` for a bounded change artifact;
 5. submit_resolution with the proposal, verification, and any required
    approval.
 
@@ -664,10 +709,10 @@ User request:
 Possible resolver loop:
 
 1. skill loads the approved Chinese-localization procedure;
-2. transform_text applies the bounded transformation;
+2. native DSH `transform_text` applies the bounded transformation;
 3. submit_resolution returns the artifact and declared terminology choices.
 
-The skill improves technique. transform_text remains the executable
+The skill improves technique. Native `transform_text` remains the executable
 capability.
 
 ## Failure behavior
@@ -675,24 +720,24 @@ capability.
 | Condition | Owner and result |
 | --- | --- |
 | Unknown tool | Runtime rejects call; model receives typed contract error within retry cap |
-| Invalid arguments | Runtime rejects before dispatch; bounded model regeneration |
+| Invalid arguments | Runtime rejects before dispatch; typed structural rejection returns to the DSH loop |
 | Scope escalation | Runtime rejects; recorded permission failure |
 | Tool timeout | Typed tool_failed result; model may choose another eligible tool |
 | Source unavailable | Model explores alternatives or submits unavailable/needs_user_input |
 | Conflicting evidence | Model reads more sources or submits explicit uncertainty |
-| Repeated equivalent calls | Runtime warns once and terminates at repetition bound |
+| Repeated equivalent calls | Standard/native loop policy decides whether to continue; exact events remain auditable |
 | Inline deadline | Runtime checkpoints; brain-owned logic promotes same session |
 | Context limit | Atomic compaction with durable source ledger |
 | Process crash | Replay events; classify pending call outcome before retry |
 | Side-effect outcome unknown | Verify through manifest or request approval/input |
-| Malformed terminal result | Producing model receives bounded regeneration request |
-| Step or cost budget exhausted | Typed failed result with evidence already gathered |
+| Malformed terminal result | Typed terminal structural rejection returns to the DSH loop; no terminal commit |
 
 All model-authored contracts pass through the canonical LLM JSON parser where
 the owning stage permits syntax repair. Deterministic repair may normalize
 structure and declared bounds; it does not invent semantic values or override
-model decisions. Invalid terminal semantics follow bounded regeneration and
-then fail closed.
+model decisions. Invalid terminal semantics produce a typed structural
+rejection returned to the autonomous DSH loop. Runtime failure remains
+fail-closed when the session cannot continue safely.
 
 ## Cutover and decommission
 

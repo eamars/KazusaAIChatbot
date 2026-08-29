@@ -61,6 +61,7 @@ from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionExecutionError,
     is_targetless_group_self_cognition_episode,
     validate_overused_moves,
+    validate_pending_dsh_interaction,
     validate_terminal_text_seed,
 )
 from kazusa_ai_chatbot.cognition_shared.emotion_derivation import (
@@ -226,6 +227,12 @@ def _validate_canonical_input(value: object) -> dict[str, object]:
         ) from exc
     if value["state_scope"] not in {"user", "character"}:
         raise CanonicalContractError("canonical state scope is invalid")
+    pending_dsh = value.get("pending_dsh_interaction")
+    if pending_dsh is not None:
+        try:
+            validate_pending_dsh_interaction(pending_dsh)
+        except CognitionContractError as exc:
+            raise CanonicalContractError(str(exc)) from exc
     continuation = value.get("_continuation_goal_ref")
     if continuation is not None and (
         not isinstance(continuation, Mapping)
@@ -735,7 +742,14 @@ def _validate_goal(
     return typed_goal, typed_willingness, private_monologue
 
 
-def _validate_plan(raw: object, *, self_cognition: bool, capabilities: dict[str, object]) -> CanonicalResponsePlan:
+def _validate_plan(
+    raw: object,
+    *,
+    self_cognition: bool,
+    capabilities: dict[str, object],
+    dsh_interaction_context: Mapping[str, object] | None = None,
+    dsh_reply: bool = False,
+) -> CanonicalResponsePlan:
     if not isinstance(raw, dict):
         raise CanonicalContractError("response plan must be an object")
     if self_cognition:
@@ -782,6 +796,9 @@ def _validate_plan(raw: object, *, self_cognition: bool, capabilities: dict[str,
         "resolver_requests",
         "epistemic_boundary",
     }
+    has_dsh_context = isinstance(dsh_interaction_context, Mapping)
+    if has_dsh_context:
+        required.add("dsh_interaction_decision")
     if set(raw) != required or raw["goal_resolution"] not in GOAL_RESOLUTION_VALUES:
         raise CanonicalContractError("ordinary response plan fields are not exact")
     action_roster = {
@@ -854,6 +871,13 @@ def _validate_plan(raw: object, *, self_cognition: bool, capabilities: dict[str,
         )
     except CognitionContractError as exc:
         raise CanonicalContractError(str(exc)) from exc
+    dsh_decision = None
+    if has_dsh_context:
+        dsh_decision = _validate_dsh_interaction_decision(
+            raw["dsh_interaction_decision"],
+            context=dsh_interaction_context,
+            dsh_reply=dsh_reply,
+        )
     return CanonicalResponsePlan(
         goal_resolution=raw["goal_resolution"],
         response_goal=response_goal,
@@ -863,7 +887,92 @@ def _validate_plan(raw: object, *, self_cognition: bool, capabilities: dict[str,
             "epistemic boundary",
             _EPISTEMIC_BOUNDARY_MAX_CHARS,
         ),
+        dsh_interaction_decision=dsh_decision,
     )
+
+
+def _validate_dsh_interaction_decision(
+    raw: object,
+    *,
+    context: Mapping[str, object],
+    dsh_reply: bool = False,
+) -> dict[str, object]:
+    """Validate a Brain-owned P-stage interaction decision without rewriting it."""
+
+    if not isinstance(raw, dict):
+        raise CanonicalContractError("DSH interaction decision must be an object")
+    expected = {
+        "interaction_id", "kind", "decision", "answer", "response_goal",
+        "relay_mode", "reason",
+    }
+    if set(raw) - expected or expected - set(raw):
+        raise CanonicalContractError("DSH interaction decision fields are not exact")
+    interaction_id = raw["interaction_id"]
+    kind = raw["kind"]
+    decision = raw["decision"]
+    if not isinstance(interaction_id, str) or not interaction_id.strip():
+        raise CanonicalContractError("DSH interaction decision identity is invalid")
+    if interaction_id != context.get("interaction_id"):
+        raise CanonicalContractError("DSH interaction decision identity mismatches context")
+    if kind != context.get("kind"):
+        raise CanonicalContractError("DSH interaction decision kind mismatches context")
+    if kind not in {"approval", "question", "plan_review"}:
+        raise CanonicalContractError("DSH interaction decision kind is invalid")
+    allowed_dsh_decisions = {
+        "answer", "allow_once", "reject", "relay_to_user",
+    }
+    if dsh_reply:
+        allowed_dsh_decisions.add("continue_waiting")
+    if decision not in allowed_dsh_decisions:
+        raise CanonicalContractError("DSH interaction decision is invalid")
+    if decision == "answer" and kind not in {"question", "plan_review"}:
+        raise CanonicalContractError("DSH answer decision is kind-incompatible")
+    if decision == "allow_once" and kind not in {"approval", "plan_review"}:
+        raise CanonicalContractError("DSH allow decision is kind-incompatible")
+    answer = raw["answer"]
+    response_goal = raw["response_goal"]
+    relay_mode = raw["relay_mode"]
+    if answer is not None and (not isinstance(answer, str) or not answer.strip()):
+        raise CanonicalContractError("DSH interaction answer is invalid")
+    if isinstance(answer, str) and len(answer) > 2_000:
+        raise CanonicalContractError("DSH interaction answer is too long")
+    if response_goal is not None and (
+        not isinstance(response_goal, str) or not response_goal.strip()
+    ):
+        raise CanonicalContractError("DSH response goal is invalid")
+    if isinstance(response_goal, str) and len(response_goal) > 2_000:
+        raise CanonicalContractError("DSH response goal is too long")
+    if relay_mode is not None and relay_mode not in {
+        "question", "approval", "plan_review",
+    }:
+        raise CanonicalContractError("DSH relay mode is invalid")
+    if decision == "answer" and answer is None:
+        raise CanonicalContractError("DSH answer is required for answer decision")
+    if decision != "answer" and answer is not None:
+        raise CanonicalContractError("DSH answer is status-specific")
+    if decision == "relay_to_user" and (
+        response_goal is None or relay_mode is None
+    ):
+        raise CanonicalContractError(
+            "DSH response goal and relay mode are required for relay decision"
+        )
+    if decision != "relay_to_user" and (
+        response_goal is not None or relay_mode is not None
+    ):
+        raise CanonicalContractError("DSH relay fields are status-specific")
+    if decision == "continue_waiting" and not dsh_reply:
+        raise CanonicalContractError(
+            "continue_waiting is available only for a matched user reply"
+        )
+    return {
+        "interaction_id": interaction_id,
+        "kind": kind,
+        "decision": decision,
+        "answer": answer,
+        "response_goal": response_goal,
+        "relay_mode": relay_mode,
+        "reason": _bounded_text(raw["reason"], "DSH interaction reason"),
+    }
 
 
 def _validate_appraisal_stage(
@@ -903,6 +1012,8 @@ def _validate_plan_stage(
     *,
     self_cognition: bool,
     capabilities: dict[str, object],
+    dsh_interaction_context: Mapping[str, object] | None = None,
+    dsh_reply: bool = False,
 ) -> _CognitionValidationResult:
     """Validate the response plan without adding semantic recovery."""
 
@@ -911,6 +1022,8 @@ def _validate_plan_stage(
             raw,
             self_cognition=self_cognition,
             capabilities=capabilities,
+            dsh_interaction_context=dsh_interaction_context,
+            dsh_reply=dsh_reply,
         ),
     )
 
@@ -971,6 +1084,7 @@ async def _run_cognition(
         resolver_progress=validated.get("resolver_goal_progress", {}),
         runtime_limits=validated.get("runtime_capability_limits", []),
         group_engagement=validated.get("group_engagement_action_context", {}),
+        pending_dsh_interaction=validated.get("pending_dsh_interaction"),
     )
     a1 = await _run_cognition_stage(
         services=services,
@@ -1031,11 +1145,14 @@ async def _run_cognition(
             goal=goal.__dict__,
             appraisal_summary=summaries,
             self_cognition=self_cognition,
+            dsh_reply=bool(validated.get("pending_dsh_reply", False)),
         ),
         validator=lambda raw: _validate_plan_stage(
             raw,
             self_cognition=self_cognition,
             capabilities=workspace["capabilities"],
+            dsh_interaction_context=workspace.get("pending_dsh_interaction"),
+            dsh_reply=bool(validated.get("pending_dsh_reply", False)),
         ),
         deadline_monotonic=deadline_monotonic,
     )

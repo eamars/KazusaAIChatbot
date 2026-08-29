@@ -47,6 +47,56 @@ from kazusa_ai_chatbot.time_boundary import LocalTimeContextDoc
 ReferentRole = Literal["subject", "object", "time"]
 
 
+class DshPendingInteractionContext(TypedDict, total=False):
+    """Bounded untrusted DSH interaction context projected into cognition."""
+
+    schema_version: Literal["dsh_brain_interaction.v1"]
+    interaction_id: str
+    kind: Literal["approval", "question", "plan_review"]
+    resolution_thread_id: str
+    segment_id: str
+    activation_id: str
+    lease_epoch: int
+    dsh_call_id: str
+    tool_name: str | None
+    operation_id: str
+    operation_payload_digest: str
+    arguments_digest: str
+    transient_detail: str
+    brain_conversation_ref: str
+    platform: str
+    platform_channel_id: str
+    global_user_id: str
+    scope_fingerprint: str
+    audience_fingerprint: str
+    profile_version: str
+    catalog_digest: str
+    model_route_digest: str
+    workspace_fingerprint: str
+    policy_epoch: str
+    issued_reference_digest: str
+    issuer: str
+    nonce: str
+    issued_at: str
+    expires_at: str
+
+
+class DshSemanticInteractionDecision(TypedDict, total=False):
+    """Brain-owned semantic disposition for one DSH interaction."""
+
+    schema_version: Literal["dsh_brain_interaction.v1"]
+    interaction_id: str
+    request_digest: str
+    kind: Literal["approval", "question", "plan_review"]
+    decision: Literal[
+        "answer", "allow_once", "reject", "relay_to_user", "continue_waiting",
+    ]
+    answer: str | None
+    response_goal: str | None
+    relay_mode: Literal["question", "approval", "plan_review"] | None
+    reason: str
+
+
 class ReferentResolution(TypedDict, total=False):
     """Structured decontextualizer reference-resolution result."""
 
@@ -128,6 +178,9 @@ class GlobalPersonaState(TypedDict):
     action_availability_runtime: NotRequired[dict[str, object]]
     interaction_style_context: NotRequired[dict]
     settled_relevance_context_consumption: NotRequired[dict]
+    pending_dsh_interaction: NotRequired[DshPendingInteractionContext]
+    pending_dsh_reply: NotRequired[bool]
+    dsh_interaction_decision: NotRequired[DshSemanticInteractionDecision]
 
     # Debug
     debug_modes: DebugModes
@@ -245,6 +298,9 @@ class CognitionState(TypedDict):
     group_engagement_action_context: NotRequired[dict]
     action_selection_context: NotRequired[dict]
     coding_run_followup: NotRequired[dict]
+    pending_dsh_interaction: NotRequired[DshPendingInteractionContext]
+    pending_dsh_reply: NotRequired[bool]
+    dsh_interaction_decision: NotRequired[DshSemanticInteractionDecision]
     selected_text_surface_intent: NotRequired[str]
     attempt_diagnostics: Annotated[
         list[EpisodeAttemptDiagnosticV1],

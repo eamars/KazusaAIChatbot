@@ -21,6 +21,16 @@ class RuntimeFaultCode(str, Enum):
     TERMINAL_RECEIPT_INVALID = "TERMINAL_RECEIPT_INVALID"
 
 
+class InteractionFaultCode(str, Enum):
+    """Machine-readable Brain interaction faults."""
+
+    AUTHENTICATION_FAILED = "BRAIN_INTERACTION_AUTHENTICATION_FAILED"
+    REPLAY = "BRAIN_INTERACTION_REPLAY"
+    EXPIRED = "BRAIN_INTERACTION_EXPIRED"
+    UNAVAILABLE = "BRAIN_INTERACTION_UNAVAILABLE"
+    IDENTITY_INVALID = "BRAIN_INTERACTION_IDENTITY_INVALID"
+
+
 class AgenticResolverError(RuntimeError):
     """Base class for typed resolver integration errors."""
 

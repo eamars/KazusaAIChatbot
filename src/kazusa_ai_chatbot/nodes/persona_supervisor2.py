@@ -1053,6 +1053,13 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
     ):
         if turn_context_field in state:
             initial_persona_state[turn_context_field] = state[turn_context_field]
+    pending_dsh_interaction = state.get("pending_dsh_interaction")
+    if isinstance(pending_dsh_interaction, Mapping):
+        initial_persona_state["pending_dsh_interaction"] = dict(
+            pending_dsh_interaction
+        )
+        if state.get("pending_dsh_reply") is True:
+            initial_persona_state["pending_dsh_reply"] = True
     
     results = await persona_graph.ainvoke(initial_persona_state)
     
@@ -1109,6 +1116,11 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
             "character_identity_epistemic_core_included"
         ),
     }
+    dsh_interaction_decision = results.get("dsh_interaction_decision")
+    if isinstance(dsh_interaction_decision, Mapping):
+        return_value["dsh_interaction_decision"] = dict(
+            dsh_interaction_decision
+        )
     if "public_group_scene_context" in results:
         return_value["public_group_scene_context"] = results[
             "public_group_scene_context"

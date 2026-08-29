@@ -5,21 +5,30 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from inspect import isawaitable
 from typing import Any, Protocol
 from uuid import uuid4
 
 from agentic_resolver.contracts import (
+    PROFILE_VERSION,
     SEGMENT_SCHEMA_VERSION,
-    DSHResolutionIntakeV1,
-    DSHResolutionRuntimeV1,
+    DSHResolutionIntakeV2,
 )
 from agentic_resolver.errors import (
     OperationIdReuseMismatchError,
     OperationOutcomeUncertainError,
 )
+from agentic_resolver.fingerprints import (
+    operation_payload_digest,
+    workspace_fingerprint,
+)
 from agentic_resolver.persistence import ResolutionThreadRepository
+from kazusa_ai_chatbot.dsh_tool_gateway.authority import (
+    activation_id_for,
+    verify_activation_token,
+)
 
 
 class ResolutionRpc(Protocol):
@@ -42,13 +51,43 @@ def _expires() -> str:
     )
 
 
+_ALLOW_ONCE_CONTINUATION_FACT = (
+    "The earlier native approval cancellation was the checkpoint transport "
+    "outcome and is superseded by Brain's one-shot approval. One short-lived "
+    "grant is available only for a fresh call to the same native tool with "
+    "semantically identical executable arguments. Retry that exact native "
+    "call now with a fresh call id so the gateway can validate and atomically "
+    "consume the grant."
+)
+
+
+def _continuation_model_facts(
+    continuation_delta: Mapping[str, Any],
+) -> list[str]:
+    """Project a typed continuation decision into bounded model-visible facts."""
+
+    if continuation_delta.get("decision") != "allow_once":
+        return []
+    return [_ALLOW_ONCE_CONTINUATION_FACT]
+
+
 class ResolutionController:
     """Own thread compatibility, semantic operations, and lease fencing."""
 
     _COMPATIBILITY_FIELDS = (
-        "scope_fingerprint", "audience_fingerprint",
-        "resolver_profile_version", "dsh_release", "session_store_epoch",
-        "model_route", "tool_catalog_digest", "policy_epoch",
+        "brain_conversation_ref",
+        "workspace_root",
+        "workspace_fingerprint",
+        "route_digest",
+        "resolver_profile_version",
+        "dsh_release",
+        "session_store_epoch",
+        "standard_catalog_digest",
+        "semantic_catalog_digest",
+        "policy_epoch",
+        "scope_fingerprint",
+        "audience_fingerprint",
+        "interaction_id",
     )
     _LEASE_RENEWAL_SECONDS = 10.0
     _COMMITTED_DISPOSITIONS = frozenset({
@@ -61,76 +100,126 @@ class ResolutionController:
         rpc: ResolutionRpc,
         *,
         owner_id: str,
+        semantic_authority_secret: bytes,
     ) -> None:
+        if not isinstance(semantic_authority_secret, bytes) or not semantic_authority_secret:
+            raise ValueError("semantic_authority_secret is required")
         self._repository = repository
         self._rpc = rpc
         self._owner_id = owner_id
+        self._semantic_authority_secret = semantic_authority_secret
 
     async def resolve(self, value: Mapping[str, Any]) -> dict[str, Any]:
-        intake = DSHResolutionIntakeV1.from_mapping(value)
+        intake = DSHResolutionIntakeV2.from_mapping(value)
         if intake.mode == "start":
             return await self.open(intake.to_dict())
         return await self.continue_resolution(intake.to_dict())
 
     async def open(self, value: Mapping[str, Any]) -> dict[str, Any]:
-        intake = DSHResolutionIntakeV1.from_mapping(value)
-        runtime = intake.runtime
+        intake = DSHResolutionIntakeV2.from_mapping(value)
+        health = await self._health_identity()
+        self._assert_intake_health(intake, health)
+        self._verify_intake_authority(intake, health)
         record = await self._repository_call(
-            "get_thread", runtime.resolution_thread_id
+            "get_thread", intake.resolution_thread_id
         )
         if record is None:
+            self._verify_intake_authority(
+                intake,
+                health,
+                activation_id=activation_id_for(
+                    intake.resolution_thread_id, intake.segment_id, 1
+                ),
+                lease_epoch=1,
+            )
+            segment = self._segment(
+                intake,
+                health,
+                segment_id=intake.segment_id,
+            )
             await self._repository_call(
-                "create_thread",
-                runtime.resolution_thread_id,
-                runtime.resolution_thread_id,
-                intake.model_input.objective,
-                runtime.priority,
-                runtime.scope_fingerprint,
-                runtime.audience_fingerprint,
-                self._segment(runtime),
-                _now(),
+                "create_thread_v2",
+                resolution_thread_id=intake.resolution_thread_id,
+                brain_conversation_ref=intake.brain_conversation_ref,
+                root_goal_ref=intake.model_input.objective,
+                priority="now",
+                workspace_root=intake.workspace_root,
+                workspace_fingerprint=workspace_fingerprint(
+                    intake.workspace_root
+                ),
+                route_digest=intake.route_digest,
+                profile_version=PROFILE_VERSION,
+                standard_catalog_digest=health["native_catalog_digest"],
+                semantic_catalog_digest=health["semantic_catalog_digest"],
+                scope_fingerprint=(
+                    intake.interaction_authority["scope_fingerprint"]
+                ),
+                audience_fingerprint=(
+                    intake.interaction_authority["audience_fingerprint"]
+                ),
+                policy_epoch="dsh-standard-policy-v2",
+                interaction_id=intake.request_id,
+                segment=segment,
+                now=str(segment["created_at"]),
             )
         return await self._activate("resolution.open", intake)
 
     async def continue_resolution(
         self, value: Mapping[str, Any]
     ) -> dict[str, Any]:
-        intake = DSHResolutionIntakeV1.from_mapping(value)
-        runtime = intake.runtime
+        intake = DSHResolutionIntakeV2.from_mapping(value)
+        health = await self._health_identity()
+        self._assert_intake_health(intake, health)
+        self._verify_intake_authority(intake, health)
         record = await self._repository_call(
-            "get_thread", runtime.resolution_thread_id
+            "get_thread", intake.resolution_thread_id
         )
         if record is None:
-            return await self.open({**intake.to_dict(), "mode": "start"})
+            raise RuntimeError("V2 resolution thread is not admitted")
+        self._verify_intake_authority(
+            intake,
+            health,
+            activation_id=activation_id_for(
+                intake.resolution_thread_id,
+                intake.segment_id,
+                int(record.lease_epoch) + 1,
+            ),
+            lease_epoch=int(record.lease_epoch) + 1,
+        )
         current = next(
             segment
             for segment in record.segments
             if segment["segment_id"] == record.current_segment_id
         )
+        candidate = self._compatibility_values(intake, health)
         mismatch = next(
             (
                 field
                 for field in self._COMPATIBILITY_FIELDS
-                if current[field] != getattr(runtime, field)
+                if current[field] != candidate[field]
             ),
             None,
         )
+        if mismatch is None and current["segment_id"] != intake.segment_id:
+            raise RuntimeError("SEGMENT_ID_MISMATCH")
         if mismatch is not None:
-            rotated_runtime = DSHResolutionRuntimeV1.from_mapping({
-                **runtime.to_dict(),
-                "segment_id": f"seg_{uuid4().hex}",
-            })
+            # A new segment is authenticated by the caller's activation token;
+            # the controller preserves that exact hidden identity through the
+            # durable rotation rather than inventing an unauthenticated id.
+            rotated_segment_id = intake.segment_id
             await self._repository_call(
                 "rotate_segment",
-                runtime.resolution_thread_id,
-                self._segment(rotated_runtime),
+                intake.resolution_thread_id,
+                self._segment(
+                    intake,
+                    health,
+                    segment_id=rotated_segment_id,
+                ),
                 reason=f"{mismatch}_mismatch",
             )
-            intake = DSHResolutionIntakeV1(
-                schema_version=intake.schema_version,
-                mode=intake.mode,
-                runtime=rotated_runtime,
-                model_input=intake.model_input,
+            intake = replace(
+                intake,
+                segment_id=rotated_segment_id,
             )
         return await self._activate("resolution.continue", intake)
 
@@ -190,6 +279,205 @@ class ResolutionController:
             resolution_thread_id,
             activation_id,
             lease_epoch,
+        )
+
+    async def interaction_checkpoint(
+        self,
+        *,
+        resolution_thread_id: str,
+        segment_id: str,
+        activation_id: str,
+        lease_epoch: int,
+        interaction_id: str,
+    ) -> dict[str, Any]:
+        """Checkpoint one active segment under a Brain interaction identity."""
+
+        payload = {
+            "resolution_thread_id": resolution_thread_id,
+            "segment_id": segment_id,
+            "activation_id": activation_id,
+            "lease_epoch": lease_epoch,
+        }
+        digest = operation_payload_digest({
+            "method": "resolution.request_checkpoint",
+            "params": payload,
+        })
+        return await self._rpc.call(
+            "resolution.request_checkpoint",
+            {
+                **payload,
+                "operation_id": interaction_id,
+                "operation_payload_digest": digest,
+            },
+            operation_id=interaction_id,
+            operation_payload_digest=digest,
+        )
+
+    async def resume_after_interaction(
+        self,
+        *,
+        resolution_thread_id: str,
+        segment_id: str,
+        activation_id: str,
+        lease_epoch: int,
+        interaction_id: str,
+        continuation_delta: Mapping[str, Any],
+        continuation_authority_token: str,
+    ) -> dict[str, Any]:
+        """Resume with a fresh Brain-issued activation authority."""
+
+        if not isinstance(continuation_delta, Mapping):
+            raise TypeError("continuation_delta must be an object")
+        if "reply_text" in continuation_delta:
+            raise ValueError(
+                "continuation_delta must contain a cognition decision, not reply_text"
+            )
+        if not isinstance(continuation_authority_token, str) or not continuation_authority_token:
+            raise ValueError("continuation_authority_token is required")
+        payload = {
+            "resolution_thread_id": resolution_thread_id,
+            "segment_id": segment_id,
+            "activation_id": activation_id,
+            "lease_epoch": lease_epoch,
+            "continuation": dict(continuation_delta),
+        }
+        digest = operation_payload_digest({
+            "method": "resolution.continue",
+            "params": {"interaction_id": interaction_id, **payload},
+        })
+        continuation_facts = _continuation_model_facts(continuation_delta)
+        expected: dict[str, object] = {
+            "activation_id": activation_id,
+            "lease_epoch": lease_epoch,
+            "resolution_thread_id": resolution_thread_id,
+            "segment_id": segment_id,
+        }
+        if self._repository is None:
+            try:
+                authority = verify_activation_token(
+                    continuation_authority_token,
+                    secret=self._semantic_authority_secret,
+                    expected=expected,
+                )
+            except (TypeError, ValueError) as exc:
+                raise RuntimeError("SEMANTIC_AUTHORITY_INVALID") from exc
+            objective = continuation_delta.get("answer")
+            if not isinstance(objective, str) or not objective:
+                objective = continuation_delta.get("response_goal")
+            if not isinstance(objective, str) or not objective:
+                raise ValueError("continuation_delta requires a typed answer")
+            intake = {
+                "schema_version": "dsh_resolution_intake.v2",
+                "mode": "continue",
+                "request_id": interaction_id,
+                "operation_id": interaction_id,
+                "operation_payload_digest": digest,
+                "resolution_thread_id": resolution_thread_id,
+                "segment_id": segment_id,
+                "brain_conversation_ref": authority.brain_conversation_ref,
+                "workspace_root": authority.workspace_root,
+                "route_digest": authority.route_digest,
+                "model_input": {
+                    "objective": objective,
+                    "facts": continuation_facts,
+                },
+                "semantic_tool_authority": {
+                    "catalog_digest": authority.catalog_digest,
+                    "token": continuation_authority_token,
+                },
+                "interaction_authority": {
+                    "issuer": authority.interaction_issuer,
+                    "scope_fingerprint": authority.scope_fingerprint,
+                    "audience_fingerprint": authority.audience_fingerprint,
+                },
+            }
+            return await self._rpc.call(
+                "resolution.continue",
+                {
+                    **payload,
+                    "operation_id": interaction_id,
+                    "operation_payload_digest": digest,
+                    "intake": DSHResolutionIntakeV2.from_mapping(intake).to_dict(),
+                },
+                operation_id=interaction_id,
+                operation_payload_digest=digest,
+            )
+        record = await self._repository_call("get_thread", resolution_thread_id)
+        if record is None:
+            raise RuntimeError("V2 resolution thread is not admitted")
+        if record.current_segment_id != segment_id:
+            raise RuntimeError("SEGMENT_ID_MISMATCH")
+        health = await self._health_identity()
+        expected.update({
+            "brain_conversation_ref": record.brain_conversation_ref,
+            "scope_fingerprint": record.scope_fingerprint,
+            "audience_fingerprint": record.audience_fingerprint,
+            "workspace_root": record.workspace_root,
+            "workspace_fingerprint": workspace_fingerprint(record.workspace_root),
+            "route_digest": health["route_digest"],
+            "model_route_digest": health["route_digest"],
+            "catalog_digest": health["semantic_catalog_digest"],
+            "profile_version": health["profile_version"],
+            "policy_epoch": health["policy_epoch"],
+        })
+        try:
+            authority = verify_activation_token(
+                continuation_authority_token,
+                secret=self._semantic_authority_secret,
+                expected=expected,
+            )
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("SEMANTIC_AUTHORITY_INVALID") from exc
+        objective = continuation_delta.get("answer")
+        if not isinstance(objective, str) or not objective:
+            objective = continuation_delta.get("response_goal")
+        if not isinstance(objective, str) or not objective:
+            objective = record.root_goal_ref
+        intake = {
+            "schema_version": "dsh_resolution_intake.v2",
+            "mode": "continue",
+            "request_id": interaction_id,
+            "operation_id": interaction_id,
+            "operation_payload_digest": digest,
+            "resolution_thread_id": resolution_thread_id,
+            "segment_id": segment_id,
+            "brain_conversation_ref": record.brain_conversation_ref,
+            "workspace_root": record.workspace_root,
+            "route_digest": record.route_digest,
+            "model_input": {
+                "objective": objective,
+                "facts": continuation_facts,
+            },
+            "semantic_tool_authority": {
+                "catalog_digest": authority.catalog_digest,
+                "token": continuation_authority_token,
+            },
+            "interaction_authority": {
+                "issuer": authority.interaction_issuer,
+                "scope_fingerprint": authority.scope_fingerprint,
+                "audience_fingerprint": authority.audience_fingerprint,
+            },
+        }
+        parsed = DSHResolutionIntakeV2.from_mapping(intake)
+        self._assert_intake_health(parsed, health)
+        self._verify_intake_authority(
+            parsed,
+            health,
+            activation_id=activation_id,
+            lease_epoch=lease_epoch,
+            segment_id=segment_id,
+        )
+        return await self._rpc.call(
+            "resolution.continue",
+            {
+                "operation_id": interaction_id,
+                "operation_payload_digest": digest,
+                "activation_id": activation_id,
+                "lease_epoch": lease_epoch,
+                "intake": parsed.to_dict(),
+            },
+            operation_id=interaction_id,
+            operation_payload_digest=digest,
         )
 
     async def cancel(
@@ -265,20 +553,25 @@ class ResolutionController:
         )
 
     async def _activate(
-        self, method: str, intake: DSHResolutionIntakeV1
+        self, method: str, intake: DSHResolutionIntakeV2
     ) -> dict[str, Any]:
-        runtime = intake.runtime
+        runtime = intake
+        health = await self._health_identity()
+        self._assert_intake_health(runtime, health)
+        self._verify_intake_authority(runtime, health)
         record = await self._repository_call(
             "get_thread", runtime.resolution_thread_id
         )
         if record is None:
             raise RuntimeError("created thread disappeared")
-        segment_id = record.current_segment_id
+        segment_id = runtime.segment_id
         existing = await self._repository_call(
             "get_operation",
             runtime.resolution_thread_id,
             runtime.operation_id,
         )
+        if existing is None and segment_id != record.current_segment_id:
+            raise RuntimeError("SEGMENT_ID_MISMATCH")
         if existing is not None:
             if (
                 existing["operation_payload_digest"]
@@ -311,6 +604,7 @@ class ResolutionController:
                         method,
                         intake,
                         existing,
+                        health,
                     )
                     return await self._complete_activation(
                         runtime.resolution_thread_id,
@@ -340,7 +634,11 @@ class ResolutionController:
                     "operation inspection returned an unsupported disposition"
                 )
 
-        activation_id = f"act_{uuid4().hex}"
+        activation_id = activation_id_for(
+            runtime.resolution_thread_id,
+            segment_id,
+            int(record.lease_epoch) + 1,
+        )
         lease = await self._repository_call(
             "acquire_lease",
             runtime.resolution_thread_id,
@@ -366,6 +664,13 @@ class ResolutionController:
             raise OperationIdReuseMismatchError(
                 "operation id was reused with a different digest"
             )
+        self._verify_intake_authority(
+            runtime,
+            health,
+            activation_id=activation_id,
+            lease_epoch=int(lease["lease_epoch"]),
+            segment_id=segment_id,
+        )
         result = await self._call_with_lease_renewal(
             method,
             {
@@ -377,10 +682,7 @@ class ResolutionController:
                 "lease_epoch": lease["lease_epoch"],
                 "intake": {
                     **intake.to_dict(),
-                    "runtime": {
-                        **runtime.to_dict(),
-                        "segment_id": segment_id,
-                    },
+                    "segment_id": segment_id,
                 },
             },
             runtime.resolution_thread_id,
@@ -401,8 +703,9 @@ class ResolutionController:
     async def _call_existing_activation(
         self,
         method: str,
-        intake: DSHResolutionIntakeV1,
+        intake: DSHResolutionIntakeV2,
         operation: Mapping[str, Any],
+        health: Mapping[str, str],
     ) -> dict[str, Any]:
         activation_id = operation["activation_id"]
         lease_epoch = operation["lease_epoch"]
@@ -415,7 +718,14 @@ class ResolutionController:
             raise OperationOutcomeUncertainError(
                 "prepared operation has no reusable activation fence"
             )
-        runtime = intake.runtime
+        self._verify_intake_authority(
+            intake,
+            health,
+            activation_id=activation_id,
+            lease_epoch=lease_epoch,
+            segment_id=segment_id,
+        )
+        runtime = intake
         return await self._call_with_lease_renewal(
             method,
             {
@@ -427,10 +737,7 @@ class ResolutionController:
                 "lease_epoch": lease_epoch,
                 "intake": {
                     **intake.to_dict(),
-                    "runtime": {
-                        **runtime.to_dict(),
-                        "segment_id": segment_id,
-                    },
+                    "segment_id": segment_id,
                 },
             },
             runtime.resolution_thread_id,
@@ -754,24 +1061,179 @@ class ResolutionController:
         value = method(*args, **kwargs)
         return await value if isawaitable(value) else value
 
+    async def _health_identity(self) -> dict[str, str]:
+        """Read the actual mounted Standard identity before thread admission."""
+
+        value = await self._rpc.call("system.health", {})
+        if not isinstance(value, Mapping):
+            raise RuntimeError("sidecar health identity is unavailable")
+        if value.get("protocol_version") != "kazusa.dsh-resolution-rpc.v2":
+            raise RuntimeError("sidecar health protocol is unsupported")
+        if value.get("status") != "ready":
+            raise RuntimeError("sidecar health is not ready")
+        route = value.get("route")
+        catalog = value.get("catalog")
+        workspace = value.get("workspace")
+        policy = value.get("policy")
+        if not isinstance(route, Mapping):
+            raise RuntimeError("sidecar health route identity is unavailable")
+        if not isinstance(catalog, Mapping):
+            raise RuntimeError("sidecar health catalog identity is unavailable")
+        if not isinstance(workspace, Mapping):
+            raise RuntimeError("sidecar health workspace identity is unavailable")
+        if not isinstance(policy, Mapping):
+            raise RuntimeError("sidecar health policy identity is unavailable")
+
+        def required_text(value: object, field: str) -> str:
+            if not isinstance(value, str) or not value:
+                raise RuntimeError(f"sidecar health {field} is unavailable")
+            return value
+
+        root = required_text(workspace.get("root"), "workspace.root")
+        return {
+            "route_digest": required_text(route.get("digest"), "route.digest"),
+            "native_catalog_digest": required_text(
+                catalog.get("native_catalog_digest"),
+                "catalog.native_catalog_digest",
+            ),
+            "semantic_catalog_digest": required_text(
+                catalog.get("semantic_catalog_digest"),
+                "catalog.semantic_catalog_digest",
+            ),
+            "published_catalog_digest": required_text(
+                catalog.get("published_catalog_digest"),
+                "catalog.published_catalog_digest",
+            ),
+            "profile_version": required_text(
+                value.get("profile_version"), "profile_version"
+            ),
+            "dsh_release": required_text(value.get("dsh_release"), "dsh_release"),
+            "session_store_epoch": required_text(
+                value.get("store_epoch"), "store_epoch"
+            ),
+            "policy_epoch": required_text(policy.get("epoch"), "policy.epoch"),
+            "workspace_root": root.replace("\\", "/"),
+        }
+
     @staticmethod
-    def _segment(runtime: DSHResolutionRuntimeV1) -> dict[str, Any]:
+    def _assert_intake_health(
+        intake: DSHResolutionIntakeV2,
+        health: Mapping[str, str],
+    ) -> None:
+        """Require intake identity to name the actual sidecar health."""
+
+        if intake.route_digest != health["route_digest"]:
+            raise RuntimeError("ROUTE_DIGEST_MISMATCH")
+        if intake.semantic_tool_authority["catalog_digest"] != health[
+            "semantic_catalog_digest"
+        ]:
+            raise RuntimeError("SEMANTIC_CATALOG_DIGEST_MISMATCH")
+        if intake.workspace_root.replace("\\", "/") != health["workspace_root"]:
+            raise RuntimeError("WORKSPACE_ROOT_MISMATCH")
+
+    def _verify_intake_authority(
+        self,
+        intake: DSHResolutionIntakeV2,
+        health: Mapping[str, str],
+        *,
+        activation_id: str | None = None,
+        lease_epoch: int | None = None,
+        segment_id: str | None = None,
+    ) -> None:
+        """Verify the host-issued token against intake and the acquired fence."""
+
+        expected: dict[str, object] = {
+            "resolution_thread_id": intake.resolution_thread_id,
+            "segment_id": segment_id or intake.segment_id,
+            "brain_conversation_ref": intake.brain_conversation_ref,
+            "scope_fingerprint": intake.interaction_authority[
+                "scope_fingerprint"
+            ],
+            "audience_fingerprint": intake.interaction_authority[
+                "audience_fingerprint"
+            ],
+            "workspace_root": intake.workspace_root,
+            "workspace_fingerprint": workspace_fingerprint(
+                intake.workspace_root
+            ),
+            "route_digest": health["route_digest"],
+            "model_route_digest": health["route_digest"],
+            "catalog_digest": health["semantic_catalog_digest"],
+            "profile_version": health["profile_version"],
+            "policy_epoch": health["policy_epoch"],
+            "interaction_issuer": intake.interaction_authority["issuer"],
+        }
+        if activation_id is not None:
+            expected["activation_id"] = activation_id
+        if lease_epoch is not None:
+            expected["lease_epoch"] = lease_epoch
+        try:
+            verify_activation_token(
+                intake.semantic_tool_authority["token"],
+                secret=self._semantic_authority_secret,
+                expected=expected,
+            )
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("SEMANTIC_AUTHORITY_INVALID") from exc
+
+    @classmethod
+    def _compatibility_values(
+        cls,
+        intake: DSHResolutionIntakeV2,
+        health: Mapping[str, str],
+    ) -> dict[str, str]:
+        return {
+            "brain_conversation_ref": intake.brain_conversation_ref,
+            "workspace_root": intake.workspace_root,
+            "workspace_fingerprint": workspace_fingerprint(
+                intake.workspace_root
+            ),
+            "route_digest": intake.route_digest,
+            "resolver_profile_version": health["profile_version"],
+            "dsh_release": health["dsh_release"],
+            "session_store_epoch": health["session_store_epoch"],
+            "standard_catalog_digest": health["native_catalog_digest"],
+            "semantic_catalog_digest": health["semantic_catalog_digest"],
+            "policy_epoch": health["policy_epoch"],
+            "scope_fingerprint": intake.interaction_authority[
+                "scope_fingerprint"
+            ],
+            "audience_fingerprint": intake.interaction_authority[
+                "audience_fingerprint"
+            ],
+            "interaction_id": intake.request_id,
+        }
+
+    @classmethod
+    def _segment(
+        cls,
+        intake: DSHResolutionIntakeV2,
+        health: Mapping[str, str],
+        *,
+        segment_id: str | None = None,
+    ) -> dict[str, Any]:
         now = _now()
+        values = cls._compatibility_values(intake, health)
         return {
             "schema_version": SEGMENT_SCHEMA_VERSION,
-            "segment_id": runtime.segment_id,
-            "resolution_thread_id": runtime.resolution_thread_id,
+            "segment_id": segment_id or intake.segment_id,
+            "resolution_thread_id": intake.resolution_thread_id,
             "dsh_session_id": ResolutionController._dsh_session_id(
-                runtime.resolution_thread_id, runtime.segment_id
+                intake.resolution_thread_id, segment_id or intake.segment_id
             ),
-            "resolver_profile_version": runtime.resolver_profile_version,
-            "dsh_release": runtime.dsh_release,
-            "session_store_epoch": runtime.session_store_epoch,
-            "tool_catalog_digest": runtime.tool_catalog_digest,
-            "policy_epoch": runtime.policy_epoch,
-            "scope_fingerprint": runtime.scope_fingerprint,
-            "audience_fingerprint": runtime.audience_fingerprint,
-            "model_route": runtime.model_route,
+            "brain_conversation_ref": values["brain_conversation_ref"],
+            "workspace_root": values["workspace_root"],
+            "workspace_fingerprint": values["workspace_fingerprint"],
+            "route_digest": values["route_digest"],
+            "resolver_profile_version": values["resolver_profile_version"],
+            "dsh_release": values["dsh_release"],
+            "session_store_epoch": values["session_store_epoch"],
+            "standard_catalog_digest": values["standard_catalog_digest"],
+            "semantic_catalog_digest": values["semantic_catalog_digest"],
+            "policy_epoch": values["policy_epoch"],
+            "scope_fingerprint": values["scope_fingerprint"],
+            "audience_fingerprint": values["audience_fingerprint"],
+            "interaction_id": values["interaction_id"],
             "state": "live",
             "last_committed_seq": 0,
             "parent_segment_id": None,

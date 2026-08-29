@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import os
+from hashlib import sha256
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
@@ -189,6 +190,44 @@ def _optional_http_url_from_env(name: str, default: str) -> str:
     return value
 
 
+def _required_non_empty_string_from_env(name: str) -> str:
+    """Read one required non-empty environment setting."""
+
+    raw_value = os.getenv(name)
+    if raw_value is None or not raw_value.strip():
+        raise ValueError(f"{name} must be non-empty")
+    return raw_value.strip()
+
+
+def _required_http_url_from_env(name: str) -> str:
+    """Read one required HTTP(S) URL without a default value."""
+
+    value = _required_non_empty_string_from_env(name).rstrip("/")
+    parsed_url = urlparse(value)
+    if parsed_url.scheme not in ("http", "https") or not parsed_url.netloc:
+        raise ValueError(f"{name} must be a non-empty HTTP(S) URL")
+    return value
+
+
+def _required_minimum_int_from_env(name: str, *, minimum: int) -> int:
+    """Read one required integer with an inclusive lower bound."""
+
+    raw_value = _required_non_empty_string_from_env(name)
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if value < minimum:
+        raise ValueError(f"{name} must be >= {minimum}")
+    return value
+
+
+def _required_bool_from_env(name: str) -> bool:
+    """Read one required boolean environment setting."""
+
+    return _bool_from_value(name, _required_non_empty_string_from_env(name))
+
+
 def _local_time_minutes_from_value(name: str, value: str) -> int:
     """Parse exact ``HH:MM`` text into minutes after local midnight."""
 
@@ -245,6 +284,95 @@ class CognitionV3RouteSettingsV1:
 
     chain: CognitionRouteSettingV1
     turn_deadline_seconds: int
+
+
+@dataclass(frozen=True)
+class AgenticResolverRouteSettingsV1:
+    """Closed canonical Qwen route settings used by the DSH sidecar."""
+
+    route_name: str
+    base_url: str
+    api_key: str = field(repr=False)
+    model: str
+    context_window_tokens: int
+    max_completion_tokens: int
+    thinking_enabled: bool
+    supports_developer_role: bool
+    max_tokens_field: str
+    thinking_format: str
+    chat_template_kwargs_enable_thinking: bool
+    reasoning_effort: str
+    output_mode: str
+    compatibility_epoch: str
+
+    @property
+    def credential_reference(self) -> str:
+        """Return the non-secret environment reference for the route key."""
+
+        return "AGENTIC_RESOLVER_LLM_API_KEY"
+
+    @property
+    def route_digest(self) -> str:
+        """Return a non-secret digest of the selected route contract."""
+
+        value = {
+            "route_name": self.route_name,
+            "base_url": self.base_url,
+            "model": self.model,
+            "context_window_tokens": self.context_window_tokens,
+            "max_completion_tokens": self.max_completion_tokens,
+            "thinking_enabled": self.thinking_enabled,
+            "supports_developer_role": self.supports_developer_role,
+            "max_tokens_field": self.max_tokens_field,
+            "thinking_format": self.thinking_format,
+            "chat_template_kwargs_enable_thinking": (
+                self.chat_template_kwargs_enable_thinking
+            ),
+            "reasoning_effort": self.reasoning_effort,
+            "output_mode": self.output_mode,
+            "compatibility_epoch": self.compatibility_epoch,
+            "credential_reference": self.credential_reference,
+        }
+        encoded = json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return f"sha256:{sha256(encoded.encode('utf-8')).hexdigest()}"
+
+
+def load_agentic_resolver_route_settings() -> AgenticResolverRouteSettingsV1:
+    """Load and strictly validate the canonical local Qwen route."""
+
+    base_url = _required_http_url_from_env("AGENTIC_RESOLVER_LLM_BASE_URL")
+    api_key = _required_non_empty_string_from_env("AGENTIC_RESOLVER_LLM_API_KEY")
+    model = _required_non_empty_string_from_env("AGENTIC_RESOLVER_LLM_MODEL")
+    context_window_tokens = _required_minimum_int_from_env(
+        "AGENTIC_RESOLVER_LLM_CONTEXT_WINDOW_TOKENS", minimum=50_000,
+    )
+    max_completion_tokens = _required_minimum_int_from_env(
+        "AGENTIC_RESOLVER_LLM_MAX_COMPLETION_TOKENS", minimum=8_192,
+    )
+    thinking_enabled = _required_bool_from_env(
+        "AGENTIC_RESOLVER_LLM_THINKING_ENABLED",
+    )
+    return AgenticResolverRouteSettingsV1(
+        route_name="kazusa-agentic-resolver",
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        context_window_tokens=context_window_tokens,
+        max_completion_tokens=max_completion_tokens,
+        thinking_enabled=thinking_enabled,
+        supports_developer_role=False,
+        max_tokens_field="max_completion_tokens",
+        thinking_format="qwen-chat-template",
+        chat_template_kwargs_enable_thinking=thinking_enabled,
+        reasoning_effort="high" if thinking_enabled else "off",
+        output_mode="text",
+        compatibility_epoch="qwen-openai-completions-v1",
+    )
 
 
 def _load_cognition_v3_route_setting(

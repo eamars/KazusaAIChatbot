@@ -85,3 +85,31 @@ describe("rpc", () => {
     expect(calls).toEqual(["open", "checkpoint", "cancel"]);
   });
 });
+
+describe("V2 RPC", () => {
+  it("requires loopback bearer and V2 protocol", async () => {
+    const contracts = await import("../src/contracts.js");
+    const rpcModule = await import("../src/rpc.js");
+    const server = new rpcModule.RpcServer({ token: "rpc-secret" });
+    const frame = {
+      jsonrpc: "2.0",
+      id: "rpc-v2",
+      method: "system.health",
+      params: { protocol_version: "kazusa.dsh-resolution-rpc.v2" },
+    };
+    const response = server.dispatch(frame, {
+      remoteAddress: "127.0.0.1",
+      authorization: "Bearer rpc-secret",
+    });
+    expect(response.protocol_version).toBe("kazusa.dsh-resolution-rpc.v2");
+    expect(contracts.RPC_PROTOCOL_VERSION).toBe(response.protocol_version);
+    expect(() => server.dispatch(frame, {
+      remoteAddress: "192.0.2.10",
+      authorization: "Bearer rpc-secret",
+    })).toThrow(/loopback|authentication/i);
+    expect(() => new rpcModule.RpcClient(
+      "http://192.0.2.10/rpc",
+      "rpc-secret",
+    )).toThrow(/loopback/i);
+  });
+});

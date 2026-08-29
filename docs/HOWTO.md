@@ -1,22 +1,89 @@
 # Kazusa AI Chatbot HOWTO
 
-## Run the standalone DSH resolution sidecar
+## Run the Plan 2 DSH Standard sidecar
+
+Plan 2 has two processes with independent lifecycles. Start the Brain first:
+it provides the durable Mongo DSH interaction store and cognition judge. Build
+and start the Node sidecar separately after the Brain reports ready. The
+sidecar loads the layered repository `.env` itself; never put real secrets in
+this document or in source control.
+
+The required host and route settings are:
+
+```env
+KAZUSA_DSH_SIDECAR_URL=http://127.0.0.1:8791/rpc
+KAZUSA_DSH_RPC_TOKEN=<opaque-rpc-token>
+KAZUSA_DSH_DATA_ROOT=C:\\kazusa-data
+AGENTIC_RESOLVER_WORKSPACE_ROOT=C:\\workspace\\kazusa_ai_chatbot
+KAZUSA_DSH_BRAIN_URL=http://127.0.0.1:8000
+KAZUSA_DSH_BRAIN_SHARED_SECRET=<opaque-brain-secret>
+KAZUSA_DSH_TOOL_GATEWAY_SECRET=<opaque-gateway-secret>
+KAZUSA_DSH_PYTHON_EXECUTABLE=C:\\workspace\\kazusa_ai_chatbot\\venv\\Scripts\\python.exe
+AGENTIC_RESOLVER_LLM_BASE_URL=http://127.0.0.1:1234/v1
+AGENTIC_RESOLVER_LLM_API_KEY=<route-api-key>
+AGENTIC_RESOLVER_LLM_MODEL=qwen27b-5090
+AGENTIC_RESOLVER_LLM_CONTEXT_WINDOW_TOKENS=50176
+AGENTIC_RESOLVER_LLM_MAX_COMPLETION_TOKENS=8192
+AGENTIC_RESOLVER_LLM_THINKING_ENABLED=true
+```
+
+`DEEPSEEK_API_KEY` is optional host-only configuration for the pinned native
+DSH web provider. `KAZUSA_DSH_DATA_ROOT` and
+`AGENTIC_RESOLVER_WORKSPACE_ROOT` must be absolute paths; the Brain URL must
+be loopback. The route bundle is all-or-nothing and the initial route is
+qwen27b-5090 with 50,176 context tokens, 8,192 completion tokens, and
+thinking enabled.
+
+Build and start the sidecar from the repository root:
 
 ```powershell
 corepack pnpm@11.7.0 --dir sidecars/dsh_resolution install --frozen-lockfile
 corepack pnpm@11.7.0 --dir sidecars/dsh_resolution build
-$env:KAZUSA_DSH_SIDECAR_URL = "http://127.0.0.1:8791/rpc"
-$env:KAZUSA_DSH_RPC_TOKEN = "replace-with-an-opaque-token"
-$env:KAZUSA_DSH_DATA_ROOT = "C:\\kazusa-data"
-$env:KAZUSA_DSH_MODEL = "resolver-model"
 node sidecars/dsh_resolution/dist/src/main.js
 ```
 
-Send authenticated JSON-RPC method `system.health` to `/rpc`. The response
-identifies profile `kazusa-resolver-v1`, DSH `0.1.1-rc.2`, and the versioned
-SQLite store. Ctrl+C stops only the sidecar. Python callers construct
-`AgenticResolverRuntime.from_environment()` and pass one strict
-`dsh_resolution_intake.v1` value to `resolve(...)`.
+Use the authenticated JSON-RPC `system.health` response as the sidecar gate.
+It must be `ready` with `route`, `standard`, `semantic_worker`, `web`, and
+`brain` readiness, plus non-secret route, catalog, policy, and workspace
+diagnostics. Brain `GET /runtime/dsh/health` must report configured,
+durable-store, and cognition-judge readiness. A sidecar process may be
+restarted independently, but it remains operationally unready until its
+Brain dependency is healthy.
+
+The RPC contract is `kazusa.dsh-resolution-rpc.v2` and the intake schema is
+`dsh_resolution_intake.v2`. The profile is
+`kazusa-resolver-standard-v2`, DSH is `0.1.1-rc.2`, and the session store
+epoch is `dsh-sqlite-0.1.1-rc.2-standard-v2` under policy
+`dsh-standard-policy-v2`. Session data is stored at
+`<KAZUSA_DSH_DATA_ROOT>/dsh/0.1.1-rc.2/sessions.sqlite`; semantic worker
+outcomes use the adjacent `semantic-outcomes.sqlite`.
+
+Plan 2 adds these thirteen semantic gateway tools:
+
+`kazusa_search_conversation_history`, `kazusa_read_conversation_entries`,
+`kazusa_summarize_conversation_participants`, `kazusa_search_memories`,
+`kazusa_read_memories`, `kazusa_remember_information`,
+`kazusa_revise_memory`, `kazusa_change_memory_lifecycle`,
+`kazusa_find_people_by_name`, `kazusa_read_person_profiles`,
+`kazusa_recall_active_context`, `kazusa_read_calendar_context`, and
+`kazusa_inspect_attached_media`. Standard native tools take precedence by
+name. `submit_resolution` is controller-owned and is the sole terminal
+operation; Kazusa supplies no coding/web wrapper, command filter, DSH budget,
+sandbox overlay, or generic workflow tool.
+
+For approval, question, or plan-review requests, the Brain receives an
+authenticated request, adds a targeted runtime-authored cognition observation
+and pending semantic context, and returns an immediate answer/reject/one-shot
+decision or a `relay_to_user` checkpoint. Normal dialog and adapter delivery
+own visible wording. An exact user reply resumes the same thread and segment;
+the deterministic gateway matches tool, executable arguments, workspace,
+scope, and policy before atomically consuming the one-shot grant. Runtime DSH
+detail stays in pending context and does not become user-authored evidence.
+
+The production `task_resolution_request`, accepted/background routing, legacy
+resolvers and coding callers, and existing exhaust mapping remain unchanged.
+This Plan 2 capability-ready seam is the infrastructure boundary for the
+future Plan 3 cutover, which remains a separate draft decision.
 
 This document keeps setup, operations, and test commands out of the project
 README while preserving the practical details needed to run the brain.

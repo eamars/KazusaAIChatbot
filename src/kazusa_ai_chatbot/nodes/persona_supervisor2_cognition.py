@@ -85,6 +85,7 @@ from kazusa_ai_chatbot.cognition_shared.contracts import (
     SceneContextV2,
     _validate_scene_context,
     validate_scheduled_authority_proposal,
+    validate_pending_dsh_interaction,
 )
 from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
     clear_v2_shared_memory_prewarm_checkpoint,
@@ -510,6 +511,11 @@ def build_cognition_input_from_global_state(
     pending_resume = state.get("pending_resolver_resume")
     if isinstance(pending_resume, Mapping):
         payload["pending_resolver_resume"] = dict(pending_resume)
+    pending_dsh = state.get("pending_dsh_interaction")
+    if isinstance(pending_dsh, Mapping):
+        payload["pending_dsh_interaction"] = dict(pending_dsh)
+        if state.get("pending_dsh_reply") is True:
+            payload["pending_dsh_reply"] = True
     resolver_state = state.get("resolver_state")
     if isinstance(resolver_state, Mapping):
         cycle_index = resolver_state.get("cycle_index")
@@ -526,6 +532,84 @@ def build_cognition_input_from_global_state(
                 evidence_dependency
             )
     return payload
+
+
+async def run_dsh_interaction_cognition(
+    state: GlobalPersonaState,
+    *,
+    pending_interaction: Mapping[str, object],
+    pending_reply: bool = False,
+    services: CognitionChainServicesV3 | None = None,
+) -> dict[str, object]:
+    """Run the canonical cognition chain for one DSH interaction.
+
+    The interaction context is inserted into the existing prompt-safe global
+    state projection.  The canonical A1/A2/G/P chain then owns interpretation
+    and returns the typed P-stage interaction decision; this helper does not
+    classify text or persist a decision.
+    """
+
+    try:
+        validate_pending_dsh_interaction(pending_interaction)
+    except CognitionContractError as exc:
+        raise CognitionExecutionError(str(exc)) from exc
+    staged_state: GlobalPersonaState = dict(state)
+    staged_state["pending_dsh_interaction"] = dict(pending_interaction)
+    if pending_reply:
+        staged_state["pending_dsh_reply"] = True
+    cognition_input = build_cognition_input_from_global_state(staged_state)
+    trace_token = llm_tracing.bind_trace_id(
+        str(state.get("llm_trace_id") or ""),
+    )
+    diagnostics_token = None
+    try:
+        cognition_services = services or build_cognition_core_services()
+        if current_chain_scope() is None:
+            input_episode = cognition_input.get("episode")
+            target_scope = (
+                input_episode.get("target_scope")
+                if isinstance(input_episode, Mapping)
+                else None
+            )
+            platform = (
+                str(target_scope.get("platform", "")).strip().lower()
+                if isinstance(target_scope, Mapping)
+                else ""
+            )
+            source_kind = "debug" if platform == "debug" else "live"
+            episode = state.get("cognitive_episode")
+            episode_id = (
+                str(episode.get("episode_id") or "").strip()
+                if isinstance(episode, Mapping)
+                else ""
+            )
+            trace_id = str(state.get("llm_trace_id") or episode_id)
+            diagnostics_token = bind_protected_chain_records(
+                run_id=episode_id,
+                source_kind=source_kind,
+                llm_trace_id=trace_id,
+                cognition_invocation_id=episode_id,
+            )
+        output = await run_cognition(
+            cognition_input,
+            cognition_services,
+        )
+        response_plan = output.get("response_plan")
+        if not isinstance(response_plan, Mapping):
+            raise CognitionExecutionError(
+                "canonical DSH cognition response plan is unavailable"
+            )
+        decision = response_plan.get("dsh_interaction_decision")
+        if not isinstance(decision, Mapping):
+            raise CognitionExecutionError(
+                "canonical DSH cognition decision is unavailable"
+            )
+        decision_value = dict(decision)
+        return decision_value
+    finally:
+        if diagnostics_token is not None:
+            reset_protected_chain_records(diagnostics_token)
+        llm_tracing.reset_trace_id(trace_token)
 
 
 async def call_cognition_subgraph(
@@ -1066,6 +1150,9 @@ def _project_output_to_global_state(
     self_response = plan.get("self_cognition_response")
     if isinstance(self_response, Mapping):
         update["self_cognition_response"] = dict(self_response)
+    dsh_decision = plan.get("dsh_interaction_decision")
+    if isinstance(dsh_decision, Mapping):
+        update["dsh_interaction_decision"] = dict(dsh_decision)
     return update
 
 

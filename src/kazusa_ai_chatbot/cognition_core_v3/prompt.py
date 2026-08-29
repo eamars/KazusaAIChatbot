@@ -19,6 +19,7 @@ from kazusa_ai_chatbot.cognition_shared.contracts import (
     GOAL_RESOLUTION_VALUES,
     SELF_COGNITION_RESPONSE_DECISION_VALUES,
     project_evidence_provenance_role,
+    project_pending_dsh_interaction_for_prompt,
 )
 from kazusa_ai_chatbot.cognition_shared.state_projection import (
     RELATIONSHIP_AXIS_FIELDS,
@@ -96,15 +97,19 @@ GOAL_QUESTION_GUIDANCE = '''
     relational_carrier_evidence=G_RELATIONAL_CARRIER_EVIDENCE_GUIDANCE,
     recipient_applicability=RECIPIENT_APPLICABILITY_GUIDANCE,
 )
-ORDINARY_PLAN_GUIDANCE = '''
+_ORDINARY_PLAN_FIELD_GUIDANCE = '''严格只返回
+`goal_resolution`、`response_goal`、`action_requests`、`resolver_requests` 和
+`epistemic_boundary`。不得把输入中的权威通道名称复制到输出对象中。'''
+_DSH_PLAN_FIELD_GUIDANCE = '''严格返回普通计划的五个字段，并在存在 DSH 交互时额外返回
+第六个顶层字段 `dsh_interaction_decision`；本次输出对象必须总共包含这六个字段。不得把
+输入中的权威通道名称复制到输出对象中。'''
+_ORDINARY_PLAN_GUIDANCE_TEMPLATE = '''
 返回一份由当前角色拥有的回应计划。`response_goal` 描述可见对话的意图；
 `action_requests` 和 `resolver_requests` 只能使用输入中提供的语义能力。
 `epistemic_boundary` 必须说明可见措辞可以断言什么、哪些内容只能作为解释，以及
 哪些内容仍然未知。每一项未经观察的功能、原因、来源、意图或结果，都必须留在解释
 层，并在可见措辞中明确表达不确定性。缺少证据或没有观察到某项特征，都不能据此
-作出否定断言，也不能排除任何可能。不得虚构能力或私有引用。严格只返回
-`goal_resolution`、`response_goal`、`action_requests`、`resolver_requests` 和
-`epistemic_boundary`。不得把输入中的权威通道名称复制到输出对象中。
+作出否定断言，也不能排除任何可能。不得虚构能力或私有引用。{plan_field_guidance}
 先让回应目标回答当前观察新增加、改变、纠正、询问或仍未解决的内容，再决定如何
 让角色的性格和关系语境影响表达。
 已表达的回应模式只属于背景连续性；只有当前用户继续、深化、实质改变或重新打开同一事项时，才允许重新选择该模式。
@@ -115,11 +120,31 @@ ORDINARY_PLAN_GUIDANCE = '''
 角色倾向可以影响语气和立场，但不能取代当前语义增量成为主要目标。
 {current_observation_authority}
 {background_goal_authority}
-{recipient_applicability}'''.format(
+{recipient_applicability}'''
+ORDINARY_PLAN_GUIDANCE = _ORDINARY_PLAN_GUIDANCE_TEMPLATE.format(
+    plan_field_guidance=_ORDINARY_PLAN_FIELD_GUIDANCE,
     current_observation_authority=CURRENT_OBSERVATION_AUTHORITY_GUIDANCE,
     background_goal_authority=BACKGROUND_CONTEXT_GOAL_AUTHORITY_GUIDANCE,
     recipient_applicability=RECIPIENT_APPLICABILITY_GUIDANCE,
 )
+_DSH_PLAN_GUIDANCE_TEMPLATE = '''
+{ordinary_guidance}
+当前存在一个待处理的 DSH 交互。`dsh_interaction_decision` 是普通计划五个字段之外的
+唯一附加顶层字段；Brain 负责这项语义决定，dialog 负责面向用户的可见措辞。
+`interaction_id` 必须逐字返回 `{interaction_id}`，`kind` 必须逐字返回 `{kind}`。
+`decision` 只能使用当前 `kind` 对应的值：{decision_values_by_kind}。
+嵌套的 `answer` 决定要求非空 `answer`，并且嵌套的 `response_goal` 与 `relay_mode` 必须
+为 `null`。`relay_to_user` 决定要求 `answer` 为 `null`、非空 `response_goal`，以及一个
+非空的 `relay_mode`。`allow_once` 和 `reject` 决定要求嵌套的
+`answer`、`response_goal` 和 `relay_mode` 全部为 `null`。`reason` 始终必须是非空字符串。
+`relay_mode` 只能是 `question`、`approval`、`plan_review` 或 `null`。
+{reply_guidance}
+'''
+_DSH_DECISION_VALUES_BY_KIND = {
+    "approval": ("allow_once", "reject", "relay_to_user"),
+    "question": ("answer", "reject", "relay_to_user"),
+    "plan_review": ("answer", "allow_once", "reject", "relay_to_user"),
+}
 SELF_PLAN_GUIDANCE = '''
 返回独立的自我认知回应契约。根据输入中有依据的参与语境，判断角色应保持沉默还是
 提出一项可见回复，并为任何可见措辞明确断言边界。
@@ -867,6 +892,7 @@ def build_canonical_turn_workspace(
     resolver_progress: Mapping[str, object] | None = None,
     runtime_limits: Sequence[Mapping[str, object]] = (),
     group_engagement: Mapping[str, object] | None = None,
+    pending_dsh_interaction: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     if not isinstance(episode, Mapping) or not isinstance(scene_context, Mapping):
         raise PromptContractError("episode and scene_context must be mappings")
@@ -921,7 +947,7 @@ def build_canonical_turn_workspace(
         affect_context.extend(
             _project_affect_context({"affect": list(character_affect_context)})
         )
-    return {
+    result = {
         "observation": observation,
         "evidence_rows": [dict(row) for row in evidence],
         "orientation": orientation,
@@ -947,6 +973,11 @@ def build_canonical_turn_workspace(
         ],
         "capabilities": _project_capabilities(available_actions, available_resolvers),
     }
+    if isinstance(pending_dsh_interaction, Mapping):
+        result["pending_dsh_interaction"] = (
+            project_pending_dsh_interaction_for_prompt(pending_dsh_interaction)
+        )
+    return result
 
 
 def _family_contract(families: Sequence[str]) -> dict[str, object]:
@@ -1087,7 +1118,11 @@ def build_canonical_plan_question(
     goal: Mapping[str, object],
     appraisal_summary: object,
     self_cognition: bool = False,
+    dsh_reply: bool = False,
 ) -> dict[str, object]:
+    pending_interaction = workspace.get("pending_dsh_interaction")
+    has_pending_interaction = isinstance(pending_interaction, Mapping)
+    pending_prompt: dict[str, object] | None = None
     if self_cognition:
         contract = {
             "required_fields": [
@@ -1107,11 +1142,14 @@ def build_canonical_plan_question(
         }
         guidance = SELF_PLAN_GUIDANCE
     else:
+        required_fields = [
+            "goal_resolution", "response_goal", "action_requests", "resolver_requests",
+            "epistemic_boundary",
+        ]
+        if has_pending_interaction:
+            required_fields.append("dsh_interaction_decision")
         contract = {
-            "required_fields": [
-                "goal_resolution", "response_goal", "action_requests", "resolver_requests",
-                "epistemic_boundary",
-            ],
+            "required_fields": required_fields,
             "additionalProperties": False,
             "goal_resolution_values": sorted(GOAL_RESOLUTION_VALUES),
             "response_goal": {
@@ -1131,12 +1169,138 @@ def build_canonical_plan_question(
                 "maximum_characters": 1000,
             },
         }
-        guidance = ORDINARY_PLAN_GUIDANCE
+        if has_pending_interaction:
+            pending_prompt = project_pending_dsh_interaction_for_prompt(
+                pending_interaction
+            )
+            interaction_id = pending_prompt["interaction_id"]
+            interaction_kind = pending_prompt["kind"]
+            if (
+                not isinstance(interaction_id, str)
+                or not isinstance(interaction_kind, str)
+                or interaction_kind not in _DSH_DECISION_VALUES_BY_KIND
+            ):
+                raise PromptContractError(
+                    "pending DSH interaction identity is invalid"
+                )
+            decision_values_by_kind = {
+                kind: list(values)
+                for kind, values in _DSH_DECISION_VALUES_BY_KIND.items()
+            }
+            if dsh_reply:
+                decision_values_by_kind[interaction_kind].append(
+                    "continue_waiting"
+                )
+            decision_values_by_kind_text = "；".join(
+                "`{kind}`：{values}".format(
+                    kind=kind,
+                    values="、".join(
+                        "`" + decision + "`"
+                        for decision in values
+                    ),
+                )
+                for kind, values in decision_values_by_kind.items()
+            )
+            contract["dsh_interaction_decision_fields"] = [
+                "interaction_id", "kind", "decision", "answer", "response_goal",
+                "relay_mode", "reason",
+            ]
+            contract["dsh_interaction_decision_bindings"] = {
+                "interaction_id": interaction_id,
+                "kind": interaction_kind,
+            }
+            contract["dsh_interaction_decision_guidance"] = (
+                "Brain owns the semantic interaction decision; dialog owns visible wording."
+            )
+            contract["dsh_interaction_decision_values"] = (
+                decision_values_by_kind[interaction_kind]
+            )
+            contract["dsh_interaction_decision_values_by_kind"] = (
+                decision_values_by_kind
+            )
+            contract["dsh_interaction_decision_relay_mode_values"] = [
+                "question", "approval", "plan_review", None,
+            ]
+            dsh_decision_field_rules = {
+                "answer": {
+                    "type": ["string", "null"],
+                    "minimum_characters_when_string": 1,
+                    "maximum_characters": 2_000,
+                    "by_decision": {
+                        "answer": "required_non_empty_string",
+                        "relay_to_user": "null",
+                        "allow_once": "null",
+                        "reject": "null",
+                    },
+                },
+                "response_goal": {
+                    "type": ["string", "null"],
+                    "minimum_characters_when_string": 1,
+                    "maximum_characters": 2_000,
+                    "by_decision": {
+                        "answer": "null",
+                        "relay_to_user": "required_non_empty_string",
+                        "allow_once": "null",
+                        "reject": "null",
+                    },
+                },
+                "relay_mode": {
+                    "type": ["string", "null"],
+                    "allowed_values": [
+                        "question", "approval", "plan_review", None,
+                    ],
+                    "by_decision": {
+                        "answer": "null",
+                        "relay_to_user": "required_allowed_value",
+                        "allow_once": "null",
+                        "reject": "null",
+                    },
+                },
+                "reason": {
+                    "type": "string",
+                    "minimum_characters": 1,
+                    "maximum_characters": 2_000,
+                    "required_for_every_decision": True,
+                },
+            }
+            if dsh_reply:
+                for field_name in ("answer", "response_goal", "relay_mode"):
+                    dsh_decision_field_rules[field_name]["by_decision"][
+                        "continue_waiting"
+                    ] = "null"
+            contract["dsh_interaction_decision_field_rules"] = (
+                dsh_decision_field_rules
+            )
+            ordinary_guidance = _ORDINARY_PLAN_GUIDANCE_TEMPLATE.format(
+                plan_field_guidance=_DSH_PLAN_FIELD_GUIDANCE,
+                current_observation_authority=(
+                    CURRENT_OBSERVATION_AUTHORITY_GUIDANCE
+                ),
+                background_goal_authority=(
+                    BACKGROUND_CONTEXT_GOAL_AUTHORITY_GUIDANCE
+                ),
+                recipient_applicability=RECIPIENT_APPLICABILITY_GUIDANCE,
+            )
+            reply_guidance = (
+                "本次是与用户回复匹配的判断，因此只有当前契约列出时才可以使用 "
+                "`continue_waiting`。"
+                if dsh_reply
+                else "本次不是与用户回复匹配的判断，不得使用 `continue_waiting`。"
+            )
+            guidance = _DSH_PLAN_GUIDANCE_TEMPLATE.format(
+                ordinary_guidance=ordinary_guidance,
+                interaction_id=interaction_id,
+                kind=interaction_kind,
+                decision_values_by_kind=decision_values_by_kind_text,
+                reply_guidance=reply_guidance,
+            )
+        else:
+            guidance = ORDINARY_PLAN_GUIDANCE
     lanes = _stage_authority_lanes(
         workspace,
         allowed_questions=_ALL_QUESTIONS,
     )
-    return {
+    result = {
         "stage": "P",
         "guidance": guidance,
         "goal": goal,
@@ -1153,6 +1317,9 @@ def build_canonical_plan_question(
         "capabilities": workspace["capabilities"],
         "output_contract": contract,
     }
+    if pending_prompt is not None:
+        result["pending_dsh_interaction"] = pending_prompt
+    return result
 
 
 def build_turn_workspace_stage_contracts(

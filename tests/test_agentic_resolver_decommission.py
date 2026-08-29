@@ -55,3 +55,24 @@ def test_legacy_resolver_dependency_and_package_files_are_absent() -> None:
     pyproject = (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert "PyYAML" not in pyproject
     assert not (PROJECT_ROOT / "tests" / "test_llm_interface_tool_stream.py").exists()
+
+
+def test_plan2_adds_only_interaction_bridge_and_does_not_cut_over_task_resolution() -> None:
+    """The interaction bridge keeps existing task resolution callers intact."""
+
+    task_resolution_root = PROJECT_ROOT / "src" / "kazusa_ai_chatbot" / "task_resolution"
+    task_sources = [
+        path.read_text(encoding="utf-8")
+        for path in task_resolution_root.rglob("*.py")
+    ]
+    assert task_sources
+    assert all("dsh_interaction" not in source for source in task_sources)
+    service_source = (
+        PROJECT_ROOT / "src" / "kazusa_ai_chatbot" / "service.py"
+    ).read_text(encoding="utf-8")
+    assert any("task_resolution_request" in source for source in task_sources)
+    assert "accepted_task" in service_source
+    interaction_source = (
+        PROJECT_ROOT / "src" / "kazusa_ai_chatbot" / "dsh_interaction" / "service.py"
+    ).read_text(encoding="utf-8")
+    assert "BrainInteractionService" in interaction_source

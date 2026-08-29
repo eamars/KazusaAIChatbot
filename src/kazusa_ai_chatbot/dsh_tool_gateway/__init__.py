@@ -1,0 +1,63 @@
+"""Public semantic capability contracts and catalog for DSH."""
+
+from kazusa_ai_chatbot.dsh_tool_gateway.authority import (
+    AUTHORITY_SCHEMA_VERSION,
+    CALL_SCHEMA_VERSION,
+    SemanticActivationAuthorityV1,
+    activation_id_for,
+    issue_activation_token,
+    issue_semantic_call,
+    verify_activation_token,
+    verify_semantic_call,
+)
+from kazusa_ai_chatbot.dsh_tool_gateway.catalog import (
+    SEMANTIC_TOOL_NAMES,
+    colliding_names,
+    description_stripped_catalog,
+    native_catalog_digest,
+    native_catalog_projection,
+    published_catalog_digest,
+    published_catalog_projection,
+    semantic_catalog,
+    semantic_catalog_digest,
+    semantic_catalog_projection,
+)
+from kazusa_ai_chatbot.dsh_tool_gateway.contracts import (
+    EVIDENCE_RECEIPT_SCHEMA_VERSION,
+    SEMANTIC_RESULT_SCHEMA_VERSION,
+    EvidenceReceiptV2,
+    KazusaSemanticCapabilityResultV1,
+    OpaqueReferenceCodec,
+    SemanticErrorV1,
+    SemanticMutationOutcomeV1,
+    SemanticPageV1,
+)
+
+__all__ = [
+    "AUTHORITY_SCHEMA_VERSION",
+    "CALL_SCHEMA_VERSION",
+    "EVIDENCE_RECEIPT_SCHEMA_VERSION",
+    "SEMANTIC_RESULT_SCHEMA_VERSION",
+    "SEMANTIC_TOOL_NAMES",
+    "EvidenceReceiptV2",
+    "KazusaSemanticCapabilityResultV1",
+    "OpaqueReferenceCodec",
+    "SemanticActivationAuthorityV1",
+    "SemanticErrorV1",
+    "SemanticMutationOutcomeV1",
+    "SemanticPageV1",
+    "activation_id_for",
+    "colliding_names",
+    "description_stripped_catalog",
+    "issue_activation_token",
+    "issue_semantic_call",
+    "native_catalog_digest",
+    "native_catalog_projection",
+    "published_catalog_digest",
+    "published_catalog_projection",
+    "semantic_catalog",
+    "semantic_catalog_digest",
+    "semantic_catalog_projection",
+    "verify_activation_token",
+    "verify_semantic_call",
+]

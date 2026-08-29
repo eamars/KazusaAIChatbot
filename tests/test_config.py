@@ -1396,6 +1396,31 @@ def test_cognition_v3_route_settings_are_loaded_once(monkeypatch) -> None:
     assert loaded_again is selected_settings
 
 
+def test_agentic_resolver_route_settings_are_strict_and_load_initial_qwen_route(monkeypatch) -> None:
+    """The standalone resolver uses one canonical local Qwen route."""
+
+    import kazusa_ai_chatbot.config as config
+
+    monkeypatch.setenv("AGENTIC_RESOLVER_LLM_BASE_URL", "http://localhost:8080/v1")
+    monkeypatch.setenv("AGENTIC_RESOLVER_LLM_API_KEY", "qwen-key")
+    monkeypatch.setenv("AGENTIC_RESOLVER_LLM_MODEL", "qwen27b-5090")
+    monkeypatch.setenv("AGENTIC_RESOLVER_LLM_CONTEXT_WINDOW_TOKENS", "50176")
+    monkeypatch.setenv("AGENTIC_RESOLVER_LLM_MAX_COMPLETION_TOKENS", "8192")
+    monkeypatch.setenv("AGENTIC_RESOLVER_LLM_THINKING_ENABLED", "true")
+    settings = config.load_agentic_resolver_route_settings()
+    assert settings.route_name == "kazusa-agentic-resolver"
+    assert settings.model == "qwen27b-5090"
+    assert settings.context_window_tokens == 50176
+    assert settings.max_completion_tokens == 8192
+    assert settings.thinking_enabled is True
+    assert settings.supports_developer_role is False
+    assert settings.max_tokens_field == "max_completion_tokens"
+    assert "qwen-key" not in settings.route_digest
+    assert settings.route_digest == (
+        "sha256:61a1cf315a6b041aec1ed8946d05d2cfeb4b06198d2a19b5d80cdde47d4cd2f8"
+    )
+
+
 def test_v3_service_import_succeeds_with_shared_routes_and_without_legacy_stage_bundles(
     tmp_path,
 ) -> None:

@@ -102,3 +102,68 @@ async def test_ignore_ends_before_claim_and_cognition() -> None:
 
     assert called == []
     assert result["response_action"] == "ignore"
+
+
+@pytest.mark.asyncio
+async def test_dsh_fields_cross_top_level_graph_boundary() -> None:
+    """Top-level graph preserves pending DSH input and typed output."""
+
+    pending = {
+        "schema_version": "dsh_brain_interaction.v1",
+        "interaction_id": "interaction-1",
+        "kind": "question",
+    }
+    decision = {
+        "schema_version": "dsh_brain_interaction.v1",
+        "interaction_id": "interaction-1",
+        "kind": "question",
+        "decision": "answer",
+        "answer": "The requested answer.",
+        "response_goal": None,
+        "relay_mode": None,
+        "reason": "The interaction can be answered.",
+    }
+    captured: dict[str, object] = {}
+
+    async def _relevance(_state):
+        return {"response_action": "proceed"}
+
+    async def _claim(_state):
+        return {"cognition_claimed": True}
+
+    async def _load(_state):
+        return {"conversation_episode_state": None}
+
+    async def _persona(state):
+        captured["state"] = state
+        return {
+            "final_dialog": [],
+            "cognition_state_committed": True,
+            "cognition_core_output": {},
+            "cognition_state_update": {},
+            "dsh_interaction_decision": decision,
+        }
+
+    async def _multimedia(_state):
+        raise AssertionError("media node should not run for this text case")
+
+    graph = build_graph(
+        relevance_agent_node=_relevance,
+        multimedia_descriptor_agent_node=_multimedia,
+        load_conversation_episode_state_node=_load,
+        persona_supervisor_node=_persona,
+        claim_for_cognition_node=_claim,
+    )
+    state = _state()
+    state.update({
+        "pending_dsh_interaction": pending,
+        "pending_dsh_reply": True,
+    })
+
+    result = await graph.ainvoke(state)
+
+    persona_state = captured["state"]
+    assert isinstance(persona_state, dict)
+    assert persona_state["pending_dsh_interaction"] == pending
+    assert persona_state["pending_dsh_reply"] is True
+    assert result["dsh_interaction_decision"] == decision

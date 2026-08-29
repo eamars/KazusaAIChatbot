@@ -1,61 +1,52 @@
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
-import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { existsSync } from "node:fs";
+import { mkdir, readFile, realpath } from "node:fs/promises";
+import { join, resolve } from "node:path";
 
-import { Context, type Fiber } from "@deepseek-ai/cordis";
+import { Context } from "@deepseek-ai/cordis";
 import { AgentRegistry, type AgentHandle } from "@deepseek-ai/dsh-agent";
-import { AgentLoop } from "@deepseek-ai/dsh-agent-loop";
+import { createUserMessage } from "@deepseek-ai/dsh-llm";
 import {
-  BlockAssembler,
-  CallId,
-  createUserMessage,
-  type GenerateOptions,
-  LlmAdapter,
-  LlmRuntime,
-  type LlmModelInfo,
-  type LlmProviderInfo,
-  type LlmResolvedModelInfo,
-  type StreamChunk,
-} from "@deepseek-ai/dsh-llm";
-import * as deepseekPlugin from "@deepseek-ai/dsh-llm-deepseek";
-import {
-  type JsonValue,
   type SessionEvent,
   SessionId,
-  SessionStore,
 } from "@deepseek-ai/dsh-session";
-import * as checkpointPolicy from "@deepseek-ai/dsh-session-checkpoint-policy";
-import { SqliteSessionPersistence } from "@deepseek-ai/dsh-session-persistence-sqlite";
-import SystemPrompt from "@deepseek-ai/dsh-system-prompt";
-import { defineTool, ToolRuntime } from "@deepseek-ai/dsh-tools";
+import "@deepseek-ai/dsh-session-persistence";
 
+import { BrainInteractionService, type BrainInteractionProvider } from "./brain_interaction.js";
+import { composeStandardProfile, selectPublishedTools } from "./composition.js";
 import {
   DSH_RELEASE,
+  nativeCatalogDigest,
+  publishedCatalogDigest,
+  semanticCatalogDigest,
   type JsonObject,
   PROFILE_VERSION,
   type ResolutionIntake,
   type ResolutionRuntime,
+  verifyActivationToken,
   validateSubmitResolution,
   validateTerminalReceipt,
 } from "./contracts.js";
-import { digest } from "./evidence.js";
+import { digest, EvidenceLedger } from "./evidence.js";
+import { createSecretBroker } from "./secret_broker.js";
+import { SemanticGatewayService, type SemanticGatewayRegistration } from "./semantic_gateway.js";
 import { OperationReuseFault } from "./operations.js";
-import { replayTerminalExhaust } from "./submit_resolution.js";
+import { replayTerminalExhaust, SubmitResolutionService } from "./submit_resolution.js";
+import { routeDigest as canonicalRouteDigest, type QwenRouteConfig } from "./model_route.js";
 
 export const PRODUCTION_SESSION_EVENT_KINDS = ["tool/result"] as const;
 
 const ADMISSION_PREFIX = "kazusa-operation:";
-const CORRECTION_MESSAGE = (
-  "The previous response violated the resolver action contract. "
-  + "Call submit_resolution exactly once with a complete valid object."
-);
 const REQUIRED_DSH_PACKAGES = [
+  "@deepseek-ai/dsh-app-boot",
+  "@deepseek-ai/dsh-agent-presets",
+  "@deepseek-ai/dsh-base",
   "@deepseek-ai/dsh-agent",
   "@deepseek-ai/dsh-agent-loop",
   "@deepseek-ai/dsh-invariants",
   "@deepseek-ai/dsh-llm",
-  "@deepseek-ai/dsh-llm-deepseek",
+  "@deepseek-ai/dsh-llm-pi-ai",
   "@deepseek-ai/dsh-scope",
   "@deepseek-ai/dsh-session",
   "@deepseek-ai/dsh-session-checkpoint-policy",
@@ -64,6 +55,22 @@ const REQUIRED_DSH_PACKAGES = [
   "@deepseek-ai/dsh-settings",
   "@deepseek-ai/dsh-system-prompt",
   "@deepseek-ai/dsh-tools",
+] as const;
+
+const KAZUSA_SEMANTIC_TOOL_NAMES = [
+  "kazusa_search_conversation_history",
+  "kazusa_read_conversation_entries",
+  "kazusa_summarize_conversation_participants",
+  "kazusa_search_memories",
+  "kazusa_read_memories",
+  "kazusa_remember_information",
+  "kazusa_revise_memory",
+  "kazusa_change_memory_lifecycle",
+  "kazusa_find_people_by_name",
+  "kazusa_read_person_profiles",
+  "kazusa_recall_active_context",
+  "kazusa_read_calendar_context",
+  "kazusa_inspect_attached_media",
 ] as const;
 
 interface AdmissionIdentity {
@@ -88,6 +95,41 @@ export interface ProfileDiagnostics extends JsonObject {
   live_activations: number;
 }
 
+export interface ProfileCatalog {
+  names: readonly string[];
+  digest: string;
+  native_catalog_digest: string;
+  semantic_catalog_digest: string;
+  published_catalog_digest: string;
+  descriptions_stripped: true;
+  native_names: readonly string[];
+  semantic_names: readonly string[];
+  omitted_semantic_tools: readonly { name: string; reason: "native_precedence" }[];
+}
+
+const SUBMIT_RESOLUTION_SCHEMA = {
+  name: "submit_resolution",
+  parameters: {
+    type: "object",
+    properties: {
+      status: { type: "string", required: true },
+      summary: { type: "string", required: true },
+      findings: { type: "array", required: true, items: { type: "object", additionalProperties: true } },
+      completed_subgoals: { type: "array", required: true, items: { type: "string" } },
+      remaining_needs: { type: "array", required: true, items: { type: "string" } },
+      clarification_request: { required: true, oneOf: [{ type: "object", additionalProperties: true }, { type: "null" }] },
+      approval_request: { required: true, oneOf: [{ type: "object", additionalProperties: true }, { type: "null" }] },
+      artifact_refs: { type: "array", required: true, items: { type: "string" } },
+      warnings: { type: "array", required: true, items: { type: "string" } },
+    },
+    required: [
+      "status", "summary", "findings", "completed_subgoals", "remaining_needs",
+      "clarification_request", "approval_request", "artifact_refs", "warnings",
+    ],
+    additionalProperties: false,
+  },
+} as const;
+
 export function assertCompatibleDependencyGraph(
   versions: Readonly<Record<string, string>>,
 ): void {
@@ -100,9 +142,19 @@ export function assertCompatibleDependencyGraph(
 
 export interface ResolverProfile {
   id: typeof PROFILE_VERSION;
+  profileVersion: typeof PROFILE_VERSION;
   model: string;
   dataRoot: string;
-  semanticTools: readonly ["submit_resolution"];
+  routeName: string;
+  routeDigest: string;
+  officialDigests: {
+    base: string;
+    standardPreset: string;
+    standardAgent: string;
+  };
+  standardPresetPath: string;
+  semanticTools: readonly string[];
+  catalog: ProfileCatalog;
   dshPackages: typeof REQUIRED_DSH_PACKAGES;
   composedServices: readonly string[];
   diagnostics: ProfileDiagnostics;
@@ -145,6 +197,19 @@ function stableSessionId(runtime: ResolutionRuntime): ReturnType<typeof SessionI
   const identity = `${runtime.resolution_thread_id}\u0000${runtime.segment_id}`;
   const suffix = createHash("sha256").update(identity).digest("hex").slice(0, 32);
   return SessionId(`kazusa-resolution-${suffix}`);
+}
+
+async function sha256File(path: string): Promise<string> {
+  return `sha256:${createHash("sha256").update(await readFile(path)).digest("hex")}`;
+}
+
+function localPluginPath(name: string): string {
+  const candidates = [
+    resolve(import.meta.dirname, `${name}.js`),
+    resolve(import.meta.dirname, "..", "dist", "src", `${name}.js`),
+  ];
+  const compiled = candidates.find((path) => existsSync(path));
+  return compiled ?? resolve(import.meta.dirname, `${name}.ts`);
 }
 
 function activationKey(threadId: string, segmentId: string): string {
@@ -277,9 +342,21 @@ function inspectEvents(
       ) {
         throw new Error("terminal receipt identity mismatch");
       }
-      const terminalExhaust = replayTerminalExhaust([
-        event as unknown as Record<string, unknown>,
-      ]);
+      const evidenceEvents = events.filter(
+        (candidate) => candidate.seq > found.seq && candidate.seq < event.seq,
+      );
+      const ledger = EvidenceLedger.rebuild(
+        evidenceEvents as unknown as Record<string, unknown>[],
+      );
+      const terminalExhaust = replayTerminalExhaust(
+        [event as unknown as Record<string, unknown>],
+        ledger.all({
+          threadId: receipt.resolution_thread_id,
+          segmentId: receipt.segment_id,
+          scopeFingerprint: receipt.scope_fingerprint,
+          policyEpoch: receipt.policy_epoch,
+        }),
+      );
       return operationView(
         session,
         found.admission,
@@ -341,72 +418,136 @@ function inspectEvents(
   );
 }
 
-function validSingleAction(chunks: readonly StreamChunk[]): boolean {
-  const assembler = new BlockAssembler();
-  for (const chunk of chunks) assembler.push(chunk);
-  const finish = assembler.finish;
-  if (finish.kind === "error" || finish.kind === "aborted") return true;
-  const calls = assembler.blocks().filter((block) => block.type === "tool-call");
-  if (calls.length !== 1 || calls[0]?.type !== "tool-call") return false;
-  if (calls[0].name !== "submit_resolution") return false;
-  try {
-    validateSubmitResolution(JSON.parse(calls[0].arguments));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function* rejectedActionStream(): AsyncIterable<StreamChunk> {
-  const text = "Resolver action contract violation; correction required.";
-  yield { type: "block-start", index: 0, blockType: "text" };
-  yield { type: "text-delta", index: 0, text };
-  yield { type: "block-end", index: 0, block: { type: "text", text } };
-  yield { type: "finish", reason: { kind: "stop" } };
-}
-
 export async function buildProfile(
   id: string,
-  options: { model: string; dataRoot: string; testScript?: JsonObject[] },
+  options: {
+    model: string;
+    dataRoot: string;
+    repositoryRoot: string;
+    workspaceRoot: string;
+    route: QwenRouteConfig;
+    hostSecrets: Record<string, string>;
+    nativeEnvironment: Record<string, string>;
+    launchEnvironment?: unknown;
+    brainProvider: BrainInteractionProvider;
+    semanticInvoker: (frame: Record<string, unknown>) => Promise<unknown>;
+    persistEvidence?: (receipt: Record<string, unknown>) => Promise<void>;
+    disposeSemanticWorker?: () => Promise<void> | void;
+  },
 ): Promise<ResolverProfile> {
   if (id !== PROFILE_VERSION) throw new Error(`unsupported resolver profile: ${id}`);
   if (options.model.length === 0 || options.dataRoot.length === 0) {
     throw new Error("resolver profile requires model and data root");
   }
+  if (options.route === undefined) throw new Error("resolver profile requires a canonical model route");
 
   const storePath = join(options.dataRoot, "dsh", DSH_RELEASE, "sessions.sqlite");
   await mkdir(join(options.dataRoot, "dsh", DSH_RELEASE), { recursive: true });
-  const context = new Context();
-  const fibers: Fiber[] = [];
-  const mount = async (
-    plugin: Parameters<Context["plugin"]>[0],
-    config?: unknown,
-  ): Promise<void> => {
-    const fiber = context.plugin(plugin, config);
-    await fiber;
-    fibers.push(fiber);
-  };
-  await mount(SessionStore);
-  await mount(SqliteSessionPersistence, { path: storePath });
-  await mount(LlmRuntime);
-  if (options.testScript === undefined) {
-    await mount(deepseekPlugin, { apiKeyEnv: "DEEPSEEK_API_KEY", maxTokens: 4096 });
-  } else {
-    context.llm.registerAdapter(["kazusa-test"], new ScriptedAdapter(options.testScript));
-  }
-  await mount(SystemPrompt, {
-    includeHarnessIdentity: true,
-    includeRuntimeContext: false,
-    persona: (
-      "Resolve the supplied objective. Call submit_resolution exactly once. "
-      + "Do not answer with prose."
-    ),
-    toolOrder: ["submit_resolution", "<unlisted-tools>"],
+  const repositoryRoot = options.repositoryRoot;
+  const workspaceRoot = options.workspaceRoot;
+  const route = options.route;
+  const routeDigest = canonicalRouteDigest(route);
+  const composition = await composeStandardProfile({
+    repositoryRoot,
+    workspaceRoot,
+    routeConfig: route,
+    sqlitePath: storePath,
+    semanticNames: KAZUSA_SEMANTIC_TOOL_NAMES,
+    localPluginPaths: {
+      submitResolution: localPluginPath("submit_resolution"),
+      semanticGateway: localPluginPath("semantic_gateway"),
+      secretBroker: localPluginPath("secret_broker"),
+      brainInteraction: localPluginPath("brain_interaction"),
+    },
   });
-  await mount(ToolRuntime, { mode: "native" });
-  await mount(AgentRegistry);
-  await mount(AgentLoop, { agents: [], maxParallelToolCalls: 1 });
-  await mount(checkpointPolicy);
+  const broker = createSecretBroker({
+    hostSecrets: options.hostSecrets,
+    nativeEnvironment: options.nativeEnvironment,
+  });
+  const appBootModule = "@deepseek-ai/dsh-app-boot";
+  const { boot } = await import(appBootModule) as unknown as {
+    boot(
+      name: string,
+      configPath: string,
+      patches: Array<Record<string, unknown>>,
+      prepare: (context: Context) => Promise<void> | void,
+      bareModuleBaseUrl: string,
+    ): Promise<Context>;
+  };
+  const context = await boot(
+    "dsh-resolution",
+    composition.rootPath,
+    [...composition.basePatches, ...composition.overlayPatches],
+    async (bootContext) => {
+      bootContext.provide("dshHostSecrets", broker);
+      if (options.launchEnvironment !== undefined) {
+        bootContext.provide("launchEnvironment", options.launchEnvironment);
+      }
+    },
+    composition.bareModuleBaseUrl,
+  );
+  // Root app boot resolves its own relative config rows beside root.cordis.yml,
+  // while the installed Standard preset resolves bare DSH rows from the
+  // packaged harness.  Agent-preset mounting captures this inherited base URL
+  // before it rewrites the preset tree to the preset directory.
+  context.baseUrl = composition.bareModuleBaseUrl;
+  const agentLoop = context.get("agentLoop") as {
+    runtime?: { ctx?: Context };
+  } | undefined;
+  if (agentLoop?.runtime?.ctx === undefined) {
+    throw new Error("agent loop runtime context is unavailable");
+  }
+  agentLoop.runtime.ctx.baseUrl = composition.bareModuleBaseUrl;
+  const agentPresets = context.get("agentPresets") as {
+    selfCtx?: Context;
+    standingKeyFor(id?: string): Promise<unknown>;
+  } | undefined;
+  if (agentPresets?.selfCtx === undefined) {
+    throw new Error("agent presets runtime context is unavailable");
+  }
+  agentPresets.selfCtx.baseUrl = composition.bareModuleBaseUrl;
+
+  // Ensure the installed Standard composition is real before publishing
+  // readiness.  The health catalog is derived from this standing scope so
+  // native web/tool rows and native-precedence collisions come from DSH's
+  // registry rather than a copied or synthetic list.
+  const standingKey = await agentPresets.standingKeyFor("standard");
+  const tools = context.get("tools") as {
+    schemas(scope?: unknown): Array<{ name: string; parameters?: unknown }>;
+  } | undefined;
+  if (tools === undefined) throw new Error("DSH tool runtime is unavailable");
+  const standardNativeSchemas = tools.schemas(standingKey).map((schema) => ({
+    name: schema.name,
+    parameters: schema.parameters,
+  }));
+  const standardNativeNames = standardNativeSchemas.map((schema) => schema.name);
+  const publishedCatalog = selectPublishedTools({
+    nativeNames: standardNativeNames,
+    semanticNames: KAZUSA_SEMANTIC_TOOL_NAMES,
+  });
+  const catalogNames = [
+    ...publishedCatalog.nativeNames,
+    ...publishedCatalog.semanticNames,
+    "submit_resolution",
+  ];
+  const nativeDigest = nativeCatalogDigest(standardNativeSchemas);
+  const semanticDigest = semanticCatalogDigest();
+  const publishedDigest = publishedCatalogDigest(
+    standardNativeSchemas,
+    SUBMIT_RESOLUTION_SCHEMA,
+    KAZUSA_SEMANTIC_TOOL_NAMES,
+  );
+  const catalog: ProfileCatalog = {
+    names: catalogNames,
+    digest: publishedDigest,
+    native_catalog_digest: nativeDigest,
+    semantic_catalog_digest: semanticDigest,
+    published_catalog_digest: publishedDigest,
+    descriptions_stripped: true,
+    native_names: publishedCatalog.nativeNames,
+    semantic_names: [...publishedCatalog.semanticNames, "submit_resolution"],
+    omitted_semantic_tools: publishedCatalog.omittedSemanticTools,
+  };
 
   const activations = new Map<string, LiveActivation>();
   const diagnostics: ProfileDiagnostics = {
@@ -479,14 +620,33 @@ export async function buildProfile(
 
   return {
     id: PROFILE_VERSION,
+    profileVersion: PROFILE_VERSION,
     model: options.model,
     dataRoot: options.dataRoot,
-    semanticTools: ["submit_resolution"],
+    routeName: route.routeName,
+    routeDigest,
+    officialDigests: {
+      base: await sha256File(composition.officialFiles.basePath),
+      standardPreset: await sha256File(composition.officialFiles.standardPresetPath),
+      standardAgent: await sha256File(composition.officialFiles.standardAgentPath),
+    },
+    standardPresetPath: composition.officialFiles.standardPresetPath,
+    semanticTools: [...catalog.semantic_names],
+    catalog,
     dshPackages: REQUIRED_DSH_PACKAGES,
     composedServices: [
       "sessions",
       "session-persistence-sqlite",
       "llm",
+      "llm-pi-ai",
+      "credentials",
+      "agent-presets",
+      "standard",
+      "web",
+      "tool-web",
+      "kazusaSemanticGateway",
+      "brainInteractionProvider",
+      "submitResolution",
       "system-prompt",
       "tools",
       "agents",
@@ -495,14 +655,43 @@ export async function buildProfile(
     ],
     diagnostics,
     async activate(method, intake, activationId, leaseEpoch) {
-      const runtime = intake.runtime;
+      if (intake.route_digest !== routeDigest) {
+        throw new Error("ROUTE_DIGEST_MISMATCH");
+      }
+      const semanticSecret = options.hostSecrets.KAZUSA_DSH_TOOL_GATEWAY_SECRET;
+      if (semanticSecret === undefined || semanticSecret.length === 0) {
+        throw new Error("semantic gateway host binding is unavailable");
+      }
+      const authority = verifyActivationToken(
+        intake.semantic_tool_authority.token,
+        semanticSecret,
+        {
+          activation_id: activationId,
+          lease_epoch: leaseEpoch,
+          resolution_thread_id: intake.resolution_thread_id,
+          segment_id: intake.segment_id,
+          brain_conversation_ref: intake.brain_conversation_ref,
+          scope_fingerprint: intake.interaction_authority.scope_fingerprint,
+          audience_fingerprint: intake.interaction_authority.audience_fingerprint,
+          workspace_root: intake.workspace_root,
+          route_digest: routeDigest,
+          catalog_digest: catalog.semantic_catalog_digest,
+          profile_version: PROFILE_VERSION,
+          model_route_digest: routeDigest,
+          policy_epoch: "dsh-standard-policy-v2",
+          interaction_issuer: intake.interaction_authority.issuer,
+        },
+      );
+      if (intake.semantic_tool_authority.catalog_digest !== catalog.semantic_catalog_digest) {
+        throw new Error("SEMANTIC_CATALOG_DIGEST_MISMATCH");
+      }
       const durable = await inspectOperation(
-        runtime.operation_id,
-        runtime.operation_payload_digest,
+        intake.operation_id,
+        intake.operation_payload_digest,
       );
       if (durable.disposition !== "not_admitted") return durable;
 
-      const key = activationKey(runtime.resolution_thread_id, runtime.segment_id);
+      const key = activationKey(intake.resolution_thread_id, intake.segment_id);
       const existing = activations.get(key);
       if (existing !== undefined) {
         if (leaseEpoch <= existing.admission.leaseEpoch) {
@@ -521,95 +710,116 @@ export async function buildProfile(
 
       const admission: AdmissionIdentity = {
         method,
-        operationId: runtime.operation_id,
-        payloadDigest: runtime.operation_payload_digest,
-        requestId: runtime.request_id,
-        threadId: runtime.resolution_thread_id,
-        segmentId: runtime.segment_id,
+        operationId: intake.operation_id,
+        payloadDigest: intake.operation_payload_digest,
+        requestId: intake.request_id,
+        threadId: intake.resolution_thread_id,
+        segmentId: intake.segment_id,
         activationId,
         leaseEpoch,
       };
-      let terminalReached = false;
-      let correctionAttempts = 0;
-      const setup = (agentContext: Context): void => {
-        agentContext.on("llm/stream", async function* (_request, next) {
-          const chunks: StreamChunk[] = [];
-          for await (const chunk of next()) chunks.push(chunk);
-          if (validSingleAction(chunks)) {
-            for (const chunk of chunks) yield chunk;
-            return;
-          }
-          yield* rejectedActionStream();
+      const setup = async (agentContext: Context): Promise<void> => {
+        const presets = agentContext.get("agentPresets") as {
+          mount(agent: Context, id?: string): Promise<unknown>;
+        } | undefined;
+        if (presets === undefined) throw new Error("standard agent preset service is unavailable");
+        await presets.mount(agentContext, "standard");
+
+        const systemPrompt = agentContext.get("systemPrompt") as {
+          section(section: { name: string; order: number; text: string }): () => void;
+        } | undefined;
+        if (systemPrompt === undefined) throw new Error("system prompt service is unavailable");
+        const disposeTerminalContract = systemPrompt.section({
+          name: "kazusa:terminal-contract",
+          order: 190,
+          text: [
+            "Resolve exactly one bounded Kazusa operation.",
+            "Use the available tools only as needed to satisfy the objective.",
+            "Once sufficient evidence is available, or the operation cannot proceed, call submit_resolution exactly once and immediately end the turn.",
+            "The only valid terminal response is one submit_resolution tool call. Do not give a prose final answer.",
+            "Keep reasoning concise; after tool results arrive, summarize them only inside submit_resolution.",
+          ].join(" "),
         });
-        agentContext.on("agent/pre-step", async (payload, next) => {
-          if (payload.step > runtime.max_model_steps) return { kind: "reject" };
-          return next();
+        agentContext.effect(
+          () => disposeTerminalContract,
+          "kazusa-terminal-contract.registration",
+        );
+
+        const semanticService = context.get("kazusaSemanticGateway") as SemanticGatewayService | undefined;
+        if (semanticService === undefined) {
+          throw new Error("semantic gateway host binding is unavailable");
+        }
+        const semanticRegistration: SemanticGatewayRegistration = {
+          authority: authority as unknown as Record<string, unknown>,
+          authorityToken: intake.semantic_tool_authority.token,
+          secret: semanticSecret,
+          invoke: options.semanticInvoker,
+          persistEvidence: options.persistEvidence ?? (async () => undefined),
+        };
+        const published = semanticService.register(agentContext, semanticRegistration);
+        agentContext.effect(() => published.dispose, "semantic-gateway.registration");
+
+        const brainService = context.get("brainInteractionProvider") as BrainInteractionService | undefined;
+        if (brainService === undefined) throw new Error("Brain interaction service is unavailable");
+        brainService.register(agentContext, {
+          requestContext: {
+            operation_id: intake.operation_id,
+            operation_payload_digest: intake.operation_payload_digest,
+            resolution_thread_id: intake.resolution_thread_id,
+            segment_id: intake.segment_id,
+            activation_id: activationId,
+            lease_epoch: leaseEpoch,
+            brain_conversation_ref: intake.brain_conversation_ref,
+            platform: authority.service_scope.platform,
+            platform_channel_id: authority.service_scope.platform_channel_id,
+            global_user_id: authority.service_scope.global_user_id,
+            scope_fingerprint: intake.interaction_authority.scope_fingerprint,
+            audience_fingerprint: authority.audience_fingerprint,
+            profile_version: PROFILE_VERSION,
+            catalog_digest: authority.catalog_digest,
+            model_route_digest: authority.model_route_digest,
+            workspace_fingerprint: authority.workspace_fingerprint,
+            policy_epoch: authority.policy_epoch,
+            issued_reference_digest: authority.issued_reference_digest,
+            issued_at: authority.issued_at,
+            expires_at: authority.expires_at,
+            nonce: authority.nonce,
+            issuer: authority.interaction_issuer,
+          },
+          provider: options.brainProvider,
         });
-        agentContext.on("agent/turn-stopping", ({ agent }) => {
-          if (terminalReached || correctionAttempts >= 2) return;
-          correctionAttempts += 1;
-          diagnostics.correction_attempts += 1;
-          agent.steer(createUserMessage({
-            content: [{ type: "text", text: CORRECTION_MESSAGE }],
-            source: { kind: "plugin", plugin: "kazusa-resolver-correction" },
-          }));
+
+        const submitService = context.get("submitResolution") as SubmitResolutionService | undefined;
+        if (submitService === undefined) throw new Error("submit resolution service is unavailable");
+        const disposeSubmit = submitService.register(agentContext, {
+          intake,
+          activationId,
+          leaseEpoch,
+          diagnostics,
         });
-        agentContext.tools.register(defineTool({
-          name: "submit_resolution",
-          description: "Submit the complete terminal resolution.",
-          parameters: {
-            status: { type: "string", required: true, enum: ["resolved", "partial", "needs_user_input", "approval_required", "unavailable", "failed"] },
-            summary: { type: "string", required: true },
-            findings: { type: "array", required: true, items: { type: "object", additionalProperties: true } },
-            completed_subgoals: { type: "array", required: true, items: { type: "string" } },
-            remaining_needs: { type: "array", required: true, items: { type: "string" } },
-            clarification_request: { required: true, oneOf: [{ type: "object", additionalProperties: true }, { type: "null" }] },
-            approval_request: { required: true, oneOf: [{ type: "object", additionalProperties: true }, { type: "null" }] },
-            artifact_refs: { type: "array", required: true, items: { type: "string" } },
-            warnings: { type: "array", required: true, items: { type: "string" } },
-          },
-          output: {
-            schema: { type: "object", properties: { accepted: { type: "boolean", required: true }, receipt: { type: "json", required: true } }, additionalProperties: false },
-            render: () => [{ type: "text", text: "Resolution accepted." }],
-            presentationMeta: (_args, value) => ({ kazusa: value.receipt }),
-          },
-          async execute(args, execution) {
-            const terminal = validateSubmitResolution(args);
-            diagnostics.terminal_tool_executions += 1;
-            const validated = validateTerminalReceipt({
-              kind: "terminal_resolution_v1", schema_version: "1", call_id: execution.callId,
-              operation_id: runtime.operation_id, operation_payload_digest: runtime.operation_payload_digest,
-              request_id: runtime.request_id, resolution_thread_id: runtime.resolution_thread_id,
-              segment_id: runtime.segment_id, activation_id: activationId, lease_epoch: leaseEpoch,
-              scope_fingerprint: runtime.scope_fingerprint, audience_fingerprint: runtime.audience_fingerprint,
-              resolver_profile_version: runtime.resolver_profile_version, dsh_release: runtime.dsh_release,
-              session_store_epoch: runtime.session_store_epoch, model_route: runtime.model_route,
-              tool_catalog_digest: runtime.tool_catalog_digest, policy_epoch: runtime.policy_epoch,
-              terminal, terminal_digest: digest(terminal),
-            });
-            const receipt = (
-              process.env.NODE_ENV === "test"
-              && process.env.KAZUSA_DSH_TEST_CORRUPT_TERMINAL_RECEIPT === "1"
-            ) ? { ...validated, terminal_digest: "sha256:corrupt" } : validated;
-            terminalReached = true;
-            execution.concludeTurn();
-            return { accepted: true, receipt: receipt as unknown as JsonValue };
-          },
-        }));
+        agentContext.effect(() => disposeSubmit, "submit-resolution.registration");
       };
 
-      const idValue = stableSessionId(runtime);
+      const idValue = stableSessionId({
+        ...intake,
+        segment_id: authority.segment_id,
+      });
       const persisted = (await context.sessionPersistence.list()).some(
         (header) => header.id === idValue,
       );
       const agentOptions = {
-        provider: options.testScript === undefined ? "deepseek-official" : "kazusa-test",
-        model: options.model,
-        maxTokens: 4096,
+        provider: route.routeName,
+        model: route.model,
+        maxTokens: route.maxCompletionTokens,
       };
       const handle = persisted
         ? await context.agents.resume({ resumeSessionId: idValue, agentOptions, setup })
-        : await context.agents.create({ sessionId: idValue, agentOptions, setup });
+        : await context.agents.create({
+          sessionId: idValue,
+          meta: { cwd: workspaceRoot, agentPreset: "standard" },
+          agentOptions,
+          setup,
+        });
       activations.set(key, { admission, handle });
       diagnostics.live_activations = activations.size;
       handle.agent.followup(createUserMessage({
@@ -619,8 +829,8 @@ export async function buildProfile(
       await handle.agent.whenIdle();
       await context.sessions.flush(handle.agent.session);
       const result = await inspectOperation(
-        runtime.operation_id,
-        runtime.operation_payload_digest,
+        intake.operation_id,
+        intake.operation_payload_digest,
       );
       if (
         result.disposition === "terminal"
@@ -670,57 +880,8 @@ export async function buildProfile(
       for (const active of activations.values()) await active.handle.dispose();
       activations.clear();
       diagnostics.live_activations = 0;
-      for (const fiber of fibers.reverse()) await fiber.dispose();
+      await context.fiber.dispose();
+      await options.disposeSemanticWorker?.();
     },
   };
-}
-
-class ScriptedAdapter extends LlmAdapter {
-  private index = 0;
-
-  constructor(private readonly script: JsonObject[]) { super(); }
-
-  providerInfo(provider: string): LlmProviderInfo {
-    return { id: provider, name: "Kazusa test", attribution: { headers: {} } } as unknown as LlmProviderInfo;
-  }
-
-  async listModels(provider: string): Promise<readonly LlmModelInfo[]> {
-    return [{ provider, id: "test-model", name: "Test model" }];
-  }
-
-  async resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
-    return { provider, id: model, name: model, context: { contextWindow: 32_768 }, defaultMaxTokens: 4096 };
-  }
-
-  async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
-    const step = this.script[this.index] ?? this.script[this.script.length - 1] ?? {};
-    this.index += 1;
-    if (step.wait === true) {
-      if (options.signal === undefined) throw new Error("scripted wait requires cancellation signal");
-      await new Promise<void>((resolve) => {
-        options.signal?.addEventListener("abort", () => resolve(), { once: true });
-      });
-      yield { type: "finish", reason: { kind: "aborted", failure: { code: "ABORTED", message: "scripted request canceled" } } };
-      return;
-    }
-    const calls = Array.isArray(step.calls) ? step.calls : step.name === undefined ? [] : [step];
-    if (calls.length === 0) {
-      yield { type: "block-start", index: 0, blockType: "text" };
-      const value = typeof step.text === "string" ? step.text : "";
-      yield { type: "text-delta", index: 0, text: value };
-      yield { type: "block-end", index: 0, block: { type: "text", text: value } };
-      yield { type: "finish", reason: { kind: "stop" } };
-      return;
-    }
-    for (let index = 0; index < calls.length; index += 1) {
-      const call = calls[index] as JsonObject;
-      const callId = CallId(`test-call-${this.index}-${index}`);
-      const name = String(call.name ?? "unknown");
-      const args = JSON.stringify(call.arguments ?? {});
-      yield { type: "block-start", index, blockType: "tool-call" };
-      yield { type: "tool-call-delta", index, id: callId, name, argumentsDelta: args };
-      yield { type: "block-end", index, block: { type: "tool-call", id: callId, name, arguments: args } };
-    }
-    yield { type: "finish", reason: { kind: "tool-calls" } };
-  }
 }

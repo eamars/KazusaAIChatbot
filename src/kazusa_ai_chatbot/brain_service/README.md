@@ -161,6 +161,26 @@ future foreground applications must call the same interface instead of
 importing `/chat` queue state or adding their own gates. Different channel
 scopes remain independent.
 
+## DSH interaction and runtime readiness
+
+The Brain owns the Plan 2 DSH interaction judge, durable Mongo interaction
+store, exact request/decision lineage, cognition observation, normal dialog,
+and adapter delivery. Its authenticated `GET /runtime/dsh/health` reports
+`configured`, `durable_store`, and `cognition_judge` readiness. The internal
+`POST /runtime/dsh/interactions` and
+`POST /runtime/dsh/interactions/checkpoint` routes admit or replay typed
+approval, question, and plan-review requests from the DSH sidecar.
+
+The cognition P-stage makes the semantic choice; deterministic Brain code
+validates authority, scope, expiry, persistence, conflict, and one-shot grant
+consumption. A runtime-authored DSH observation is not a user utterance or
+permission. `relay_to_user` is delivered through the ordinary dialog/adapter
+path, and an exact reply resumes the same thread and segment before a fresh
+native call is matched to the grant. The public ChatResponse remains a
+Brain-owned surface rather than a projection of raw DSH prose. See the [DSH
+interaction contract](../dsh_interaction/README.md) and [DSH integration
+architecture](../../../docs/architecture/dsh_integration_architecture.md).
+
 ### Live Chat Intake And Settlement
 
 The normal active-chat path persists each typed inbound fragment, runs the

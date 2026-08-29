@@ -21,9 +21,10 @@ from copy import deepcopy
 from typing import Any, Literal
 from uuid import uuid4
 
-from fastapi import BackgroundTasks, FastAPI, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 
 from kazusa_ai_chatbot import event_logging, llm_tracing
+from agentic_resolver.runtime import AgenticResolverRuntime
 from kazusa_ai_chatbot.action_spec.execution import execute_action_specs_for_trace
 from kazusa_ai_chatbot.action_spec.results import (
     EpisodeAttemptDiagnosticV1,
@@ -86,6 +87,10 @@ from kazusa_ai_chatbot.brain_service.contracts import (
     CognitionRunObservationV1,
     DeliveryReceiptRequest,
     DeliveryReceiptResponse,
+    DshBrainInteractionCheckpointV1,
+    DshBrainInteractionRequestV1 as DshBrainInteractionRequestDTO,
+    DshBrainInteractionResponseV1,
+    DshInteractionHealthResponseV1,
     EventRequest,
     HealthResponse,
     OperationalErrorOut,
@@ -145,6 +150,7 @@ from kazusa_ai_chatbot.cognition_episode import (
     PerceptV1,
     TargetScopeV1,
     build_reply_media_description_rows,
+    build_self_cognition_episode,
     build_text_chat_media_description_rows,
     build_user_message_episode,
 )
@@ -156,6 +162,7 @@ from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionContextLimitError,
     CognitionContractError,
     CognitionExecutionError,
+    validate_text_surface_output,
 )
 from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
     bind_v2_attempt_ledger,
@@ -213,6 +220,10 @@ from kazusa_ai_chatbot.conversation_progress import (
     select_recent_logical_turns,
     select_recordable_turn_outcome,
 )
+from kazusa_ai_chatbot.conversation_history_prompt_projection import (
+    project_conversation_history_for_llm,
+)
+from kazusa_ai_chatbot.cognition_resolver.state import build_empty_rag_result
 from kazusa_ai_chatbot.db import (
     DatabaseBackendError,
     IdentityLedgerNotFoundError,
@@ -226,6 +237,7 @@ from kazusa_ai_chatbot.db import (
     ensure_character_identity,
     ensure_operational_character_state,
     get_ambient_conversation_history,
+    get_character_cognition_state,
     get_character_profile,
     get_character_runtime_state,
     get_conversation_by_platform_message_id,
@@ -233,6 +245,7 @@ from kazusa_ai_chatbot.db import (
     get_current_identity,
     get_user_message_by_platform_message_id,
     get_user_message_by_row_id,
+    get_user_cognition_state,
     get_user_profile,
     has_inbound_after,
     issue_internal_action_latch,
@@ -245,6 +258,17 @@ from kazusa_ai_chatbot.db import (
     update_conversation_row_llm_trace_id,
     upsert_post_turn_lifecycle_record,
 )
+from kazusa_ai_chatbot.db.dsh_interactions import (
+    MongoInteractionStore,
+    ensure_indexes as ensure_dsh_interaction_indexes,
+)
+from kazusa_ai_chatbot.dsh_interaction.contracts import (
+    DshBrainReplyDecisionV1,
+    DshBrainInteractionRequestV1,
+)
+from kazusa_ai_chatbot.dsh_interaction.decision import BrainDecisionEngine
+from kazusa_ai_chatbot.dsh_interaction.service import BrainInteractionService
+from kazusa_ai_chatbot.dsh_tool_gateway.media import persist_attached_media
 from kazusa_ai_chatbot.dispatcher import (
     AdapterRegistry,
     DispatchContext,
@@ -267,7 +291,12 @@ from kazusa_ai_chatbot.message_envelope import (
     project_prompt_message_context,
     project_reply_attachment_summaries,
 )
+from kazusa_ai_chatbot.nodes.dialog_agent import dialog_agent
 from kazusa_ai_chatbot.nodes.persona_supervisor2 import persona_supervisor2
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
+    build_cognition_core_services,
+    run_dsh_interaction_cognition,
+)
 from kazusa_ai_chatbot.nodes.persona_supervisor2_memory_lifecycle import (
     call_post_surface_memory_lifecycle_review,
 )
@@ -316,6 +345,7 @@ from kazusa_ai_chatbot.state import (
     ReplyContext,
 )
 from kazusa_ai_chatbot.time_boundary import (
+    local_time_context_from_storage_utc,
     parse_storage_utc_datetime,
     storage_utc_now,
     storage_utc_now_iso,
@@ -1026,9 +1056,564 @@ _calendar_worker_handle: CalendarSchedulerWorkerHandle | None = None
 _reflection_worker_handle: ReflectionWorkerHandle | None = None
 _self_cognition_worker_handle: SelfCognitionWorkerHandle | None = None
 _background_work_worker_handle: BackgroundWorkRuntimeHandle | None = None
+_dsh_interaction_service: BrainInteractionService | None = None
+_dsh_resolver_runtime: AgenticResolverRuntime | None = None
+_dsh_cognition_services: Any | None = None
 _primary_interaction_active_count = 0
 _latest_cognition_graph: CognitionRunObservationV1 | None = None
 _latest_self_cognition_graph: CognitionRunObservationV1 | None = None
+
+
+def configure_dsh_interaction_service(
+    interaction_service: BrainInteractionService,
+) -> None:
+    """Install the durable Brain interaction owner for the running service.
+
+    The composition root supplies cognition, dialog, dispatcher, and resolver
+    callbacks.  Keeping this explicit makes readiness reflect a real owner and
+    prevents an implicit process-local fallback from becoming authoritative.
+    """
+
+    if not isinstance(interaction_service, BrainInteractionService):
+        raise TypeError("interaction_service must be BrainInteractionService")
+    global _dsh_interaction_service
+    _dsh_interaction_service = interaction_service
+
+
+async def _build_dsh_cognition_state(
+    request: DshBrainInteractionRequestV1,
+    *,
+    user_reply_text: str | None = None,
+) -> dict[str, Any]:
+    """Build the ordinary cognition state for one authenticated DSH event."""
+
+    if user_reply_text is not None and (
+        not isinstance(user_reply_text, str) or not user_reply_text.strip()
+    ):
+        raise ValueError("DSH user reply is required")
+    timestamp = request.issued_at
+    character_profile = await _load_latest_character_profile_snapshot()
+    character_name = character_profile.get("name")
+    if not isinstance(character_name, str) or not character_name.strip():
+        raise ValueError("active character profile name is required")
+    character_user_id = character_profile.get("global_user_id")
+    if not isinstance(character_user_id, str) or not character_user_id.strip():
+        raise ValueError("active character profile global_user_id is required")
+    user_profile = await get_user_profile(request.global_user_id)
+    user_state = await get_user_cognition_state(request.global_user_id)
+    character_state = await get_character_cognition_state()
+    history = await get_conversation_history(
+        platform=request.platform,
+        platform_channel_id=request.platform_channel_id,
+        limit=CONVERSATION_HISTORY_LIMIT,
+    )
+    chat_history_wide = trim_history_dict(history)
+    chat_history_recent = chat_history_wide[-CHAT_HISTORY_RECENT_LIMIT:]
+    rag_result = build_empty_rag_result(
+        current_user_id=request.global_user_id,
+        character_user_id=character_user_id,
+    )
+    rag_result["conversation_evidence"] = (
+        project_conversation_history_for_llm(
+            history,
+            character_name=character_name,
+            max_rows=CHAT_HISTORY_RECENT_LIMIT,
+        )
+    )
+    local_time_context = local_time_context_from_storage_utc(timestamp)
+    episode_id = f"dsh-interaction:{request.interaction_id}"
+    dsh_debug_modes = {
+        "think_only": False,
+        "no_remember": True,
+        "no_visual_directives": True,
+    }
+    target_scope: TargetScopeV1 = {
+        "platform": request.platform,
+        "platform_channel_id": request.platform_channel_id,
+        "channel_type": "private",
+        "current_platform_user_id": request.global_user_id,
+        "current_global_user_id": request.global_user_id,
+        "current_display_name": request.global_user_id,
+        "target_addressed_user_ids": [request.global_user_id],
+        "target_broadcast": False,
+        "permission_ref": request.scope_fingerprint,
+    }
+    evidence_ref: EvidenceRefV1 = {
+        "schema_version": "evidence_ref.v1",
+        "evidence_kind": "dsh_interaction",
+        "evidence_id": request.interaction_id,
+        "owner": "dsh_resolution",
+        "excerpt": (
+            "DSH runtime pending interaction requiring Brain judgment."
+        ),
+        "observed_at": timestamp,
+    }
+    if user_reply_text is None:
+        input_text = (
+            f"The DSH runtime has a pending {request.kind} interaction "
+            "requiring Brain judgment. This is a runtime-authored system "
+            "observation, not a user-authored request or user authorization."
+        )
+        episode = build_self_cognition_episode(
+            case={
+                "case_id": request.interaction_id,
+                "source_case_kind": "dsh_runtime_pending_interaction",
+                "correlation_id": request.interaction_id,
+                "scope_ref": request.scope_fingerprint,
+                "privacy_scope": "private",
+                "target_scope": target_scope,
+            },
+            percepts=[{
+                "schema_version": "percept.v1",
+                "percept_kind": "dsh_interaction_context",
+                "source_kind": "system_event",
+                "source_id": request.interaction_id,
+                "content": {"semantic_text": input_text},
+                "observed_at": timestamp,
+            }],
+            evidence_refs=[evidence_ref],
+            local_time_context=local_time_context,
+            created_at=timestamp,
+        )
+    else:
+        input_text = user_reply_text[:4_000]
+        episode = build_user_message_episode(
+            episode_id=episode_id,
+            origin={
+                "platform": request.platform,
+                "platform_message_id": request.interaction_id,
+                "active_turn_platform_message_ids": [request.interaction_id],
+                "correlation_id": request.interaction_id,
+                "privacy_scope": "conversation",
+            },
+            target_scope=target_scope,
+            dialog_percept={
+                "schema_version": "percept.v1",
+                "percept_kind": "dialog",
+                "source_kind": "dialog",
+                "source_id": request.interaction_id,
+                "content": {"text": input_text},
+                "observed_at": timestamp,
+            },
+            media_percepts=[],
+            evidence_refs=[evidence_ref],
+            local_time_context=local_time_context,
+            created_at=timestamp,
+            debug_controls=dsh_debug_modes,
+        )
+    return {
+        "storage_timestamp_utc": timestamp,
+        "local_time_context": local_time_context,
+        "llm_trace_id": request.interaction_id,
+        "debug_modes": dict(dsh_debug_modes),
+        "user_input": input_text,
+        "decontextualized_input": input_text,
+        "rag_result": rag_result,
+        "prompt_message_context": {},
+        "cognitive_episode": episode,
+        "user_multimedia_input": [],
+        "platform": request.platform,
+        "platform_channel_id": request.platform_channel_id,
+        "channel_type": "private",
+        "channel_name": "",
+        "platform_message_id": request.interaction_id,
+        "active_turn_platform_message_ids": [request.interaction_id],
+        "active_turn_conversation_row_ids": [],
+        "platform_user_id": request.global_user_id,
+        "global_user_id": request.global_user_id,
+        "user_name": str(user_profile.get("display_name") or request.global_user_id),
+        "chat_history_wide": chat_history_wide,
+        "chat_history_recent": chat_history_recent,
+        "user_profile": user_profile,
+        "character_profile": character_profile,
+        "character_cognition_state": character_state,
+        "cognition_state": user_state,
+        "reply_context": {},
+        "conversation_episode_state": {},
+        "conversation_progress": None,
+        "public_group_scene": "",
+        "interaction_style_context": None,
+        "action_availability_runtime": _action_availability_runtime_for_target(
+            platform=request.platform,
+            platform_channel_id=request.platform_channel_id,
+            channel_type="private",
+        ),
+    }
+
+
+def _dsh_decision_payload(
+    request: DshBrainInteractionRequestV1,
+    decision: Mapping[str, object],
+) -> dict[str, object]:
+    """Bind a canonical P-stage decision to the authenticated request."""
+
+    return {
+        "schema_version": "dsh_brain_interaction.v1",
+        "interaction_id": request.interaction_id,
+        "request_digest": request.request_digest,
+        "kind": request.kind,
+        "decision": decision.get("decision"),
+        "answer": decision.get("answer"),
+        "response_goal": decision.get("response_goal"),
+        "relay_mode": decision.get("relay_mode"),
+        "reason": decision.get("reason"),
+    }
+
+
+async def _production_dsh_judge(
+    request: DshBrainInteractionRequestV1,
+    context: Mapping[str, Any],
+) -> Mapping[str, object]:
+    """Run the canonical cognition P-stage for an immediate DSH event."""
+
+    del context
+    state = await _build_dsh_cognition_state(request)
+    decision = await run_dsh_interaction_cognition(
+        state,
+        pending_interaction=request.unsigned_dict(),
+        services=_dsh_cognition_services,
+    )
+    return _dsh_decision_payload(request, decision)
+
+
+async def _production_dsh_reply_judge(
+    row: Mapping[str, Any],
+    reply_context: Mapping[str, Any],
+) -> Mapping[str, object]:
+    """Judge a user reply through the same canonical P-stage contract."""
+
+    request_identity = row.get("request_identity")
+    if not isinstance(request_identity, Mapping):
+        raise ValueError("pending request identity is unavailable")
+    request = DshBrainInteractionRequestV1.from_mapping(request_identity)
+    reply_text = reply_context.get("reply_text")
+    if not isinstance(reply_text, str) or not reply_text.strip():
+        raise ValueError("reply text is required for cognition")
+    state = await _build_dsh_cognition_state(
+        request,
+        user_reply_text=reply_text,
+    )
+    decision = await run_dsh_interaction_cognition(
+        state,
+        pending_interaction=request.unsigned_dict(),
+        pending_reply=True,
+        services=_dsh_cognition_services,
+    )
+    return {
+        "schema_version": "dsh_brain_interaction.v1",
+        "interaction_id": request.interaction_id,
+        "request_digest": request.request_digest,
+        "decision": decision.get("decision"),
+        "answer": decision.get("answer"),
+        "reason": decision.get("reason"),
+    }
+
+
+def _dsh_surface_for_relay(
+    response_goal: str,
+    *,
+    reason: str,
+) -> dict[str, object]:
+    """Project a cognition-owned response goal into the normal dialog input."""
+
+    return validate_text_surface_output({
+        "schema_version": "text_surface_output.v2",
+        "content_plan": response_goal,
+        "content_requirements": [
+            "Address the cognition-owned response goal in visible dialog.",
+        ],
+        "epistemic_boundary": reason,
+        "visible_boundaries": [],
+        "addressee_plan": [],
+        "delivery_profile": {
+            "lexical_register": "natural",
+            "sentence_shape": "complete",
+            "rhythm": "balanced",
+            "hesitation": "restrained",
+            "punctuation": "conversational",
+        },
+        "selected_surface_intent": response_goal,
+        "permitted_action_results": [],
+    })
+
+
+async def _production_dsh_deliver(
+    response_goal: Mapping[str, Any],
+    request: DshBrainInteractionRequestV1,
+) -> Mapping[str, object]:
+    """Render a relay goal through dialog and deliver via the adapter registry."""
+
+    goal = response_goal.get("response_goal")
+    relay_mode = response_goal.get("relay_mode")
+    if not isinstance(goal, str) or not goal.strip():
+        raise ValueError("response goal is required for DSH relay")
+    if not isinstance(relay_mode, str) or not relay_mode.strip():
+        raise ValueError("relay mode is required for DSH relay")
+    if _adapter_registry is None:
+        raise RuntimeError("adapter registry is unavailable")
+    state = await _build_dsh_cognition_state(request)
+    state.update({
+        "internal_monologue": goal,
+        "dialog_usage_mode": "dsh_relay_visible",
+        "text_surface_output_v2": _dsh_surface_for_relay(
+            goal,
+            reason=(
+                "The visible message must remain within the Brain-owned "
+                "interaction response goal."
+            ),
+        ),
+        "platform_bot_id": CHARACTER_GLOBAL_USER_ID,
+    })
+    dialog_result = await dialog_agent(state)
+    final_dialog = dialog_result.get("final_dialog")
+    if not isinstance(final_dialog, list) or not final_dialog:
+        raise RuntimeError("dialog owner returned no relay text")
+    profile = state["character_profile"]
+    character_name = str(profile.get("name") or "").strip()
+    if not character_name:
+        raise ValueError("active character profile name is required")
+    dispatch_result = await handle_send_message(
+        {
+            "target_platform": request.platform,
+            "target_channel": request.platform_channel_id,
+            "target_channel_type": "private",
+            "text": "\n".join(str(item) for item in final_dialog),
+            "reply_to_msg_id": None,
+        },
+        DispatchContext(
+            source_platform=request.platform,
+            source_channel_id=request.platform_channel_id,
+            source_user_id=request.global_user_id,
+            source_message_id=request.interaction_id,
+            guild_id=None,
+            bot_permission_role=f"dsh_{relay_mode}",
+            now=storage_utc_now(),
+            source_channel_type="private",
+            source_platform_bot_id=CHARACTER_GLOBAL_USER_ID,
+            source_character_name=character_name,
+        ),
+        _adapter_registry,
+    )
+    message_id = dispatch_result.get("adapter_message_id")
+    if not isinstance(message_id, str) or not message_id.strip():
+        raise RuntimeError("dispatcher returned no platform message id")
+    return {
+        "platform_message_id": message_id,
+        "delivered_at": storage_utc_now_iso(),
+        "delivery_tracking_id": dispatch_result.get("delivery_tracking_id", ""),
+        "adapter": request.platform,
+    }
+
+
+async def _production_dsh_continue(**fields: Any) -> Mapping[str, object]:
+    """Continue the resolver through its canonical controller owner."""
+
+    runtime = _dsh_resolver_runtime
+    if runtime is None:
+        raise RuntimeError("resolution continuation owner is unavailable")
+    decision = fields.get("decision")
+    if not isinstance(decision, Mapping):
+        raise ValueError("typed continuation decision is required")
+    return await runtime.resume_after_interaction(
+        resolution_thread_id=fields["resolution_thread_id"],
+        segment_id=fields["segment_id"],
+        activation_id=fields["activation_id"],
+        lease_epoch=fields["lease_epoch"],
+        interaction_id=fields["interaction_id"],
+        continuation_delta=dict(decision),
+        continuation_authority_token=fields["continuation_authority_token"],
+    )
+
+
+async def _production_dsh_context(
+    request: DshBrainInteractionRequestV1,
+) -> Mapping[str, object]:
+    """Return exact request-bound policy fields for grant enactment."""
+
+    return {
+        "workspace_fingerprint": request.workspace_fingerprint,
+        "policy_epoch": request.policy_epoch,
+    }
+
+
+async def _production_dsh_issue_authority(
+    request: DshBrainInteractionRequestV1,
+    row: Mapping[str, Any],
+    grant: Any,
+) -> str:
+    """Issue one fresh canonical continuation authority from the resolver owner."""
+
+    runtime = _dsh_resolver_runtime
+    if runtime is None:
+        raise RuntimeError("canonical continuation authority issuer is unavailable")
+    return runtime.issue_continuation_authority(
+        request=request,
+        row=row,
+        grant=grant,
+    )
+
+
+async def _configure_dsh_interaction_service_from_lifespan() -> None:
+    """Construct production Brain owners after the graph and adapters exist."""
+
+    global _dsh_interaction_service, _dsh_resolver_runtime
+    global _dsh_cognition_services
+    if _dsh_interaction_service is not None:
+        return
+    if not all(
+        os.environ.get(name, "").strip()
+        for name in (
+            "KAZUSA_DSH_BRAIN_SHARED_SECRET",
+            "KAZUSA_DSH_TOOL_GATEWAY_SECRET",
+        )
+    ):
+        return
+    _dsh_cognition_services = build_cognition_core_services()
+    _dsh_resolver_runtime = AgenticResolverRuntime.from_environment()
+    _dsh_interaction_service = BrainInteractionService.from_environment(
+        judge=BrainDecisionEngine(judge=_production_dsh_judge),
+        reply_judge=_production_dsh_reply_judge,
+        deliver=_production_dsh_deliver,
+        context_provider=_production_dsh_context,
+        continue_resolution=_production_dsh_continue,
+        issue_continuation_authority=_production_dsh_issue_authority,
+    )
+
+
+def _dsh_interaction_health() -> DshInteractionHealthResponseV1:
+    """Project non-secret readiness facts for the Brain interaction owner."""
+
+    service = _dsh_interaction_service
+    configured = service is not None
+    durable_store = isinstance(
+        getattr(service, "_interaction_store", None),
+        MongoInteractionStore,
+    ) if service is not None else False
+    cognition_judge = service is not None and getattr(service, "_judge", None) is not None
+    status = "ready" if configured and durable_store and cognition_judge else "unavailable"
+    return DshInteractionHealthResponseV1(
+        schema_version="dsh_brain_interaction_health.v1",
+        status=status,
+        configured=configured,
+        durable_store=durable_store,
+        cognition_judge=cognition_judge,
+    )
+
+
+def _dsh_authorization_header(request: Request) -> str:
+    """Extract one bearer credential without exposing its value."""
+
+    value = request.headers.get("authorization", "")
+    scheme, separator, credential = value.partition(" ")
+    if scheme.lower() != "bearer" or not separator or not credential:
+        return ""
+    return credential
+
+
+def _dsh_http_error(*, status_code: int, code: str) -> HTTPException:
+    """Build one fixed-shape internal boundary error."""
+
+    return HTTPException(
+        status_code=status_code,
+        detail={
+            "schema_version": "dsh_brain_interaction_error.v1",
+            "code": code,
+        },
+    )
+
+
+def _dsh_request_body_within_limit(request: Request) -> bool:
+    """Keep a defense-in-depth body-size check at the route boundary."""
+
+    raw_length = request.headers.get("content-length")
+    if raw_length is None:
+        return True
+    try:
+        length = int(raw_length)
+    except ValueError:
+        return False
+    return 0 <= length <= 32 * 1024
+
+
+class _DshInteractionBodyLimitMiddleware:
+    """Bound DSH request bytes before FastAPI materializes a Pydantic DTO."""
+
+    _PATHS = frozenset({
+        "/runtime/dsh/interactions",
+        "/runtime/dsh/interactions/checkpoint",
+    })
+    _MAX_BYTES = 32 * 1024
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope.get("type") != "http" or scope.get("path") not in self._PATHS:
+            await self.app(scope, receive, send)
+            return
+        headers = {
+            key.lower(): value
+            for key, value in scope.get("headers", [])
+        }
+        length = headers.get(b"content-length")
+        if length is not None:
+            try:
+                declared = int(length)
+            except (TypeError, ValueError):
+                await self._reject(send)
+                return
+            if declared < 0 or declared > self._MAX_BYTES:
+                await self._reject(send)
+                return
+        body = bytearray()
+        while True:
+            message = await receive()
+            if message.get("type") == "http.disconnect":
+                return
+            if message.get("type") != "http.request":
+                continue
+            chunk = message.get("body", b"")
+            if not isinstance(chunk, bytes):
+                await self._reject(send)
+                return
+            body.extend(chunk)
+            if len(body) > self._MAX_BYTES:
+                await self._reject(send)
+                return
+            if not message.get("more_body", False):
+                break
+        consumed = False
+
+        async def replay_receive() -> dict[str, Any]:
+            nonlocal consumed
+            if consumed:
+                return {"type": "http.disconnect"}
+            consumed = True
+            return {"type": "http.request", "body": bytes(body), "more_body": False}
+
+        await self.app(scope, replay_receive, send)
+
+    async def _reject(self, send: Any) -> None:
+        """Return one fixed boundary error without invoking FastAPI parsing."""
+
+        body = json.dumps({
+            "detail": {
+                "schema_version": "dsh_brain_interaction_error.v1",
+                "code": "DSH_INTERACTION_BODY_TOO_LARGE",
+            },
+        }, separators=(",", ":")).encode("utf-8")
+        await send({
+            "type": "http.response.start",
+            "status": 413,
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode("ascii")),
+            ],
+        })
+        await send({
+            "type": "http.response.body",
+            "body": body,
+        })
 
 
 def _action_availability_runtime_for_target(
@@ -4088,7 +4673,7 @@ async def _process_queued_chat_item(
                         "base64_data": base64_data,
                         "description": description,
                     })
-        put_session_media(
+        session_media_refs = put_session_media(
             media_scope,
             [
                 {
@@ -4102,6 +4687,13 @@ async def _process_queued_chat_item(
                 and bool(item["base64_data"])
             ],
         )
+        try:
+            persist_attached_media(media_scope, session_media_refs)
+        except OSError as exc:
+            logger.warning(
+                "DSH attached-media cache persistence failed: %s",
+                exc,
+            )
 
         history = await get_conversation_history(
             platform=req.platform,
@@ -4438,6 +5030,22 @@ async def _process_queued_chat_item(
                 )
             ),
         }
+        pending_dsh_interaction = getattr(req, "_dsh_pending_interaction", None)
+        if isinstance(pending_dsh_interaction, Mapping):
+            request_identity = pending_dsh_interaction.get("request_identity")
+            if isinstance(request_identity, Mapping):
+                try:
+                    pending_request = DshBrainInteractionRequestV1.from_mapping(
+                        request_identity,
+                    )
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(
+                        "durable DSH pending identity is invalid"
+                    ) from exc
+                initial_state["pending_dsh_interaction"] = (
+                    pending_request.unsigned_dict()
+                )
+                initial_state["pending_dsh_reply"] = True
         if settled_relevance_context_consumption is not None:
             if not isinstance(settled_relevance_context_consumption, Mapping):
                 raise ValueError("settled relevance context consumption is invalid")
@@ -4863,6 +5471,12 @@ async def _process_queued_chat_item(
                 return
 
             stages_reached.append("assistant_persisted")
+        pending_reply_result = await _enact_pending_dsh_reply_after_chat(
+            request=req,
+            graph_result=result,
+        )
+        if pending_reply_result is not None:
+            stages_reached.append("dsh_reply_enacted")
         if settlement_turn_id and response_dialog:
             await _turn_settlement_coordinator.record_bot_continuity(
                 scope=(req.platform, req.platform_channel_id, req.channel_type),
@@ -5183,11 +5797,64 @@ async def _commit_ingress_receipt(req: ChatRequest) -> ChatRequestReceiptMetadat
     )
     if not conversation_row_id:
         raise RuntimeError("ingress receipt persistence did not commit a row")
+    if _dsh_interaction_service is not None:
+        reply = message_envelope.get("reply")
+        reply_message_id = (
+            reply.get("platform_message_id")
+            if isinstance(reply, Mapping)
+            else None
+        )
+        if isinstance(reply_message_id, str) and reply_message_id.strip():
+            pending_row = await _dsh_interaction_service.pending_row_for_reply(
+                platform=req.platform,
+                platform_channel_id=req.platform_channel_id,
+                global_user_id=global_user_id,
+                reply_to_platform_message_id=reply_message_id,
+                now=received_at,
+            )
+            if pending_row is not None:
+                req._dsh_pending_interaction = pending_row
     receipt: ChatRequestReceiptMetadata = {
         "conversation_row_id": conversation_row_id,
         "received_at": received_at,
     }
     return receipt
+
+
+async def _enact_pending_dsh_reply_after_chat(
+    *,
+    request: ChatRequest,
+    graph_result: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Enact the typed P-stage result after the ordinary chat commit."""
+
+    interaction_service = _dsh_interaction_service
+    pending_row = getattr(request, "_dsh_pending_interaction", None)
+    if interaction_service is None or not isinstance(pending_row, Mapping):
+        return None
+    raw_decision = graph_result.get("dsh_interaction_decision")
+    if not isinstance(raw_decision, Mapping):
+        raise ValueError(
+            "matched DSH reply did not produce a cognition decision"
+        )
+    request_identity = pending_row.get("request_identity")
+    if not isinstance(request_identity, Mapping):
+        raise ValueError("matched DSH reply identity is unavailable")
+    pending_request = DshBrainInteractionRequestV1.from_mapping(request_identity)
+    decision = DshBrainReplyDecisionV1.from_mapping({
+        "schema_version": pending_request.schema_version,
+        "interaction_id": pending_request.interaction_id,
+        "request_digest": pending_request.request_digest,
+        "decision": raw_decision.get("decision"),
+        "answer": raw_decision.get("answer"),
+        "reason": raw_decision.get("reason"),
+    })
+    return await interaction_service.enact_typed_reply(
+        row=pending_row,
+        decision=decision,
+        reply_platform_message_id=request.platform_message_id,
+        current=storage_utc_now_iso(),
+    )
 
 
 async def _enqueue_chat_request(req: ChatRequest) -> ChatResponse:
@@ -5976,6 +6643,21 @@ async def lifespan(app: FastAPI):
         adapter_registry = AdapterRegistry()
         _adapter_registry = adapter_registry
 
+        # Construct the production Brain interaction owner only after the
+        # canonical cognition graph and adapter owners exist.  Explicit test
+        # composition may install an owner before startup; both paths still
+        # require the durable Mongo store and its indexes before readiness.
+        await _configure_dsh_interaction_service_from_lifespan()
+        if _dsh_interaction_service is not None:
+            if not isinstance(
+                getattr(_dsh_interaction_service, "_interaction_store", None),
+                MongoInteractionStore,
+            ):
+                raise RuntimeError(
+                    "configured DSH interaction owner must use Mongo persistence"
+                )
+            await ensure_dsh_interaction_indexes()
+
         logger.info(render_llm_route_table())
         _ensure_chat_input_worker_started()
         if CALENDAR_SCHEDULER_ENABLED:
@@ -6155,6 +6837,7 @@ async def lifespan(app: FastAPI):
 # ── App ─────────────────────────────────────────────────────────────
 
 app = FastAPI(title="Kazusa Brain Service", lifespan=lifespan)
+app.add_middleware(_DshInteractionBodyLimitMiddleware)
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -6165,6 +6848,107 @@ async def health():
         logger=logger,
     )
     return return_value
+
+
+@app.get(
+    "/runtime/dsh/health",
+    response_model=DshInteractionHealthResponseV1,
+)
+async def runtime_dsh_health() -> DshInteractionHealthResponseV1:
+    """Return the configured Brain interaction owner's readiness facts."""
+
+    return _dsh_interaction_health()
+
+
+@app.post(
+    "/runtime/dsh/interactions",
+    response_model=DshBrainInteractionResponseV1,
+)
+async def runtime_dsh_interaction(
+    request_dto: DshBrainInteractionRequestDTO,
+    request: Request,
+) -> DshBrainInteractionResponseV1:
+    """Admit one authenticated DSH interaction into Brain cognition."""
+
+    interaction_service = _dsh_interaction_service
+    if interaction_service is None:
+        raise _dsh_http_error(
+            status_code=503,
+            code="BRAIN_INTERACTION_UNAVAILABLE",
+        )
+    if not _dsh_request_body_within_limit(request):
+        raise _dsh_http_error(
+            status_code=413,
+            code="DSH_INTERACTION_BODY_TOO_LARGE",
+        )
+    if not interaction_service.accepts_bearer(_dsh_authorization_header(request)):
+        raise _dsh_http_error(
+            status_code=401,
+            code="DSH_INTERACTION_UNAUTHORIZED",
+        )
+    try:
+        internal_request = request_dto.to_canonical()
+        result = await interaction_service.handle_signed(internal_request)
+        return DshBrainInteractionResponseV1.model_validate(result)
+    except (TypeError, ValueError) as exc:
+        logger.warning("DSH Brain interaction rejected: %s", exc)
+        raise _dsh_http_error(
+            status_code=400,
+            code="DSH_INTERACTION_INVALID",
+        ) from None
+    except Exception:
+        logger.exception("DSH Brain interaction handling failed")
+        raise _dsh_http_error(
+            status_code=503,
+            code="BRAIN_INTERACTION_UNAVAILABLE",
+        ) from None
+
+
+@app.post(
+    "/runtime/dsh/interactions/checkpoint",
+    response_model=DshBrainInteractionResponseV1,
+)
+async def runtime_dsh_interaction_checkpoint(
+    request_dto: DshBrainInteractionCheckpointV1,
+    request: Request,
+) -> DshBrainInteractionResponseV1:
+    """Replay one durable relay checkpoint after a sidecar transport retry."""
+
+    interaction_service = _dsh_interaction_service
+    if interaction_service is None:
+        raise _dsh_http_error(
+            status_code=503,
+            code="BRAIN_INTERACTION_UNAVAILABLE",
+        )
+    if not _dsh_request_body_within_limit(request):
+        raise _dsh_http_error(
+            status_code=413,
+            code="DSH_INTERACTION_BODY_TOO_LARGE",
+        )
+    if not interaction_service.accepts_bearer(_dsh_authorization_header(request)):
+        raise _dsh_http_error(
+            status_code=401,
+            code="DSH_INTERACTION_UNAUTHORIZED",
+        )
+    try:
+        internal_request = request_dto.to_canonical()
+        result = await interaction_service.handle_checkpoint(
+            internal_request,
+            response_goal=request_dto.response_goal,
+            relay_mode=request_dto.relay_mode,
+        )
+        return DshBrainInteractionResponseV1.model_validate(result)
+    except (TypeError, ValueError):
+        raise _dsh_http_error(
+            status_code=400,
+            code="DSH_INTERACTION_INVALID",
+        ) from None
+    except Exception:
+        logger.exception("DSH Brain checkpoint handling failed")
+        raise _dsh_http_error(
+            status_code=503,
+            code="BRAIN_INTERACTION_UNAVAILABLE",
+        ) from None
 
 
 @app.get("/ops/runtime-status", response_model=OpsRuntimeStatusResponse)

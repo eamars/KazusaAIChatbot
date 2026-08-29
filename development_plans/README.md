@@ -45,7 +45,6 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
-| [dsh_semantic_tools_and_coding_capability_plan_2026-08-26.md](active/short_term/dsh_semantic_tools_and_coding_capability_plan_2026-08-26.md) | Plan 2 DSH Standard, storage-independent semantic Brain/memory capabilities, default native web/coding, autonomous runtime, and Brain judgment bridge | approved; implementation requires an explicit production command |
 | [dsh_brain_bigbang_cutover_and_legacy_resolution_decommission_plan_2026-08-26.md](active/short_term/dsh_brain_bigbang_cutover_and_legacy_resolution_decommission_plan_2026-08-26.md) | Plan 3 preserved post-selector Brain handover with a DSH task-execution edge and scoped legacy executor/coding decommission | draft; preservation boundary approved, exact post-Plan 2 inventory pending |
 
 ### Superseded Plans
@@ -63,6 +62,7 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
+| [dsh_semantic_tools_and_coding_capability_plan_2026-08-26.md](archive/completed/short_term/dsh_semantic_tools_and_coding_capability_plan_2026-08-26.md) | Plan 2 DSH Standard, storage-independent semantic Brain/memory capabilities, default native web/coding, autonomous runtime, and Brain judgment bridge | completed; P2-P0–P3 and G1–G10 passed without waiver; independent review passed |
 | [dsh_standalone_sidecar_and_resolution_interface_plan_2026-08-26.md](archive/completed/short_term/dsh_standalone_sidecar_and_resolution_interface_plan_2026-08-26.md) | Plan 1 standalone DSH sidecar, canonical resolution interface, durable lifecycle, and old resolver replacement | completed; all seven original gates passed without waiver |
 | [cognition_observability_icd_and_console_consistency_plan_2026-08-26.md](archive/completed/short_term/cognition_observability_icd_and_console_consistency_plan_2026-08-26.md) | Canonical cognition observability ICD, explicit prewarm outcome, and consistent control-console graph cutover | completed |
 | [asuna_real_e2e_50_turn_conversation_practice_plan_2026-08-23.md](archive/completed/short_term/asuna_real_e2e_50_turn_conversation_practice_plan_2026-08-23.md) | Fresh-identity adaptive 50-turn real debug conversation practice, issue register, and optimization handoff | completed |

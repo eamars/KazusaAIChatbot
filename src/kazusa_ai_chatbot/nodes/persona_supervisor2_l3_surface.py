@@ -109,6 +109,11 @@ def build_text_surface_input_from_global_state(
         raise ValueError("canonical private monologue is required")
     if not isinstance(epistemic_boundary, str) or not epistemic_boundary.strip():
         raise ValueError("canonical epistemic boundary is required")
+    surface_response_plan = {
+        key: value
+        for key, value in plan.items()
+        if key != "dsh_interaction_decision"
+    }
     expression_context, visual_context = _character_surface_contexts(state)
     conversation_progress = state.get("conversation_progress")
     if conversation_progress is None:
@@ -123,7 +128,7 @@ def build_text_surface_input_from_global_state(
         "schema_version": "text_surface_input.v4",
         "episode": _canonical_episode(state),
         "active_character_goal": dict(goal),
-        "response_plan": dict(plan),
+        "response_plan": surface_response_plan,
         "expression_policy": {
             "visibility": "visible" if plan.get("response_goal") else "none",
             "emotional_tone": "character-consistent",

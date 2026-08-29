@@ -292,6 +292,76 @@ async def test_reject_memory_unit_marks_active_target_rejected(
 
 
 @pytest.mark.asyncio
+async def test_lifecycle_transitions_are_guarded_idempotent_and_invalidate_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Lifecycle actions persist through one guarded, read-back owner."""
+    active = _document("unit-lifecycle")
+    active["embedding"] = [0.1]
+    collection = _MemoryCollection([active])
+    runtime = _patch_repository(monkeypatch, collection)
+    monkeypatch.setattr(
+        repository_module,
+        "now_iso",
+        lambda: "2026-07-03T00:00:00+00:00",
+    )
+
+    completed = await repository_module.transition_memory_lifecycle(
+        memory_unit_id="unit-lifecycle",
+        transition="complete",
+        reason="the commitment is fulfilled",
+    )
+    assert completed["status"] == MemoryStatus.FULFILLED
+    assert completed["updated_at"] == "2026-07-03T00:00:00+00:00"
+    assert collection.docs["unit-lifecycle"]["status"] == MemoryStatus.FULFILLED
+
+    replayed = await repository_module.transition_memory_lifecycle(
+        memory_unit_id="unit-lifecycle",
+        transition="complete",
+        reason="the same commitment remains fulfilled",
+    )
+    assert replayed == completed
+
+    cancelled = await repository_module.transition_memory_lifecycle(
+        memory_unit_id="unit-lifecycle",
+        transition="cancel",
+        reason="the commitment was cancelled",
+    )
+    assert cancelled["status"] == MemoryStatus.REJECTED
+
+    archived = await repository_module.transition_memory_lifecycle(
+        memory_unit_id="unit-lifecycle",
+        transition="archive",
+        reason="the record is no longer current",
+    )
+    assert archived["status"] == MemoryStatus.EXPIRED
+
+    activated = await repository_module.transition_memory_lifecycle(
+        memory_unit_id="unit-lifecycle",
+        transition="activate",
+        reason="the record is current again",
+    )
+    assert activated["status"] == MemoryStatus.ACTIVE
+
+    assert runtime.invalidate.await_count == 4
+    assert repository_module.memory_store.acquire_memory_write_lock.await_count == 5
+    assert repository_module.memory_store.release_memory_write_lock.await_count == 5
+    assert all(
+        set(fields) == {"status", "updated_at"}
+        for _, update in collection.updated
+        for fields in [update["$set"]]
+    )
+
+    collection.docs["unit-lifecycle"]["status"] = MemoryStatus.SUPERSEDED
+    with pytest.raises(ValueError, match="superseded"):
+        await repository_module.transition_memory_lifecycle(
+            memory_unit_id="unit-lifecycle",
+            transition="activate",
+            reason="must remain immutable",
+        )
+
+
+@pytest.mark.asyncio
 async def test_merge_memory_units_uses_new_lineage_for_different_sources(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

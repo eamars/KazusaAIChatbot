@@ -9,10 +9,14 @@ from pydantic import (
     ConfigDict,
     Field,
     PrivateAttr,
+    model_validator,
 )
 
 from kazusa_ai_chatbot.brain_service.cognition_observation_contracts import (
     CognitionRunObservationV1,
+)
+from kazusa_ai_chatbot.dsh_interaction.contracts import (
+    DshBrainInteractionRequestV1 as CanonicalDshBrainInteractionRequestV1,
 )
 from kazusa_ai_chatbot.message_envelope import MentionEntityKind
 
@@ -88,6 +92,7 @@ class ChatRequest(BaseModel):
     debug_modes: DebugModesIn = Field(default_factory=DebugModesIn)
 
     _receipt_metadata: ChatRequestReceiptMetadata | None = None
+    _dsh_pending_interaction: dict[str, Any] | None = PrivateAttr(default=None)
     _console_trace_authorized: bool = PrivateAttr(default=False)
 
 
@@ -124,6 +129,137 @@ class ChatResponse(BaseModel):
     trace_id: str = ""
     cognition_graph: CognitionRunObservationV1 | None = None
     operational_error: OperationalErrorOut | None = None
+
+
+class DshBrainInteractionRequestV1(BaseModel):
+    """Versioned internal request accepted only from the DSH sidecar."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["dsh_brain_interaction.v1"]
+    interaction_id: str = Field(min_length=1)
+    kind: Literal["approval", "question", "plan_review"]
+    resolution_thread_id: str = Field(min_length=1)
+    segment_id: str = Field(min_length=1)
+    activation_id: str = Field(min_length=1)
+    lease_epoch: int = Field(ge=1)
+    dsh_call_id: str = Field(min_length=1)
+    tool_name: str | None
+    operation_id: str = Field(min_length=1)
+    operation_payload_digest: str = Field(min_length=1)
+    arguments_digest: str = Field(min_length=1)
+    transient_detail: str = Field(min_length=1, max_length=8_000)
+    brain_conversation_ref: str = Field(min_length=1)
+    platform: str = Field(min_length=1)
+    platform_channel_id: str = Field(min_length=1)
+    global_user_id: str = Field(min_length=1)
+    scope_fingerprint: str = Field(min_length=1)
+    audience_fingerprint: str = Field(min_length=1)
+    profile_version: str = Field(min_length=1)
+    catalog_digest: str = Field(min_length=1)
+    model_route_digest: str = Field(min_length=1)
+    workspace_fingerprint: str = Field(min_length=1)
+    policy_epoch: str = Field(min_length=1)
+    issued_reference_digest: str = Field(min_length=1)
+    nonce: str = Field(min_length=1)
+    issued_at: str = Field(min_length=1)
+    expires_at: str = Field(min_length=1)
+    issuer: str = Field(min_length=1)
+    mac: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_interaction_identity(self) -> "DshBrainInteractionRequestV1":
+        """Enforce the closed transport shape before Brain admission."""
+
+        self.to_canonical()
+        if self.kind == "approval" and self.tool_name is None:
+            raise ValueError("approval interaction requires tool_name")
+        for field_name in (
+            "operation_payload_digest",
+            "arguments_digest",
+            "scope_fingerprint",
+            "audience_fingerprint",
+            "catalog_digest",
+            "model_route_digest",
+            "workspace_fingerprint",
+            "issued_reference_digest",
+        ):
+            value = getattr(self, field_name)
+            if not value.strip():
+                raise ValueError(f"{field_name} must be non-empty")
+        return self
+
+    def to_canonical(self) -> CanonicalDshBrainInteractionRequestV1:
+        """Adapt the HTTP DTO through the single internal request contract."""
+
+        return CanonicalDshBrainInteractionRequestV1.from_mapping(
+            self.model_dump(mode="python"),
+        )
+
+
+class DshBrainInteractionCheckpointV1(DshBrainInteractionRequestV1):
+    """Signed relay checkpoint request accepted only by the Brain service."""
+
+    response_goal: str = Field(min_length=1, max_length=2_000)
+    relay_mode: Literal["question", "approval", "plan_review"]
+
+    def to_canonical(self) -> CanonicalDshBrainInteractionRequestV1:
+        """Adapt the checkpoint envelope while excluding its relay fields."""
+
+        value = self.model_dump(mode="python")
+        value.pop("response_goal", None)
+        value.pop("relay_mode", None)
+        return CanonicalDshBrainInteractionRequestV1.from_mapping(value)
+
+
+class DshBrainInteractionResponseV1(BaseModel):
+    """Versioned internal decision response returned to the DSH sidecar."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["dsh_brain_interaction.v1"]
+    interaction_id: str = Field(min_length=1)
+    request_digest: str = Field(min_length=1)
+    kind: Literal["approval", "question", "plan_review"]
+    decision: Literal["answer", "allow_once", "reject", "relay_to_user"]
+    reason: str = Field(min_length=1)
+    answer: str | None = Field(default=None, max_length=2_000)
+    response_goal: str | None = Field(default=None, max_length=2_000)
+    relay_mode: Literal["question", "approval", "plan_review"] | None = None
+    grant: dict[str, Any] | None = None
+    checkpoint_required: bool = False
+    pending_interaction_id: str | None = None
+    delivered_platform_message_id: str | None = None
+    delivery_status: Literal["failed"] | None = None
+
+    @model_validator(mode="after")
+    def validate_decision_payload(self) -> "DshBrainInteractionResponseV1":
+        """Enforce decision-specific fields on responses leaving Brain."""
+
+        if self.decision == "answer" and self.answer is None:
+            raise ValueError("answer is required for answer decision")
+        if self.decision != "answer" and self.answer is not None:
+            raise ValueError("answer is status-specific")
+        if self.decision == "relay_to_user":
+            if self.response_goal is None or self.relay_mode is None:
+                raise ValueError("relay response requires response_goal and relay_mode")
+        elif self.response_goal is not None or self.relay_mode is not None:
+            raise ValueError("relay fields are status-specific")
+        if self.decision == "allow_once" and self.grant is None:
+            raise ValueError("allow_once response requires a deterministic grant")
+        return self
+
+
+class DshInteractionHealthResponseV1(BaseModel):
+    """Readiness facts for the configured Brain interaction owner."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["dsh_brain_interaction_health.v1"]
+    status: Literal["ready", "unavailable"]
+    configured: bool
+    durable_store: bool
+    cognition_judge: bool
 
 
 class OpsLatestCognitionGraphResponse(BaseModel):
