@@ -30,24 +30,17 @@ def _require_live_backend() -> None:
             pytest.fail(f"live Brain configuration is missing: {name}")
 
 
-def _request(kind: str, interaction_id: str) -> dict[str, object]:
-    """Return one identity-complete interaction request for the live model."""
+def _question_request(interaction_id: str) -> dict[str, object]:
+    """Return one identity-complete question request for the live model."""
 
     value = _request_mapping()
-    value["kind"] = kind
+    value["kind"] = "question"
     value["interaction_id"] = interaction_id
     value["nonce"] = f"nonce-{interaction_id}"
-    if kind == "approval":
-        value["tool_name"] = "pwsh"
-        value["transient_detail"] = (
-            "A one-time native workspace write was requested, but the existing "
-            "conversation contains no user permission for that exact operation."
-        )
-    else:
-        value["transient_detail"] = (
-            "The bounded context states that the verification marker is three. "
-            "Answer what the verification marker is directly from that context."
-        )
+    value["transient_detail"] = (
+        "The bounded context states that the verification marker is three. "
+        "Answer what the verification marker is directly from that context."
+    )
     return value
 
 
@@ -89,7 +82,7 @@ async def test_brain_cognition_answers_or_rejects_dsh_request_from_context() -> 
     secret = os.environ["KAZUSA_DSH_BRAIN_SHARED_SECRET"].encode("utf-8")
     service = _live_service()
     request = DshBrainInteractionRequestV2.from_mapping(
-        _request("question", interaction_id)
+        _question_request(interaction_id)
     )
     try:
         result = await service.handle_signed(
@@ -107,34 +100,5 @@ async def test_brain_cognition_answers_or_rejects_dsh_request_from_context() -> 
             "reason",
         }
         assert "checkpoint" not in json.dumps(result, ensure_ascii=False)
-    finally:
-        await _delete_interaction(interaction_id)
-
-
-@pytest.mark.asyncio
-async def test_brain_cognition_decides_native_approval_without_user_relay() -> None:
-    """Brain cognition owns the approval decision without a user relay."""
-
-    _require_live_backend()
-    from kazusa_ai_chatbot.dsh_interaction.auth import sign_request
-    from kazusa_ai_chatbot.dsh_interaction.contracts import DshBrainInteractionRequestV2
-    interaction_id = f"live-approval-{uuid4().hex}"
-    secret = os.environ["KAZUSA_DSH_BRAIN_SHARED_SECRET"].encode("utf-8")
-    service = _live_service()
-    request = DshBrainInteractionRequestV2.from_mapping(
-        _request("approval", interaction_id)
-    )
-    try:
-        result = await service.handle_signed(
-            sign_request(request, secret=secret)
-        )
-        assert result["kind"] == "approval"
-        assert result["decision"] in {"allow_once", "reject"}
-        assert "relay" not in json.dumps(result, ensure_ascii=False)
-        assert "checkpoint" not in json.dumps(result, ensure_ascii=False)
-        if result["decision"] == "allow_once":
-            grant = result.get("grant")
-            assert isinstance(grant, dict)
-            assert grant["grant_status"] == "consumed"
     finally:
         await _delete_interaction(interaction_id)

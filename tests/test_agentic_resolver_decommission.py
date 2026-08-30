@@ -26,20 +26,18 @@ def test_old_resolver_contracts_facades_and_aliases_are_absent() -> None:
     assert not legacy_exports.intersection(package.__dict__)
 
 
-def test_brain_task_resolution_rag_and_coding_paths_use_only_canonical_dsh_bridge() -> None:
+def test_brain_task_resolution_and_rag_paths_use_only_canonical_dsh_bridge() -> None:
     """Retained paths have no deleted executor or compatibility imports."""
 
     roots = (
         PROJECT_ROOT / "src" / "kazusa_ai_chatbot" / "brain_service",
         PROJECT_ROOT / "src" / "kazusa_ai_chatbot" / "task_resolution",
         PROJECT_ROOT / "src" / "kazusa_ai_chatbot" / "rag",
-        PROJECT_ROOT / "src" / "kazusa_ai_chatbot" / "coding_agent",
     )
     forbidden = (
         "task_resolution.orchestrator",
         "task_resolution.specialists",
         "complex_task_resolver",
-        "coding_agent",
         "sidecars/dsh_resolution",
     )
     for root in roots:

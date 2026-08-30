@@ -37,7 +37,6 @@ def test_route_report_omits_decommissioned_routes_and_keeps_live_routes(
             _route("COGNITION_V3_CHAIN_LLM"),
             _route("RAG_PLANNER_LLM"),
             _route("BACKGROUND_WORK_LLM"),
-            _route("CODING_AGENT_PM_LLM"),
         ),
     )
     monkeypatch.setattr(
@@ -51,8 +50,6 @@ def test_route_report_omits_decommissioned_routes_and_keeps_live_routes(
 
     assert names == {"COGNITION_V3_CHAIN_LLM", "RAG_PLANNER_LLM"}
     assert all(row.route_name != "BACKGROUND_WORK_LLM" for row in diagnostics)
-    assert all(row.route_name != "CODING_AGENT_PM_LLM" for row in diagnostics)
     rendered = route_report.render_llm_route_table()
     assert "COGNITION_V3_CHAIN_LLM" in rendered
     assert "RAG_PLANNER_LLM" in rendered
-    assert "CODING_AGENT_PM_LLM" not in rendered

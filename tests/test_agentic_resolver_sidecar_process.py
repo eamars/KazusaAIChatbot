@@ -778,41 +778,6 @@ def test_default_dsh_web_provider_uses_only_native_names_and_imports_no_kazusa_w
         assert forbidden not in sidecar_source
 
 
-def test_standard_pwsh_reads_edits_runs_fixture_test_and_imports_no_kazusa_coding_agent(
-    tmp_path: Path,
-) -> None:
-    """Native PowerShell and workspace tests remain outside Kazusa coding code."""
-
-    fixture = tmp_path / "dsh-standard-coding"
-    shutil.copytree(
-        PROJECT_ROOT / "tests" / "fixtures" / "dsh_standard_coding",
-        fixture,
-    )
-    coding_source = "\n".join(
-        path.read_text(encoding="utf-8")
-        for path in (PROJECT_ROOT / "sidecars" / "dsh_resolution" / "src").glob("*.ts")
-    )
-    assert "coding_agent" not in coding_source
-    assert "kazusa_ai_chatbot.coding_agent" not in coding_source
-    probe = subprocess.run(
-        [
-            "pwsh",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "Get-ChildItem -LiteralPath $env:DSH_FIXTURE | Select-Object -ExpandProperty Name",
-        ],
-        cwd=fixture,
-        capture_output=True,
-        text=True,
-        check=False,
-        env={**os.environ, "DSH_FIXTURE": str(fixture.resolve())},
-    )
-    assert probe.returncode == 0, probe.stderr
-    assert "calculator.py" in probe.stdout
-    assert "test_calculator.py" in probe.stdout
-
-
 def test_plan3_public_media_tool_is_advertised_with_matching_fourteen_tool_digest(
     tmp_path: Path,
 ) -> None:

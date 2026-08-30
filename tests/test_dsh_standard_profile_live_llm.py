@@ -4,21 +4,12 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
-import sqlite3
-import subprocess
-import sys
 from collections.abc import Callable, Mapping
-from hashlib import sha256
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 import pytest
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-FIXTURE_ROOT = PROJECT_ROOT / "tests" / "fixtures" / "dsh_standard_coding"
-DEBUG_ROOT = PROJECT_ROOT / ".dsh-debug"
 
 pytestmark = pytest.mark.live_llm
 
@@ -81,69 +72,6 @@ def _assert_semantic_tool_used(result: dict[str, Any], name: str) -> None:
 
     rendered = json.dumps(result, ensure_ascii=False, sort_keys=True)
     assert name in rendered
-
-
-def _read_root_approval_events(
-    result: Mapping[str, Any],
-) -> list[tuple[str, dict[str, Any]]]:
-    """Read approval audit events from the exact root session for one result."""
-
-    from agentic_resolver.contracts import DSH_RELEASE
-
-    identity = result.get("identity")
-    if not isinstance(identity, Mapping):
-        pytest.fail("live result has no identity for session attribution")
-    resolution_thread_id = identity.get("resolution_thread_id")
-    segment_id = identity.get("segment_id")
-    if (
-        not isinstance(resolution_thread_id, str)
-        or not resolution_thread_id.strip()
-        or not isinstance(segment_id, str)
-        or not segment_id.strip()
-    ):
-        pytest.fail("live result identity cannot identify a DSH root session")
-
-    session_identity = f"{resolution_thread_id}\0{segment_id}".encode()
-    session_id = (
-        "kazusa-resolution-"
-        f"{sha256(session_identity).hexdigest()[:32]}"
-    )
-    data_root = os.environ.get("KAZUSA_DSH_DATA_ROOT")
-    if data_root is None or not data_root.strip():
-        pytest.fail("KAZUSA_DSH_DATA_ROOT is unavailable for audit inspection")
-    store_path = Path(data_root) / "dsh" / DSH_RELEASE / "sessions.sqlite"
-    if not store_path.is_file():
-        pytest.fail(f"DSH session store is unavailable: {store_path}")
-
-    uri = f"file:{store_path.as_posix()}?mode=ro"
-    with sqlite3.connect(uri, uri=True) as connection:
-        session_rows = connection.execute(
-            "SELECT id FROM sessions WHERE id = ?",
-            (session_id,),
-        ).fetchall()
-        if session_rows != [(session_id,)]:
-            pytest.fail(
-                "exact DSH root session was not uniquely attributable: "
-                f"{session_id}"
-            )
-        event_rows = connection.execute(
-            "SELECT type, data FROM events "
-            "WHERE session_id = ? AND type IN (?, ?) ORDER BY seq",
-            (session_id, "approval/asked", "approval/decided"),
-        ).fetchall()
-
-    events: list[tuple[str, dict[str, Any]]] = []
-    for event_type, raw_data in event_rows:
-        if not isinstance(raw_data, str):
-            pytest.fail(f"approval audit event is not JSON text: {event_type}")
-        try:
-            data = json.loads(raw_data)
-        except json.JSONDecodeError as error:
-            pytest.fail(f"approval audit event is malformed: {error}")
-        if not isinstance(data, dict):
-            pytest.fail(f"approval audit event is not an object: {event_type}")
-        events.append((event_type, data))
-    return events
 
 
 @pytest.mark.asyncio
@@ -365,78 +293,3 @@ async def test_qwen27b_selects_description_stripped_semantic_and_native_tools_th
     )
     assert result["terminal"]["status"] in {"resolved", "partial"}
     assert "native_precedence" not in json.dumps(result, ensure_ascii=False)
-
-
-@pytest.mark.asyncio
-async def test_qwen27b_standard_mode_repairs_fixture_with_native_workspace_tools(
-    tmp_path: Path,
-) -> None:
-    """Exercise Standard native editing and test execution on the fixture."""
-
-    _require_live_backend()
-    DEBUG_ROOT.mkdir(parents=True, exist_ok=True)
-    workspace = DEBUG_ROOT / f"dsh-standard-coding-{uuid4().hex}"
-    shutil.copytree(FIXTURE_ROOT, workspace)
-    relative_workspace = workspace.relative_to(PROJECT_ROOT).as_posix()
-    try:
-        result = await _resolve_live(
-            tmp_path,
-            (
-                "Use only native workspace tools to inspect, repair, and run "
-                f"the deterministic test in {relative_workspace}."
-            ),
-            "native-coding",
-        )
-        environment = os.environ.copy()
-        environment["KAZUSA_RUN_DSH_FIXTURE"] = "1"
-        completed = subprocess.run(
-            [sys.executable, "-m", "pytest", "-q", "test_calculator.py"],
-            cwd=workspace,
-            capture_output=True,
-            text=True,
-            check=False,
-            env=environment,
-        )
-        assert completed.returncode == 0, completed.stdout + completed.stderr
-        assert result["terminal"]["status"] == "resolved"
-    finally:
-        shutil.rmtree(workspace)
-
-
-@pytest.mark.asyncio
-async def test_qwen27b_outside_workspace_request_round_trips_through_brain_once(
-    tmp_path: Path,
-) -> None:
-    """Exercise Brain approval and one same-thread retry."""
-
-    _require_live_backend()
-    result = await _resolve_live(
-        tmp_path,
-        "Request one operation outside the admitted workspace, let Brain judge it, and retry only after its one-shot grant.",
-        "brain-approval",
-    )
-    events = _read_root_approval_events(result)
-    asked = [data for event_type, data in events if event_type == "approval/asked"]
-    decided = [
-        data for event_type, data in events if event_type == "approval/decided"
-    ]
-    assert len(asked) == 1
-    assert len(decided) == 1
-
-    asked_event = asked[0]
-    decided_event = decided[0]
-    approval_id = asked_event.get("id")
-    assert isinstance(approval_id, str) and approval_id.strip()
-    assert decided_event.get("id") == approval_id
-    call_id = asked_event.get("callId")
-    assert isinstance(call_id, str) and call_id.strip()
-
-    outcome = decided_event.get("outcome")
-    assert outcome in {"allowed-once", "rejected"}
-    terminal = result.get("terminal")
-    assert isinstance(terminal, Mapping)
-    terminal_status = terminal.get("status")
-    if outcome == "allowed-once":
-        assert terminal_status in {"resolved", "partial"}
-    else:
-        assert terminal_status in {"resolved", "partial", "unavailable"}

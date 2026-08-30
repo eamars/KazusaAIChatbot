@@ -78,13 +78,12 @@ def _module(name: str) -> Any:
         pytest.fail(f"planned action owner is unavailable: {name}: {exc}")
 
 
-def test_registry_exposes_closed_dsh_task_controls_without_legacy_coding_capability() -> None:
+def test_registry_exposes_closed_dsh_task_controls() -> None:
     """The executable registry projection advertises the typed control."""
 
     registry = _module("kazusa_ai_chatbot.action_spec.registry")
     capabilities = registry.build_initial_action_capabilities()
     assert "accepted_task_control" in capabilities
-    assert "accepted_coding_task_request" not in capabilities
     schema = capabilities["accepted_task_control"]["input_schema"]
     assert schema["additionalProperties"] is False
     assert schema["properties"]["operation"]["enum"] == [
@@ -197,4 +196,3 @@ def test_action_public_exports_use_only_accepted_task_control() -> None:
     public_names = set(getattr(module, "__all__", ()))
     assert "AcceptedTaskControlV1" in public_names
     assert "accepted_task_control" in public_names
-    assert "accepted_coding_task_request" not in public_names

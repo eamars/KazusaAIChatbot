@@ -123,7 +123,7 @@ async def test_dsh_task_updates_have_no_interaction_wait_state() -> None:
 
 
 @pytest.mark.asyncio
-async def test_one_open_dsh_followup_is_scoped_indexed_and_excludes_legacy_coding_context(
+async def test_one_open_dsh_followup_is_scoped_and_indexed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The real repository creates the sole scoped DSH follow-up index."""
@@ -136,10 +136,6 @@ async def test_one_open_dsh_followup_is_scoped_indexed_and_excludes_legacy_codin
         "accepted_task_open_dsh_followup_unique",
         "accepted_task_scope_dsh_followup_lookup",
     }
-    assert all(
-        "coding_run_context" not in str(index)
-        for index in database.accepted_tasks.indexes.values()
-    )
 
 
 @pytest.mark.asyncio

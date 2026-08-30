@@ -550,10 +550,6 @@ class TestRouteLlmConfig:
         assert not hasattr(config, "LLM_BASE_URL")
         assert not hasattr(config, "LLM_API_KEY")
         assert not hasattr(config, "LLM_MODEL")
-        retired_code_route = "CODING_AGENT_" + "LLM"
-        assert not hasattr(config, f"{retired_code_route}_BASE_URL")
-        assert not hasattr(config, f"{retired_code_route}_API_KEY")
-        assert not hasattr(config, f"{retired_code_route}_MODEL")
 
     def test_all_route_config_values_are_present(self):
         import kazusa_ai_chatbot.config as config

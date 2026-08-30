@@ -264,12 +264,12 @@ def test_removed_source_manifest_maps_deleted_sources_to_surviving_nodes() -> No
     manifest = load_manifest(REPOSITORY_ROOT)
     removed_sources = manifest["removed_sources"]
     assert isinstance(removed_sources, dict)
-    assert len(removed_sources) == 119
+    assert len(removed_sources) == 28
 
     common_nodes = {
         (
             "tests/unit/task_resolution/test_decommission.py::"
-            "test_legacy_task_complex_coding_and_rag2_executor_sources_are_absent"
+            "test_legacy_task_complex_and_rag2_executor_sources_are_absent"
         ),
         (
             "tests/unit/task_resolution/test_decommission.py::"
@@ -288,10 +288,6 @@ def test_removed_source_manifest_maps_deleted_sources_to_surviving_nodes() -> No
             "test_public_media_rejects_private_redirect_oversize_or_invalid_image_before_inspection"
         ),
     }
-    assert set(resolve_impacted_test_nodes(
-        manifest,
-        ["scripts/run_coding_agent_benchmark.py"],
-    )) == common_nodes
 
 
 def test_stale_required_node_fails_closed() -> None:

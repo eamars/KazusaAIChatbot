@@ -33,7 +33,6 @@ def test_plan3_docs_describe_dsh_only_task_execution_and_retained_rag3() -> None
     assert "task" in docs
     assert "rag3" in docs or "local_context" in docs
     assert "complex_task_resolver" not in docs
-    assert "coding_agent" not in docs
 
 
 def test_plan3_docs_name_exact_fourteen_tool_catalog_and_public_media_boundary() -> None:
@@ -54,7 +53,6 @@ def test_plan3_docs_contain_no_legacy_executor_interfaces() -> None:
     forbidden = (
         "continue_bound_coding_run",
         "background_work_llm_",
-        "coding_agent_llm_",
         "complex_task_resolver",
     )
     present = [term for term in forbidden if term in docs]

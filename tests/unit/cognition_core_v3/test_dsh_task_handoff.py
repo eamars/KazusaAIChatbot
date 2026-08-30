@@ -7,7 +7,7 @@ from kazusa_ai_chatbot.cognition_core_v3.contracts import CanonicalAppraisal
 from tests.unit.cognition_core_v3.test_handleless_contract import _input
 
 
-def test_task_control_preserves_continuation_goal_without_coding_special_case() -> None:
+def test_task_control_preserves_continuation_goal() -> None:
     """A generic DSH request creates one guarded continuation goal."""
 
     payload = _input()
@@ -62,4 +62,3 @@ def test_task_control_preserves_continuation_goal_without_coding_special_case() 
     assert transitions
     assert receipts
     assert provenance
-    assert all("coding" not in repr(item).lower() for item in transitions)

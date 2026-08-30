@@ -200,21 +200,6 @@ async def test_dsh_promotion_and_followup_claim_preserve_one_session_with_new_de
     assert repository.create_calls == 1
 
 
-def test_accepted_task_public_exports_exclude_coding_run_contexts() -> None:
-    """The public package exports the DSH affordance/control vocabulary."""
-
-    module = _module("kazusa_ai_chatbot.accepted_task")
-    public_names = set(getattr(module, "__all__", ()))
-    assert {
-        "DshAcceptedTaskAffordanceV1",
-        "AcceptedTaskControlV1",
-    } <= public_names
-    assert not public_names & {
-        "CodingRunContextV1",
-        "AcceptedCodingTaskRequestV1",
-    }
-
-
 class _FakeRepository:
     def __init__(self) -> None:
         self.create_calls = 0

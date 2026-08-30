@@ -20,6 +20,4 @@ def test_producer_matrix_matches_current_source_owners() -> None:
     assert "src/kazusa_ai_chatbot/background_work/**" in patterns
     assert "src/kazusa_ai_chatbot/media_inspection/**" in patterns
     assert "src/kazusa_ai_chatbot/complex_task_resolver/**" not in patterns
-    assert "src/kazusa_ai_chatbot/coding_agent/**" not in patterns
     assert "dsh_task_resolution" in routes
-    assert "coding_agent" not in routes

@@ -29,6 +29,43 @@
   gates green; the post-Plan 2 source/data/config/test inventory and all Plan 3
   design decisions are closed below. Plan 3 implementation is in progress.
 
+## Coding-Agent Test De-Overfitting Amendment — 2026-08-31
+
+The user directed removal of every coding-agent-specific unit, integration,
+and real-LLM test. The completed DSH cutover owns generic task execution;
+Kazusa no longer carries a second coding-agent behavior contract. Earlier
+Plan 2 and Plan 3 test rows, commands, matrices, and acceptance text that name
+the removed nodes below are historical evidence and no longer gate Plan 3.
+
+The removed behavioral nodes are:
+
+- `tests/test_agentic_resolver_sidecar_process.py::test_standard_pwsh_reads_edits_runs_fixture_test_and_imports_no_kazusa_coding_agent`;
+- `tests/test_dsh_standard_profile_live_llm.py::test_qwen27b_standard_mode_repairs_fixture_with_native_workspace_tools`;
+- `tests/test_dsh_standard_profile_live_llm.py::test_qwen27b_outside_workspace_request_round_trips_through_brain_once`;
+- `tests/test_dsh_plan2_e2e_live_llm.py::test_e2e_native_coding_repairs_and_verifies_workspace_fixture`;
+- `tests/test_dsh_plan2_e2e_live_llm.py::test_e2e_brain_judgment_owns_native_approval_and_one_shot_grant`;
+- `tests/test_dsh_plan3_e2e_live_llm.py::test_e2e_native_coding_uses_brain_approval_and_returns_verified_artifact`;
+- `tests/test_dsh_plan3_e2e_live_llm.py::test_e2e_coding_followups_revision_summary_status_approval_blocker_and_cancel_preserve_session`;
+- `tests/test_dsh_brain_interaction_live_llm.py::test_brain_cognition_decides_native_approval_without_user_relay`;
+- `tests/unit/accepted_task/test_dsh_task_lifecycle.py::test_accepted_task_public_exports_exclude_coding_run_contexts`.
+
+The coding-only `tests/fixtures/dsh_standard_coding/` fixture is deleted.
+The coding-ledger-specific
+`tests/unit/scripts/test_check_dsh_plan3_drain.py` module is deleted.
+Mixed decommission, route, configuration, documentation, action, database,
+manifest, and resolver-boundary tests retain only their non-coding contracts.
+The removed-source manifest no longer carries historical coding-agent source
+rows or maps them to absence-policing tests.
+
+The retained exception is the existing result-delivery boundary. Tests may
+continue to project or reject the canonical empty `coding_run_context` field
+while that field remains in `TaskResolutionResultV1`, and delivery UI fixtures
+may display already persisted historical worker labels. Generic DSH profile,
+native-tool catalog, evidence receipt, interaction/grant, sandbox, task
+lifecycle, cognition recurrence, dialog, dispatcher, and delivery tests remain
+because they test DSH or delivery ownership rather than a Kazusa coding agent.
+This amendment changes no production source, deployment state, or data.
+
 ## Authoritative Character-Owned DSH Interaction Amendment — 2026-08-30
 
 The user confirmed this amendment before implementation. DSH belongs to the

@@ -94,7 +94,7 @@ async def test_open_carries_admission_sequence_into_empty_checkpoint_identity(
     assert exhaust.to_dict()["identity"]["last_committed_seq"] == 0
 
 
-def test_runtime_has_no_brain_task_resolution_rag_or_coding_import_edge() -> None:
+def test_runtime_has_no_brain_task_resolution_or_rag_import_edge() -> None:
     source = inspect.getsource(__import__("agentic_resolver.runtime", fromlist=["*"]))
     tree = ast.parse(source)
     imports: set[str] = set()
@@ -103,7 +103,7 @@ def test_runtime_has_no_brain_task_resolution_rag_or_coding_import_edge() -> Non
             imports.update(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom) and node.module:
             imports.add(node.module)
-    forbidden = ("brain_service", "task_resolution", ".rag", "coding_agent")
+    forbidden = ("brain_service", "task_resolution", ".rag")
     assert all(
         not any(name in target for name in forbidden)
         for target in imports

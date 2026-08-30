@@ -168,7 +168,6 @@ async def test_task_resolution_cutover_live_db(
                 "state": completed["state"],
                 "completion_status": completed["completion_status"],
             },
-            "coding_agent_operation_called": False,
         })
         print(f"TASK_RESOLUTION_CUTOVER_ARTIFACT={artifact_path}")
     finally:

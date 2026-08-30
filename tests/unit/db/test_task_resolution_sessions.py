@@ -472,10 +472,10 @@ async def test_binding_repository_is_exposed_only_through_named_db_helpers(
 
 
 @pytest.mark.asyncio
-async def test_bootstrap_creates_binding_and_dsh_followup_indexes_and_drops_only_obsolete_coding_index(
+async def test_bootstrap_creates_binding_and_dsh_followup_indexes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Bootstrap invokes binding indexes and removes only the obsolete coding index."""
+    """Bootstrap invokes the exact binding indexes."""
 
     try:
         module = importlib.import_module("kazusa_ai_chatbot.db.bootstrap")

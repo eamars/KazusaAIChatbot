@@ -219,7 +219,6 @@ def test_fresh_database_fixture_uses_current_required_routes() -> None:
 
     assert "agentic_resolver" in routes
     assert "dsh_task_resolution" in routes
-    assert "coding_agent" not in routes
     assert "complex_task_resolver" not in routes
 
 
