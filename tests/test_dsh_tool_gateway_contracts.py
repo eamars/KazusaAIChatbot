@@ -2,20 +2,25 @@
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 
 
 def test_public_gateway_exports_are_bounded_contracts_only() -> None:
     from kazusa_ai_chatbot.dsh_tool_gateway import (
-        KazusaSemanticCapabilityResultV1,
         SEMANTIC_TOOL_NAMES,
+        KazusaSemanticCapabilityResultV1,
     )
 
-    assert len(SEMANTIC_TOOL_NAMES) == 13
+    assert len(SEMANTIC_TOOL_NAMES) == 14
     assert all(name.startswith("kazusa_") for name in SEMANTIC_TOOL_NAMES)
+    assert "kazusa_inspect_public_media" in SEMANTIC_TOOL_NAMES
     assert not any(name.endswith("_v1") for name in SEMANTIC_TOOL_NAMES)
     assert KazusaSemanticCapabilityResultV1
 
@@ -66,7 +71,7 @@ def test_description_stripped_catalog_is_self_explanatory_storage_independent_an
 
     catalog = description_stripped_catalog({"read_file", "submit_resolution"})
     names = {item["name"] for item in catalog}
-    assert len(names) == 13
+    assert len(names) == 14
     assert "read_file" not in names
     assert "submit_resolution" not in names
     assert all("description" not in item for item in catalog)
@@ -89,6 +94,7 @@ def test_description_stripped_catalog_is_self_explanatory_storage_independent_an
         "kazusa_recall_active_context",
         "kazusa_read_calendar_context",
         "kazusa_inspect_attached_media",
+        "kazusa_inspect_public_media",
     }
     for schema in schemas.values():
         assert schema["type"] == "object"
@@ -150,7 +156,9 @@ def test_description_stripped_catalog_is_self_explanatory_storage_independent_an
 
 
 def test_opaque_reference_is_sealed_complete_authority_bound_and_restart_resolvable() -> None:
-    from kazusa_ai_chatbot.dsh_tool_gateway.authority import SemanticActivationAuthorityV1
+    from kazusa_ai_chatbot.dsh_tool_gateway.authority import (
+        SemanticActivationAuthorityV1,
+    )
     from kazusa_ai_chatbot.dsh_tool_gateway.contracts import (
         OpaqueReferenceCodec,
         content_digest,
@@ -248,3 +256,90 @@ def test_opaque_reference_is_sealed_complete_authority_bound_and_restart_resolva
                 ),
             ),
         )
+
+
+def test_catalog_preserves_plan2_thirteen_and_adds_exact_public_media_tool() -> None:
+    """The Plan 3 catalog is additive and keeps every Plan 2 tool unchanged."""
+
+    from kazusa_ai_chatbot.dsh_tool_gateway.catalog import semantic_catalog
+
+    catalog = semantic_catalog()
+    by_name = {item["name"]: item for item in catalog}
+    expected_plan2 = {
+        "kazusa_search_conversation_history",
+        "kazusa_read_conversation_entries",
+        "kazusa_summarize_conversation_participants",
+        "kazusa_search_memories",
+        "kazusa_read_memories",
+        "kazusa_remember_information",
+        "kazusa_revise_memory",
+        "kazusa_change_memory_lifecycle",
+        "kazusa_find_people_by_name",
+        "kazusa_read_person_profiles",
+        "kazusa_recall_active_context",
+        "kazusa_read_calendar_context",
+        "kazusa_inspect_attached_media",
+    }
+
+    assert set(by_name) == expected_plan2 | {"kazusa_inspect_public_media"}
+    assert by_name["kazusa_inspect_public_media"]["input_schema"] == {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["public_media_url", "question"],
+        "properties": {
+            "public_media_url": {"type": "string"},
+            "question": {"type": "string"},
+        },
+    }
+
+
+def test_catalog_declares_exact_fourteen_storage_independent_semantic_tools() -> None:
+    """Description stripping must leave fourteen closed semantic schemas."""
+
+    from kazusa_ai_chatbot.dsh_tool_gateway.catalog import (
+        description_stripped_catalog,
+    )
+
+    catalog = description_stripped_catalog(set())
+    names = {item["name"] for item in catalog}
+
+    assert len(catalog) == 14
+    assert len(names) == 14
+    assert all("description" not in item for item in catalog)
+    assert all(
+        item["input_schema"]["additionalProperties"] is False
+        for item in catalog
+    )
+
+
+def test_plan3_public_media_tool_is_byte_identical_across_python_and_sidecar_catalogs() -> None:
+    """The executable Python and built sidecar catalogs have one exact shape."""
+
+    from kazusa_ai_chatbot.dsh_tool_gateway.catalog import semantic_catalog
+
+    repository_root = Path(__file__).resolve().parents[1]
+    sidecar_root = repository_root / "sidecars" / "dsh_resolution"
+    node_script = (
+        "import { semanticCatalogProjection } from './dist/src/contracts.js'; "
+        "process.stdout.write(JSON.stringify(semanticCatalogProjection()));"
+    )
+    completed = subprocess.run(
+        ["node", "--input-type=module", "-e", node_script],
+        cwd=sidecar_root,
+        env=os.environ.copy(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    python_catalog = [
+        {"name": item["name"], "input_schema": item["input_schema"]}
+        for item in semantic_catalog()
+    ]
+    sidecar_catalog = json.loads(completed.stdout)
+    assert sidecar_catalog == python_catalog
+    assert len(python_catalog) == 14
+    assert {
+        item["name"] for item in python_catalog
+    } >= {"kazusa_inspect_public_media"}

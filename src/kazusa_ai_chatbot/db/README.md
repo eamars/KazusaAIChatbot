@@ -676,6 +676,19 @@ in upstream prompts, schemas, or caller contracts.
 
 ## Evolution Paths
 
+## DSH task binding collection
+
+The DSH task edge owns dsh_task_binding.v1 documents in the
+dsh_task_bindings collection. A binding records the accepted task, background
+job, DSH thread and segment, current operation_generation, lease/authority
+fencing metadata, and document revision. Claim, checkpoint, continuation, and
+terminal transitions use revision CAS and idempotent operation identity.
+Recovery mints fresh authority at claim time and refuses stale generations;
+historical terminal bindings remain immutable until their retention window
+expires. The binding is the durable bridge between accepted-task state and
+the sidecar session; transient TaskResolutionAdmissionV1 never substitutes
+for it.
+
 ## Resolution thread metadata
 
 Collection `resolution_threads` is owned by

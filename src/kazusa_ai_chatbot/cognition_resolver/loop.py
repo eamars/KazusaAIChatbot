@@ -29,18 +29,13 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     ResolverCycleStateV1,
     ResolverObservationV1,
     ResolverPendingResolutionV1,
-    ResolverPendingResumeV1,
+    ResolverPendingResumeV3,
     ResolverValidationError,
     validate_required_resolver_evidence_dependency,
     validate_resolver_capability_request,
     validate_resolver_goal_progress,
     validate_resolver_observation,
     validate_resolver_pending_resolution,
-)
-from kazusa_ai_chatbot.cognition_shared.contracts import (
-    CognitionContractError,
-    CognitionExecutionError,
-    _validate_scene_context,
 )
 from kazusa_ai_chatbot.cognition_resolver.pending import (
     apply_pending_resolution,
@@ -53,6 +48,11 @@ from kazusa_ai_chatbot.cognition_resolver.state import (
     project_resolver_context,
     update_goal_progress,
     validate_resolver_state,
+)
+from kazusa_ai_chatbot.cognition_shared.contracts import (
+    CognitionContractError,
+    CognitionExecutionError,
+    _validate_scene_context,
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from kazusa_ai_chatbot.past_dialog_cognition import (
@@ -69,7 +69,7 @@ CapabilityExecutorFunc = Callable[
 ]
 PendingResumeUpsertFunc = Callable[
     [GlobalPersonaState, ResolverObservationV1],
-    Awaitable[ResolverPendingResumeV1],
+    Awaitable[ResolverPendingResumeV3],
 ]
 PendingResolutionApplyFunc = Callable[
     [GlobalPersonaState, ResolverPendingResolutionV1],
@@ -1313,7 +1313,7 @@ async def _run_user_input_blocker_final_cognition(
 
 def _pending_resume_speak_action_spec(
     state: GlobalPersonaState,
-    pending_resume: ResolverPendingResumeV1,
+    pending_resume: ResolverPendingResumeV3,
     observation: ResolverObservationV1,
 ) -> dict[str, Any]:
     """Build the visible text action for a persisted pending row."""
@@ -1418,7 +1418,7 @@ def _resolver_speak_cognition_provenance(
 
 def _pending_resume_continuation_ref(
     state: GlobalPersonaState,
-    pending_resume: ResolverPendingResumeV1,
+    pending_resume: ResolverPendingResumeV3,
 ) -> GoalContinuationRefV1:
     """Derive the validated continuation identity from pending-resume lineage.
 
@@ -1825,7 +1825,17 @@ def _is_repeated_capability_request(
             same_capability
             and observation["status"] == "failed"
         )
-        if same_capability and (same_objective or same_failed_capability):
+        same_continuation = (
+            same_capability
+            and observation.get("goal_continuation_ref") is not None
+            and observation.get("goal_continuation_ref")
+            == request["goal_continuation_ref"]
+        )
+        if same_capability and (
+            same_objective
+            or same_failed_capability
+            or same_continuation
+        ):
             return_value = True
             return return_value
     return_value = False

@@ -347,11 +347,6 @@ const worker = new SemanticWorkerClient(
 const brainProvider = createBrainInteractionProvider({
   secret: brainSecret,
   request: async (request) => await postJson(new URL("runtime/dsh/interactions", brainUrl), brainSecret, request),
-  checkpoint: async (pending) => await postJson(
-    new URL("runtime/dsh/interactions/checkpoint", brainUrl),
-    brainSecret,
-    pending,
-  ) as Record<string, unknown>,
 });
 type BrainReadiness = "ready" | "unavailable";
 let brainReadiness: BrainReadiness = "unavailable";

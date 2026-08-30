@@ -525,7 +525,7 @@ describe("V2 process", () => {
     ]));
     expect(catalog.native_catalog_digest).toMatch(/^sha256:/u);
     expect(catalog.semantic_catalog_digest).toBe(
-      "sha256:495baf34779da92da5d554e70e51dc47579fb88f6af2c0a7992c46b2f88e02d4",
+      "sha256:ba49a8f6a55a8ad049a5f4026fb2db880ee0e9134b32acf7b7401fa43d36438d",
     );
     expect(catalog.published_catalog_digest).toMatch(/^sha256:/u);
     expect(catalog.omitted_semantic_tools).toEqual([]);

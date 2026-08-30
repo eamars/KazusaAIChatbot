@@ -268,6 +268,7 @@ export const SEMANTIC_TOOL_NAMES = [
   "kazusa_recall_active_context",
   "kazusa_read_calendar_context",
   "kazusa_inspect_attached_media",
+  "kazusa_inspect_public_media",
 ] as const;
 
 const nullableText = { type: ["string", "null"] };
@@ -295,6 +296,7 @@ export const SEMANTIC_CATALOG: readonly Record<string, unknown>[] = [
   { name: "kazusa_recall_active_context", input_schema: { type: "object", properties: { kinds: { type: "array", items: { type: "string", enum: ["commitments", "progress", "history", "calendar"] }, minItems: 1, maxItems: 4 }, max_results: boundedResult }, required: ["kinds"], additionalProperties: false } },
   { name: "kazusa_read_calendar_context", input_schema: { type: "object", properties: { view: { type: "string", enum: ["schedules", "recent_runs", "pending_runs"] }, max_results: boundedResult, ...pageProperties }, required: ["view"], additionalProperties: false } },
   { name: "kazusa_inspect_attached_media", input_schema: { type: "object", properties: { attached_media_ref: { type: "string" }, question: { type: "string" } }, required: ["attached_media_ref", "question"], additionalProperties: false } },
+  { name: "kazusa_inspect_public_media", input_schema: { type: "object", properties: { public_media_url: { type: "string" }, question: { type: "string" } }, required: ["public_media_url", "question"], additionalProperties: false } },
 ];
 
 function stripDescriptions(value: unknown): unknown {

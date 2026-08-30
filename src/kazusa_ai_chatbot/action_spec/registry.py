@@ -20,15 +20,13 @@ SPEAK_CAPABILITY = "speak"
 TRIGGER_FUTURE_COGNITION_CAPABILITY = "trigger_future_cognition"
 FUTURE_SPEAK_CAPABILITY = "future_speak"
 ACCEPTED_TASK_STATUS_CHECK_CAPABILITY = "accepted_task_status_check"
-ACCEPTED_CODING_TASK_REQUEST_CAPABILITY = "accepted_coding_task_request"
+ACCEPTED_TASK_CONTROL_CAPABILITY = "accepted_task_control"
 _QUEUE_ONLY_CAPABILITIES = frozenset({
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
     FUTURE_SPEAK_CAPABILITY,
-    ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
 })
 _USER_MESSAGE_ONLY_CAPABILITIES = frozenset({
     FUTURE_SPEAK_CAPABILITY,
-    ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
 })
 _AVAILABILITY_SNAPSHOT_TTL_SECONDS = 5
 
@@ -40,7 +38,6 @@ def build_runtime_capability_snapshot(
     worker_status: Mapping[str, str] | None = None,
     scheduler_status: str = "healthy",
     adapter_target_status: Mapping[str, str] | None = None,
-    coding_workspace_status: str = "healthy",
     permissions: Mapping[str, bool] | None = None,
 ) -> RuntimeCapabilitySnapshotV1:
     """Build one short-lived, side-effect-free runtime health snapshot."""
@@ -57,7 +54,6 @@ def build_runtime_capability_snapshot(
         "worker_status": dict(worker_status or {}),
         "scheduler_status": scheduler_status,
         "adapter_target_status": dict(adapter_target_status or {}),
-        "coding_workspace_status": coding_workspace_status,
         "permissions": dict(permissions or {}),
     }
 
@@ -73,9 +69,7 @@ def build_initial_action_capabilities() -> dict[str, CapabilitySpecV1]:
         SPEAK_CAPABILITY: _speak_capability(),
         TRIGGER_FUTURE_COGNITION_CAPABILITY: _future_cognition_capability(),
         FUTURE_SPEAK_CAPABILITY: _future_speak_capability(),
-        ACCEPTED_CODING_TASK_REQUEST_CAPABILITY: (
-            _accepted_coding_task_capability()
-        ),
+        ACCEPTED_TASK_CONTROL_CAPABILITY: _accepted_task_control_capability(),
         ACCEPTED_TASK_STATUS_CHECK_CAPABILITY: (
             _accepted_task_status_check_capability()
         ),
@@ -100,8 +94,8 @@ def project_prompt_affordances(
             projection.append(_future_cognition_projection())
         elif capability_kind == FUTURE_SPEAK_CAPABILITY:
             projection.append(_future_speak_projection())
-        elif capability_kind == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY:
-            projection.append(_accepted_coding_task_projection())
+        elif capability_kind == ACCEPTED_TASK_CONTROL_CAPABILITY:
+            projection.append(_accepted_task_control_projection())
         elif capability_kind == ACCEPTED_TASK_STATUS_CHECK_CAPABILITY:
             projection.append(_accepted_task_status_check_projection())
     return projection
@@ -140,10 +134,7 @@ def _probe_capability_availability(
         }
 
     requested_work_kind = context.get("requested_work_kind")
-    if (
-        capability_kind == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY
-        and requested_work_kind == "unsupported"
-    ):
+    if requested_work_kind == "unsupported":
         return {
             "status": "unavailable",
             "reason_code": "unsupported_work_kind",
@@ -234,15 +225,6 @@ def _probe_capability_availability(
             "expires_at": expires_at,
         }
 
-    if capability_kind == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY:
-        if snapshot["coding_workspace_status"] in {"down", "unavailable"}:
-            return {
-                "status": "unavailable",
-                "reason_code": "workspace_unavailable",
-                "checked_at": checked_at,
-                "expires_at": expires_at,
-            }
-
     worker_status = snapshot["worker_status"].get(owner, "healthy")
     if capability_kind == ACCEPTED_TASK_STATUS_CHECK_CAPABILITY:
         worker_status = "healthy"
@@ -315,10 +297,7 @@ def build_episode_affordances(
         if visibility not in {"private", "preview", "user_visible"}:
             visibility = "private"
         latency_tier = "live"
-        if capability_kind in {
-            FUTURE_SPEAK_CAPABILITY,
-            ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
-        }:
+        if capability_kind == FUTURE_SPEAK_CAPABILITY:
             latency_tier = "background"
         if capability_kind == TRIGGER_FUTURE_COGNITION_CAPABILITY:
             latency_tier = "scheduled"
@@ -579,103 +558,64 @@ def _future_speak_capability() -> CapabilitySpecV1:
     return return_value
 
 
-def _accepted_coding_task_capability() -> CapabilitySpecV1:
-    """Build the accepted coding-task durable-run request capability."""
+def _accepted_task_control_capability() -> CapabilitySpecV1:
+    """Build the closed typed control capability for delivered DSH tasks."""
 
-    return_value: CapabilitySpecV1 = {
+    return {
         "schema_version": "capability_spec.v1",
-        "capability_kind": ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
+        "capability_kind": ACCEPTED_TASK_CONTROL_CAPABILITY,
         "category": "action",
-        "owner_module": "background_work",
+        "owner_module": "accepted_task",
         "input_schema": {
             "type": "object",
-            "required": [
-                "task_brief",
-                "coding_action",
-                "coding_run_ref",
-                "requested_delivery",
-                "max_output_chars",
-            ],
+            "additionalProperties": False,
             "properties": {
-                "task_brief": {"type": "string"},
-                "coding_action": {
+                "schema_version": {"type": "string", "enum": [
+                    "accepted_task_control.v1",
+                ]},
+                "accepted_task_ref": {"type": "string"},
+                "operation": {
                     "type": "string",
-                    "enum": [
-                        "revise_proposal",
-                        "summarize",
-                        "status",
-                        "approve_and_verify",
-                        "respond_to_blocker",
-                        "cancel",
-                    ],
+                    "enum": ["continue", "summarize", "cancel"],
                 },
-                "coding_run_ref": {"type": "string"},
-                "revision_instruction": {"type": "string"},
-                "execution_request": {"type": "string"},
-                "approval_evidence": {"type": "object"},
-                "requested_delivery": {
-                    "type": "string",
-                    "enum": ["send_result_when_done"],
-                },
-                "max_output_chars": {"type": "integer"},
+                "instruction": {"type": ["string", "null"]},
             },
         },
         "output_schema": {
             "type": "object",
             "properties": {
                 "status": {"type": "string"},
-                "queue_state": {"type": "string"},
-                "task_summary": {"type": "string"},
-                "coding_run_ref": {"type": "string"},
+                "accepted_task_ref": {"type": "string"},
             },
         },
-        "handler_id": "background_work.bound_coding_continuation.enqueue.v1",
-        "lifecycle_hooks": ["validate", "enqueue_background_work"],
-        "permission_policy": "policy:background_work.coding_continuation.v1",
+        "handler_id": "accepted_task.dsh_control.v1",
+        "lifecycle_hooks": ["validate", "claim_followup"],
+        "permission_policy": "policy:accepted_task.dsh_control.v1",
         "rate_limit_policy": "policy:action.default_rate_limit.v1",
         "audit_policy": "policy:action.audit.v1",
         "prompt_projection_policy": "policy:prompt.action_safe.v1",
     }
-    return return_value
 
 
-def _accepted_coding_task_projection() -> dict[str, object]:
-    """Return prompt-safe durable coding-run affordance metadata."""
+def _accepted_task_control_projection() -> dict[str, object]:
+    """Return prompt-safe metadata for the typed task control."""
 
-    return_value = {
-        "capability": ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
+    return {
+        "capability": ACCEPTED_TASK_CONTROL_CAPABILITY,
         "available": True,
-        "availability_context": "",
+        "availability_context": "delivered_dsh_task_affordance",
         "visibility": "private",
         "decision_mode": "closed",
-        "allowed_decisions": [
-            "revise_proposal",
-            "summarize",
-            "status",
-            "approve_and_verify",
-            "respond_to_blocker",
-            "cancel",
-        ],
-        "default_decision": "status",
+        "allowed_decisions": ["continue", "summarize", "cancel"],
+        "default_decision": "continue",
         "decision_pattern": "",
         "context_ref": "",
         "semantic_input_summary": [
-            "仅用于绑定既有 coding_run_ref 的生命周期操作。",
-            (
-                "allowed_next_actions：revise_proposal、summarize、status、"
-                "approve_and_verify、respond_to_blocker、cancel。"
-            ),
-            (
-                "使用上下文 affordance 中的决定；无法区分 run 时由可见发言向用户澄清。"
-            ),
-            "把验证要求或阻塞答复放入 semantic detail。",
-            "把私有请求与可见确认配对。",
+            "Use only the advertised accepted-task reference and operation.",
+            "Continue carries semantic instruction; summarize and cancel carry none.",
         ],
-        "execution_boundary": (
-            "durable accepted-task lifecycle queues task_orchestrator"
-        ),
+        "execution_boundary": "accepted-task lifecycle claims DSH follow-up",
     }
-    return return_value
 
 
 def _future_cognition_projection() -> dict[str, object]:
@@ -787,7 +727,7 @@ def _accepted_task_status_check_projection() -> dict[str, object]:
         "decision_pattern": "",
         "context_ref": "",
         "semantic_input_summary": [
-            "用户询问已经接纳的延迟任务或既有 coding run 状态时使用。",
+            "用户询问已经接纳的延迟任务状态时使用。",
             "这是直接读取持久化状态的只读查询，不填写 worker、queue 或 job 参数。",
             "把私有查询与可见的状态答复配对。",
         ],

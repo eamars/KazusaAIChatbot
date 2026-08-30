@@ -1,5 +1,12 @@
 {
   "schema_version": "stage3_fresh_database_cases.v1",
+  "required_routes": [
+    "agentic_resolver",
+    "dsh_task_resolution",
+    "rag3",
+    "background_work",
+    "future_speak"
+  ],
   "source_artifact_paths": [
     "test_artifacts/cognition_core_v3/live_character_judgment_40_turn_review.md",
     "test_artifacts/cognition_core_v3/compositional_action_group_20_turn_proof/"

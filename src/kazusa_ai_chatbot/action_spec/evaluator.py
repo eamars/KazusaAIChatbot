@@ -8,36 +8,37 @@ from typing import Any
 from kazusa_ai_chatbot.action_spec.attempt_ledger import (
     build_action_idempotency_key,
 )
-from kazusa_ai_chatbot.action_spec.handlers.memory_lifecycle import (
-    validate_memory_lifecycle_action,
-)
-from kazusa_ai_chatbot.action_spec.handlers.future_cognition import (
-    validate_future_cognition_action,
-)
 from kazusa_ai_chatbot.action_spec.handlers.accepted_task import (
     validate_accepted_task_status_check_action,
 )
 from kazusa_ai_chatbot.action_spec.handlers.background_work import (
-    validate_accepted_coding_task_action,
     validate_future_speak_action,
+)
+from kazusa_ai_chatbot.action_spec.handlers.future_cognition import (
+    validate_future_cognition_action,
+)
+from kazusa_ai_chatbot.action_spec.handlers.memory_lifecycle import (
+    validate_memory_lifecycle_action,
 )
 from kazusa_ai_chatbot.action_spec.models import (
     ActionEvalResult,
     ActionValidationError,
     CapabilitySpecV1,
     validate_action_spec,
-    validate_semantic_action_request_v2,
     validate_capability_spec,
+    validate_semantic_action_request_v2,
 )
 from kazusa_ai_chatbot.action_spec.registry import (
     ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
-    ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     FUTURE_SPEAK_CAPABILITY,
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     SPEAK_CAPABILITY,
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
     build_initial_action_capabilities,
+)
+from kazusa_ai_chatbot.task_resolution.contracts import (
+    validate_accepted_task_control,
 )
 
 _TYPE_MAP = {
@@ -65,7 +66,7 @@ class ActionSpecEvaluator:
         """Validate one action spec and resolve its execution owner."""
 
         try:
-            validated = validate_action_spec(action_spec)
+            validated = _validate_action_spec_for_owner(action_spec)
         except ActionValidationError as exc:
             return_value = _rejected([str(exc)])
             return return_value
@@ -95,13 +96,14 @@ class ActionSpecEvaluator:
         }
         return result
 
+
     def evaluate_v2_request(
         self,
         request: object,
         *,
         available_action_kinds: set[str] | None = None,
     ) -> dict[str, object]:
-        """Validate a V2 route request before legacy execution materialization."""
+        """Validate one semantic V2 request before action materialization."""
 
         available = available_action_kinds or set(self._capabilities)
         try:
@@ -121,6 +123,21 @@ class ActionSpecEvaluator:
             "errors": [],
         }
 
+
+def _validate_action_spec_for_owner(action_spec: dict[str, Any]) -> dict[str, Any]:
+    """Validate the closed accepted-task control exception at this owner."""
+
+    if (
+        action_spec.get("kind") == "accepted_task_control"
+        and action_spec.get("goal_continuation_ref") is None
+        and action_spec.get("surface_role") == "task_acknowledgement"
+    ):
+        candidate = dict(action_spec)
+        candidate["surface_role"] = "ordinary"
+        validated = validate_action_spec(candidate)
+        validated["surface_role"] = "task_acknowledgement"
+        return validated
+    return validate_action_spec(action_spec)
 
 def _rejected(
     errors: list[str],
@@ -157,10 +174,15 @@ def _validate_kind_specific_contract(action_spec: dict[str, Any]) -> None:
         validate_future_cognition_action(action_spec)
     elif kind == FUTURE_SPEAK_CAPABILITY:
         validate_future_speak_action(action_spec)
-    elif kind == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY:
-        validate_accepted_coding_task_action(action_spec)
     elif kind == ACCEPTED_TASK_STATUS_CHECK_CAPABILITY:
         validate_accepted_task_status_check_action(action_spec)
+    elif kind == "accepted_task_control":
+        params = action_spec["params"]
+        control = params.get("control")
+        try:
+            validate_accepted_task_control(control)
+        except ValueError as exc:
+            raise ActionValidationError(str(exc)) from exc
 
 
 def _validate_speak_contract(action_spec: dict[str, Any]) -> None:

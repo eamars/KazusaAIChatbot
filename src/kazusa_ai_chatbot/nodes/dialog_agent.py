@@ -41,9 +41,6 @@ from kazusa_ai_chatbot.cognition_shared.contracts import (
 from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
     V2_MODEL_TOTAL_ATTEMPTS,
 )
-from kazusa_ai_chatbot.cognition_shared.surface_stages import (
-    VISIBLE_CONTENT_AUTHORITY_GUIDANCE,
-)
 from kazusa_ai_chatbot.config import (
     DIALOG_GENERATOR_LLM_API_KEY,
     DIALOG_GENERATOR_LLM_BASE_URL,
@@ -72,6 +69,20 @@ DIALOG_USAGE_MODE_SELF_COGNITION_ACTION_CANDIDATE = (
 )
 DIALOG_GENERATOR_TOTAL_ATTEMPTS = V2_MODEL_TOTAL_ATTEMPTS
 DIALOG_CANDIDATE_MAX_CHARS = 12000
+_DIALOG_OUTPUT_CONTRACT = {
+    "additionalProperties": False,
+    "required_fields": ["final_dialog"],
+    "final_dialog": {
+        "type": "array",
+        "minimum_items": 1,
+        "item": {
+            "type": "string",
+            "minimum_characters": 1,
+            "maximum_characters": DIALOG_CANDIDATE_MAX_CHARS,
+        },
+        "aggregate_maximum_characters": DIALOG_CANDIDATE_MAX_CHARS,
+    },
+}
 _HTTP_URL_PATTERN = re.compile(
     r"https?://[^\s\\)>\]}\"']+",
     re.IGNORECASE,
@@ -80,10 +91,6 @@ _MAX_REQUIRED_SOURCE_URLS = 8
 _DIALOG_REPAIR_ERROR_CAP = 500
 _DIALOG_REPAIR_OUTPUT_CAP = 8000
 _DIALOG_VISIBLE_PERCEPT_SCAN_MAX_CHARS = 24000
-_DIALOG_REPAIR_INSTRUCTION = (
-    '保留原始的角色判断、事实、语气和互动方向；只修复 final_dialog 的消息值、类型、非空内容、'
-    '总长度、列表基数和 required_source_urls 字面保真。保留原有语义，不添加新的事实、立场或解释。'
-)
 
 
 class StateContractError(ValueError):
@@ -205,7 +212,7 @@ def _candidate_role_frame(
     return frame
 
 
-_V2_DIALOG_GENERATOR_PROMPT_TEMPLATE = '''你是当前角色的最终文字渲染器。把 text_surface_output_v2 转化为
+_V2_DIALOG_GENERATOR_PROMPT = '''你是当前角色的最终文字渲染器。把 text_surface_output_v2 转化为
 自然、鲜活、有角色辨识度，并且切合当前场景的聊天内容。上游认知负责角色判断；surface planning
 提供语义内容、称呼安排、delivery profile、lexical_avoidances 和 permitted action results。
 
@@ -222,7 +229,18 @@ evidence_handles、prompt_safe_observation_handle 和 remaining_needs 属权威�
 evidence_state=complete 时，只能依据 supplied evidence_excerpts；partial、pending、missing 或
 blocked 时，表达答案缺口、等待状态或 typed blocker，不把 generic semantic_result 当事实。
 
-{visible_content_authority_guidance}
+可见语义的选择权属于 response_plan.response_goal 与当前可见观察。relational_willingness 和
+subjective_expression_context.private_monologue 只用于塑造表达姿态：亲疏、主动性、直接程度、节奏、信心、关照与声音。
+`active_character_goal.reason`、`active_character_goal.cause_summary`、`intention.reason`、`relational_willingness` 和
+`subjective_expression_context.private_monologue` 都只是理解或表达姿态的上下文，不能独立扩展
+response_plan.response_goal 与当前可见观察已经选定的语义。
+`epistemic_boundary` 只限制已选语义的断言强度；其中列为解释或未知的内容不是可见内容候选，不能独立进入 content_plan 或 dialog。
+字段存在本身不能单独选出明确的可见关系断言、对当前用户动机的解释或独立的关系性收束。只有当前观察与已选
+response_goal 共同表明某项关系意义属于本轮回复时，才可将其明确写入可见内容。已经显现的关系模式只属于连续性；
+除非当前输入重新打开该意义，语义改写不能把它变成本轮新选择。保留当前观察明确支持的关系拒绝、边界变化、接受
+或拒绝，以及当前用户明确重新打开的关系意义。未选中的关系解释即使改写成感受、姿态、理由、content_requirements
+或 delivery_profile 中的表达效果，仍是在选择可见关系语义，不能绕过上述边界。dialog 必须服从已选 content_plan
+与 response_goal。
 
 # 渲染步骤
 1. selected_surface_intent 是本轮语义锚点；epistemic_boundary 限定可见断言强度；
@@ -273,7 +291,7 @@ content_plan 中实际呈现的事实选择直接相关来源；回应包含来�
 
 引文、专有名词、代码、URL 以及必要的 schema 或 enum token 保持原样。
 
-# 输出前不可跳过的合同检查
+# 语义审计
 1. 逐句对照 payload.epistemic_boundary。对每个功能、原因、来源、意图、结果或排除性主张，
    边界未允许直接断言时，必须在同一句中明确使用猜测或未知措辞。不把缺少可见特征或证据改写成排除性事实。
    如果 content_plan 或 content_requirements 越界，以 epistemic_boundary 为准主动降低断言强度。
@@ -282,15 +300,9 @@ content_plan 中实际呈现的事实选择直接相关来源；回应包含来�
    未来时的具体外部承诺同样必须有同一效果的 pending、scheduled 或 executed 行。删去不匹配的动作、括号舞台提示、拟声、感官反馈、结果反问和外部执行承诺，
    保留 response_plan 已选择的当前言语立场、愿望、提议或条件。
 
-# 输出格式
-字段必须恰好是 final_dialog。final_dialog 是由完整可见消息字符串组成的
-非空列表。
+# 交付职责
+final_dialog 只承载当前角色实际可见、可发送的文字，并完整实现已选择的语义与来源边界。
 '''
-
-
-_V2_DIALOG_GENERATOR_PROMPT = _V2_DIALOG_GENERATOR_PROMPT_TEMPLATE.format(
-    visible_content_authority_guidance=VISIBLE_CONTENT_AUTHORITY_GUIDANCE,
-)
 
 _dialog_generator_llm = LLInterface()
 _dialog_generator_llm_config = LLMCallConfig(
@@ -327,11 +339,10 @@ def _set_dialog_repair_issues(
 
 
 def _dialog_repair_block(repair_issues: list[str]) -> dict[str, str]:
-    """Build the exact four-field dialog content-repair block."""
+    """Project bounded runtime diagnostics for the next dialog attempt."""
 
     bounded_issues = [*repair_issues, "", "", ""]
     return {
-        "repair_instruction": _DIALOG_REPAIR_INSTRUCTION,
         "reason": bounded_issues[0],
         "contract_error": bounded_issues[1][:_DIALOG_REPAIR_ERROR_CAP],
         "invalid_candidate": bounded_issues[2][:_DIALOG_REPAIR_OUTPUT_CAP],
@@ -629,6 +640,7 @@ async def _render_dialog_candidate(
         "epistemic_boundary": validated_surface["epistemic_boundary"],
         "text_surface_output_v2": dict(validated_surface),
         "candidate_role_frame": _candidate_role_frame(validated_surface),
+        "output_contract": _DIALOG_OUTPUT_CONTRACT,
         "user_name": user_name,
     }
     if source_urls:

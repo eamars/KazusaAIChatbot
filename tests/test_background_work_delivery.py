@@ -14,9 +14,9 @@ from tests.cognition_test_helpers import (
     canonical_episode_identity_snapshot,
     canonical_service_character_profile,
 )
+from tests.task_resolution_test_helpers import _goal_continuation_ref
 from tests.test_background_work_jobs import _resume_queue_request
 from tests.test_task_resolution_background_resume import _recorded_checkpoint
-from tests.test_task_resolution_orchestrator import _goal_continuation_ref
 
 
 def _completed_job() -> dict:
@@ -52,6 +52,7 @@ def _accepted_task_completed_job() -> dict:
 
     job = _completed_job()
     _checkpoint, task_result = _recorded_checkpoint(status="resolved")
+    task_result["evidence"][0]["summary"] = "public-evidence-1"
     job["accepted_task_id"] = "task-001"
     job["task_identity_key"] = "accepted_task:v1:abc"
     job["source_llm_trace_id"] = "llmtrace-parent-1"
@@ -187,6 +188,7 @@ def test_result_source_preserves_typed_task_status_and_ref() -> None:
         storage_timestamp_utc="2026-06-06T00:00:00+00:00",
     )
     _checkpoint, task_result = _recorded_checkpoint(status="resolved")
+    task_result["evidence"][0]["summary"] = "public-evidence-1"
     job.update({
         "status": "completed",
         "completed_at": "2026-06-06T00:01:00+00:00",
@@ -228,6 +230,58 @@ def test_tool_result_source_builder_ignores_untyped_job_summary() -> None:
     assert episode["percepts"][0]["source_kind"] == "tool_result"
     assert episode["percepts"][0]["content"]["semantic_summary"] == (
         "A public source resolved the requested fact."
+    )
+
+
+def test_successful_delivery_summary_uses_validated_semantic_result() -> None:
+    """Resolved accepted-task delivery retains the result-owned semantic summary."""
+
+    worker = importlib.import_module("kazusa_ai_chatbot.background_work.worker")
+    job = _accepted_task_completed_job()
+    task_result = job["task_resolution_result"]
+    assert isinstance(task_result, dict)
+    marker = "PLAN3_E2E_BETA_SELECTED"
+    task_result["prompt_safe_summary"] = f"The selected marker is {marker}."
+    task_result["evidence"][0]["summary"] = "receipt-only-reference"
+
+    summary = worker._task_result_delivery_summary(task_result)
+
+    assert summary.startswith(f"The selected marker is {marker}.")
+    assert "receipt-only-reference" not in summary
+    assert "https://example.com/source" in summary
+
+
+def test_partial_delivery_summary_retains_semantic_result_and_limitations() -> None:
+    """Partial delivery retains result meaning and declared remaining needs."""
+
+    worker = importlib.import_module("kazusa_ai_chatbot.background_work.worker")
+    job = _accepted_task_completed_job()
+    task_result = job["task_resolution_result"]
+    assert isinstance(task_result, dict)
+    task_result["status"] = "partial"
+    task_result["evidence_state"] = "partial"
+    task_result["prompt_safe_summary"] = "The selected result is partial."
+    task_result["evidence"][0]["summary"] = "receipt-only-reference"
+    task_result["remaining_needs"] = ["One bounded source remains unavailable."]
+
+    summary = worker._task_result_delivery_summary(task_result)
+
+    assert summary.startswith("The selected result is partial.")
+    assert "receipt-only-reference" not in summary
+    assert "Remaining limitations: One bounded source remains unavailable." in summary
+
+
+def test_non_success_delivery_summary_retains_existing_blocker_contract() -> None:
+    """Non-success delivery continues to use its summary plus remaining needs."""
+
+    worker = importlib.import_module("kazusa_ai_chatbot.background_work.worker")
+    _checkpoint, task_result = _recorded_checkpoint(status="needs_user_input")
+
+    summary = worker._task_result_delivery_summary(task_result)
+
+    assert summary == (
+        "Continuation is pending.\n"
+        "Remaining limitation: Continue the DSH task."
     )
 
 
@@ -1012,7 +1066,7 @@ def test_delivery_failure_summary_initialized_empty() -> None:
     """New jobs should start with empty delivery_failure_summary."""
 
     jobs = importlib.import_module("kazusa_ai_chatbot.background_work.jobs")
-    build = getattr(jobs, "_build_job_document")
+    build = jobs._build_job_document
     request = _resume_queue_request()
     job = build(
         request,

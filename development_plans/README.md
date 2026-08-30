@@ -45,7 +45,7 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
-| [dsh_brain_bigbang_cutover_and_legacy_resolution_decommission_plan_2026-08-26.md](active/short_term/dsh_brain_bigbang_cutover_and_legacy_resolution_decommission_plan_2026-08-26.md) | Plan 3 preserved post-selector Brain handover with a DSH task-execution edge and scoped legacy executor/coding decommission | draft; preservation boundary approved, exact post-Plan 2 inventory pending |
+| [dsh_brain_bigbang_cutover_and_legacy_resolution_decommission_plan_2026-08-26.md](active/short_term/dsh_brain_bigbang_cutover_and_legacy_resolution_decommission_plan_2026-08-26.md) | Final Plan 3 DSH production cutover: complete function porting, public-media semantic bridge, durable Brain handover, accepted/background continuation, real user-wire E2E, and exact legacy decommission | in progress as of 2026-08-29; production implementation is authorized, while data operations and deployment require a separate command naming the target environment |
 
 ### Superseded Plans
 

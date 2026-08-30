@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+
 from kazusa_ai_chatbot.background_work.models import (
-    BACKGROUND_WORK_JOB_REF_OWNER,
     BACKGROUND_WORK_JOB_SCHEMA_VERSION,
     BACKGROUND_WORK_REQUESTED_DELIVERY,
     FUTURE_SPEAK_WORKER,
@@ -30,11 +30,10 @@ from kazusa_ai_chatbot.config import (
 )
 from kazusa_ai_chatbot.db.background_work_jobs import insert_background_work_job
 from kazusa_ai_chatbot.task_resolution.contracts import (
-    validate_task_resolution_checkpoint,
+    validate_accepted_task_control,
     validate_task_resolution_execution_context,
 )
 from kazusa_ai_chatbot.time_boundary import normalize_storage_utc_iso
-
 
 _REQUIRED_TEXT_FIELDS = (
     "job_id",
@@ -53,39 +52,6 @@ _REQUIRED_TEXT_FIELDS = (
     "requester_platform_user_id",
     "requester_display_name",
 )
-_BOUND_CODING_REQUEST_FIELDS = frozenset((
-    "workspace_root",
-    "run_id",
-    "action",
-    "revision_instruction",
-    "approval",
-    "execution_specs",
-    "execution_request",
-    "repair_attempt_limit",
-    "reason",
-))
-_BOUND_CODING_ACTIONS = frozenset((
-    "revise_proposal",
-    "summarize",
-    "status",
-    "approve_and_verify",
-    "respond_to_blocker",
-    "cancel",
-))
-_PATCH_APPLY_APPROVAL_FIELDS = frozenset((
-    "approved",
-    "approved_by",
-    "approved_at",
-    "approval_reason",
-))
-_CODE_EXECUTION_SPEC_FIELDS = frozenset((
-    "tool",
-    "paths",
-    "pytest_selectors",
-    "timeout_seconds",
-))
-
-
 async def enqueue_background_work_request(
     request: BackgroundWorkQueueRequest,
 ) -> BackgroundWorkQueueResult:
@@ -164,170 +130,41 @@ def validate_task_orchestrator_worker_payload(
     if set(value) != {
         "schema_version",
         "operation",
-        "checkpoint",
-        "coding_request",
+        "task_session_id",
+        "operation_generation",
+        "control",
     }:
         raise ValueError("task_orchestrator worker_payload fields are invalid")
     if value.get("schema_version") != TASK_ORCHESTRATOR_WORKER_PAYLOAD_VERSION:
         raise ValueError("task_orchestrator worker_payload schema_version is invalid")
     operation = value.get("operation")
-    checkpoint = value.get("checkpoint")
-    coding_request = value.get("coding_request")
-    if operation == "resume_task_resolution":
-        if coding_request is not None:
-            raise ValueError("resume_task_resolution cannot contain coding_request")
-        validate_task_resolution_checkpoint(checkpoint)
-        return dict(value)
-    if operation == "continue_bound_coding_run":
-        if checkpoint is not None:
-            raise ValueError("continue_bound_coding_run cannot contain checkpoint")
-        _validate_bound_coding_request(coding_request)
-        return dict(value)
-    raise ValueError("task_orchestrator worker_payload operation is unsupported")
-
-
-def _validate_bound_coding_request(value: object) -> None:
-    """Validate the frozen public coding continuation request shape.
-
-    This worker boundary accepts only established coding-run actions and passes
-    the validated public request unchanged to the retained coding lifecycle.
-    """
-
-    if not isinstance(value, Mapping):
-        raise ValueError("continue_bound_coding_run requires coding_request")
-    request = dict(value)
-    unknown_fields = set(request) - _BOUND_CODING_REQUEST_FIELDS
-    if unknown_fields:
-        raise ValueError("coding_request contains unsupported fields")
-    for field_name in ("workspace_root", "run_id", "action"):
-        _require_non_empty_mapping_text(request, field_name, "coding_request")
-    action = str(request["action"])
-    if action not in _BOUND_CODING_ACTIONS:
-        raise ValueError("coding_request.action is unsupported")
-    _validate_optional_coding_texts(request)
-    _validate_optional_coding_execution_specs(request)
-    _validate_optional_repair_attempt_limit(request)
-    if action == "approve_and_verify":
-        _validate_patch_apply_approval(request.get("approval"))
-    elif "approval" in request:
-        raise ValueError("coding_request.approval is only valid for approval")
-    if action == "revise_proposal":
-        _require_non_empty_mapping_text(
-            request,
-            "revision_instruction",
-            "coding_request",
-        )
-
-
-def _validate_optional_coding_texts(request: Mapping[str, object]) -> None:
-    """Validate optional text fields exposed by the frozen coding request."""
-
-    for field_name in (
-        "revision_instruction",
-        "execution_request",
-        "reason",
-    ):
-        if field_name not in request:
-            continue
-        _require_non_empty_mapping_text(request, field_name, "coding_request")
-
-
-def _validate_optional_coding_execution_specs(
-    request: Mapping[str, object],
-) -> None:
-    """Validate optional public execution specs without executing commands."""
-
-    if "execution_specs" not in request:
-        return
-    execution_specs = request["execution_specs"]
-    if not isinstance(execution_specs, list):
-        raise ValueError("coding_request.execution_specs must be a list")
-    for execution_spec in execution_specs:
-        if not isinstance(execution_spec, Mapping):
-            raise ValueError("coding_request.execution_specs must contain objects")
-        spec = dict(execution_spec)
-        if set(spec) - _CODE_EXECUTION_SPEC_FIELDS:
-            raise ValueError(
-                "coding_request.execution_specs contain unsupported fields"
-            )
-        if "tool" in spec:
-            _require_non_empty_mapping_text(
-                spec,
-                "tool",
-                "coding_request.execution_specs",
-            )
-        for list_field in ("paths", "pytest_selectors"):
-            if list_field not in spec:
-                continue
-            values = spec[list_field]
-            if (
-                not isinstance(values, list)
-                or any(
-                    not isinstance(item, str) or not item.strip()
-                    for item in values
-                )
-            ):
-                raise ValueError(
-                    f"coding_request.execution_specs.{list_field} is invalid"
-                )
-        if "timeout_seconds" in spec:
-            timeout_seconds = spec["timeout_seconds"]
-            if (
-                isinstance(timeout_seconds, bool)
-                or not isinstance(timeout_seconds, int)
-                or timeout_seconds < 1
-            ):
-                raise ValueError(
-                    "coding_request.execution_specs.timeout_seconds is invalid"
-                )
-
-
-def _validate_optional_repair_attempt_limit(
-    request: Mapping[str, object],
-) -> None:
-    """Validate the optional bounded repair-attempt integer."""
-
-    if "repair_attempt_limit" not in request:
-        return
-    repair_attempt_limit = request["repair_attempt_limit"]
+    session_id = value.get("task_session_id")
+    generation = value.get("operation_generation")
+    control = value.get("control")
+    if not isinstance(session_id, str) or not session_id.strip():
+        raise ValueError("task_orchestrator task_session_id is required")
     if (
-        isinstance(repair_attempt_limit, bool)
-        or not isinstance(repair_attempt_limit, int)
-        or repair_attempt_limit < 1
+        isinstance(generation, bool)
+        or not isinstance(generation, int)
+        or generation < 0
     ):
-        raise ValueError("coding_request.repair_attempt_limit is invalid")
-
-
-def _validate_patch_apply_approval(value: object) -> None:
-    """Require the public approval object before a coding mutation continues."""
-
-    if not isinstance(value, Mapping):
-        raise ValueError("coding_request.approval is required")
-    approval = dict(value)
-    if set(approval) != _PATCH_APPLY_APPROVAL_FIELDS:
-        raise ValueError("coding_request.approval fields are invalid")
-    if approval["approved"] is not True:
-        raise ValueError("coding_request.approval.approved must be true")
-    for field_name in ("approved_by", "approved_at", "approval_reason"):
-        _require_non_empty_mapping_text(
-            approval,
-            field_name,
-            "coding_request.approval",
-        )
-
-
-def _require_non_empty_mapping_text(
-    value: Mapping[str, object],
-    field_name: str,
-    label: str,
-) -> str:
-    """Return one required non-empty text value from a trusted mapping."""
-
-    field_value = value.get(field_name)
-    if not isinstance(field_value, str) or not field_value.strip():
-        raise ValueError(f"{label}.{field_name} is required")
-    text = field_value.strip()
-    return text
+        raise ValueError("task_orchestrator operation_generation is invalid")
+    if operation == "open_dsh_resolution":
+        if control is not None or generation != 0:
+            raise ValueError("open_dsh_resolution generation/control is invalid")
+    elif operation == "continue_dsh_resolution":
+        if control is not None:
+            if not isinstance(control, Mapping):
+                raise ValueError("continue_dsh_resolution control is invalid")
+            try:
+                validate_accepted_task_control(control)
+            except ValueError as exc:
+                raise ValueError(
+                    f"continue_dsh_resolution control is invalid: {exc}"
+                ) from exc
+    else:
+        raise ValueError("task_orchestrator worker_payload operation is unsupported")
+    return dict(value)
 
 
 def _validate_task_orchestrator_payload(
@@ -339,12 +176,10 @@ def _validate_task_orchestrator_payload(
     """Validate a task payload and its persisted typed execution context.
 
     Every task-resolution job fails closed without the exact validated
-    continuation reference and typed task execution context; both are required
-    to resume a checkpoint or continue a bound coding run through the same
-    worker result contract.
+    continuation reference and typed task execution context.
     """
 
-    payload = validate_task_orchestrator_worker_payload(value)
+    validate_task_orchestrator_worker_payload(value)
     if continuation_ref is None:
         raise ValueError(
             "task-resolution jobs require goal_continuation_ref"

@@ -1,81 +1,119 @@
-"""Target-state contracts for the unified task-resolution boundary."""
+"""Executable tests for the closed Plan 3 task-resolution boundary."""
 
 from __future__ import annotations
 
 import importlib
 import inspect
 from importlib.util import find_spec
-from typing import get_type_hints
 
 import pytest
 
-from tests.test_task_resolution_orchestrator import (
+from tests.task_resolution_test_helpers import (
+    _context,
     _goal_continuation_ref,
     _scene_context,
 )
 
 
-PUBLIC_EXPORTS = (
-    "TaskResolutionCheckpointV1",
-    "TaskResolutionContractError",
-    "TaskResolutionExecutionContextV1",
-    "TaskResolutionResultV1",
-    "TaskSpecialistRequestV1",
-    "TaskSpecialistResultV1",
-    "resolve_task_inline",
-    "resume_task_resolution",
-    "validate_task_resolution_checkpoint",
-    "validate_task_resolution_result",
-    "validate_task_specialist_request",
-    "validate_task_specialist_result",
-)
+def _evidence(*, evidence_id: str = "evidence-1") -> dict[str, object]:
+    """Build one DSH-owned prompt-safe evidence receipt."""
 
-
-def _evidence() -> dict[str, object]:
     return {
         "schema_version": "task_resolution_evidence.v1",
-        "evidence_id": "evidence-1",
-        "task_node_id": "node-1",
-        "specialist": "local_context",
+        "evidence_id": evidence_id,
+        "task_node_id": "dsh-node-1",
+        "specialist": "dsh",
         "summary": "A relevant prior commitment was found.",
         "provenance_refs": ["memory:item-1"],
         "limitations": [],
     }
 
 
-def _result(*, status: str, evidence: list[dict[str, object]]) -> dict[str, object]:
+def _result(
+    *,
+    status: str,
+    evidence: list[dict[str, object]],
+    checkpoint: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Build one result carrier with the status-aligned evidence state."""
+
+    evidence_state = {
+        "resolved": "complete",
+        "partial": "partial",
+        "needs_user_input": "pending",
+        "approval_required": "pending",
+        "unavailable": "missing",
+        "failed": "blocked",
+        "deferred": "pending",
+    }[status]
     return {
         "schema_version": "task_resolution_result.v1",
         "semantic_objective": "Resolve the user's bounded task.",
         "status": status,
         "scene_context": _scene_context(),
         "goal_continuation_ref": _goal_continuation_ref(),
-        "evidence_state": "partial",
+        "evidence_state": evidence_state,
         "evidence_excerpts": [str(item["summary"]) for item in evidence],
         "evidence_handles": [str(item["evidence_id"]) for item in evidence],
         "prompt_safe_summary": "One relevant fact was recovered.",
         "evidence": evidence,
         "completed_subgoals": [],
         "remaining_needs": ["Confirm the current constraint."],
-        "checkpoint": {},
+        "checkpoint": checkpoint or {},
         "coding_run_context": {},
     }
 
 
-def test_task_resolution_public_boundary_exists() -> None:
-    """The package exposes one canonical inline and resume boundary."""
+def _resolution_ref() -> dict[str, object]:
+    """Build a complete durable DSH reference for deferred results."""
+
+    return {
+        "schema_version": "dsh_resolution_ref.v1",
+        "resolution_thread_id": "thread-task-001",
+        "segment_id": "segment-task-001",
+        "dsh_session_id": "session-task-001",
+        "activation_id": "activation-task-001",
+        "lease_epoch": 1,
+        "document_revision": 0,
+        "last_committed_seq": 0,
+    }
+
+
+def test_task_resolution_public_boundary_uses_closed_plan3_names() -> None:
+    """The package exposes only the canonical V2 context and DSH carriers."""
 
     module = importlib.import_module("kazusa_ai_chatbot.task_resolution")
 
-    for name in PUBLIC_EXPORTS:
+    for name in (
+        "AcceptedTaskControlV1",
+        "DshResolutionRefV1",
+        "TaskResolutionContractError",
+        "TaskResolutionExecutionContextV2",
+        "TaskResolutionResultV1",
+        "validate_accepted_task_control",
+        "validate_dsh_resolution_ref",
+        "validate_task_resolution_execution_context",
+        "validate_task_resolution_result",
+        "resolve_task_inline",
+        "resume_task_resolution",
+    ):
         assert hasattr(module, name), name
 
+    for retired_name in (
+        "TaskResolutionCheckpointV1",
+        "TaskResolutionExecutionContextV1",
+        "TaskSpecialistRequestV1",
+        "TaskSpecialistResultV1",
+        "validate_task_specialist_request",
+        "validate_task_specialist_result",
+    ):
+        assert not hasattr(module, retired_name), retired_name
 
-def test_task_resolution_entrypoint_signatures_are_frozen() -> None:
-    """Callers pass only typed task state and an explicit inline budget."""
+
+def test_task_resolution_entrypoints_accept_typed_runtime_injection() -> None:
+    """The public entrypoints keep runtime collaborators keyword-only."""
 
     module = importlib.import_module("kazusa_ai_chatbot.task_resolution")
-
     inline = inspect.signature(module.resolve_task_inline)
     resume = inspect.signature(module.resume_task_resolution)
 
@@ -83,104 +121,128 @@ def test_task_resolution_entrypoint_signatures_are_frozen() -> None:
         "request",
         "execution_context",
         "inline_budget_seconds",
+        "runtime",
+        "binding_store",
+    )
+    assert tuple(resume.parameters) == (
+        "checkpoint",
+        "execution_context",
+        "runtime",
     )
     assert inline.parameters["inline_budget_seconds"].kind is (
         inspect.Parameter.KEYWORD_ONLY
     )
-    assert tuple(resume.parameters) == ("checkpoint", "execution_context")
-    hints = get_type_hints(module.resolve_task_inline)
-    cognition_contracts = importlib.import_module(
-        "kazusa_ai_chatbot.cognition_shared.contracts"
-    )
-    assert hints["request"] is cognition_contracts.ResolverCapabilityRequestV2
+    assert inline.parameters["runtime"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert resume.parameters["runtime"].kind is inspect.Parameter.KEYWORD_ONLY
 
 
 def test_removed_background_provider_module_is_absent() -> None:
-    """The v1 provider dispatcher has no importable compatibility path."""
+    """The deleted provider dispatcher has no importable compatibility path."""
 
     assert find_spec("kazusa_ai_chatbot.background_work.providers") is None
 
 
-def test_evidence_bearing_partial_is_valid() -> None:
-    """Partial is a terminal success only when grounded by evidence."""
+def test_execution_context_and_resolution_ref_validate_as_exact_carriers() -> None:
+    """The context and opaque DSH reference use their exact schemas."""
 
     module = importlib.import_module("kazusa_ai_chatbot.task_resolution")
 
+    context = module.validate_task_resolution_execution_context(_context())
+    reference = module.validate_dsh_resolution_ref(_resolution_ref())
+
+    assert context["schema_version"] == "task_resolution_execution_context.v2"
+    assert context["source_message_id"] == "message-1"
+    assert reference["resolution_thread_id"] == "thread-task-001"
+    assert reference["last_committed_seq"] == 0
+
+
+def test_accepted_task_control_requires_instruction_only_for_continue() -> None:
+    """Typed controls keep operation-specific instruction ownership."""
+
+    module = importlib.import_module("kazusa_ai_chatbot.task_resolution")
+
+    continue_control = module.validate_accepted_task_control({
+        "schema_version": "accepted_task_control.v1",
+        "accepted_task_ref": "accepted_task:task-1",
+        "operation": "continue",
+        "instruction": "Verify the remaining constraint.",
+    })
+    cancel_control = module.validate_accepted_task_control({
+        "schema_version": "accepted_task_control.v1",
+        "accepted_task_ref": "accepted_task:task-1",
+        "operation": "cancel",
+        "instruction": None,
+    })
+
+    assert continue_control["operation"] == "continue"
+    assert cancel_control["instruction"] is None
+    with pytest.raises(module.TaskResolutionContractError, match="instruction"):
+        module.validate_accepted_task_control({
+            "schema_version": "accepted_task_control.v1",
+            "accepted_task_ref": "accepted_task:task-1",
+            "operation": "continue",
+            "instruction": None,
+        })
+
+
+def test_evidence_bearing_partial_is_valid() -> None:
+    """Partial is accepted only when a DSH evidence receipt is present."""
+
+    module = importlib.import_module("kazusa_ai_chatbot.task_resolution")
     validated = module.validate_task_resolution_result(
         _result(status="partial", evidence=[_evidence()]),
     )
 
     assert validated["status"] == "partial"
-    assert validated["evidence"][0]["evidence_id"] == "evidence-1"
+    assert validated["evidence"][0]["specialist"] == "dsh"
 
 
 def test_zero_evidence_partial_is_rejected() -> None:
-    """Completed-subgoal claims cannot turn an ungrounded result into partial."""
+    """An ungrounded partial result cannot enter the cognition boundary."""
 
     module = importlib.import_module("kazusa_ai_chatbot.task_resolution")
-    result = _result(status="partial", evidence=[])
-    result["completed_subgoals"] = ["Claimed completion without evidence."]
-
     with pytest.raises(module.TaskResolutionContractError, match="partial"):
-        module.validate_task_resolution_result(result)
+        module.validate_task_resolution_result(
+            _result(status="partial", evidence=[]),
+        )
 
 
-def test_non_coding_specialist_cannot_emit_coding_context() -> None:
-    """Only the frozen coding adapter may project coding-run context."""
-
-    module = importlib.import_module("kazusa_ai_chatbot.task_resolution")
-    result = {
-        "schema_version": "task_specialist_result.v1",
-        "specialist": "local_context",
-        "status": "resolved",
-        "evidence": [_evidence()],
-        "completed_subgoals": ["Found public evidence."],
-        "remaining_needs": [],
-        "reason": "Public sources resolved the node.",
-        "retryable": False,
-        "coding_run_context": {
-            "schema_version": "coding_run_context.v1",
-            "coding_run_ref": "coding-run:1",
-        },
-    }
-
-    with pytest.raises(module.TaskResolutionContractError, match="coding"):
-        module.validate_task_specialist_result(result)
-
-
-def test_specialist_result_rejects_foreign_evidence() -> None:
-    """A specialist cannot claim evidence attributed to another owner."""
+def test_foreign_evidence_owner_is_rejected() -> None:
+    """Only DSH may populate the post-cutover task evidence carrier."""
 
     module = importlib.import_module("kazusa_ai_chatbot.task_resolution")
-    result = {
-        "schema_version": "task_specialist_result.v1",
-        "specialist": "public_research",
-        "status": "resolved",
-        "evidence": [_evidence()],
-        "completed_subgoals": [],
-        "remaining_needs": [],
-        "reason": "The result must own all returned evidence.",
-        "retryable": False,
-    }
+    foreign_evidence = _evidence()
+    foreign_evidence["specialist"] = "public_research"
 
     with pytest.raises(module.TaskResolutionContractError, match="specialist"):
-        module.validate_task_specialist_result(result)
+        module.validate_task_resolution_result(
+            _result(status="partial", evidence=[foreign_evidence]),
+        )
 
 
-def test_temporary_unavailable_requires_retryable_result() -> None:
-    """A typed temporary failure must explicitly authorize one bounded retry."""
+def test_deferred_result_requires_a_complete_dsh_reference() -> None:
+    """A deferred result carries only the validated opaque DSH reference."""
 
     module = importlib.import_module("kazusa_ai_chatbot.task_resolution")
-    result = {
-        "schema_version": "task_specialist_result.v1",
-        "specialist": "public_research",
-        "status": "temporarily_unavailable",
-        "evidence": [],
-        "completed_subgoals": [],
-        "remaining_needs": ["Retry the public source once."],
-        "reason": "The provider is temporarily unavailable.",
-        "retryable": False,
-    }
+    validated = module.validate_task_resolution_result(
+        _result(
+            status="deferred",
+            evidence=[],
+            checkpoint=_resolution_ref(),
+        ),
+    )
 
-    with pytest.raises(module.TaskResolutionContractError, match="retryable"):
-        module.validate_task_specialist_result(result)
+    assert validated["checkpoint"]["schema_version"] == "dsh_resolution_ref.v1"
+    assert validated["coding_run_context"] == {}
+
+
+def test_nonempty_coding_context_is_rejected() -> None:
+    """The predecessor field remains present but cannot carry legacy state."""
+
+    module = importlib.import_module("kazusa_ai_chatbot.task_resolution")
+    result = _result(status="resolved", evidence=[])
+    result["evidence_state"] = "complete"
+    result["coding_run_context"] = {"legacy": "state"}
+
+    with pytest.raises(module.TaskResolutionContractError, match="coding"):
+        module.validate_task_resolution_result(result)

@@ -1,59 +1,40 @@
-# DSH Standard Resolution Sidecar
+# DSH Resolution Sidecar
 
-This separately built, long-lived Node process hosts the official DSH base and
-Standard preset for Kazusa Plan 2. The official composition is mounted by
-reference, not copied or forked. Standard native filesystem, shell, coding,
-jobs, tests, public web, approval, and sandbox capabilities take name
-precedence. Kazusa supplies thirteen storage-independent semantic gateway
-tools plus the controller-owned `submit_resolution`; it supplies no coding or
-web wrapper, command filter, DSH budget, sandbox overlay, or generic workflow
-tool.
+The sidecar is the independently operating DSH Standard execution boundary.
+It authenticates Brain/resolver calls, persists session events and receipts,
+owns native Standard tools, and forwards the exact semantic catalog.
 
-The exact semantic names are listed in the [tool gateway README](../../src/kazusa_ai_chatbot/dsh_tool_gateway/README.md).
-The Python worker owns framed service calls, idempotent semantic mutations,
-and outcome replay. DSH session data and semantic outcomes are separate
-SQLite stores:
+The model-visible catalog has exactly fourteen rows. Plan 2 rows 1 through
+13 remain byte-identical; Plan 3 adds only row 14:
 
-- `<KAZUSA_DSH_DATA_ROOT>/dsh/0.1.1-rc.2/sessions.sqlite`
-- `<KAZUSA_DSH_DATA_ROOT>/dsh/0.1.1-rc.2/semantic-outcomes.sqlite`
+1. kazusa_search_conversation_history
+2. kazusa_read_conversation_entries
+3. kazusa_summarize_conversation_participants
+4. kazusa_search_memories
+5. kazusa_read_memories
+6. kazusa_remember_information
+7. kazusa_revise_memory
+8. kazusa_change_memory_lifecycle
+9. kazusa_find_people_by_name
+10. kazusa_read_person_profiles
+11. kazusa_recall_active_context
+12. kazusa_read_calendar_context
+13. kazusa_inspect_attached_media
+14. kazusa_inspect_public_media
 
-## Build and run
+kazusa_inspect_public_media is limited to HTTP(S) image URLs and a semantic
+question. The shared safety contract rejects credentials/fragments, private
+or special-use DNS results, unsafe redirects after at most 3 hops, responses
+over 6 MiB, and responses exceeding 15 seconds. PNG, JPEG, GIF, or WebP
+MIME/magic agreement, Pillow decoding, and 1..8192 dimensions are required.
+The sidecar forwards bounded vision evidence with source dsh_public_media,
+never raw bytes or base64.
 
-```powershell
-corepack pnpm@11.7.0 --dir sidecars/dsh_resolution install --frozen-lockfile
-corepack pnpm@11.7.0 --dir sidecars/dsh_resolution typecheck
-corepack pnpm@11.7.0 --dir sidecars/dsh_resolution build
-node sidecars/dsh_resolution/dist/src/main.js
-```
+The new row produces a new catalog digest. Eligible terminal/checkpointed V2
+threads rotate to a fresh segment when no interaction is open; old authority
+and grants fail closed. Open pre-cutover interactions and grants drain first.
 
-The layered repository `.env` supplies `KAZUSA_DSH_SIDECAR_URL`,
-`KAZUSA_DSH_RPC_TOKEN`, absolute `KAZUSA_DSH_DATA_ROOT`, absolute
-`AGENTIC_RESOLVER_WORKSPACE_ROOT`, loopback `KAZUSA_DSH_BRAIN_URL`,
-`KAZUSA_DSH_BRAIN_SHARED_SECRET`, `KAZUSA_DSH_TOOL_GATEWAY_SECRET`, and
-absolute `KAZUSA_DSH_PYTHON_EXECUTABLE`. It also supplies all six
-`AGENTIC_RESOLVER_LLM_*` route fields. The initial route is qwen27b-5090 with
-50,176 context tokens, 8,192 completion tokens, and thinking enabled.
-`DEEPSEEK_API_KEY` is optional host-only configuration for the pinned native
-DSH web provider. Secret values belong in the operator environment, never in
-this README.
-
-## Readiness and lifecycle
-
-Start the Brain first and wait for its `/health` and authenticated
-`/runtime/dsh/health` endpoints. The latter must report configured,
-durable-store, and cognition-judge readiness. Then start this sidecar and
-call authenticated JSON-RPC `system.health`; its status is `ready` only when
-`route`, `standard`, `semantic_worker`, `web`, and `brain` are ready. The
-response contains sanitized route, catalog, policy, and workspace
-diagnostics. Brain and sidecar have independent process lifecycles, but the
-sidecar readiness dependency prevents DSH interaction requests from running
-without the Brain judge.
-
-The pinned wire contract is `kazusa.dsh-resolution-rpc.v2`, intake is
-`dsh_resolution_intake.v2`, profile is `kazusa-resolver-standard-v2`, and the
-store epoch is `dsh-sqlite-0.1.1-rc.2-standard-v2` under policy
-`dsh-standard-policy-v2` for DSH `0.1.1-rc.2`.
-See the [integration architecture](../../docs/architecture/dsh_integration_architecture.md),
-[control-plane README](../../src/agentic_resolver/README.md), and
-[HOWTO](../../docs/HOWTO.md#run-the-plan-2-dsh-standard-sidecar) for the full
-runtime and interaction contract.
+system.health is ready only when authenticated route, Standard,
+semantic-worker, web, Brain, catalog, policy, workspace, profile, release,
+and store checks agree. Build and sidecar tests are run through the pinned
+package-manager command recorded by Plan 3.

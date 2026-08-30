@@ -2,18 +2,28 @@
 
 from __future__ import annotations
 
+import ast
 import inspect
 
 import pytest
 
 from agentic_resolver import AgenticResolverRuntime
 from agentic_resolver.contracts import DSHResolutionExhaustV2
+from kazusa_ai_chatbot.dsh_tool_gateway.contracts import content_digest
 
 
 class FakeController:
     async def resolve(self, intake: dict[str, object]) -> dict[str, object]:
         del intake
         return {"kind": "checkpointed", "checkpoint": {"reason": "requested"}}
+
+
+class EmptyCheckpointController:
+    """Return the sidecar shape used when a relay checkpoint has no payload."""
+
+    async def resolve(self, intake: dict[str, object]) -> dict[str, object]:
+        del intake
+        return {"kind": "checkpointed", "checkpoint": {}}
 
 
 @pytest.mark.asyncio
@@ -24,10 +34,80 @@ async def test_resolve_preserves_standalone_entrypoint_and_returns_typed_exhaust
     assert exhaust.kind == "checkpointed"
 
 
+@pytest.mark.asyncio
+async def test_open_carries_admission_sequence_into_empty_checkpoint_identity(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """An empty sidecar checkpoint keeps the already-admitted typed reference."""
+
+    monkeypatch.setenv(
+        "AGENTIC_RESOLVER_LLM_BASE_URL", "http://127.0.0.1:8080/v1"
+    )
+    monkeypatch.setenv("AGENTIC_RESOLVER_LLM_API_KEY", "route-secret")
+    monkeypatch.setenv("AGENTIC_RESOLVER_LLM_MODEL", "qwen27b-5090")
+    monkeypatch.setenv("AGENTIC_RESOLVER_LLM_CONTEXT_WINDOW_TOKENS", "50176")
+    monkeypatch.setenv("AGENTIC_RESOLVER_LLM_MAX_COMPLETION_TOKENS", "8192")
+    monkeypatch.setenv("AGENTIC_RESOLVER_LLM_THINKING_ENABLED", "true")
+    monkeypatch.setenv("AGENTIC_RESOLVER_WORKSPACE_ROOT", str(tmp_path.resolve()))
+    monkeypatch.setenv("KAZUSA_DSH_TOOL_GATEWAY_SECRET", "semantic-secret")
+
+    continuation_ref = {
+        "source_episode_id": "runtime-episode",
+        "source_message_id": "runtime-message",
+        "branch_id": "ordinary_response",
+        "goal_ref": {
+            "scope": "user",
+            "kind": "goal",
+            "entity_id": "runtime-goal",
+        },
+    }
+    facts = [f"fact-{index}" for index in range(10)]
+    execution_context = {
+        "brain_conversation_ref": "chat:debug:runtime",
+        "platform": "debug",
+        "channel_id": "runtime-channel",
+        "requester_global_user_id": "runtime-user",
+        "goal_continuation_ref": continuation_ref,
+    }
+    start_spec = {
+        "model_facts": facts,
+        "model_facts_digest": content_digest(facts),
+        "objective_ref": content_digest(continuation_ref),
+    }
+    admitted_references: list[dict[str, object]] = []
+
+    async def before_resolve(reference: dict[str, object]) -> None:
+        admitted_references.append(dict(reference))
+
+    runtime = AgenticResolverRuntime(EmptyCheckpointController())
+    exhaust = await runtime.open(
+        task_session_id="session-runtime",
+        operation_generation=0,
+        request={"semantic_goal": "Resolve the runtime test goal."},
+        execution_context=execution_context,
+        start_spec=start_spec,
+        before_resolve=before_resolve,
+    )
+
+    assert admitted_references[0]["last_committed_seq"] == 0
+    assert exhaust.to_dict()["identity"]["last_committed_seq"] == 0
+
+
 def test_runtime_has_no_brain_task_resolution_rag_or_coding_import_edge() -> None:
     source = inspect.getsource(__import__("agentic_resolver.runtime", fromlist=["*"]))
+    tree = ast.parse(source)
+    imports: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imports.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imports.add(node.module)
     forbidden = ("brain_service", "task_resolution", ".rag", "coding_agent")
-    assert all(name not in source for name in forbidden)
+    assert all(
+        not any(name in target for name in forbidden)
+        for target in imports
+    )
 
 
 def test_runtime_builds_v2_authority_from_canonical_project_route_and_workspace(

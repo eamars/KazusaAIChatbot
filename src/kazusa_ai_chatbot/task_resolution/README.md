@@ -1,101 +1,62 @@
-# Task Resolution
+# DSH Task Resolution
 
-## Document Control
+kazusa_ai_chatbot.task_resolution owns the single Plan 3 DSH task edge.
+Cognition supplies a typed semantic task request when its evidence and
+judgment call for work. DSH owns admission, execution, checkpointing,
+recovery, and terminal projection. Dialog and the dispatcher own visible
+wording and delivery.
 
-- Owning package: `kazusa_ai_chatbot.task_resolution`
-- Source of truth: contracts, state, orchestrator, service, and focused tests
-- Document status: current inline-first task-resolution contract
+## Admission and result contracts
 
-## Purpose
+TaskResolutionAdmissionV1 is transient and model-hidden. It contains
+exactly schema_version, accepted_task_id, background_work_job_id, and
+task_session_id. It is an observation of accepted work, not a deferred
+result, not a durable authority, and not a reference to a checkpoint.
 
-`task_resolution` owns one inline-first, resumable semantic task session.
-It accepts an authorized `task_resolution_request`, preserves a typed
-checkpoint, and returns only a terminal prompt-safe result or a deferred
-checkpoint for durable continuation.
+Only a committed checkpoint may produce
+TaskResolutionResultV1(status="deferred"). That result carries one
+DshResolutionRefV1; it never carries worker metadata or a legacy executor
+reference. Terminal and evidence-bearing partial results remain typed and
+prompt-safe.
 
-## Boundary
+## Durable binding and recovery
 
-- Cognition decides whether current evidence is sufficient and may emit one
-  `task_resolution_request`.
-- The task orchestrator chooses one next specialist, semantic subgoal, and
-  validated coding objective mode.
-- Specialists own their declared public IO and return typed evidence or a
-  typed refusal.
-- Deterministic code owns budgets, counters, retry eligibility, checkpoint
-  validation, and durable handoff.
-- Dialog owns final visible wording.
+The task edge creates the accepted-task and background-job records in their
+reviewed order. Claim-time execution creates dsh_task_binding.v1 in the
+dsh_task_bindings collection, then mints fresh DSH authority for the bound
+thread and segment. operation_generation and document revision CAS make
+claim, checkpoint, continuation, and terminal delivery idempotent. Lease
+loss, process restart, sidecar loss, stale catalog authority, and malformed
+responses fail closed and recover only from the binding/checkpoint.
 
-The package has exactly four initial specialists:
-`local_context`, `public_research`, `coding`, and `text_computation`.
+The worker payload is task_orchestrator_worker_payload.v2. Its operations
+are open_dsh_resolution and continue_dsh_resolution. The same shared
+runtime handles foreground work and direct background work; direct admission
+returns the transient observation before the checkpoint exists.
 
-## Public Interfaces
+## Accepted-task controls
 
-```python
-await resolve_task_inline(
-    request,
-    execution_context,
-    inline_budget_seconds=30.0,
-)
+The prompt-safe capability is accepted_task_control.v1. It allows only
+continue, summarize, and cancel against the same opaque accepted task
+and session. Status inspection is read-only. Controls create a new DSH
+operation with fresh authority and the current binding generation; they do
+not expose queue leases, raw evidence, credentials, adapters, or paths.
 
-await resume_task_resolution(checkpoint, execution_context)
-```
+## Limits and ownership
 
-`TaskResolutionExecutionContextV1` contains only typed, prompt-safe context.
-It excludes adapter objects, database handles, credentials, raw worker
-payloads, and coding-agent internal state.
+Deterministic code enforces schema, budgets, idempotency, persistence order,
+lease fencing, CAS, and delivery boundaries. The DSH semantic worker owns
+semantic tool choice and task judgment under the pinned Standard profile.
+RAG3/local-context and its prewarm owner remain the evidence path for ordinary
+chat context; they are not replaced by task-resolution documentation.
 
-`start_task_resolution_in_background(...)` creates the initial checkpoint and
-uses the existing accepted-task, pending-state, queue, and idempotency
-promotion boundary without running an inline specialist. The public result is
-the same validated deferred shape used by inline work that exceeds its budget.
+No second resolver graph, specialist vocabulary, generic background router,
+or direct adapter delivery may be introduced. A result-ready task returns
+through normal cognition, dialog, and dispatcher delivery.
 
-## Runtime Flow
+## Verification
 
-- Four specialist dispatches maximum.
-- Four raw orchestrator LLM calls maximum, including malformed structural
-  candidates and their bounded replacements.
-- Two route corrections maximum.
-- Two invocations of one specialist for one task node maximum.
-- An incompatible `(task_node_id, specialist)` pair cannot repeat.
-- A second invocation requires a persisted retryable temporary operational
-  failure or material later evidence that changes the handler input.
-- `partial` requires at least one validated provenance-bearing evidence item.
-- A deferred result carries the same nonterminal checkpoint and never resets
-  counters after a process or lease retry.
-- `pending_dispatch` records the exact selected specialist, subgoal, coding
-  mode, and `selected` or `started` phase. Background work persists selection,
-  then the started transition, before invoking a handler. A resumed started
-  dispatch is settled unavailable rather than relaunched.
-- Inline coding selections always return a deferred selected handover before a
-  coding handler is imported or called.
-- A direct background handoff creates no specialist evidence before the worker
-  resumes. If a deferred result contains committed evidence, callers expose
-  that evidence before continuation context; an empty evidence list remains
-  empty and does not become a claimed partial result.
-- A resolved or evidence-bearing partial result with remaining needs creates
-  deterministic dependency child nodes. The first dependency-ready node
-  continues through the same bounded loop; exhausted continuation returns an
-  evidence-bearing partial result.
-
-The static orchestrator prompt receives a bounded human payload with task
-state and evidence. It does not receive raw specialist payloads, worker
-metadata, credentials, repository paths, or adapter identifiers.
-
-## Failure Behavior
-
-Specialists return typed incompatibility, availability, user-input, approval,
-or failure outcomes. Deterministic checkpoint validation enforces dispatch and
-route-correction limits; durable retries resume the same validated checkpoint.
-
-## Testing Contract
-
-Run task-resolution contract, state, orchestrator, specialist, inline-promotion,
-and background-resume suites. Run live LLM cases one at a time and inspect their
-saved artifacts before sign-off.
-
-## Forbidden Paths
-
-Do not add specialists, dynamic tool schemas, direct adapter delivery, raw
-database access, arbitrary filesystem or shell access, or a second task-session
-persistence collection. Do not inspect coding-agent internals; the coding
-specialist uses only frozen public coding-run exports.
+Run the task-resolution contract, lifecycle, binding, recovery, accepted-task,
+background-work, and cognition handoff tests with venv\Scripts\python.
+Live DB and live LLM nodes are explicit, one case at a time, and require
+inspection of their saved evidence.

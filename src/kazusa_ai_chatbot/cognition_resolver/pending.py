@@ -17,10 +17,11 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     ResolverGoalProgressV1,
     ResolverObservationV1,
     ResolverPendingResolutionV1,
-    ResolverPendingResumeV1,
+    ResolverPendingResumeV3,
     ResolverValidationError,
-    validate_resolver_observation,
+    validate_pending_task_continuation,
     validate_resolver_goal_progress,
+    validate_resolver_observation,
     validate_resolver_pending_resolution,
     validate_resolver_pending_resume,
 )
@@ -101,7 +102,7 @@ async def upsert_pending_resume(
     observation: ResolverObservationV1,
     *,
     upsert_action_attempt_func: UpsertActionAttemptFunc = upsert_action_attempt,
-) -> ResolverPendingResumeV1:
+) -> ResolverPendingResumeV3:
     """Persist and return a pending HIL or approval resume row."""
 
     record = build_pending_resume_record(state, observation)
@@ -116,11 +117,14 @@ async def load_matching_pending_resume(
     *,
     list_action_attempts_func: ListActionAttemptsFunc = list_action_attempts,
     upsert_action_attempt_func: UpsertActionAttemptFunc = upsert_action_attempt,
-) -> ResolverPendingResumeV1 | None:
+) -> ResolverPendingResumeV3 | None:
     """Load one unexpired pending row matching the current conversation scope."""
 
     current_timestamp_utc = _storage_timestamp(state)
     rows = await list_action_attempts_func(limit=1000)
+    selected_resume: ResolverPendingResumeV3 | None = None
+    selected_created_at = None
+    selected_resume_id = ""
     for row in rows:
         if not _is_pending_resolver_row(row):
             continue
@@ -131,9 +135,9 @@ async def load_matching_pending_resume(
             continue
         if not _is_open_pending_status(pending_resume):
             continue
-        if _is_source_message_for_current_turn(pending_resume, state):
+        if pending_resume["capability_kind"] != "human_clarification":
             continue
-        if not _is_reply_to_pending_source_message(pending_resume, state):
+        if _is_source_message_for_current_turn(pending_resume, state):
             continue
         if _is_created_after_current_turn(pending_resume, current_timestamp_utc):
             continue
@@ -147,9 +151,21 @@ async def load_matching_pending_resume(
             )
             await upsert_action_attempt_func(expired_row)
             continue
-        return_value = pending_resume
-        return return_value
-    return_value = None
+        created_at = parse_storage_utc_datetime(
+            pending_resume["created_at_utc"],
+        )
+        if (
+            selected_created_at is None
+            or created_at > selected_created_at
+            or (
+                created_at == selected_created_at
+                and pending_resume["resume_id"] > selected_resume_id
+            )
+        ):
+            selected_resume = pending_resume
+            selected_created_at = created_at
+            selected_resume_id = pending_resume["resume_id"]
+    return_value = selected_resume
     return return_value
 
 
@@ -231,7 +247,7 @@ def _pending_resume(
     *,
     resume_id: str,
     expires_at_utc: str,
-) -> ResolverPendingResumeV1:
+) -> ResolverPendingResumeV3:
     """Build the typed pending-resume payload stored in a ledger row."""
 
     capability_kind = observation["capability_kind"]
@@ -267,6 +283,12 @@ def _pending_resume(
     }
     if goal_progress is not None:
         pending_resume["prompt_safe_goal_progress"] = goal_progress
+    if capability_kind == "human_clarification":
+        pending_resume["pending_task_continuation"] = (
+            validate_pending_task_continuation(
+                state["pending_task_continuation"],
+            )
+        )
     return_value = validate_resolver_pending_resume(pending_resume)
     return return_value
 
@@ -309,7 +331,7 @@ def _approval_summary_for_pending_resume(
     return approval_summary
 
 
-def _pending_resume_from_row(row: dict[str, Any]) -> ResolverPendingResumeV1 | None:
+def _pending_resume_from_row(row: dict[str, Any]) -> ResolverPendingResumeV3 | None:
     """Read and validate pending-resume payload from a ledger row."""
 
     top_level_resume = row.get("resolver_pending_resume")
@@ -343,7 +365,7 @@ def _pending_resume_from_row(row: dict[str, Any]) -> ResolverPendingResumeV1 | N
 
 def _updated_pending_row(
     row: dict[str, Any],
-    pending_resume: ResolverPendingResumeV1,
+    pending_resume: ResolverPendingResumeV3,
     *,
     status: str,
     resolution: ResolverPendingResolutionV1 | None,
@@ -399,7 +421,7 @@ def _pending_status_for_capability(capability_kind: str) -> str:
 
 
 def _status_for_resolution(
-    pending_resume: ResolverPendingResumeV1,
+    pending_resume: ResolverPendingResumeV3,
     resolution: ResolverPendingResolutionV1,
 ) -> str:
     """Map L2d's pending decision to durable pending-row status."""
@@ -426,7 +448,7 @@ def _is_pending_resolver_row(row: dict[str, Any]) -> bool:
     return return_value
 
 
-def _is_open_pending_status(pending_resume: ResolverPendingResumeV1) -> bool:
+def _is_open_pending_status(pending_resume: ResolverPendingResumeV3) -> bool:
     """Return whether a pending row should be projected into cognition."""
 
     return_value = pending_resume["status"] in {
@@ -437,7 +459,7 @@ def _is_open_pending_status(pending_resume: ResolverPendingResumeV1) -> bool:
 
 
 def _is_source_message_for_current_turn(
-    pending_resume: ResolverPendingResumeV1,
+    pending_resume: ResolverPendingResumeV3,
     state: GlobalPersonaState,
 ) -> bool:
     """Return whether the current turn created the pending row."""
@@ -445,21 +467,6 @@ def _is_source_message_for_current_turn(
     return_value = (
         pending_resume["source_message_id"]
         == _state_text(state, "platform_message_id")
-    )
-    return return_value
-
-
-def _is_reply_to_pending_source_message(
-    pending_resume: ResolverPendingResumeV1,
-    state: GlobalPersonaState,
-) -> bool:
-    """Return whether the current turn replies to the pending source message."""
-
-    reply_context = state["reply_context"]
-    reply_to_message_id = reply_context.get("reply_to_message_id")
-    return_value = (
-        isinstance(reply_to_message_id, str)
-        and reply_to_message_id == pending_resume["source_message_id"]
     )
     return return_value
 
@@ -543,7 +550,7 @@ def _expiry_timestamp(storage_timestamp_utc: str) -> str:
 
 
 def _is_expired(
-    pending_resume: ResolverPendingResumeV1,
+    pending_resume: ResolverPendingResumeV3,
     current_timestamp_utc: str,
 ) -> bool:
     """Return whether a pending row has expired at the current turn."""
@@ -555,7 +562,7 @@ def _is_expired(
 
 
 def _is_created_after_current_turn(
-    pending_resume: ResolverPendingResumeV1,
+    pending_resume: ResolverPendingResumeV3,
     current_timestamp_utc: str,
 ) -> bool:
     """Return whether a pending row belongs to a future event."""

@@ -110,9 +110,15 @@ def build_text_surface_input_from_global_state(
     if not isinstance(epistemic_boundary, str) or not epistemic_boundary.strip():
         raise ValueError("canonical epistemic boundary is required")
     surface_response_plan = {
-        key: value
-        for key, value in plan.items()
-        if key != "dsh_interaction_decision"
+        key: plan[key]
+        for key in (
+            "response_goal",
+            "goal_resolution",
+            "epistemic_boundary",
+            "action_requests",
+            "resolver_requests",
+        )
+        if key in plan
     }
     expression_context, visual_context = _character_surface_contexts(state)
     conversation_progress = state.get("conversation_progress")
@@ -154,6 +160,13 @@ def build_text_surface_input_from_global_state(
     willingness = output.get("relational_willingness")
     if isinstance(willingness, Mapping):
         canonical_payload["relational_willingness"] = dict(willingness)
+    continuation_ref = _resolver_result_continuation_ref(state)
+    resolver_result = _resolver_result(
+        state,
+        continuation_ref=continuation_ref,
+    )
+    if resolver_result is not None:
+        canonical_payload["resolver_result"] = resolver_result
     return validate_text_surface_input_canonical(canonical_payload)
 
 
@@ -669,6 +682,70 @@ def _action_results(state: Mapping[str, Any]) -> list[dict[str, Any]]:
             continue
         result.append(project_trace_action_result_v2(row))
     return result
+
+
+def _resolver_result_continuation_ref(
+    state: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    """Resolve the exact typed continuation reference for one L3 result."""
+
+    episode = state.get("cognitive_episode")
+    if isinstance(episode, Mapping) and episode.get("trigger_source") == "tool_result":
+        return _tool_result_surface_continuation_ref(state, episode)
+    raw_resolver_state = state.get("resolver_state")
+    if not isinstance(raw_resolver_state, Mapping):
+        return None
+    resolver_state = validate_resolver_state(raw_resolver_state)
+    dependency = resolver_state.get("required_resolver_evidence_dependency")
+    if dependency is not None:
+        return dependency["goal_continuation_ref"]
+    observations = resolver_state["observations"]
+    if (
+        not observations
+        or observations[-1]["capability_kind"] != "task_resolution_request"
+    ):
+        return None
+    continuation_ref = observations[-1].get("goal_continuation_ref")
+    if not isinstance(continuation_ref, Mapping):
+        raise TypeError("task resolver observation lacks a continuation reference")
+    return continuation_ref
+
+
+def _tool_result_surface_continuation_ref(
+    state: Mapping[str, Any],
+    episode: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    """Cross-check one tool-result source against its cognition-owned speak."""
+
+    typed_source = _episode_tool_result_source(episode)
+    continuation_ref = typed_source["goal_continuation_ref"]
+    origin = episode.get("origin_metadata")
+    if (
+        not isinstance(origin, Mapping)
+        or origin.get("goal_continuation_ref") != continuation_ref
+    ):
+        raise ValueError("tool-result episode origin continuation reference conflicts")
+    action_specs = state.get("action_specs")
+    if not isinstance(action_specs, list):
+        raise TypeError("tool-result surface requires cognition-owned action specs")
+    speak_specs = [
+        row
+        for row in action_specs
+        if isinstance(row, Mapping) and row.get("kind") == "speak"
+    ]
+    if len(speak_specs) != 1:
+        raise ValueError("tool-result surface requires exactly one speak action")
+    expected_role = (
+        "task_result"
+        if typed_source["task_status"] in {"resolved", "partial"}
+        else "task_status"
+    )
+    speak_spec = speak_specs[0]
+    if speak_spec.get("surface_role") != expected_role:
+        raise ValueError("tool-result speak surface role conflicts with result status")
+    if speak_spec.get("goal_continuation_ref") != continuation_ref:
+        raise ValueError("tool-result speak continuation reference conflicts")
+    return continuation_ref
 
 
 def _resolver_result(

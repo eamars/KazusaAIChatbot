@@ -49,26 +49,57 @@ DELIVERY_PROFILE_FIELDS = (
     "hesitation",
     "punctuation",
 )
+_CONTENT_PLAN_OUTPUT_CONTRACT = {
+    "additionalProperties": False,
+    "required_fields": [
+        "content_plan",
+        "content_requirements",
+        "delivery_profile",
+        "lexical_avoidances",
+    ],
+    "content_plan": {
+        "type": "string",
+        "minimum_characters": 1,
+        "maximum_characters": 1000,
+    },
+    "content_requirements": {
+        "type": "array",
+        "minimum_items": 1,
+        "maximum_items": 8,
+        "unique_items": True,
+        "item": {
+            "type": "string",
+            "minimum_characters": 1,
+            "maximum_characters": 500,
+        },
+    },
+    "delivery_profile": {
+        "type": "object",
+        "additionalProperties": False,
+        "required_fields": list(DELIVERY_PROFILE_FIELDS),
+        "fields": {
+            field_name: {
+                "type": "string",
+                "minimum_characters": 1,
+                "maximum_characters": 200,
+            }
+            for field_name in DELIVERY_PROFILE_FIELDS
+        },
+    },
+    "lexical_avoidances": {
+        "type": "array",
+        "minimum_items": 0,
+        "maximum_items": 8,
+        "unique_items": True,
+        "item": {
+            "type": "string",
+            "minimum_characters": 1,
+            "maximum_characters": 120,
+        },
+    },
+}
 
-SURFACE_REPAIR_INSTRUCTION = '保留原始的角色判断、\r\n情绪方向、关系方向、selected intention、能力结果和事实；只修复字段集合、字段类型、长度、\r\n列表基数和 JSON 语法。只返回当前阶段规定的\r\nJSON 对象，不添加解释、markdown 或额外字段。'
-
-
-VISIBLE_CONTENT_AUTHORITY_GUIDANCE = '''可见语义的选择权属于 response_plan.response_goal 与当前可见观察。relational_willingness 和
-subjective_expression_context.private_monologue 只用于塑造表达姿态：亲疏、主动性、直接程度、节奏、信心、关照与声音。
-`active_character_goal.reason`、`active_character_goal.cause_summary`、`intention.reason`、`relational_willingness` 和
-`subjective_expression_context.private_monologue` 都只是理解或表达姿态的上下文，不能独立扩展
-response_plan.response_goal 与当前可见观察已经选定的语义。
-`epistemic_boundary` 只限制已选语义的断言强度；其中列为解释或未知的内容不是可见内容候选，不能独立进入 content_plan 或 dialog。
-字段存在本身不能单独选出明确的可见关系断言、对当前用户动机的解释或独立的关系性收束。只有当前观察与已选
-response_goal 共同表明某项关系意义属于本轮回复时，才可将其明确写入可见内容。已经显现的关系模式只属于连续性；
-除非当前输入重新打开该意义，语义改写不能把它变成本轮新选择。保留当前观察明确支持的关系拒绝、边界变化、接受
-或拒绝，以及当前用户明确重新打开的关系意义。未选中的关系解释即使改写成感受、姿态、理由、content_requirements
-或 delivery_profile 中的表达效果，仍是在选择可见关系语义，不能绕过上述边界。dialog 必须服从已选 content_plan
-与 response_goal。'''
-
-
-
-_CONTENT_PLAN_SYSTEM_PROMPT_TEMPLATE = '''规划当前角色实际会说出或发送的内容，表达已经形成的角色判断。综合 active character goal、response plan、
+CONTENT_PLAN_SYSTEM_PROMPT = '''规划当前角色实际会说出或发送的内容，表达已经形成的角色判断。综合 active character goal、response plan、
 visible episode、semantic affect、semantic relationship、expression policy、interaction style、
 permitted_action_results、resolver_result、runtime_capability_limits、character_expression_context、
 subjective_expression_context、addressee_plan 和 overused_moves。task_resolution_request
@@ -80,7 +111,18 @@ overused_moves 只描述当前参与者在本段互动中已经使用过的可�
 先服务 selected intention 和 response_plan；只有当前输入继续、深化、实质改变或重新
 打开同一事项时，才允许重新使用对应模式，不能靠语义换词把同一模式作为新的主要收束。
 
-{visible_content_authority_guidance}
+可见语义的选择权属于 response_plan.response_goal 与当前可见观察。relational_willingness 和
+subjective_expression_context.private_monologue 只用于塑造表达姿态：亲疏、主动性、直接程度、节奏、信心、关照与声音。
+`active_character_goal.reason`、`active_character_goal.cause_summary`、`intention.reason`、`relational_willingness` 和
+`subjective_expression_context.private_monologue` 都只是理解或表达姿态的上下文，不能独立扩展
+response_plan.response_goal 与当前可见观察已经选定的语义。
+`epistemic_boundary` 只限制已选语义的断言强度；其中列为解释或未知的内容不是可见内容候选，不能独立进入 content_plan 或 dialog。
+字段存在本身不能单独选出明确的可见关系断言、对当前用户动机的解释或独立的关系性收束。只有当前观察与已选
+response_goal 共同表明某项关系意义属于本轮回复时，才可将其明确写入可见内容。已经显现的关系模式只属于连续性；
+除非当前输入重新打开该意义，语义改写不能把它变成本轮新选择。保留当前观察明确支持的关系拒绝、边界变化、接受
+或拒绝，以及当前用户明确重新打开的关系意义。未选中的关系解释即使改写成感受、姿态、理由、content_requirements
+或 delivery_profile 中的表达效果，仍是在选择可见关系语义，不能绕过上述边界。dialog 必须服从已选 content_plan
+与 response_goal。
 
 # 最高优先级的行动事实
 permitted_action_results 是物理或外部效果是否完成的唯一权威。空列表或没有 executed 行时，
@@ -120,7 +162,7 @@ goal_resolution 是当前目标可回答性的已确认判断：answerable_now �
 输出规划字段；最终对话由 dialog 渲染器生成。当前用户的即时发言来自 visible percept；角色反思是语境证据；运行元数据留在内部。
 自由文本使用简体中文，用户引文、专有名词、代码、URL、schema 或 enum token 原样保留。
 
-# 输出前不可跳过的合同检查
+# 语义审计
 1. 逐句对照 subjective_expression_context.epistemic_boundary。对每个功能、原因、来源、意图、结果或排除性主张，
    边界未允许直接断言时，必须在 content_plan 和同一条 content_requirements 中明确要求猜测或未知措辞。
    缺少可见特征或证据不等于能排除一种功能或可能性。
@@ -129,15 +171,9 @@ goal_resolution 是当前目标可回答性的已确认判断：answerable_now �
    未来时的具体外部承诺同样必须有同一效果的 pending、scheduled 或 executed 行。删去不匹配的完成描写和外部执行承诺，
    保留 response_plan 已选择的当前言语立场、愿望、提议或条件。
 
-# 输出格式
-字段恰好是 content_plan、content_requirements、delivery_profile 和 lexical_avoidances。content_plan 非空且最多 1000 字符；
-content_requirements 为一到八条互不重复的非空语义要求，每条最多 500 字符。delivery_profile 必须恰好包含 lexical_register、sentence_shape、rhythm、hesitation、punctuation，
-每个值非空且最多 200 字符，只描述表达实现。lexical_avoidances 为零到八条互不重复的非空当前措辞片段，每条最多 120 字符，只描述表达连续性。'''
-
-
-CONTENT_PLAN_SYSTEM_PROMPT = _CONTENT_PLAN_SYSTEM_PROMPT_TEMPLATE.format(
-    visible_content_authority_guidance=VISIBLE_CONTENT_AUTHORITY_GUIDANCE,
-)
+# 交付职责
+content_plan 选择本轮可见语义的推进；content_requirements 说明必须保留的语义要求；delivery_profile
+只描述词语、句式、节奏、犹豫和标点的表达实现；lexical_avoidances 只记录本轮应避免重复的具体措辞。'''
 
 
 async def run_content_plan_stage(
@@ -170,8 +206,8 @@ visual_directives。
 当前角色、当前用户或其他参与者。角色自己的反思或内部观察属于证据，不是当前用户的即时发言。输出中不复述来源包标题、
 时间戳、传输摘要、schema key 或运行元数据。
 
-# 输出格式
-字段必须恰好是 visual_directives，其值是一个非空字符串，最多 1000 字符。'''
+# 交付职责
+visual_directives 只描述终端图像表面的可见角色特征、姿势、表情、构图、环境与场景氛围。'''
 
 
 async def run_visual_stage(
@@ -260,7 +296,7 @@ async def _run_surface_stage(
                 payload=fitted_payload,
                 system_prompt=system_prompt,
                 invalid_candidate="",
-                reason="上一轮模型调用未返回可用候选，请在相同语境下重新生成完整 JSON。",
+                reason="provider_error",
                 contract_error="",
                 stage_name=stage_name,
                 safe_checkpoint=safe_checkpoint,
@@ -305,7 +341,7 @@ async def _run_surface_stage(
                 payload=fitted_payload,
                 system_prompt=system_prompt,
                 invalid_candidate=str(response_text),
-                reason="上一份候选未通过当前阶段的字段、类型、长度或 JSON contract 校验。",
+                reason="contract_error",
                 contract_error=str(exc),
                 stage_name=stage_name,
                 safe_checkpoint=safe_checkpoint,
@@ -416,7 +452,6 @@ def _surface_repair_messages(
     repair_payload = {
         "surface": payload,
         "contract_repair": {
-            "repair_instruction": SURFACE_REPAIR_INSTRUCTION,
             "reason": reason,
             "contract_error": contract_error[:SURFACE_STAGE_ERROR_CAP],
             "invalid_candidate": _bounded_repair_text(invalid_candidate),
@@ -435,10 +470,9 @@ def _surface_repair_messages(
             {
                 "surface": payload,
                 "contract_repair": {
-                    "repair_instruction": SURFACE_REPAIR_INSTRUCTION,
                     "reason": reason,
                     "contract_error": contract_error[:SURFACE_STAGE_ERROR_CAP],
-                    "invalid_candidate": "上一份候选已省略；请依据 surface 语境返回完整合法对象。",
+                    "invalid_candidate": "",
                 },
             },
             ensure_ascii=False,
@@ -467,11 +501,7 @@ def _bounded_repair_text(value: str) -> str:
     if len(value) <= SURFACE_STAGE_REPAIR_OUTPUT_CAP:
         return value
     half_cap = SURFACE_STAGE_REPAIR_OUTPUT_CAP // 2
-    return (
-        value[:half_cap]
-        + "\n... 已截断的不合格候选 ...\n"
-        + value[-half_cap:]
-    )
+    return value[:half_cap] + value[-half_cap:]
 
 
 def _validate_content_plan_result(
@@ -577,6 +607,8 @@ def _surface_prompt_packet(
     """Serialize and retain the exact reduced packet used by the model."""
 
     reduced_payload = dict(payload)
+    if stage_name == "content_plan":
+        reduced_payload["output_contract"] = _CONTENT_PLAN_OUTPUT_CONTRACT
     while True:
         prompt_text = json.dumps(
             {"surface": reduced_payload},

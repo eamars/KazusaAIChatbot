@@ -7,14 +7,14 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
-from typing import Any, Sequence
-
+from typing import Any
 
 DEFAULT_MANIFEST_PATH = Path(
     "tests/ownership/source_test_impact_manifest.json"
 )
-STRICT_SOURCE_PREFIX = "src/"
+STRICT_SOURCE_PREFIXES = ("src/", "scripts/")
 
 
 class ImpactValidationError(RuntimeError):
@@ -40,6 +40,15 @@ def _path_is_under(path: str, root: str) -> bool:
     """Return whether a normalized path is equal to or below a root."""
 
     return path == root or path.startswith(f"{root.rstrip('/')}/")
+
+
+def _is_strict_source_path(path: str) -> bool:
+    """Return whether a changed path is a governed Python source module."""
+
+    return (
+        path.endswith(".py")
+        and any(path.startswith(prefix) for prefix in STRICT_SOURCE_PREFIXES)
+    )
 
 
 def _source_paths_for_root(
@@ -105,6 +114,71 @@ def _string_list(value: object, label: str, errors: list[str]) -> list[str]:
     return list(value)
 
 
+def _removed_source_entries(
+    manifest: Mapping[str, Any],
+    errors: list[str],
+    repository_root: Path,
+) -> dict[str, list[str]]:
+    """Validate and normalize the explicit removed-source vocabulary."""
+
+    if "removed_sources" not in manifest:
+        errors.append("removed_sources must be a mapping or list")
+        return {}
+    raw_entries = manifest.get("removed_sources")
+    candidates: list[tuple[object, object]] = []
+    if isinstance(raw_entries, Mapping):
+        for source_value, nodes_value in raw_entries.items():
+            if isinstance(nodes_value, Mapping):
+                candidates.append(
+                    (source_value, nodes_value.get("required_unit_tests"))
+                )
+            else:
+                candidates.append((source_value, nodes_value))
+    elif isinstance(raw_entries, list):
+        for index, entry in enumerate(raw_entries):
+            if not isinstance(entry, Mapping):
+                errors.append(f"removed_sources[{index}] must be an object")
+                continue
+            candidates.append((entry.get("source"), entry.get("required_unit_tests")))
+    else:
+        errors.append("removed_sources must be a mapping or list")
+        return {}
+
+    normalized_entries: dict[str, list[str]] = {}
+    for source_value, nodes_value in candidates:
+        if not isinstance(source_value, str) or not source_value.strip():
+            errors.append("removed_sources source must be a path string")
+            continue
+        source = normalize_repository_path(source_value)
+        if "*" in source:
+            errors.append(
+                f"removed_sources source may not contain a wildcard: {source}"
+            )
+        if not _is_strict_source_path(source):
+            errors.append(
+                f"removed_sources source must be a strict Python source: {source}"
+            )
+        if source in normalized_entries:
+            errors.append(f"duplicate removed source: {source}")
+        normalized_entries[source] = _string_list(
+            nodes_value,
+            f"removed_sources.{source}.required_unit_tests",
+            errors,
+        )
+        if not normalized_entries[source]:
+            errors.append(
+                f"removed_sources.{source}.required_unit_tests must not be empty"
+            )
+        for node_id in normalized_entries[source]:
+            if "::" not in node_id:
+                errors.append(
+                    f"removed_sources.{source} has a non-exact unit node: {node_id}"
+                )
+        if (repository_root / Path(*source.split("/"))).exists():
+            errors.append(f"removed source path must be absent: {source}")
+    return normalized_entries
+
+
 def validate_manifest(
     manifest: dict[str, Any],
     repository_root: Path | None = None,
@@ -124,6 +198,8 @@ def validate_manifest(
     if not isinstance(entries, list):
         errors.append("entries must be a list")
         entries = []
+
+    removed_sources = _removed_source_entries(manifest, errors, root)
 
     expected_sources: set[str] = set()
     for source_root in source_roots:
@@ -191,6 +267,8 @@ def validate_manifest(
         errors.append(f"source module has no manifest entry: {source}")
     for source in sorted(set(entry_by_source) - expected_sources):
         errors.append(f"manifest source is outside source_roots: {source}")
+    for source in sorted(set(removed_sources) & set(entry_by_source)):
+        errors.append(f"source is both active and removed: {source}")
     return errors
 
 
@@ -206,6 +284,22 @@ def manifest_test_nodes(
         nodes.extend(entry["required_unit_tests"])
         if not unit_only:
             nodes.extend(entry.get("supplemental_tests", []))
+    removed_sources = manifest.get("removed_sources", {})
+    if isinstance(removed_sources, Mapping):
+        for node_ids in removed_sources.values():
+            if isinstance(node_ids, list):
+                nodes.extend(
+                    node_id for node_id in node_ids if isinstance(node_id, str)
+                )
+    elif isinstance(removed_sources, list):
+        for entry in removed_sources:
+            if not isinstance(entry, Mapping):
+                continue
+            node_ids = entry.get("required_unit_tests", [])
+            if isinstance(node_ids, list):
+                nodes.extend(
+                    node_id for node_id in node_ids if isinstance(node_id, str)
+                )
     unique_nodes = sorted(set(nodes))
     return unique_nodes
 
@@ -213,6 +307,7 @@ def manifest_test_nodes(
 def resolve_impacted_test_nodes(
     manifest: dict[str, Any],
     changed_paths: Sequence[str],
+    repository_root: Path | None = None,
 ) -> list[str]:
     """Resolve changed strict-boundary source paths to exact unit nodes."""
 
@@ -220,20 +315,28 @@ def resolve_impacted_test_nodes(
         normalize_repository_path(entry["source"]): entry
         for entry in manifest["entries"]
     }
+    errors: list[str] = []
+    removed_sources = _removed_source_entries(
+        manifest,
+        errors,
+        repository_root or _repository_root(),
+    )
+    if errors:
+        raise ImpactValidationError("\n".join(errors))
     impacted_nodes: list[str] = []
     for changed_path in changed_paths:
         normalized_path = normalize_repository_path(changed_path)
-        if not (
-            normalized_path.startswith(STRICT_SOURCE_PREFIX)
-            and normalized_path.endswith(".py")
-        ):
+        if not _is_strict_source_path(normalized_path):
             continue
-        if normalized_path not in entries:
+        if normalized_path in entries:
+            impacted_nodes.extend(entries[normalized_path]["required_unit_tests"])
+        elif normalized_path in removed_sources:
+            impacted_nodes.extend(removed_sources[normalized_path])
+        else:
             raise ImpactValidationError(
                 f"changed production source has no manifest entry: "
                 f"{normalized_path}"
             )
-        impacted_nodes.extend(entries[normalized_path]["required_unit_tests"])
     return sorted(set(impacted_nodes))
 
 
@@ -397,16 +500,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 repository_root,
                 arguments.base_ref,
             )
-            node_ids = resolve_impacted_test_nodes(manifest, changed_paths)
+            node_ids = resolve_impacted_test_nodes(
+                manifest,
+                changed_paths,
+                repository_root,
+            )
             print(
                 "Changed source paths: "
                 + ", ".join(
                     path
                     for path in changed_paths
-                    if (
-                        path.startswith(STRICT_SOURCE_PREFIX)
-                        and path.endswith(".py")
-                    )
+                    if _is_strict_source_path(path)
                 )
             )
         else:

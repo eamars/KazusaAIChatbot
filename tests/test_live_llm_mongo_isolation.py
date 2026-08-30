@@ -144,6 +144,62 @@ def test_guard_rejects_identity_growth_database_name_mismatch(
         client_module._assert_guarded_database_name()
 
 
+def test_guard_allows_exact_reserved_ephemeral_database(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Allow one exact reserved-prefix database for a live case."""
+
+    database_name = "_test_kazusa_plan3_ephemeral_case"
+    monkeypatch.setenv("KAZUSA_TEST_DB_GUARD", "1")
+    monkeypatch.setenv(client_module.EPHEMERAL_TEST_DATABASE_GUARD_ENV, "1")
+    monkeypatch.setenv(
+        client_module.EPHEMERAL_TEST_DATABASE_NAME_ENV,
+        database_name,
+    )
+    monkeypatch.setattr(client_module, "MONGODB_DB_NAME", database_name)
+
+    client_module._assert_guarded_database_name()
+
+
+def test_guard_rejects_ephemeral_database_name_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reject a case database that differs from its exact-name marker."""
+
+    monkeypatch.setenv("KAZUSA_TEST_DB_GUARD", "1")
+    monkeypatch.setenv(client_module.EPHEMERAL_TEST_DATABASE_GUARD_ENV, "1")
+    monkeypatch.setenv(
+        client_module.EPHEMERAL_TEST_DATABASE_NAME_ENV,
+        "_test_kazusa_plan3_expected",
+    )
+    monkeypatch.setattr(
+        client_module,
+        "MONGODB_DB_NAME",
+        "_test_kazusa_plan3_other",
+    )
+
+    with pytest.raises(client_module.DatabaseTestGuardError):
+        client_module._assert_guarded_database_name()
+
+
+def test_guard_rejects_ephemeral_database_outside_reserved_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reject an exact case name outside the reserved test namespace."""
+
+    database_name = "plan3-ephemeral-case"
+    monkeypatch.setenv("KAZUSA_TEST_DB_GUARD", "1")
+    monkeypatch.setenv(client_module.EPHEMERAL_TEST_DATABASE_GUARD_ENV, "1")
+    monkeypatch.setenv(
+        client_module.EPHEMERAL_TEST_DATABASE_NAME_ENV,
+        database_name,
+    )
+    monkeypatch.setattr(client_module, "MONGODB_DB_NAME", database_name)
+
+    with pytest.raises(client_module.DatabaseTestGuardError):
+        client_module._assert_guarded_database_name()
+
+
 def test_mongodb_log_descriptor_excludes_credentials_and_query_options() -> None:
     """Connection diagnostics must not expose raw URI secrets."""
 

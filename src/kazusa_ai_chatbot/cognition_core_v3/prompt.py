@@ -9,11 +9,17 @@ from kazusa_ai_chatbot.cognition_core_v3.contracts import (
     CANONICAL_A2_FAMILIES,
     CANONICAL_FAMILY_AXES,
     CANONICAL_SHIFT_VALUES,
+    validate_response_plan_contract_variant,
 )
 from kazusa_ai_chatbot.cognition_episode import (
     CURRENT_CHARACTER_ROLE,
     CURRENT_USER_ROLE,
     project_model_visible_percepts,
+)
+from kazusa_ai_chatbot.cognition_resolver.contracts import (
+    ResolverValidationError,
+    validate_resolver_goal_progress,
+    validate_resolver_pending_continuation,
 )
 from kazusa_ai_chatbot.cognition_shared.contracts import (
     GOAL_RESOLUTION_VALUES,
@@ -28,127 +34,11 @@ from kazusa_ai_chatbot.cognition_shared.state_projection import (
     project_relationship_axis,
 )
 
-CURRENT_OBSERVATION_AUTHORITY_GUIDANCE = '''`current_observation` 是用户行动、意图、接受、许可和回应对象的直接依据；`direct_facts` 仅为稳定背景事实，不能单独建立这些当前事实。
-有限的认知或言语贡献请求只建立所请求的贡献和当前交互角色，不会单独转移更广泛的选择权、行动权或持续控制权。同一请求的存在或清晰程度、角色受邀贡献及其上游改述，都不是放弃自主选择、缺乏能力、依赖、信任变化或关系变化、持续控制权的独立证据；这些含义须有另行表达的`current_observation`事实支持。
-授权只证明当前观察所写对象、行动、时间和条件内的许可；授权本身不证明动机或上述更广含义。'''
-A2_RELATIONSHIP_STATE_EVIDENCE_GUIDANCE = '''`relationship_social` 必须区分当前交互角色或范围许可与用户—角色关系状态；角色或许可本身只建立当前范围，不能改变任何关系轴，也不能证明依赖、信任或亲近。只有另行表达的`current_observation`关系事实才支持这些含义；没有这类事实时使用`applicable=false`或保持既有轴，并仅作事实性的交互摘要。若存在独立关系事实，仍按语义判断。'''
-A2_EXISTENTIAL_DRIVE_EVIDENCE_GUIDANCE = '''`existential_drive` 的摘要、原因和轴变化都描述当前角色自身的体验；用户能力、能动性和需要只是证据上下文，不是角色所属轴的主体。没有独立当前事实时，不能推断用户放弃自主、依赖或信任。'''
-A1_QUESTION_GUIDANCE = '''
-按固定位置返回 A1 的三个评估类别：事件与行为归因、目标与威胁结果、认知比较或
-记忆。以开放的语义判断和具体原因作为主要内容；`axis_changes` 只是可选的从属
-证据。{current_observation_authority}
-`continuation_state` 只提供仍在起作用的因果压力。
-当前用户明确纠正自己的意思时，把这项纠正当作当前观察；纠正本身不是相反意思的证据。
-只有新的当下证据支持不确定或不同判断时，才保留相应的不确定性。
-'''.format(
-    current_observation_authority=CURRENT_OBSERVATION_AUTHORITY_GUIDANCE,
-)
-RECIPIENT_APPLICABILITY_GUIDANCE = '''公共可见性只能证明说了什么、由谁说、说给谁；面向某一参与者的同意、许可、承诺、
-关系或角色，不会因为另一参与者也看见就转移给另一参与者。
-'''
-BACKGROUND_CONTEXT_GOAL_AUTHORITY_GUIDANCE = '''`direct_facts`、`conditional_character_context` 和关系解释可以影响理解、`private_monologue`、`relational_willingness` 以及角色化表达；
-只有当 `current_observation` 使这类背景意义成为当前请求、决策或未解决事项的一部分时，才可以把它纳入 `active_character_goal` 或 `response_goal`；
-否则，背景意义不能另行产生或追加当前回应目标。'''
-G_RELATIONAL_CARRIER_EVIDENCE_GUIDANCE = '''`relational_willingness` 与 `private_monologue` 可以表达角色自身有依据的互动意愿、感受和动机，也可以说明角色对当前贡献或选择的回应；
-`relational_willingness.reason` 只能记录角色自身的动机与立场；`cause_summary` 只能引用当前事实；`private_monologue` 只能表达角色自身的体验。
-当前交互角色或范围许可本身只属于当前范围，不能成为用户依赖、信任、亲近、关系状态或用户动机的依据。
-普通贡献可以成为角色化帮助的动机；用户信任、依赖、需要、能力或放弃自主，须有另行表达的`current_observation`事实，不能从角色载体或回复内容提供角色推断。
-把未经当前关系事实支持的用户关系含义写成第一人称感受、内心判断或被动经历，仍是在给用户补写关系事实，不能因放入`private_monologue`而获得依据。
-除非有另行表达的`current_observation`关系事实，否则不要把关系意义添加给用户；若存在独立关系事实，仍按语义判断。'''
-A2_QUESTION_GUIDANCE = '''
-按固定位置返回 A2 的三个评估类别：关系与社会判断、道德身份、存在性驱力。以开放
-的语义判断和具体原因作为主要内容；`axis_changes` 只是可选的从属证据。
-{current_observation_authority}
-`participant_continuity` 只描述此前参与者、行为及结果。
-`conditional_character_context` 可以影响角色判断和边界，但不能用于确认当前事实、
-同意、承诺、许可、能力或当前用户的意图。
-{existential_drive_evidence}
-{relationship_state_evidence}
-{recipient_applicability}'''.format(
-    current_observation_authority=CURRENT_OBSERVATION_AUTHORITY_GUIDANCE,
-    existential_drive_evidence=A2_EXISTENTIAL_DRIVE_EVIDENCE_GUIDANCE,
-    relationship_state_evidence=A2_RELATIONSHIP_STATE_EVIDENCE_GUIDANCE,
-    recipient_applicability=RECIPIENT_APPLICABILITY_GUIDANCE,
-)
-APPRAISAL_QUESTION_GUIDANCE = '''
-返回一个 JSON 对象，并且严格包含本阶段要求的固定评估类别位置。每个位置都要保留
-开放的 `semantic_summary` 和具体的 `cause_summary`。`axis_changes` 只是可选的
-从属证据，只能使用列出的 `axis` 和一个 `shift` 值。当前角色始终是判断主体。
-'''
-GOAL_QUESTION_GUIDANCE = '''
-严格返回一个由当前角色拥有的 `active_character_goal`、一项
-`relational_willingness` 记录，以及一段简洁的第一人称 `private_monologue`。
-内心独白要连接此刻的感受、具体原因和眼前动机。它可以影响表达方式，但不能用于
-确认事实、许可、能力、目标对象或状态变化。即使请求仍不明确，也要让角色目标具有
-实际意义；澄清、守住边界、暂缓判断或有依据地保持沉默，都是有效目标。
-先确定当前观察新增加、改变、纠正、询问或仍未解决的内容，再选择一个对这项当前
-语义增量有贡献的主要目标。已表达的回应模式只是背景连续性；只有当前用户继续、深化、实质改变或重新打开同一事项时，才把它作为当前目标。当前用户明确纠正自己的意思时，把
-这项纠正当作当前观察；纠正本身不是相反意思的证据。
-继续处理同一任务或话题，本身不会继续或重新打开角色此前使用或提出的回应方式、提议、要求、条件或关系性回报。
-角色尚未得到回应的提议只能作为参与者连续性，不能当作当前用户的意图、接受、承诺或必须追求的当前目标。
-只有当前用户回应、接受、拒绝、提及、询问、实质改变或明确重新打开该回应事项时，才可以再次选择它。
-角色倾向可以影响语气和立场，但不能取代当前语义增量成为主要目标。
-{current_observation_authority}
-{background_goal_authority}
-{relational_carrier_evidence}
-{recipient_applicability}'''.format(
-    current_observation_authority=CURRENT_OBSERVATION_AUTHORITY_GUIDANCE,
-    background_goal_authority=BACKGROUND_CONTEXT_GOAL_AUTHORITY_GUIDANCE,
-    relational_carrier_evidence=G_RELATIONAL_CARRIER_EVIDENCE_GUIDANCE,
-    recipient_applicability=RECIPIENT_APPLICABILITY_GUIDANCE,
-)
-_ORDINARY_PLAN_FIELD_GUIDANCE = '''严格只返回
-`goal_resolution`、`response_goal`、`action_requests`、`resolver_requests` 和
-`epistemic_boundary`。不得把输入中的权威通道名称复制到输出对象中。'''
-_DSH_PLAN_FIELD_GUIDANCE = '''严格返回普通计划的五个字段，并在存在 DSH 交互时额外返回
-第六个顶层字段 `dsh_interaction_decision`；本次输出对象必须总共包含这六个字段。不得把
-输入中的权威通道名称复制到输出对象中。'''
-_ORDINARY_PLAN_GUIDANCE_TEMPLATE = '''
-返回一份由当前角色拥有的回应计划。`response_goal` 描述可见对话的意图；
-`action_requests` 和 `resolver_requests` 只能使用输入中提供的语义能力。
-`epistemic_boundary` 必须说明可见措辞可以断言什么、哪些内容只能作为解释，以及
-哪些内容仍然未知。每一项未经观察的功能、原因、来源、意图或结果，都必须留在解释
-层，并在可见措辞中明确表达不确定性。缺少证据或没有观察到某项特征，都不能据此
-作出否定断言，也不能排除任何可能。不得虚构能力或私有引用。{plan_field_guidance}
-先让回应目标回答当前观察新增加、改变、纠正、询问或仍未解决的内容，再决定如何
-让角色的性格和关系语境影响表达。
-已表达的回应模式只属于背景连续性；只有当前用户继续、深化、实质改变或重新打开同一事项时，才允许重新选择该模式。
-当前用户明确纠正自己的意思时，把这项纠正当作当前观察；纠正本身不是相反意思的证据。
-继续处理同一任务或话题，本身不会继续或重新打开角色此前使用或提出的回应方式、提议、要求、条件或关系性回报。
-角色尚未得到回应的提议只能作为参与者连续性，不能当作当前用户的意图、接受、承诺或必须追求的当前目标。
-只有当前用户回应、接受、拒绝、提及、询问、实质改变或明确重新打开该回应事项时，才可以再次选择它。
-角色倾向可以影响语气和立场，但不能取代当前语义增量成为主要目标。
-{current_observation_authority}
-{background_goal_authority}
-{recipient_applicability}'''
-ORDINARY_PLAN_GUIDANCE = _ORDINARY_PLAN_GUIDANCE_TEMPLATE.format(
-    plan_field_guidance=_ORDINARY_PLAN_FIELD_GUIDANCE,
-    current_observation_authority=CURRENT_OBSERVATION_AUTHORITY_GUIDANCE,
-    background_goal_authority=BACKGROUND_CONTEXT_GOAL_AUTHORITY_GUIDANCE,
-    recipient_applicability=RECIPIENT_APPLICABILITY_GUIDANCE,
-)
-_DSH_PLAN_GUIDANCE_TEMPLATE = '''
-{ordinary_guidance}
-当前存在一个待处理的 DSH 交互。`dsh_interaction_decision` 是普通计划五个字段之外的
-唯一附加顶层字段；Brain 负责这项语义决定，dialog 负责面向用户的可见措辞。
-`interaction_id` 必须逐字返回 `{interaction_id}`，`kind` 必须逐字返回 `{kind}`。
-`decision` 只能使用当前 `kind` 对应的值：{decision_values_by_kind}。
-嵌套的 `answer` 决定要求非空 `answer`，并且嵌套的 `response_goal` 与 `relay_mode` 必须
-为 `null`。`relay_to_user` 决定要求 `answer` 为 `null`、非空 `response_goal`，以及一个
-非空的 `relay_mode`。`allow_once` 和 `reject` 决定要求嵌套的
-`answer`、`response_goal` 和 `relay_mode` 全部为 `null`。`reason` 始终必须是非空字符串。
-`relay_mode` 只能是 `question`、`approval`、`plan_review` 或 `null`。
-{reply_guidance}
-'''
 _DSH_DECISION_VALUES_BY_KIND = {
-    "approval": ("allow_once", "reject", "relay_to_user"),
-    "question": ("answer", "reject", "relay_to_user"),
-    "plan_review": ("answer", "allow_once", "reject", "relay_to_user"),
+    "approval": ("allow_once", "reject"),
+    "question": ("answer", "reject"),
+    "plan_review": ("answer", "allow_once", "reject"),
 }
-SELF_PLAN_GUIDANCE = '''
-返回独立的自我认知回应契约。根据输入中有依据的参与语境，判断角色应保持沉默还是
-提出一项可见回复，并为任何可见措辞明确断言边界。
-'''
 
 _PRIVATE_SUFFIXES = (
     "_id", "_ids", "_handle", "_handles", "_ref", "_refs", "_path", "_paths",
@@ -847,6 +737,68 @@ def _continuation_state(
     return result
 
 
+def _project_pending_resolver_continuation(
+    value: object,
+) -> dict[str, object] | None:
+    """Project one validated pending continuation into every cognition stage."""
+
+    if value is None:
+        return_value = None
+        return return_value
+    try:
+        validated = validate_resolver_pending_continuation(value)
+    except ResolverValidationError as exc:
+        raise PromptContractError(str(exc)) from exc
+    projected = _project_semantic_tree(
+        validated,
+        field="pending_resolver_continuation",
+    )
+    if not isinstance(projected, Mapping):
+        raise PromptContractError(
+            "pending_resolver_continuation projection is invalid"
+        )
+    return_value = dict(projected)
+    return return_value
+
+
+def _project_resolver_goal_progress(
+    value: object,
+) -> dict[str, object] | None:
+    """Project the validated goal checklist as a bounded continuity lane."""
+
+    if value is None or (isinstance(value, Mapping) and not value):
+        return_value = None
+        return return_value
+    try:
+        validated = validate_resolver_goal_progress(value)
+    except ResolverValidationError as exc:
+        raise PromptContractError(str(exc)) from exc
+    projected = _project_semantic_tree(
+        validated,
+        field="resolver_goal_progress",
+    )
+    if not isinstance(projected, Mapping):
+        raise PromptContractError("resolver_goal_progress projection is invalid")
+    return_value = dict(projected)
+    return return_value
+
+
+def _attach_resolver_continuity(
+    packet: dict[str, object],
+    workspace: Mapping[str, object],
+) -> dict[str, object]:
+    """Attach prompt-safe resolver continuity lanes to one stage packet."""
+
+    pending = workspace.get("pending_resolver_continuation")
+    if isinstance(pending, Mapping):
+        packet["pending_resolver_continuation"] = dict(pending)
+    goal_progress = workspace.get("resolver_goal_progress")
+    if isinstance(goal_progress, Mapping):
+        packet["resolver_goal_progress"] = dict(goal_progress)
+    return_value = packet
+    return return_value
+
+
 def _conditional_character_context(
     workspace: Mapping[str, object],
     *,
@@ -893,6 +845,8 @@ def build_canonical_turn_workspace(
     runtime_limits: Sequence[Mapping[str, object]] = (),
     group_engagement: Mapping[str, object] | None = None,
     pending_dsh_interaction: Mapping[str, object] | None = None,
+    pending_resolver_continuation: Mapping[str, object] | None = None,
+    response_plan_contract_variant: object,
 ) -> dict[str, object]:
     if not isinstance(episode, Mapping) or not isinstance(scene_context, Mapping):
         raise PromptContractError("episode and scene_context must be mappings")
@@ -947,6 +901,47 @@ def build_canonical_turn_workspace(
         affect_context.extend(
             _project_affect_context({"affect": list(character_affect_context)})
         )
+    projected_pending_resolver = _project_pending_resolver_continuation(
+        pending_resolver_continuation,
+    )
+    try:
+        validated_response_plan_variant = (
+            validate_response_plan_contract_variant(
+                response_plan_contract_variant,
+            )
+        )
+    except ValueError as exc:
+        raise PromptContractError(str(exc)) from exc
+    if (
+        validated_response_plan_variant == "open_pending_resolution"
+        and projected_pending_resolver is None
+    ):
+        raise PromptContractError(
+            "open pending response plan variant requires continuation"
+        )
+    if (
+        validated_response_plan_variant != "open_pending_resolution"
+        and projected_pending_resolver is not None
+    ):
+        raise PromptContractError(
+            "only open pending response plan variant accepts continuation"
+        )
+    capabilities = _project_capabilities(available_actions, available_resolvers)
+    if validated_response_plan_variant != "fresh_ordinary":
+        excluded_resolver_capabilities = {"human_clarification"}
+        if validated_response_plan_variant in {
+            "post_pending_resolution",
+            "tool_result_delivery",
+        }:
+            excluded_resolver_capabilities.add("task_resolution_request")
+        capabilities = {
+            **capabilities,
+            "resolvers": [
+                row
+                for row in capabilities["resolvers"]
+                if row["capability"] not in excluded_resolver_capabilities
+            ],
+        }
     result = {
         "observation": observation,
         "evidence_rows": [dict(row) for row in evidence],
@@ -971,8 +966,14 @@ def build_canonical_turn_workspace(
             _project_semantic_tree(row, field="runtime_limit")
             for row in runtime_limits if isinstance(row, Mapping)
         ],
-        "capabilities": _project_capabilities(available_actions, available_resolvers),
+        "capabilities": capabilities,
+        "response_plan_contract_variant": validated_response_plan_variant,
     }
+    if projected_pending_resolver is not None:
+        result["pending_resolver_continuation"] = projected_pending_resolver
+    projected_goal_progress = _project_resolver_goal_progress(resolver_progress)
+    if projected_goal_progress is not None:
+        result["resolver_goal_progress"] = projected_goal_progress
     if isinstance(pending_dsh_interaction, Mapping):
         result["pending_dsh_interaction"] = (
             project_pending_dsh_interaction_for_prompt(pending_dsh_interaction)
@@ -1018,11 +1019,6 @@ def build_canonical_appraisal_question(
     )
     packet: dict[str, object] = {
         "stage": stage_name,
-        "guidance": (
-            A1_QUESTION_GUIDANCE
-            if stage_name == "A1"
-            else A2_QUESTION_GUIDANCE
-        ),
         "orientation": workspace["orientation"],
         "current_observation": lanes["current_observation"],
         "direct_facts": lanes["direct_facts"],
@@ -1032,6 +1028,7 @@ def build_canonical_appraisal_question(
         ),
         "output_contract": _family_contract(families),
     }
+    _attach_resolver_continuity(packet, workspace)
     if stage_name == "A2":
         packet["accepted_a1_meaning"] = accepted_appraisal_summary or []
         packet["participant_continuity"] = [
@@ -1070,9 +1067,8 @@ def build_canonical_goal_question(
         workspace,
         allowed_questions=_ALL_QUESTIONS,
     )
-    return {
+    packet = {
         "stage": "G",
-        "guidance": GOAL_QUESTION_GUIDANCE,
         "orientation": workspace["orientation"],
         "current_observation": lanes["current_observation"],
         "direct_facts": lanes["direct_facts"],
@@ -1110,6 +1106,9 @@ def build_canonical_goal_question(
             },
         },
     }
+    _attach_resolver_continuity(packet, workspace)
+    return_value = packet
+    return return_value
 
 
 def build_canonical_plan_question(
@@ -1118,10 +1117,38 @@ def build_canonical_plan_question(
     goal: Mapping[str, object],
     appraisal_summary: object,
     self_cognition: bool = False,
-    dsh_reply: bool = False,
 ) -> dict[str, object]:
     pending_interaction = workspace.get("pending_dsh_interaction")
     has_pending_interaction = isinstance(pending_interaction, Mapping)
+    pending_resolver_continuation = workspace.get(
+        "pending_resolver_continuation"
+    )
+    has_pending_resolver = isinstance(
+        pending_resolver_continuation,
+        Mapping,
+    )
+    try:
+        response_plan_contract_variant = (
+            validate_response_plan_contract_variant(
+                workspace["response_plan_contract_variant"]
+            )
+        )
+    except ValueError as exc:
+        raise PromptContractError(str(exc)) from exc
+    if (
+        response_plan_contract_variant == "open_pending_resolution"
+        and not has_pending_resolver
+    ):
+        raise PromptContractError(
+            "open pending response plan variant requires continuation"
+        )
+    if (
+        response_plan_contract_variant != "open_pending_resolution"
+        and has_pending_resolver
+    ):
+        raise PromptContractError(
+            "only open pending response plan variant accepts continuation"
+        )
     pending_prompt: dict[str, object] | None = None
     if self_cognition:
         contract = {
@@ -1140,14 +1167,85 @@ def build_canonical_plan_question(
                 "maximum_characters": 1000,
             },
         }
-        guidance = SELF_PLAN_GUIDANCE
     else:
         required_fields = [
             "goal_resolution", "response_goal", "action_requests", "resolver_requests",
             "epistemic_boundary",
         ]
+        if has_pending_resolver:
+            required_fields.append("pending_resolution")
         if has_pending_interaction:
             required_fields.append("dsh_interaction_decision")
+        capabilities = workspace["capabilities"]
+        if not isinstance(capabilities, Mapping):
+            raise PromptContractError("workspace capabilities must be a mapping")
+        resolver_rows = capabilities.get("resolvers")
+        if not isinstance(resolver_rows, list):
+            raise PromptContractError("workspace resolver capabilities must be a list")
+        visible_resolver_capabilities = {
+            row["capability"]
+            for row in resolver_rows
+            if isinstance(row, Mapping)
+            and isinstance(row.get("capability"), str)
+        }
+        resolver_request_item_variants: dict[str, object] = {}
+        if any(
+            capability != "task_resolution_request"
+            for capability in visible_resolver_capabilities
+        ):
+            resolver_request_item_variants["non_task"] = {
+                "required_fields": ["capability", "goal", "reason"],
+                "additionalProperties": False,
+            }
+        if "task_resolution_request" in visible_resolver_capabilities:
+            resolver_request_item_variants["task_resolution_request"] = {
+                "capability": "task_resolution_request",
+                "required_fields": [
+                    "capability", "goal", "reason", "start_in_background",
+                ],
+                "additionalProperties": False,
+                "field_rules": {
+                    "start_in_background": {
+                        "type": "boolean",
+                        "semantic_values": [
+                            {
+                                "value": False,
+                                "delivery_timing": (
+                                    "required_evidence_before_current_visible_answer"
+                                ),
+                            },
+                            {
+                                "value": True,
+                                "delivery_timing": (
+                                    "current_visible_acknowledgement_then_later_delivery"
+                                ),
+                                "selection_sources": [
+                                    {
+                                        "source": "current_observation",
+                                        "selection_condition": (
+                                            "explicit_later_delivery"
+                                        ),
+                                    },
+                                    {
+                                        "source": (
+                                            "pending_resolver_continuation"
+                                        ),
+                                        "selection_condition": (
+                                            "explicit_background_or_later_delivery"
+                                        ),
+                                        "required_pending_disposition": (
+                                            "answered"
+                                        ),
+                                        "current_observation_condition": (
+                                            "answers_clarification_without_override_or_rejection"
+                                        ),
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                },
+            }
         contract = {
             "required_fields": required_fields,
             "additionalProperties": False,
@@ -1161,7 +1259,7 @@ def build_canonical_plan_question(
             "action_request_item_bounds": {"minimum": 0, "maximum": 3},
             "response_goal_action_reservation": 1,
             "maximum_action_requests_with_response_goal": 2,
-            "resolver_request_fields": ["capability", "goal", "reason"],
+            "resolver_request_item_variants": resolver_request_item_variants,
             "resolver_request_item_bounds": {"minimum": 0, "maximum": 8},
             "epistemic_boundary": {
                 "type": "string",
@@ -1169,6 +1267,45 @@ def build_canonical_plan_question(
                 "maximum_characters": 1000,
             },
         }
+        if response_plan_contract_variant == "fresh_ordinary":
+            contract["pending_task_continuation"] = {
+                "required_when": {
+                    "resolver_request_capability": "human_clarification",
+                    "exact_count": 1,
+                },
+                "forbidden_when": {
+                    "resolver_request_capability": "human_clarification",
+                    "exact_count": 0,
+                },
+                "fields": [
+                    "schema_version",
+                    "on_answered_clarification",
+                ],
+                "schema_version": "pending_task_continuation.v1",
+                "on_answered_clarification_values": [
+                    "no_task_admission",
+                    "foreground_task_admission",
+                    "background_task_admission",
+                ],
+                "on_answered_clarification_semantics": {
+                    "no_task_admission": "answered_clarification_does_not_admit_task",
+                    "foreground_task_admission": "evidence_before_current_visible_answer",
+                    "background_task_admission": "current_visible_acknowledgement_then_later_delivery",
+                },
+            }
+        if response_plan_contract_variant == "open_pending_resolution":
+            contract["pending_resolution_fields"] = ["decision", "reason"]
+            contract["pending_resolution_values"] = [
+                "answered", "continue_waiting", "rejected", "superseded",
+            ]
+            contract["pending_resolution_field_rules"] = {
+                "decision": "current_observation_semantic_disposition",
+                "reason": {
+                    "type": "string",
+                    "minimum_characters": 1,
+                    "maximum_characters": 400,
+                },
+            }
         if has_pending_interaction:
             pending_prompt = project_pending_dsh_interaction_for_prompt(
                 pending_interaction
@@ -1187,40 +1324,19 @@ def build_canonical_plan_question(
                 kind: list(values)
                 for kind, values in _DSH_DECISION_VALUES_BY_KIND.items()
             }
-            if dsh_reply:
-                decision_values_by_kind[interaction_kind].append(
-                    "continue_waiting"
-                )
-            decision_values_by_kind_text = "；".join(
-                "`{kind}`：{values}".format(
-                    kind=kind,
-                    values="、".join(
-                        "`" + decision + "`"
-                        for decision in values
-                    ),
-                )
-                for kind, values in decision_values_by_kind.items()
-            )
             contract["dsh_interaction_decision_fields"] = [
-                "interaction_id", "kind", "decision", "answer", "response_goal",
-                "relay_mode", "reason",
+                "interaction_id", "kind", "decision", "answer", "reason",
             ]
             contract["dsh_interaction_decision_bindings"] = {
                 "interaction_id": interaction_id,
                 "kind": interaction_kind,
             }
-            contract["dsh_interaction_decision_guidance"] = (
-                "Brain owns the semantic interaction decision; dialog owns visible wording."
-            )
             contract["dsh_interaction_decision_values"] = (
                 decision_values_by_kind[interaction_kind]
             )
             contract["dsh_interaction_decision_values_by_kind"] = (
                 decision_values_by_kind
             )
-            contract["dsh_interaction_decision_relay_mode_values"] = [
-                "question", "approval", "plan_review", None,
-            ]
             dsh_decision_field_rules = {
                 "answer": {
                     "type": ["string", "null"],
@@ -1228,30 +1344,6 @@ def build_canonical_plan_question(
                     "maximum_characters": 2_000,
                     "by_decision": {
                         "answer": "required_non_empty_string",
-                        "relay_to_user": "null",
-                        "allow_once": "null",
-                        "reject": "null",
-                    },
-                },
-                "response_goal": {
-                    "type": ["string", "null"],
-                    "minimum_characters_when_string": 1,
-                    "maximum_characters": 2_000,
-                    "by_decision": {
-                        "answer": "null",
-                        "relay_to_user": "required_non_empty_string",
-                        "allow_once": "null",
-                        "reject": "null",
-                    },
-                },
-                "relay_mode": {
-                    "type": ["string", "null"],
-                    "allowed_values": [
-                        "question", "approval", "plan_review", None,
-                    ],
-                    "by_decision": {
-                        "answer": "null",
-                        "relay_to_user": "required_allowed_value",
                         "allow_once": "null",
                         "reject": "null",
                     },
@@ -1263,46 +1355,15 @@ def build_canonical_plan_question(
                     "required_for_every_decision": True,
                 },
             }
-            if dsh_reply:
-                for field_name in ("answer", "response_goal", "relay_mode"):
-                    dsh_decision_field_rules[field_name]["by_decision"][
-                        "continue_waiting"
-                    ] = "null"
             contract["dsh_interaction_decision_field_rules"] = (
                 dsh_decision_field_rules
             )
-            ordinary_guidance = _ORDINARY_PLAN_GUIDANCE_TEMPLATE.format(
-                plan_field_guidance=_DSH_PLAN_FIELD_GUIDANCE,
-                current_observation_authority=(
-                    CURRENT_OBSERVATION_AUTHORITY_GUIDANCE
-                ),
-                background_goal_authority=(
-                    BACKGROUND_CONTEXT_GOAL_AUTHORITY_GUIDANCE
-                ),
-                recipient_applicability=RECIPIENT_APPLICABILITY_GUIDANCE,
-            )
-            reply_guidance = (
-                "本次是与用户回复匹配的判断，因此只有当前契约列出时才可以使用 "
-                "`continue_waiting`。"
-                if dsh_reply
-                else "本次不是与用户回复匹配的判断，不得使用 `continue_waiting`。"
-            )
-            guidance = _DSH_PLAN_GUIDANCE_TEMPLATE.format(
-                ordinary_guidance=ordinary_guidance,
-                interaction_id=interaction_id,
-                kind=interaction_kind,
-                decision_values_by_kind=decision_values_by_kind_text,
-                reply_guidance=reply_guidance,
-            )
-        else:
-            guidance = ORDINARY_PLAN_GUIDANCE
     lanes = _stage_authority_lanes(
         workspace,
         allowed_questions=_ALL_QUESTIONS,
     )
     result = {
         "stage": "P",
-        "guidance": guidance,
         "goal": goal,
         "current_observation": lanes["current_observation"],
         "direct_facts": lanes["direct_facts"],
@@ -1317,6 +1378,7 @@ def build_canonical_plan_question(
         "capabilities": workspace["capabilities"],
         "output_contract": contract,
     }
+    _attach_resolver_continuity(result, workspace)
     if pending_prompt is not None:
         result["pending_dsh_interaction"] = pending_prompt
     return result
@@ -1371,15 +1433,6 @@ def semantic_role_summary(
 
 
 __all__ = [
-    "A1_QUESTION_GUIDANCE",
-    "A2_EXISTENTIAL_DRIVE_EVIDENCE_GUIDANCE",
-    "A2_QUESTION_GUIDANCE",
-    "A2_RELATIONSHIP_STATE_EVIDENCE_GUIDANCE",
-    "APPRAISAL_QUESTION_GUIDANCE",
-    "BACKGROUND_CONTEXT_GOAL_AUTHORITY_GUIDANCE",
-    "CURRENT_OBSERVATION_AUTHORITY_GUIDANCE",
-    "G_RELATIONAL_CARRIER_EVIDENCE_GUIDANCE",
-    "RECIPIENT_APPLICABILITY_GUIDANCE",
     "PromptContractError",
     "build_canonical_appraisal_question",
     "build_canonical_goal_question",

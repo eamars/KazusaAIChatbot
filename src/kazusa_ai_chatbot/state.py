@@ -192,7 +192,7 @@ class IMProcessState(TypedDict):
     interaction_style_context: NotRequired[dict[str, Any]]
     settled_relevance_context_consumption: NotRequired[dict[str, Any]]
     pending_dsh_interaction: NotRequired[dict[str, object]]
-    pending_dsh_reply: NotRequired[bool]
+    dsh_interaction_episode: NotRequired[bool]
     dsh_interaction_decision: NotRequired[dict[str, object]]
 
     # Debug modes (optional, passed from ChatRequest)

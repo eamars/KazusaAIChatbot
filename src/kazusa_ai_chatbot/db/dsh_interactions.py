@@ -15,7 +15,7 @@ from kazusa_ai_chatbot.db._client import get_db
 from kazusa_ai_chatbot.db.errors import DatabaseOperationError
 
 DSH_INTERACTIONS_COLLECTION = "dsh_interaction_store"
-DSH_INTERACTION_SCHEMA_VERSION = "dsh_interaction_pending.v1"
+DSH_INTERACTION_SCHEMA_VERSION = "dsh_brain_interaction.v2"
 INTERACTION_INDEXES = (
     {
         "keys": [("interaction_id", 1)],
@@ -26,17 +26,6 @@ INTERACTION_INDEXES = (
         "keys": [("issuer", 1), ("nonce", 1)],
         "unique": True,
         "name": "dsh_interaction_issuer_nonce_unique",
-    },
-    {
-        "keys": [
-            ("status", 1),
-            ("platform", 1),
-            ("platform_channel_id", 1),
-            ("global_user_id", 1),
-            ("delivered_platform_message_id", 1),
-            ("expires_at", 1),
-        ],
-        "name": "dsh_interaction_reply_lookup",
     },
     {
         "keys": [
@@ -72,17 +61,6 @@ class InteractionRepository(Protocol):
         fields: dict[str, Any],
     ) -> dict[str, Any]:
         """Update mutable interaction state."""
-
-    async def find_pending(
-        self,
-        *,
-        platform: str,
-        platform_channel_id: str,
-        global_user_id: str,
-        reply_to_platform_message_id: str,
-        now: str,
-    ) -> dict[str, Any] | None:
-        """Find one exact unexpired reply target."""
 
     async def consume_nonce(self, issuer: str, nonce: str) -> None:
         """Claim one issuer/nonce pair durably."""
@@ -171,7 +149,7 @@ async def update_interaction(
     interaction_id: str,
     fields: dict[str, Any],
 ) -> dict[str, Any]:
-    """Update mutable decision, delivery, or reply state."""
+    """Update mutable decision or grant state."""
 
     collection = await _collection()
     try:
@@ -252,36 +230,6 @@ class MongoInteractionStore:
         """Update one durable interaction row."""
 
         return await update_interaction(interaction_id, fields)
-
-    async def find_pending(
-        self,
-        *,
-        platform: str,
-        platform_channel_id: str,
-        global_user_id: str,
-        reply_to_platform_message_id: str,
-        now: str,
-    ) -> dict[str, Any] | None:
-        """Find one unexpired row by every adapter identity field."""
-
-        collection = await _collection()
-        try:
-            row = await collection.find_one(
-                {
-                    "status": {
-                        "$in": ["pending", "delivered", "continuation_pending"],
-                    },
-                    "platform": platform,
-                    "platform_channel_id": platform_channel_id,
-                    "global_user_id": global_user_id,
-                    "delivered_platform_message_id": reply_to_platform_message_id,
-                    "expires_at": {"$gt": now},
-                },
-                {"_id": 0},
-            )
-        except PyMongoError as exc:
-            raise DatabaseOperationError("failed to find pending DSH interaction") from exc
-        return dict(row) if row is not None else None
 
     async def consume_nonce(self, issuer: str, nonce: str) -> None:
         """Claim an existing request nonce with a durable conditional update."""
@@ -384,38 +332,6 @@ class InMemoryInteractionStore:
                 raise ValueError("interaction does not exist")
             row.update(deepcopy(fields))
             return deepcopy(row)
-
-    async def find_pending(
-        self,
-        *,
-        platform: str,
-        platform_channel_id: str,
-        global_user_id: str,
-        reply_to_platform_message_id: str,
-        now: str,
-    ) -> dict[str, Any] | None:
-        """Find one exact unexpired pending row."""
-
-        current = _parse(now)
-        with self._lock:
-            for row in self._rows.values():
-                if row.get("status") not in {
-                    "pending",
-                    "delivered",
-                    "continuation_pending",
-                }:
-                    continue
-                if _parse(str(row.get("expires_at"))) <= current:
-                    continue
-                if (
-                    row.get("platform") == platform
-                    and row.get("platform_channel_id") == platform_channel_id
-                    and row.get("global_user_id") == global_user_id
-                    and row.get("delivered_platform_message_id")
-                    == reply_to_platform_message_id
-                ):
-                    return deepcopy(row)
-        return None
 
     async def consume_grant(
         self,

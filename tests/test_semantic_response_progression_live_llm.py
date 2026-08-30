@@ -27,8 +27,6 @@ from kazusa_ai_chatbot.cognition_core_v3.facade import (
     snapshot_protected_chain_records,
 )
 from kazusa_ai_chatbot.cognition_core_v3.prompt import (
-    BACKGROUND_CONTEXT_GOAL_AUTHORITY_GUIDANCE,
-    CURRENT_OBSERVATION_AUTHORITY_GUIDANCE,
     build_canonical_appraisal_question,
     build_canonical_goal_question,
     build_canonical_plan_question,
@@ -80,527 +78,6 @@ _REQUIRED_EMOTIONS = (
     "embarrassment",
     "nostalgia",
 )
-_FROZEN_W3B_FILE_HASHES = {
-    "prompt.py": (
-        "182530864CDB0177015771B1D446DA499B981193CE73C8AA6141688FAD587574"
-    ),
-    "facade.py": (
-        "ED095AFD05A4CAFEF6921A50A8615364A62BF602DDBF98406475F48B9BA7E5F7"
-    ),
-}
-_FROZEN_W3B_PROMPT_HASHES = {
-    "current_observation_authority": (
-        "75851952c641323b60b627b8e338423db0f401ca3ea80ac5e5a6fece17eb31a2"
-    ),
-    "a1_system_prompt": (
-        "dbbb3e807a81c103bda34af6210f14d44f2982ea5d5239c30f079b92497b62f6"
-    ),
-    "a1_packet_guidance": (
-        "950445f34be8567e53747ab529661b5ef267c140cb30958f024c00f991a13a54"
-    ),
-    "background_goal_authority": (
-        "5ca17d31f5f4f545a583447e7bb52fe2487548913998af8252e7e940b791db0d"
-    ),
-    "g_system_prompt": (
-        "77f4d570bb4ec8457eb7d05ee3e33360c313722721a82fae5e51957f1b680ee0"
-    ),
-    "p_system_prompt": (
-        "3b85e9ab965ee6ca5e64c3c597e63a974516673c6ca6056bacea1108ca2112b8"
-    ),
-    "g_packet_guidance": (
-        "16168e6bb7bdd5b9be5891199247dff92a33ed14ea7d2783b166423836359681"
-    ),
-    "p_packet_guidance": (
-        "751160a0d9a44b4adb0a7c3ac55ead3461379123087fd6653986157abae82b96"
-    ),
-}
-_FROZEN_W4_SURFACE_FILE_HASHES = {
-    "surface_stages.py": (
-        "FC2AC00FE13ADB3AB95EECBD9C1297DE4C20E589E9850C1E63DBE70782604F96"
-    ),
-    "dialog_agent.py": (
-        "5181F02FAF5BD364E49F7F8577378BAEC22668B4709C50C31B7DFF23C4D80158"
-    ),
-}
-_FROZEN_W4_SURFACE_PROMPT_HASHES = {
-    "visible_content_authority": (
-        "9d4bc873f6e27f176497df1387eca7b802dc4e5da6f48f832f41d1e8c5a7f58a"
-    ),
-    "content_plan_prompt": (
-        "a1bf212b3ff0d0ac46a49bd2c5cc31ba089d1b82b62d7984270c42124bee2709"
-    ),
-    "dialog_prompt": (
-        "674334441d9c9e7913783d087b2db30951bd956a2a1e879328fe4a930e21cc0c"
-    ),
-}
-_FROZEN_W4_REQUEST_AGENCY_FILE_HASHES = {
-    "prompt.py": (
-        "BE25F433C7934CEFADDE2989ABB329D42716271E76C1B3A4D08DE23B69ACD0E5"
-    ),
-    "facade.py": (
-        "DDF35E8FC3E643DE81660710615AEA524321FBC3433C9E09A82B3B22EED9FCB5"
-    ),
-    "surface_stages.py": (
-        "E39469B944E54B2715A8038C44DE1AA6C6EB461030124FB5D797B72E186C9833"
-    ),
-    "dialog_agent.py": (
-        "5181F02FAF5BD364E49F7F8577378BAEC22668B4709C50C31B7DFF23C4D80158"
-    ),
-}
-_FROZEN_W4_REQUEST_AGENCY_PROMPT_HASHES = {
-    "current_observation_authority": (
-        "50752cb636b19a811df411571dd69a0750f16abf6f58be5dd7f041a074772ef8"
-    ),
-    "a1_packet_guidance": (
-        "e4743682587810f453a3e8e0b97e7357f82cedbd687c677eb99c7f0cfc053685"
-    ),
-    "a2_packet_guidance": (
-        "ec059d98f8940ec2e9a9b9aa49029410f45e96f7b309dd69218fa6323c958b49"
-    ),
-    "g_packet_guidance": (
-        "be9970c1f3c79abbf558497ab3399b45caec38e8181638b728f38ce5aaed8c7f"
-    ),
-    "p_packet_guidance": (
-        "5acbdee2f64ac282e3d8155ece9286d2009a36da6a16366e55a1b5f74bcb5f4a"
-    ),
-    "a1_system_prompt": (
-        "63180b40829a3fc48182913fbca44e4604a45b013f6bc61936c1938a2f5b375d"
-    ),
-    "a2_system_prompt": (
-        "8a6187613f943a5b4c5324670c2556237ccc39ada573789c74f4a1edcf781e8c"
-    ),
-    "g_system_prompt": (
-        "6962a439eda017094a1c635f9b67bc9172c3bdaba92b002eba1b8dad983b3004"
-    ),
-    "p_system_prompt": (
-        "9c574a69a6e2c0f1aae4b1b9e886d31e5919a10d255087fa600a85215a779990"
-    ),
-    "visible_content_authority": (
-        "c6696c7a4145b35740cd3f83cf4d659b9181dd4fb291aaef162c73e3f6376127"
-    ),
-    "content_plan_prompt": (
-        "f4c15d60bc091259ec85163a785af0447f0a4082d8d9f82597f3ec8164cbb550"
-    ),
-    "dialog_prompt": (
-        "3972466eb4de98db69dbd63df3d52bab467256a28f4c71680d0481c5e6a0ed8c"
-    ),
-}
-_FROZEN_W4_REQUEST_AGENCY_V2_FILE_HASHES = {
-    "prompt.py": (
-        "504A6DDB42BEB6A55B7A1264605FCAFC3E4DCAA9ED71750728DF3D8ADFAFF46B"
-    ),
-    "facade.py": (
-        "DDF35E8FC3E643DE81660710615AEA524321FBC3433C9E09A82B3B22EED9FCB5"
-    ),
-    "surface_stages.py": (
-        "E39469B944E54B2715A8038C44DE1AA6C6EB461030124FB5D797B72E186C9833"
-    ),
-    "dialog_agent.py": (
-        "5181F02FAF5BD364E49F7F8577378BAEC22668B4709C50C31B7DFF23C4D80158"
-    ),
-}
-_FROZEN_W4_REQUEST_AGENCY_V2_PROMPT_HASHES = {
-    "current_observation_authority": (
-        "e52e7f98fb05100319f10a2865f35f733ba2a04a98b37d6f95ee0d6554fd1393"
-    ),
-    "a1_packet_guidance": (
-        "af89a9186cc765538c66bb87c4c414f8a4478a81a8cc8ae4ce1a33d9ff7228e3"
-    ),
-    "a2_packet_guidance": (
-        "d841eb94f7f7d691853ad548bc9b1c52b45bdc5d3f05294c94b00ff3a63c346f"
-    ),
-    "g_packet_guidance": (
-        "447820846f1561a1d3e677680f76cae0b8f265df79c4f23eab22fd8117457314"
-    ),
-    "p_packet_guidance": (
-        "0c0bc265ea4f49b7f3f2c8a4756be078b2b3cd8c9a017c9ecfdddcaa3132e9ea"
-    ),
-    "a1_system_prompt": (
-        "74cd45d00d7ac2dd492dc872bcf0b80ad3df689160a2cf6e1782c47eef41ad16"
-    ),
-    "a2_system_prompt": (
-        "26cd0bdf2ac8954daf31364ac3e79c2cd839493f407dc1b76825ea23035719c8"
-    ),
-    "g_system_prompt": (
-        "c71aa12851fc5684ab974ce92b1685d3b26103b1fdbe9abac1e06a01133454e0"
-    ),
-    "p_system_prompt": (
-        "f27b85bc2515ec2c0f6bdb235ba16b9ae3277fea8c44707813722e08d24b6edb"
-    ),
-    "visible_content_authority": (
-        "c6696c7a4145b35740cd3f83cf4d659b9181dd4fb291aaef162c73e3f6376127"
-    ),
-    "content_plan_prompt": (
-        "f4c15d60bc091259ec85163a785af0447f0a4082d8d9f82597f3ec8164cbb550"
-    ),
-    "dialog_prompt": (
-        "3972466eb4de98db69dbd63df3d52bab467256a28f4c71680d0481c5e6a0ed8c"
-    ),
-}
-_FROZEN_W4_REQUEST_AGENCY_V3_FILE_HASHES = {
-    "prompt.py": (
-        "17CC56FEC318A26879626B9529C1AF1B3CE0F7E75BC077CC72B2C2BA84A8880E"
-    ),
-    "facade.py": (
-        "DDF35E8FC3E643DE81660710615AEA524321FBC3433C9E09A82B3B22EED9FCB5"
-    ),
-    "surface_stages.py": (
-        "6E71A4B622773C522FA14A8FC8E54E40A0FD2784000D8307B2A388DB5953FE7F"
-    ),
-    "dialog_agent.py": (
-        "5181F02FAF5BD364E49F7F8577378BAEC22668B4709C50C31B7DFF23C4D80158"
-    ),
-}
-_FROZEN_W4_REQUEST_AGENCY_V3_PROMPT_HASHES = {
-    "current_observation_authority": (
-        "1217fc5d90bb8e933613ee29a3cc9cea00a0e4d297c38726932234bf100b3d92"
-    ),
-    "a1_packet_guidance": (
-        "19f76e29dd11ab3b205fa6e8ae939f3737ef6859fc32adddf00a3cd6cfb8aae3"
-    ),
-    "a2_packet_guidance": (
-        "1941430b6c986b8c521c483647047181131c961b877281b2af23c1aa7d2f360e"
-    ),
-    "g_packet_guidance": (
-        "cd5898dfc1bbb0416a7a667766cff5d468dfdb2f7fad279151250ce82107cf0b"
-    ),
-    "p_packet_guidance": (
-        "bed16bad4cfc2560e4cfef3b539c72b337fc6bf6ea41071615378c77c28e1d0a"
-    ),
-    "a1_system_prompt": (
-        "bdb4a11e23f563402ff94352f27a432dfae05116c7cc09cb8bc797d44c24a82b"
-    ),
-    "a2_system_prompt": (
-        "177454d0de8eec33410621e1f99e7ca38ead75ae520a434356517ee1a574fad0"
-    ),
-    "g_system_prompt": (
-        "10ff1abf7d8cf3cdddcbd3ac6439b2a66e2c2d74952130bce6defa145628af59"
-    ),
-    "p_system_prompt": (
-        "54f4c6257c02cd95d6c994007a9990c5a55be93e8a2b4722cfa75335bcb349d6"
-    ),
-    "visible_content_authority": (
-        "cf58172007101baaceec61cb24cf24213a0fca083149590dc213b4d3d5ec1ca0"
-    ),
-    "content_plan_prompt": (
-        "30717f1d3e44e3bbfefde94e59a8be5266023e043ec93a3c4b400c23d4926daa"
-    ),
-    "dialog_prompt": (
-        "03c345408bdaf8d242e055a121772b06e2e43aad0321f8f5c81235251f7afc4e"
-    ),
-}
-_FROZEN_W4_REQUEST_AGENCY_V4_FILE_HASHES = {
-    "prompt.py": (
-        "43D126DD7A603DF0F5E068780CBFB79D1F3589BD4E631A92D1225E8A7451F5FC"
-    ),
-    "facade.py": (
-        "61A856B056223415D18633CEC1902C5A7C419033170BFD8EE10E11F7CDDFF823"
-    ),
-    "surface_stages.py": (
-        "6E71A4B622773C522FA14A8FC8E54E40A0FD2784000D8307B2A388DB5953FE7F"
-    ),
-    "dialog_agent.py": (
-        "5181F02FAF5BD364E49F7F8577378BAEC22668B4709C50C31B7DFF23C4D80158"
-    ),
-}
-_FROZEN_W4_REQUEST_AGENCY_V4_PROMPT_HASHES = {
-    "current_observation_authority": (
-        "1217fc5d90bb8e933613ee29a3cc9cea00a0e4d297c38726932234bf100b3d92"
-    ),
-    "a1_packet_guidance": (
-        "19f76e29dd11ab3b205fa6e8ae939f3737ef6859fc32adddf00a3cd6cfb8aae3"
-    ),
-    "a2_packet_guidance": (
-        "236173ff1455cbfaed306962e437c9ec949a9aa20fceb103fcd59efa66c41148"
-    ),
-    "g_packet_guidance": (
-        "cd5898dfc1bbb0416a7a667766cff5d468dfdb2f7fad279151250ce82107cf0b"
-    ),
-    "p_packet_guidance": (
-        "bed16bad4cfc2560e4cfef3b539c72b337fc6bf6ea41071615378c77c28e1d0a"
-    ),
-    "a1_system_prompt": (
-        "bdb4a11e23f563402ff94352f27a432dfae05116c7cc09cb8bc797d44c24a82b"
-    ),
-    "a2_system_prompt": (
-        "cfed1e242cd2261c468e63366cb9af118f1b70e82828abef11c40c89b1359336"
-    ),
-    "g_system_prompt": (
-        "10ff1abf7d8cf3cdddcbd3ac6439b2a66e2c2d74952130bce6defa145628af59"
-    ),
-    "p_system_prompt": (
-        "54f4c6257c02cd95d6c994007a9990c5a55be93e8a2b4722cfa75335bcb349d6"
-    ),
-    "visible_content_authority": (
-        "cf58172007101baaceec61cb24cf24213a0fca083149590dc213b4d3d5ec1ca0"
-    ),
-    "content_plan_prompt": (
-        "30717f1d3e44e3bbfefde94e59a8be5266023e043ec93a3c4b400c23d4926daa"
-    ),
-    "dialog_prompt": (
-        "03c345408bdaf8d242e055a121772b06e2e43aad0321f8f5c81235251f7afc4e"
-    ),
-}
-_FROZEN_W4_REQUEST_AGENCY_V5_FILE_HASHES = {
-    "prompt.py": (
-        "96B64E9BFF33BCF9B3456220B9281BF99EE0E1BD94E1E59232FB6F8F2BAA0437"
-    ),
-    "facade.py": (
-        "8DC8FC6DC2F28720730EF26B7FF5A3FC3468800058C6A9A635CAFB9D1C61DDA5"
-    ),
-    "surface_stages.py": (
-        "685E6E3A562E892A3C49C65A60F9A96E304F9B786A07834E95A0DE2A41D06EED"
-    ),
-    "dialog_agent.py": (
-        "5181F02FAF5BD364E49F7F8577378BAEC22668B4709C50C31B7DFF23C4D80158"
-    ),
-}
-_FROZEN_W4_REQUEST_AGENCY_V5_PROMPT_HASHES = {
-    "current_observation_authority": (
-        "1217fc5d90bb8e933613ee29a3cc9cea00a0e4d297c38726932234bf100b3d92"
-    ),
-    "a1_packet_guidance": (
-        "19f76e29dd11ab3b205fa6e8ae939f3737ef6859fc32adddf00a3cd6cfb8aae3"
-    ),
-    "a2_packet_guidance": (
-        "236173ff1455cbfaed306962e437c9ec949a9aa20fceb103fcd59efa66c41148"
-    ),
-    "g_packet_guidance": (
-        "0d079a3dab7f6666459f1afbd46179cf834edc3a9b19228e89b24dcf14fd7b4c"
-    ),
-    "p_packet_guidance": (
-        "bed16bad4cfc2560e4cfef3b539c72b337fc6bf6ea41071615378c77c28e1d0a"
-    ),
-    "a1_system_prompt": (
-        "bdb4a11e23f563402ff94352f27a432dfae05116c7cc09cb8bc797d44c24a82b"
-    ),
-    "a2_system_prompt": (
-        "cfed1e242cd2261c468e63366cb9af118f1b70e82828abef11c40c89b1359336"
-    ),
-    "g_system_prompt": (
-        "0f2f7100aad0432465a04f42929ef4bab93681cdc341e5cd4c09637fb00f1e8f"
-    ),
-    "p_system_prompt": (
-        "54f4c6257c02cd95d6c994007a9990c5a55be93e8a2b4722cfa75335bcb349d6"
-    ),
-    "visible_content_authority": (
-        "7d743eeadc06b37f41c26059c49394ed2237490608ec93f44ac9978d6422a716"
-    ),
-    "content_plan_prompt": (
-        "0bbefe75d1a0a86c6994ca02fd52bfdf41efa726609f0721d83e831934030b36"
-    ),
-    "dialog_prompt": (
-        "8a5392fe73b069716e36dda199aa463216e434577407134786599d703051ee61"
-    ),
-}
-_FROZEN_W4_REQUEST_AGENCY_V6_FILE_HASHES = {
-    "prompt.py": (
-        "5B428C4CDC52DC148619994C84FC78B3A5AC39243A10A2548CC2F39945973B75"
-    ),
-    "facade.py": (
-        "8DC8FC6DC2F28720730EF26B7FF5A3FC3468800058C6A9A635CAFB9D1C61DDA5"
-    ),
-    "surface_stages.py": (
-        "685E6E3A562E892A3C49C65A60F9A96E304F9B786A07834E95A0DE2A41D06EED"
-    ),
-    "dialog_agent.py": (
-        "5181F02FAF5BD364E49F7F8577378BAEC22668B4709C50C31B7DFF23C4D80158"
-    ),
-}
-_FROZEN_W4_REQUEST_AGENCY_V6_PROMPT_HASHES = {
-    "current_observation_authority": (
-        "1217fc5d90bb8e933613ee29a3cc9cea00a0e4d297c38726932234bf100b3d92"
-    ),
-    "a1_packet_guidance": (
-        "19f76e29dd11ab3b205fa6e8ae939f3737ef6859fc32adddf00a3cd6cfb8aae3"
-    ),
-    "a2_packet_guidance": (
-        "236173ff1455cbfaed306962e437c9ec949a9aa20fceb103fcd59efa66c41148"
-    ),
-    "g_packet_guidance": (
-        "536b923e81e58afb3e89d8c1512511a7e9a61790e5e0179fce6398ab6b618112"
-    ),
-    "p_packet_guidance": (
-        "bed16bad4cfc2560e4cfef3b539c72b337fc6bf6ea41071615378c77c28e1d0a"
-    ),
-    "a1_system_prompt": (
-        "bdb4a11e23f563402ff94352f27a432dfae05116c7cc09cb8bc797d44c24a82b"
-    ),
-    "a2_system_prompt": (
-        "cfed1e242cd2261c468e63366cb9af118f1b70e82828abef11c40c89b1359336"
-    ),
-    "g_system_prompt": (
-        "3f4944774dd19d1891c5bbd4797e0278d0c937fcb48720eedd7cfffd049ca914"
-    ),
-    "p_system_prompt": (
-        "54f4c6257c02cd95d6c994007a9990c5a55be93e8a2b4722cfa75335bcb349d6"
-    ),
-    "visible_content_authority": (
-        "7d743eeadc06b37f41c26059c49394ed2237490608ec93f44ac9978d6422a716"
-    ),
-    "content_plan_prompt": (
-        "0bbefe75d1a0a86c6994ca02fd52bfdf41efa726609f0721d83e831934030b36"
-    ),
-    "dialog_prompt": (
-        "8a5392fe73b069716e36dda199aa463216e434577407134786599d703051ee61"
-    ),
-}
-_FROZEN_W4_REQUEST_AGENCY_V7_FILE_HASHES = {
-    "prompt.py": (
-        "B1F2CDC34A4282A7A650405B538B63F268A7B5C879708F6822C26373315C07DD"
-    ),
-    "facade.py": (
-        "8DC8FC6DC2F28720730EF26B7FF5A3FC3468800058C6A9A635CAFB9D1C61DDA5"
-    ),
-    "surface_stages.py": (
-        "685E6E3A562E892A3C49C65A60F9A96E304F9B786A07834E95A0DE2A41D06EED"
-    ),
-    "dialog_agent.py": (
-        "5181F02FAF5BD364E49F7F8577378BAEC22668B4709C50C31B7DFF23C4D80158"
-    ),
-}
-_FROZEN_W4_REQUEST_AGENCY_V7_PROMPT_HASHES = {
-    "current_observation_authority": (
-        "d3b35712249fce5c2529a6d196361cc4f14e9eb062af3f328027f72c62221c38"
-    ),
-    "a1_packet_guidance": (
-        "9ea9ca64e18e300bcc19944b114a4a248bfe7fa003d30327b350fd92cdbec2cd"
-    ),
-    "a2_packet_guidance": (
-        "5d951ee636159aefee49717dc8aa1b64dc95b6e172f3038ac0caf2cd9003af74"
-    ),
-    "g_packet_guidance": (
-        "4f3b41de1f27207f87e1026f097f12cc3c7204c463eafa2238ede365ad16c8e7"
-    ),
-    "p_packet_guidance": (
-        "8ba3b6eb4819bda94a3480bc9954476e230f6e908e8089b5af3ad146c9ef593a"
-    ),
-    "a1_system_prompt": (
-        "83ab31bcc213207f8389197477945152cd1bd85cc11a42efb405d2e370b4a5f0"
-    ),
-    "a2_system_prompt": (
-        "0bafd8a15b4a764a4007d8e5402de6df32ffe1873fb721d56162a89b22a35646"
-    ),
-    "g_system_prompt": (
-        "ff71eb09bf1eac745f3d4b66f38ad265253ec1e70dc117ff8dd5f92f90783e3e"
-    ),
-    "p_system_prompt": (
-        "5ab40e8020b1d6dd93f29c33dbb26c62db09777e922c55c7ecc6f7f17d2741e4"
-    ),
-    "visible_content_authority": (
-        "7d743eeadc06b37f41c26059c49394ed2237490608ec93f44ac9978d6422a716"
-    ),
-    "content_plan_prompt": (
-        "0bbefe75d1a0a86c6994ca02fd52bfdf41efa726609f0721d83e831934030b36"
-    ),
-    "dialog_prompt": (
-        "8a5392fe73b069716e36dda199aa463216e434577407134786599d703051ee61"
-    ),
-}
-_FROZEN_W4_REQUEST_AGENCY_V8_FILE_HASHES = {
-    "prompt.py": (
-        "6B822B886F39B3A89DB070E886ABCF504ABC1FB3637198CD3D3E77EAE0798D37"
-    ),
-    "facade.py": (
-        "8DC8FC6DC2F28720730EF26B7FF5A3FC3468800058C6A9A635CAFB9D1C61DDA5"
-    ),
-    "surface_stages.py": (
-        "685E6E3A562E892A3C49C65A60F9A96E304F9B786A07834E95A0DE2A41D06EED"
-    ),
-    "dialog_agent.py": (
-        "5181F02FAF5BD364E49F7F8577378BAEC22668B4709C50C31B7DFF23C4D80158"
-    ),
-}
-_FROZEN_W4_REQUEST_AGENCY_V8_PROMPT_HASHES = {
-    "current_observation_authority": (
-        "28b80261f317feafc04c47304d56fce3361548b111f5341f9c2ba9a81a855188"
-    ),
-    "a1_packet_guidance": (
-        "b8ccc1a2f564a6e6c0d99d9c4a8f0eb12b321a3bd98b96388a3973573ccb274e"
-    ),
-    "a2_packet_guidance": (
-        "95ab436e7a25bf2e99680142f7b79c454789792912d9404aba63cdb28f385316"
-    ),
-    "g_packet_guidance": (
-        "ec51fe1f902a9b3c4aa8b4e791205ebb9adb4f922799f8da5397486faf61320e"
-    ),
-    "p_packet_guidance": (
-        "6d58fd4388c2bf44c7dbe0aa1343787a80813d97d16fdf48660827e674b9c750"
-    ),
-    "a1_system_prompt": (
-        "39be82d6197da190d66ec03e6a1f087adef318c55f3db2fa04737c17486269ad"
-    ),
-    "a2_system_prompt": (
-        "fb4007dc8b03913a7aabbc3710f6c0756ab28e5fadcfbdbe85d88add69f0117b"
-    ),
-    "g_system_prompt": (
-        "dba849a4c0df21141b57850b4bb6e49be09d02bcbe8142b0288ca4f931ec2c91"
-    ),
-    "p_system_prompt": (
-        "f67357268f5c4d00d8338e542f8a763b7a8ca686fa5825176d4a72def9b86665"
-    ),
-    "visible_content_authority": (
-        "7d743eeadc06b37f41c26059c49394ed2237490608ec93f44ac9978d6422a716"
-    ),
-    "content_plan_prompt": (
-        "0bbefe75d1a0a86c6994ca02fd52bfdf41efa726609f0721d83e831934030b36"
-    ),
-    "dialog_prompt": (
-        "8a5392fe73b069716e36dda199aa463216e434577407134786599d703051ee61"
-    ),
-}
-_FROZEN_W4_POST_PROVIDER_FILE_HASHES = {
-    "prompt.py": (
-        "79CE5CDD40209AD2117CAB1278DA7B0507A3DAB74273C1400619C29561D6B868"
-    ),
-    "facade.py": (
-        "35FAAE47E73C9B42A78CCF3AE47DE4E2DC2128C3E6CB980A328249D33D1C16DF"
-    ),
-    "surface_stages.py": (
-        "685E6E3A562E892A3C49C65A60F9A96E304F9B786A07834E95A0DE2A41D06EED"
-    ),
-    "dialog_agent.py": (
-        "5181F02FAF5BD364E49F7F8577378BAEC22668B4709C50C31B7DFF23C4D80158"
-    ),
-}
-_FROZEN_W4_POST_PROVIDER_PROMPT_HASHES = {
-    "current_observation_authority": (
-        "c4b1cf212566fb2b6762fb13ca2fa6436e426162efcdf74d5bcfca42fd4e6fc9"
-    ),
-    "a1_packet_guidance": (
-        "2a8bb5e4a7f745fdb6485cc6e244e7abe442af3ab1c43b33724668cb739eb392"
-    ),
-    "a2_packet_guidance": (
-        "6bff91e08c3e4dd4deb3ff982f17f5dce3145c833da8da12ac12cdde2577de2e"
-    ),
-    "g_packet_guidance": (
-        "014cdc9de6bcdd9a8f8bdbdaa603721a25998c56e35f4c852f7fb015dae5cf43"
-    ),
-    "p_packet_guidance": (
-        "c0586898d53a0208e8489866f6ce927092faa84eca7917bc7e507061af773761"
-    ),
-    "a1_system_prompt": (
-        "a6998cabae83ca3e8a290d272b45e21476593f4bb9a09043dffaa493095f2068"
-    ),
-    "a2_system_prompt": (
-        "6ca04d2aed33649cf742c83c9ca4a6cd334350fc8c5d0de28eafc461289a4c30"
-    ),
-    "g_system_prompt": (
-        "9203fa1a36c984da212c5b5b28ad282ebc2a10c86de158311b91e87a46b9fbef"
-    ),
-    "p_system_prompt": (
-        "bd17fddee013346cac5439d55c9c439ba0cdafd676c33b4485eaf4521289c3a0"
-    ),
-    "visible_content_authority": (
-        "7d743eeadc06b37f41c26059c49394ed2237490608ec93f44ac9978d6422a716"
-    ),
-    "content_plan_prompt": (
-        "0bbefe75d1a0a86c6994ca02fd52bfdf41efa726609f0721d83e831934030b36"
-    ),
-    "dialog_prompt": (
-        "8a5392fe73b069716e36dda199aa463216e434577407134786599d703051ee61"
-    ),
-}
 _PRE_EDIT_LIVE_TEST_FILE_HASH = (
     "AE76B81C1150524790A92BFFDBEA4C0E63891F2BAD3D3362F0BD7CC53E772B43"
 )
@@ -654,12 +131,6 @@ _SERVICE_GATE_MESSAGES = {
 }
 
 
-def _sha256_file(path: Path) -> str:
-    """Return a file fingerprint for the frozen prompt boundary."""
-
-    return hashlib.sha256(path.read_bytes()).hexdigest().upper()
-
-
 def _sha256_index_file(relative_path: str) -> str:
     """Fingerprint the pre-edit version preserved in the git index."""
 
@@ -675,6 +146,52 @@ def _sha256_text(value: str) -> str:
     """Return a UTF-8 fingerprint for rendered prompt material."""
 
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _effective_cognition_prompts(
+    packets: Mapping[str, Mapping[str, object]],
+) -> dict[str, str]:
+    """Return the complete literal system prompt selected for each stage."""
+
+    return {
+        stage: facade_module._system_prompt_for_stage(
+            stage=stage,
+            packet=packet,
+        )
+        for stage, packet in packets.items()
+    }
+
+
+def _assert_cognition_prompt_semantics(
+    packets: Mapping[str, Mapping[str, object]],
+) -> None:
+    """Keep live gates bound to stage-owned semantic authority."""
+
+    prompts = _effective_cognition_prompts(packets)
+    for stage in ("A1", "A2", "G", "P"):
+        assert "current_observation" in prompts[stage]
+        assert "resolver_goal_progress" in prompts[stage]
+        assert "guidance" not in packets[stage]
+    assert "direct_facts` 只是稳定背景" in prompts["A1"]
+    assert "只有当前观察把它们带入当前请求" in prompts["G"]
+    assert "只依据输入中实际可用的能力规划行动" in prompts["P"]
+
+
+def _assert_surface_prompt_semantics() -> None:
+    """Keep surface and dialog authority at their individual prompt owners."""
+
+    content_prompt = surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
+    dialog_prompt = dialog_module._V2_DIALOG_GENERATOR_PROMPT
+
+    for prompt in (content_prompt, dialog_prompt):
+        assert prompt.count("可见语义的选择权属于") == 1
+        assert "解释或未知的内容不是可见内容候选" in prompt
+        assert "未选中的关系解释" in prompt
+        assert "dialog 必须服从已选 content_plan" in prompt
+    assert "action_kind=speak 只授权说出或发送文字" in content_prompt
+    assert "action_kind=speak 只授权说出或发送 final_dialog 的文字" in (
+        dialog_prompt
+    )
 
 
 def _request_agency_semantic_projection(
@@ -996,6 +513,9 @@ def _workspace_baseline(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
             "group_engagement_action_context",
             {},
         ),
+        response_plan_contract_variant=prepared_payload[
+            "response_plan_contract_variant"
+        ],
     )
     a1 = build_canonical_appraisal_question(
         workspace=workspace,
@@ -1124,8 +644,6 @@ async def _run_request_agency_live_case(
     current_text: str,
     case_name: str,
     monkeypatch: pytest.MonkeyPatch,
-    expected_file_hashes: Mapping[str, str],
-    expected_prompt_hashes: Mapping[str, str],
     artifact_schema: str,
     trace_source_kind: str,
 ) -> dict[str, Any]:
@@ -1147,69 +665,8 @@ async def _run_request_agency_live_case(
     evidence[0]["evidence_ref"]["semantic_summary"] = current_text
 
     baseline_packets = _workspace_baseline(payload)
-    repo_root = Path(__file__).resolve().parents[1]
-    frozen_file_hashes = {
-        "prompt.py": _sha256_file(
-            repo_root / "src" / "kazusa_ai_chatbot" / "cognition_core_v3" / "prompt.py"
-        ),
-        "facade.py": _sha256_file(
-            repo_root / "src" / "kazusa_ai_chatbot" / "cognition_core_v3" / "facade.py"
-        ),
-        "surface_stages.py": _sha256_file(
-            repo_root
-            / "src"
-            / "kazusa_ai_chatbot"
-            / "cognition_shared"
-            / "surface_stages.py"
-        ),
-        "dialog_agent.py": _sha256_file(
-            repo_root
-            / "src"
-            / "kazusa_ai_chatbot"
-            / "nodes"
-            / "dialog_agent.py"
-        ),
-    }
-    frozen_prompt_hashes = {
-        "current_observation_authority": _sha256_text(
-            CURRENT_OBSERVATION_AUTHORITY_GUIDANCE
-        ),
-        "a1_packet_guidance": _sha256_text(
-            baseline_packets["A1"]["guidance"]
-        ),
-        "a2_packet_guidance": _sha256_text(
-            baseline_packets["A2"]["guidance"]
-        ),
-        "g_packet_guidance": _sha256_text(
-            baseline_packets["G"]["guidance"]
-        ),
-        "p_packet_guidance": _sha256_text(
-            baseline_packets["P"]["guidance"]
-        ),
-        "a1_system_prompt": _sha256_text(
-            facade_module._STAGE_SYSTEM_PROMPTS["A1"]
-        ),
-        "a2_system_prompt": _sha256_text(
-            facade_module._STAGE_SYSTEM_PROMPTS["A2"]
-        ),
-        "g_system_prompt": _sha256_text(
-            facade_module._STAGE_SYSTEM_PROMPTS["G"]
-        ),
-        "p_system_prompt": _sha256_text(
-            facade_module._STAGE_SYSTEM_PROMPTS["P"]
-        ),
-        "visible_content_authority": _sha256_text(
-            surface_stages.VISIBLE_CONTENT_AUTHORITY_GUIDANCE
-        ),
-        "content_plan_prompt": _sha256_text(
-            surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
-        ),
-        "dialog_prompt": _sha256_text(
-            dialog_module._V2_DIALOG_GENERATOR_PROMPT
-        ),
-    }
-    assert frozen_file_hashes == dict(expected_file_hashes)
-    assert frozen_prompt_hashes == dict(expected_prompt_hashes)
+    _assert_cognition_prompt_semantics(baseline_packets)
+    _assert_surface_prompt_semantics()
 
     trace_id = _unique_trace_id(case_name)
     trace_token = llm_tracing.bind_trace_id(trace_id)
@@ -1227,8 +684,6 @@ async def _run_request_agency_live_case(
         "exact_current_observation": current_text,
         "input": deepcopy(payload),
         "identity_evidence": deepcopy(identity["identity_evidence"]),
-        "frozen_file_hashes": frozen_file_hashes,
-        "frozen_prompt_hashes": frozen_prompt_hashes,
     }
     cognition_output: dict[str, Any] | None = None
     cognition_records: tuple[dict[str, Any], ...] = ()
@@ -1448,8 +903,6 @@ async def test_live_advice_request_preserves_user_agency_without_dependency_infe
         ),
         case_name="w4_request_agency_advice",
         monkeypatch=monkeypatch,
-        expected_file_hashes=_FROZEN_W4_REQUEST_AGENCY_FILE_HASHES,
-        expected_prompt_hashes=_FROZEN_W4_REQUEST_AGENCY_PROMPT_HASHES,
         artifact_schema="semantic_authority_w4_request_agency_live_gate.v1",
         trace_source_kind="semantic_authority_w4_request_agency_live_gate",
     )
@@ -1472,8 +925,6 @@ async def test_live_explicit_scoped_delegation_preserves_characterful_agency_res
         ),
         case_name="w4_request_agency_v2_scoped_delegation",
         monkeypatch=monkeypatch,
-        expected_file_hashes=_FROZEN_W4_REQUEST_AGENCY_V2_FILE_HASHES,
-        expected_prompt_hashes=_FROZEN_W4_REQUEST_AGENCY_V2_PROMPT_HASHES,
         artifact_schema="semantic_authority_w4_request_agency_v2_live_gate.v1",
         trace_source_kind=(
             "semantic_authority_w4_request_agency_v2_live_gate"
@@ -1498,8 +949,6 @@ async def test_live_bounded_language_analysis_does_not_create_relationship_evide
         ),
         case_name="w4_request_agency_v2_bounded_language_analysis",
         monkeypatch=monkeypatch,
-        expected_file_hashes=_FROZEN_W4_REQUEST_AGENCY_V2_FILE_HASHES,
-        expected_prompt_hashes=_FROZEN_W4_REQUEST_AGENCY_V2_PROMPT_HASHES,
         artifact_schema="semantic_authority_w4_request_agency_v2_live_gate.v1",
         trace_source_kind=(
             "semantic_authority_w4_request_agency_v2_live_gate"
@@ -1524,8 +973,6 @@ async def test_live_bounded_causal_explanation_preserves_authority_boundary(
         ),
         case_name="w4_request_agency_v3_bounded_causal_explanation",
         monkeypatch=monkeypatch,
-        expected_file_hashes=_FROZEN_W4_REQUEST_AGENCY_V3_FILE_HASHES,
-        expected_prompt_hashes=_FROZEN_W4_REQUEST_AGENCY_V3_PROMPT_HASHES,
         artifact_schema="semantic_authority_w4_request_agency_v3_live_gate.v1",
         trace_source_kind=(
             "semantic_authority_w4_request_agency_v3_live_gate"
@@ -1550,8 +997,6 @@ async def test_live_explicit_scoped_delegation_proves_permission_without_motive(
         ),
         case_name="w4_request_agency_v3_scoped_permission",
         monkeypatch=monkeypatch,
-        expected_file_hashes=_FROZEN_W4_REQUEST_AGENCY_V3_FILE_HASHES,
-        expected_prompt_hashes=_FROZEN_W4_REQUEST_AGENCY_V3_PROMPT_HASHES,
         artifact_schema="semantic_authority_w4_request_agency_v3_live_gate.v1",
         trace_source_kind=(
             "semantic_authority_w4_request_agency_v3_live_gate"
@@ -1576,8 +1021,6 @@ async def test_live_bounded_surface_area_explanation_keeps_relationship_axes_sta
         ),
         case_name="w4_request_agency_v4_bounded_surface_area",
         monkeypatch=monkeypatch,
-        expected_file_hashes=_FROZEN_W4_REQUEST_AGENCY_V4_FILE_HASHES,
-        expected_prompt_hashes=_FROZEN_W4_REQUEST_AGENCY_V4_PROMPT_HASHES,
         artifact_schema="semantic_authority_w4_request_agency_v4_live_gate.v1",
         trace_source_kind=(
             "semantic_authority_w4_request_agency_v4_live_gate"
@@ -1602,8 +1045,6 @@ async def test_live_scoped_label_permission_keeps_relationship_axes_stable(
         ),
         case_name="w4_request_agency_v4_scoped_label_permission",
         monkeypatch=monkeypatch,
-        expected_file_hashes=_FROZEN_W4_REQUEST_AGENCY_V4_FILE_HASHES,
-        expected_prompt_hashes=_FROZEN_W4_REQUEST_AGENCY_V4_PROMPT_HASHES,
         artifact_schema="semantic_authority_w4_request_agency_v4_live_gate.v1",
         trace_source_kind=(
             "semantic_authority_w4_request_agency_v4_live_gate"
@@ -1628,8 +1069,6 @@ async def test_live_bounded_thermal_conduction_explanation_keeps_relational_carr
         ),
         case_name="w4_request_agency_v5_bounded_thermal_conduction",
         monkeypatch=monkeypatch,
-        expected_file_hashes=_FROZEN_W4_REQUEST_AGENCY_V5_FILE_HASHES,
-        expected_prompt_hashes=_FROZEN_W4_REQUEST_AGENCY_V5_PROMPT_HASHES,
         artifact_schema="semantic_authority_w4_request_agency_v5_live_gate.v1",
         trace_source_kind=(
             "semantic_authority_w4_request_agency_v5_live_gate"
@@ -1654,8 +1093,6 @@ async def test_live_scoped_fan_cord_permission_keeps_relational_carriers_grounde
         ),
         case_name="w4_request_agency_v5_scoped_fan_cord_permission",
         monkeypatch=monkeypatch,
-        expected_file_hashes=_FROZEN_W4_REQUEST_AGENCY_V5_FILE_HASHES,
-        expected_prompt_hashes=_FROZEN_W4_REQUEST_AGENCY_V5_PROMPT_HASHES,
         artifact_schema="semantic_authority_w4_request_agency_v5_live_gate.v1",
         trace_source_kind=(
             "semantic_authority_w4_request_agency_v5_live_gate"
@@ -1680,8 +1117,6 @@ async def test_live_scoped_keychain_permission_keeps_user_relationship_meaning_u
         ),
         case_name="w4_request_agency_v6_scoped_keychain_permission",
         monkeypatch=monkeypatch,
-        expected_file_hashes=_FROZEN_W4_REQUEST_AGENCY_V6_FILE_HASHES,
-        expected_prompt_hashes=_FROZEN_W4_REQUEST_AGENCY_V6_PROMPT_HASHES,
         artifact_schema="semantic_authority_w4_request_agency_v6_live_gate.v1",
         trace_source_kind=(
             "semantic_authority_w4_request_agency_v6_live_gate"
@@ -1706,8 +1141,6 @@ async def test_live_explicit_trust_fact_remains_available_with_scoped_permission
         ),
         case_name="w4_request_agency_v6_explicit_trust_and_scoped_permission",
         monkeypatch=monkeypatch,
-        expected_file_hashes=_FROZEN_W4_REQUEST_AGENCY_V6_FILE_HASHES,
-        expected_prompt_hashes=_FROZEN_W4_REQUEST_AGENCY_V6_PROMPT_HASHES,
         artifact_schema="semantic_authority_w4_request_agency_v6_live_gate.v1",
         trace_source_kind=(
             "semantic_authority_w4_request_agency_v6_live_gate"
@@ -1770,8 +1203,6 @@ async def test_live_bounded_reply_choice_request_does_not_transfer_external_agen
         current_text=_V7_BOUNDED_REPLY_CHOICE_TEXT,
         case_name="w4_request_agency_v7_bounded_reply_choice",
         monkeypatch=monkeypatch,
-        expected_file_hashes=_FROZEN_W4_REQUEST_AGENCY_V7_FILE_HASHES,
-        expected_prompt_hashes=_FROZEN_W4_REQUEST_AGENCY_V7_PROMPT_HASHES,
         artifact_schema=(
             "semantic_authority_w4_request_agency_v7_live_gate.v1"
         ),
@@ -1794,8 +1225,6 @@ async def test_live_explicit_bounded_delegation_preserves_character_initiative(
         current_text=_V7_EXPLICIT_BOUNDED_DELEGATION_TEXT,
         case_name="w4_request_agency_v7_explicit_bounded_delegation",
         monkeypatch=monkeypatch,
-        expected_file_hashes=_FROZEN_W4_REQUEST_AGENCY_V7_FILE_HASHES,
-        expected_prompt_hashes=_FROZEN_W4_REQUEST_AGENCY_V7_PROMPT_HASHES,
         artifact_schema=(
             "semantic_authority_w4_request_agency_v7_live_gate.v1"
         ),
@@ -1818,8 +1247,6 @@ async def test_live_bounded_rule_comparison_request_stays_reply_local(
         current_text=_V8_BOUNDED_RULE_COMPARISON_TEXT,
         case_name="w4_request_agency_v8_bounded_rule_comparison",
         monkeypatch=monkeypatch,
-        expected_file_hashes=_FROZEN_W4_REQUEST_AGENCY_V8_FILE_HASHES,
-        expected_prompt_hashes=_FROZEN_W4_REQUEST_AGENCY_V8_PROMPT_HASHES,
         artifact_schema=(
             "semantic_authority_w4_request_agency_v8_live_gate.v1"
         ),
@@ -1842,8 +1269,6 @@ async def test_live_explicit_export_format_delegation_stays_bounded(
         current_text=_V8_EXPLICIT_EXPORT_FORMAT_DELEGATION_TEXT,
         case_name="w4_request_agency_v8_explicit_export_format_delegation",
         monkeypatch=monkeypatch,
-        expected_file_hashes=_FROZEN_W4_REQUEST_AGENCY_V8_FILE_HASHES,
-        expected_prompt_hashes=_FROZEN_W4_REQUEST_AGENCY_V8_PROMPT_HASHES,
         artifact_schema=(
             "semantic_authority_w4_request_agency_v8_live_gate.v1"
         ),
@@ -1870,8 +1295,6 @@ async def test_live_post_provider_reply_content_request_stays_bounded(
         current_text=current_text,
         case_name="w4_post_provider_reply_content_negative",
         monkeypatch=monkeypatch,
-        expected_file_hashes=_FROZEN_W4_POST_PROVIDER_FILE_HASHES,
-        expected_prompt_hashes=_FROZEN_W4_POST_PROVIDER_PROMPT_HASHES,
         artifact_schema="semantic_authority_w4_post_provider_live_gate.v1",
         trace_source_kind=(
             "semantic_authority_w4_post_provider_live_gate"
@@ -1894,8 +1317,6 @@ async def test_live_post_provider_scoped_delegation_stays_bounded(
         current_text=current_text,
         case_name="w4_post_provider_scoped_delegation_positive",
         monkeypatch=monkeypatch,
-        expected_file_hashes=_FROZEN_W4_POST_PROVIDER_FILE_HASHES,
-        expected_prompt_hashes=_FROZEN_W4_POST_PROVIDER_PROMPT_HASHES,
         artifact_schema="semantic_authority_w4_post_provider_live_gate.v1",
         trace_source_kind=(
             "semantic_authority_w4_post_provider_live_gate"
@@ -2450,43 +1871,7 @@ async def test_live_stable_memory_does_not_become_current_event_or_response_goal
     assert stable_fact["memory_metadata"]["privacy_review"] == privacy_review
 
     baseline_packets = _workspace_baseline(payload)
-    repo_root = Path(__file__).resolve().parents[1]
-    frozen_file_hashes = {
-        "prompt.py": _sha256_file(
-            repo_root / "src/kazusa_ai_chatbot/cognition_core_v3/prompt.py"
-        ),
-        "facade.py": _sha256_file(
-            repo_root / "src/kazusa_ai_chatbot/cognition_core_v3/facade.py"
-        ),
-    }
-    frozen_prompt_hashes = {
-        "current_observation_authority": _sha256_text(
-            CURRENT_OBSERVATION_AUTHORITY_GUIDANCE
-        ),
-        "a1_system_prompt": _sha256_text(
-            facade_module._STAGE_SYSTEM_PROMPTS["A1"]
-        ),
-        "a1_packet_guidance": _sha256_text(
-            baseline_packets["A1"]["guidance"]
-        ),
-        "background_goal_authority": _sha256_text(
-            BACKGROUND_CONTEXT_GOAL_AUTHORITY_GUIDANCE
-        ),
-        "g_system_prompt": _sha256_text(
-            facade_module._STAGE_SYSTEM_PROMPTS["G"]
-        ),
-        "p_system_prompt": _sha256_text(
-            facade_module._STAGE_SYSTEM_PROMPTS["P"]
-        ),
-        "g_packet_guidance": _sha256_text(
-            baseline_packets["G"]["guidance"]
-        ),
-        "p_packet_guidance": _sha256_text(
-            baseline_packets["P"]["guidance"]
-        ),
-    }
-    assert frozen_file_hashes == _FROZEN_W3B_FILE_HASHES
-    assert frozen_prompt_hashes == _FROZEN_W3B_PROMPT_HASHES
+    _assert_cognition_prompt_semantics(baseline_packets)
 
     trace_id = _unique_trace_id("w3b-a1-authority")
     trace_token = llm_tracing.bind_trace_id(trace_id)
@@ -2502,8 +1887,6 @@ async def test_live_stable_memory_does_not_become_current_event_or_response_goal
         "trace_id": trace_id,
         "semantic_verdict": "pending_parent_review",
         "input": deepcopy(payload),
-        "frozen_file_hashes": frozen_file_hashes,
-        "frozen_prompt_hashes": frozen_prompt_hashes,
     }
     output = None
     records: tuple[dict[str, Any], ...] = ()
@@ -2663,39 +2046,10 @@ async def test_live_surface_authority_preserves_relationship_as_delivery_posture
         "llm_trace_id": "",
     }
 
-    repo_root = Path(__file__).resolve().parents[1]
-    frozen_file_hashes = {
-        "surface_stages.py": _sha256_file(
-            repo_root
-            / "src"
-            / "kazusa_ai_chatbot"
-            / "cognition_shared"
-            / "surface_stages.py"
-        ),
-        "dialog_agent.py": _sha256_file(
-            repo_root
-            / "src"
-            / "kazusa_ai_chatbot"
-            / "nodes"
-            / "dialog_agent.py"
-        ),
-    }
-    frozen_prompt_hashes = {
-        "visible_content_authority": _sha256_text(
-            surface_stages.VISIBLE_CONTENT_AUTHORITY_GUIDANCE
-        ),
-        "content_plan_prompt": _sha256_text(
-            surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
-        ),
-        "dialog_prompt": _sha256_text(
-            dialog_module._V2_DIALOG_GENERATOR_PROMPT
-        ),
-    }
     pre_edit_test_hash = _sha256_index_file(
         "tests/test_semantic_response_progression_live_llm.py"
     )
-    assert frozen_file_hashes == _FROZEN_W4_SURFACE_FILE_HASHES
-    assert frozen_prompt_hashes == _FROZEN_W4_SURFACE_PROMPT_HASHES
+    _assert_surface_prompt_semantics()
     assert pre_edit_test_hash == _PRE_EDIT_LIVE_TEST_FILE_HASH
 
     trace_id = _unique_trace_id("surface-authority")
@@ -2725,8 +2079,6 @@ async def test_live_surface_authority_preserves_relationship_as_delivery_posture
             "surface_input": deepcopy(surface_input),
             "interaction_style_context": interaction_style_context,
         },
-        "frozen_file_hashes": frozen_file_hashes,
-        "frozen_prompt_hashes": frozen_prompt_hashes,
         "pre_edit_live_test_file_hash": pre_edit_test_hash,
     }
     surface_output = None

@@ -1,4 +1,4 @@
-"""Real-conversation-derived live LLM route checks for RAG2 capability slots."""
+"""Real-conversation-derived live LLM checks for retained evidence routes."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from tests.llm_trace import write_llm_trace
-from tests.test_rag_phase3_initializer_live_llm import _run_initializer_case
+from tests.rag_phase3_test_helpers import run_initializer_case
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
 
@@ -36,7 +36,7 @@ async def _run_real_conversation_case(monkeypatch, case_id: str) -> None:
     """Run a compact case and write a second case-focused trace."""
 
     case = _load_case(case_id)
-    unknown_slots = await _run_initializer_case(
+    unknown_slots = await run_initializer_case(
         monkeypatch,
         case_id,
         case["query"],

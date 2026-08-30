@@ -6,32 +6,36 @@ from importlib import import_module
 from typing import Any
 
 from kazusa_ai_chatbot.task_resolution.contracts import (
-    TaskResolutionCheckpointV1,
+    AcceptedTaskControlV1,
+    DshResolutionRefV1,
+    TaskResolutionAdmissionV1,
     TaskResolutionContractError,
-    TaskResolutionExecutionContextV1,
-    TaskPendingDispatchV1,
+    TaskResolutionExecutionContextV2,
     TaskResolutionResultV1,
-    TaskSpecialistRequestV1,
-    TaskSpecialistResultV1,
-    validate_task_resolution_checkpoint,
+    validate_accepted_task_control,
+    validate_dsh_resolution_ref,
+    validate_task_resolution_admission,
+    validate_task_resolution_execution_context,
     validate_task_resolution_result,
-    validate_task_specialist_request,
-    validate_task_specialist_result,
 )
+
 __all__ = [
-    "TaskResolutionCheckpointV1",
+    "AcceptedTaskControlV1",
+    "DshResolutionRefV1",
+    "TaskResolutionAdmissionV1",
     "TaskResolutionContractError",
-    "TaskResolutionExecutionContextV1",
-    "TaskPendingDispatchV1",
+    "TaskResolutionExecutionContextV2",
     "TaskResolutionResultV1",
-    "TaskSpecialistRequestV1",
-    "TaskSpecialistResultV1",
+    "continue_delivered_task",
+    "reconcile_task_resolution_result",
     "resolve_task_inline",
     "resume_task_resolution",
-    "validate_task_resolution_checkpoint",
+    "start_task_resolution_in_background",
+    "validate_accepted_task_control",
+    "validate_dsh_resolution_ref",
+    "validate_task_resolution_admission",
+    "validate_task_resolution_execution_context",
     "validate_task_resolution_result",
-    "validate_task_specialist_request",
-    "validate_task_specialist_result",
 ]
 
 
@@ -46,6 +50,9 @@ def __getattr__(name: str) -> Any:
     if name not in {
         "resolve_task_inline",
         "resume_task_resolution",
+        "start_task_resolution_in_background",
+        "reconcile_task_resolution_result",
+        "continue_delivered_task",
     }:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     service_module = import_module("kazusa_ai_chatbot.task_resolution.service")

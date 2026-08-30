@@ -8,9 +8,15 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from kazusa_ai_chatbot.cognition_core_v3.prompt import (
+    build_canonical_plan_question,
+    build_canonical_turn_workspace,
+)
 from kazusa_ai_chatbot.cognition_episode import build_goal_continuation_ref
 from kazusa_ai_chatbot.cognition_resolver import capabilities as capabilities_module
+from kazusa_ai_chatbot.cognition_resolver import loop as loop_module
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
+    PENDING_TASK_CONTINUATION_VERSION,
     RESOLVER_CAPABILITY_REQUEST_VERSION,
     RESOLVER_GOAL_PROGRESS_VERSION,
     RESOLVER_OBSERVATION_VERSION,
@@ -36,9 +42,20 @@ from kazusa_ai_chatbot.cognition_resolver.telemetry import (
     build_resolver_terminal_event,
     write_human_readable_resolver_trace,
 )
+from kazusa_ai_chatbot.cognition_shared.state_models import (
+    build_acquaintance_user_state,
+    build_character_production_state,
+)
 from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_surface
+from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
+    build_cognition_input_from_global_state,
+)
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
-from tests.cognition_test_helpers import canonical_episode
+from tests.cognition_test_helpers import (
+    canonical_character_identity,
+    canonical_episode,
+    canonical_identity_context,
+)
 
 
 def _resolver_request(
@@ -100,7 +117,7 @@ def _task_observation_fields(request: dict) -> dict[str, object]:
 def _task_result(
     *,
     status: str = "resolved",
-    specialist: str = "local_context",
+    specialist: str = "dsh",
     summary: str = "找到一条相关证据。",
     semantic_objective: str = "检索当前用户与这个问题有关的关系和记忆证据。",
 ) -> dict[str, object]:
@@ -113,7 +130,7 @@ def _task_result(
             "evidence_id": "evidence-1",
             "task_node_id": "node-1",
             "specialist": specialist,
-            "summary": summary,
+            "summary": "evidence-1",
             "provenance_refs": ["source:item-1"],
             "limitations": [],
         }]
@@ -127,9 +144,9 @@ def _task_result(
             "resolved": "complete",
             "partial": "partial",
             "deferred": "pending",
-            "needs_user_input": "blocked",
-            "approval_required": "blocked",
-            "unavailable": "blocked",
+            "needs_user_input": "pending",
+            "approval_required": "pending",
+            "unavailable": "missing",
             "failed": "blocked",
         }.get(status, "blocked"),
         "evidence_excerpts": [summary]
@@ -199,6 +216,10 @@ def _resolver_state() -> dict:
         "active_turn_platform_message_ids": ["message-123"],
         "active_turn_conversation_row_ids": ["row-123"],
         "cognitive_episode": episode,
+        "pending_task_continuation": {
+            "schema_version": PENDING_TASK_CONTINUATION_VERSION,
+            "on_answered_clarification": "no_task_admission",
+        },
     }
 
 
@@ -288,7 +309,7 @@ def _pending_resume(*, capability_kind: str = "human_clarification") -> dict:
         status = "waiting_for_approval"
         question = ""
         approval_summary = "准备创建提醒，但需要用户确认。"
-    return {
+    pending_resume = {
         "schema_version": RESOLVER_PENDING_RESUME_VERSION,
         "resume_id": f"resolver-pending-{capability_kind}",
         "capability_kind": capability_kind,
@@ -303,6 +324,12 @@ def _pending_resume(*, capability_kind: str = "human_clarification") -> dict:
         "created_at_utc": "2026-05-29T21:00:00+00:00",
         "expires_at_utc": "2026-05-30T21:00:00+00:00",
     }
+    if capability_kind == "human_clarification":
+        pending_resume["pending_task_continuation"] = {
+            "schema_version": PENDING_TASK_CONTINUATION_VERSION,
+            "on_answered_clarification": "no_task_admission",
+        }
+    return pending_resume
 
 
 def _pending_resolution(
@@ -958,6 +985,53 @@ async def test_loop_blocks_duplicate_capability_objective_before_execution() -> 
     assert observations[-1]["observation_id"] == "resolver_obs_duplicate_request"
     assert observations[-1]["request_objective"] == request["objective"]
     assert result["action_specs"][0]["kind"] == "speak"
+
+
+def test_loop_blocks_rephrased_task_request_with_same_continuation_ref() -> None:
+    """One typed goal cannot be admitted twice under paraphrased objectives."""
+
+    first_request = _resolver_request(
+        objective="Resolve the bounded task objective.",
+    )
+    rephrased_request = _resolver_request(
+        objective="Resolve the same bounded task with different wording.",
+    )
+    resolver_state = {
+        "observations": [{
+            "capability_kind": "task_resolution_request",
+            "request_objective": first_request["objective"],
+            "status": "succeeded",
+            "goal_continuation_ref": first_request["goal_continuation_ref"],
+        }],
+    }
+
+    assert loop_module._is_repeated_capability_request(
+        rephrased_request,
+        resolver_state,
+    ) is True
+
+
+def _production_resolver_state(*, original_goal: str) -> dict:
+    """Build resolver state that crosses the production cognition projector."""
+
+    state = _resolver_state()
+    timestamp = "2026-05-29T21:00:00Z"
+    state.pop("conversation_progress", None)
+    profile = canonical_character_identity(marker="resolver-continuity")
+    profile["global_user_id"] = "character-123"
+    state["character_profile"] = profile
+    state["character_identity_context"] = canonical_identity_context(
+        marker="resolver-continuity",
+    )
+    state["character_cognition_state"] = build_character_production_state(
+        updated_at=timestamp,
+    )
+    state["cognition_state"] = build_acquaintance_user_state(
+        global_user_id="global-user-123",
+        updated_at=timestamp,
+    )
+    state["decontextualized_input"] = original_goal
+    return state
 
 
 @pytest.mark.asyncio
@@ -2064,6 +2138,10 @@ async def test_pending_resolution_is_applied_only_after_l2d_decision() -> None:
 async def test_hil_follow_up_can_continue_original_goal_after_answer() -> None:
     """A resolved HIL row should allow the original goal to continue."""
 
+    original_goal = (
+        "背景要求：奥克兰海滨散步加简餐；"
+        "最终必须包含 EXACT-FINAL-MARKER: AUCKLAND-PLAN-COMPLETE。"
+    )
     clarification_request = _resolver_request(
         capability_kind="human_clarification",
         objective="请只问用户所在城市。",
@@ -2071,15 +2149,33 @@ async def test_hil_follow_up_can_continue_original_goal_after_answer() -> None:
     evidence_request = _resolver_request(
         objective="根据用户补充的城市继续生成今晚计划需要的证据。",
     )
+    goal_progress = _goal_progress(
+        focus="先取得城市，再完成带背景与最终标记的计划证据。",
+    )
+    goal_progress["original_goal"] = original_goal
+    goal_progress["deliverables"][0]["description"] = "背景要求：海滨散步与简餐"
+    goal_progress["final_response_requirements"] = [
+        "EXACT-FINAL-MARKER: AUCKLAND-PLAN-COMPLETE",
+    ]
     pending_rows: list[dict] = []
     applied_rows: list[dict] = []
+    first_turn_production_inputs: list[dict] = []
 
     async def first_turn_cognition(state: dict) -> dict:
+        first_turn_production_inputs.append(
+            build_cognition_input_from_global_state(state),
+        )
         if "pending_resolver_resume" not in state["resolver_context"]:
-            return _cognition_result(
+            output = _cognition_result(
                 internal_monologue="第一轮：缺少城市，必须先问用户。",
                 resolver_requests=[clarification_request],
             )
+            output["resolver_goal_progress"] = goal_progress
+            output["pending_task_continuation"] = {
+                "schema_version": PENDING_TASK_CONTINUATION_VERSION,
+                "on_answered_clarification": "background_task_admission",
+            }
+            return output
         return _cognition_result(
             internal_monologue="第一轮：已经形成最小澄清问题。",
             action_specs=[_speak_action_spec("只问城市。")],
@@ -2109,7 +2205,7 @@ async def test_hil_follow_up_can_continue_original_goal_after_answer() -> None:
         return record["execution_result"]["pending_resume"]
 
     first_result = await call_cognition_resolver_loop(
-        _resolver_state(),
+        _production_resolver_state(original_goal=original_goal),
         call_cognition_subgraph_func=first_turn_cognition,
         execute_capability_func=first_turn_capability,
         max_cycles=3,
@@ -2119,9 +2215,23 @@ async def test_hil_follow_up_can_continue_original_goal_after_answer() -> None:
 
     assert first_result["resolver_state"]["status"] == "waiting_for_user"
     assert len(pending_rows) == 1
+    assert len(first_turn_production_inputs) == 2
+    assert first_turn_production_inputs[1]["resolver_goal_progress"][
+        "original_goal"
+    ] == original_goal
+    assert first_turn_production_inputs[1]["resolver_goal_progress"][
+        "final_response_requirements"
+    ] == ["EXACT-FINAL-MARKER: AUCKLAND-PLAN-COMPLETE"]
+    assert pending_rows[0]["resolver_pending_resume"]["prompt_safe_goal_progress"] == (
+        goal_progress
+    )
+    assert pending_rows[0]["resolver_pending_resume"]["pending_task_continuation"] == {
+        "schema_version": PENDING_TASK_CONTINUATION_VERSION,
+        "on_answered_clarification": "background_task_admission",
+    }
 
     follow_up_state = ensure_initial_resolver_inputs(
-        _resolver_state(),
+        _production_resolver_state(original_goal=original_goal),
         max_cycles=3,
     )
     follow_up_state["platform_message_id"] = "message-follow-up-123"
@@ -2143,9 +2253,14 @@ async def test_hil_follow_up_can_continue_original_goal_after_answer() -> None:
     )
     assert "pending_resolver_resume" in follow_up_state
     follow_up_inputs: list[dict] = []
+    follow_up_production_inputs: list[dict] = []
+    executed_capability_requests: list[dict] = []
 
     async def follow_up_cognition(state: dict) -> dict:
         follow_up_inputs.append(dict(state))
+        follow_up_production_inputs.append(
+            build_cognition_input_from_global_state(state),
+        )
         if len(follow_up_inputs) == 1:
             output = _cognition_result(
                 internal_monologue="第二轮：用户回答了城市，继续原始目标。",
@@ -2166,6 +2281,7 @@ async def test_hil_follow_up_can_continue_original_goal_after_answer() -> None:
         capability_request: dict,
         _state: dict,
     ) -> dict:
+        executed_capability_requests.append(dict(capability_request))
         return {
             "schema_version": RESOLVER_OBSERVATION_VERSION,
             "observation_id": "resolver_obs_city_plan",
@@ -2216,6 +2332,97 @@ async def test_hil_follow_up_can_continue_original_goal_after_answer() -> None:
     )
 
     assert len(follow_up_inputs) == 2
+    assert follow_up_production_inputs[0]["pending_resolver_continuation"][
+        "original_goal"
+    ] == original_goal
+    assert follow_up_production_inputs[0]["response_plan_contract_variant"] == (
+        "open_pending_resolution"
+    )
+    assert follow_up_production_inputs[0]["pending_resolver_continuation"][
+        "pending_task_continuation"
+    ] == {
+        "schema_version": PENDING_TASK_CONTINUATION_VERSION,
+        "on_answered_clarification": "background_task_admission",
+    }
+    assert follow_up_production_inputs[0]["resolver_goal_progress"][
+        "original_goal"
+    ] == original_goal
+    assert follow_up_production_inputs[1]["resolver_goal_progress"][
+        "original_goal"
+    ] == original_goal
+    assert follow_up_production_inputs[1]["resolver_goal_progress"]["deliverables"][
+        0
+    ]["description"] == "背景要求：海滨散步与简餐"
+    assert follow_up_production_inputs[1]["resolver_goal_progress"][
+        "final_response_requirements"
+    ] == ["EXACT-FINAL-MARKER: AUCKLAND-PLAN-COMPLETE"]
+    assert "pending_resolver_continuation" not in follow_up_production_inputs[1]
+    assert follow_up_production_inputs[1]["response_plan_contract_variant"] == (
+        "post_pending_resolution"
+    )
+    post_answer_input = follow_up_production_inputs[1]
+    post_answer_workspace = build_canonical_turn_workspace(
+        episode=post_answer_input["episode"],
+        scene_context=post_answer_input["scene_context"],
+        evidence=post_answer_input["evidence"],
+        mutable_state=post_answer_input["mutable_state"],
+        character_constraints=post_answer_input["character_constraints"],
+        identity_context=post_answer_input["character_identity_context"],
+        continuity={
+            "private": post_answer_input.get("private_continuity_context", ""),
+            "dialog": post_answer_input.get("past_dialog_cognition_context", ""),
+        },
+        available_actions=post_answer_input["available_actions"],
+        available_resolvers=post_answer_input[
+            "available_resolver_capabilities"
+        ],
+        overused_moves=post_answer_input["overused_moves"],
+        direct_facts=post_answer_input.get("direct_facts", []),
+        character_operational_context=post_answer_input.get(
+            "character_operational_context", {}
+        ),
+        character_affect_context=post_answer_input.get(
+            "character_affect_context", []
+        ),
+        relationship_context=post_answer_input.get("relationship_context", {}),
+        resolver_context=post_answer_input.get("resolver_context", ""),
+        resolver_progress=post_answer_input.get("resolver_goal_progress", {}),
+        runtime_limits=post_answer_input.get("runtime_capability_limits", []),
+        group_engagement=post_answer_input.get(
+            "group_engagement_action_context", {}
+        ),
+        response_plan_contract_variant=post_answer_input[
+            "response_plan_contract_variant"
+        ],
+    )
+    post_answer_packet = build_canonical_plan_question(
+        workspace=post_answer_workspace,
+        goal={
+            "goal_kind": "bounded_current_goal",
+            "intent": "complete the resolved evidence task",
+            "reason": "the task observation is now available",
+            "cause_summary": "the resolver observation",
+        },
+        appraisal_summary=[],
+    )
+    assert "response_plan_contract_variant" not in post_answer_packet[
+        "output_contract"
+    ]
+    assert "pending_task_continuation" not in post_answer_packet[
+        "output_contract"
+    ]
+    assert "pending_resolution_fields" not in post_answer_packet["output_contract"]
+    assert all(
+        row["capability"] not in {
+            "human_clarification",
+            "task_resolution_request",
+        }
+        for row in post_answer_packet["capabilities"]["resolvers"]
+    )
+    assert [
+        request["capability_kind"]
+        for request in executed_capability_requests
+    ] == ["task_resolution_request"]
     assert follow_up_result["resolver_pending_resolution"]["decision"] == (
         "answered"
     )
@@ -2329,6 +2536,83 @@ async def test_pending_helpers_load_and_close_matching_pending_rows() -> None:
         "resolver_pending_resolution"
     ]["decision"] == "approved"
 
+    superseded_record = build_pending_resume_record(state, observation)
+    rows = [superseded_record]
+    upserted.clear()
+    superseded_resume_id = superseded_record["resolver_pending_resume"][
+        "resume_id"
+    ]
+    await apply_pending_resolution(
+        follow_up_state,
+        _pending_resolution(
+            decision="superseded",
+            resume_id=superseded_resume_id,
+        ),
+        list_action_attempts_func=list_rows,
+        upsert_action_attempt_func=upsert_row,
+    )
+
+    assert upserted[-1]["status"] == "superseded"
+    assert upserted[-1]["execution_result"][
+        "resolver_pending_resolution"
+    ]["decision"] == "superseded"
+
+
+@pytest.mark.asyncio
+async def test_superseded_pending_row_leaves_the_next_turn_unbound() -> None:
+    """A superseded clarification cannot constrain fresh normal cognition."""
+
+    state = _resolver_state()
+    observation = {
+        "schema_version": RESOLVER_OBSERVATION_VERSION,
+        "observation_id": "resolver_obs_superseded_pending",
+        "capability_kind": "human_clarification",
+        "request_objective": "请补充原始任务所需的用户事实。",
+        "request_reason": "缺少一个用户控制的事实。",
+        "status": "blocked",
+        "prompt_safe_summary": "Human clarification required.",
+        "evidence_refs": [],
+        "created_at_utc": "2026-05-29T21:00:00+00:00",
+    }
+    record = build_pending_resume_record(state, observation)
+    rows = [record]
+
+    async def list_rows(*, limit: int = 1000) -> list[dict]:
+        del limit
+        return list(rows)
+
+    async def upsert_row(row: dict) -> None:
+        rows[:] = [row]
+
+    resume_id = record["resolver_pending_resume"]["resume_id"]
+    updated = await apply_pending_resolution(
+        state,
+        _pending_resolution(decision="superseded", resume_id=resume_id),
+        list_action_attempts_func=list_rows,
+        upsert_action_attempt_func=upsert_row,
+    )
+
+    assert updated is not None
+    assert updated["status"] == "superseded"
+    fresh_state = ensure_initial_resolver_inputs(_resolver_state(), max_cycles=3)
+    fresh_state["platform_message_id"] = "fresh-message-after-supersession"
+    fresh_state = await load_matching_pending_resume_into_state(
+        fresh_state,
+        list_action_attempts_func=list_rows,
+        upsert_action_attempt_func=upsert_row,
+    )
+    assert "pending_resolver_resume" not in fresh_state
+    fresh_production_state = ensure_initial_resolver_inputs(
+        _production_resolver_state(
+            original_goal="Handle the replacement request as a fresh task.",
+        ),
+        max_cycles=3,
+    )
+    fresh_input = build_cognition_input_from_global_state(
+        fresh_production_state,
+    )
+    assert fresh_input["response_plan_contract_variant"] == "fresh_ordinary"
+
 
 @pytest.mark.asyncio
 async def test_pending_loader_ignores_future_pending_rows() -> None:
@@ -2394,8 +2678,8 @@ async def test_pending_loader_ignores_same_source_message_rows() -> None:
 
 
 @pytest.mark.asyncio
-async def test_pending_loader_ignores_unrelated_same_scope_messages() -> None:
-    """A new same-scope message must not inherit an unrelated pending goal."""
+async def test_pending_loader_selects_unrelated_same_scope_candidate() -> None:
+    """Cognition decides whether an ordinary same-scope turn answers pending."""
 
     state = _resolver_state()
     observation = {
@@ -2423,7 +2707,123 @@ async def test_pending_loader_ignores_unrelated_same_scope_messages() -> None:
         list_action_attempts_func=list_rows,
     )
 
-    assert loaded is None
+    assert loaded is not None
+    assert loaded["resume_id"] == pending_record["resolver_pending_resume"][
+        "resume_id"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_pending_loader_selects_newest_candidate_without_reply_metadata() -> None:
+    """Ordinary adjacency selects the newest exact-scope clarification row."""
+
+    state = _resolver_state()
+    observation = {
+        "schema_version": RESOLVER_OBSERVATION_VERSION,
+        "observation_id": "resolver_obs_newest_hil",
+        "capability_kind": "human_clarification",
+        "request_objective": "确认当前计划缺少的用户事实。",
+        "request_reason": "原始目标仍缺少用户控制的信息。",
+        "status": "blocked",
+        "prompt_safe_summary": "Human clarification required: 缺少用户事实。",
+        "evidence_refs": [],
+        "created_at_utc": "2026-05-29T21:00:00+00:00",
+    }
+    older_state = dict(state)
+    older_state["storage_timestamp_utc"] = "2026-05-29T20:00:00+00:00"
+    newer_state = dict(state)
+    newer_state["storage_timestamp_utc"] = "2026-05-29T20:30:00+00:00"
+    older_record = build_pending_resume_record(older_state, observation)
+    newer_record = build_pending_resume_record(newer_state, observation)
+    follow_up_state = dict(state)
+    follow_up_state["storage_timestamp_utc"] = "2026-05-29T21:00:00+00:00"
+    follow_up_state["platform_message_id"] = "ordinary-follow-up-456"
+    follow_up_state["reply_context"] = {}
+
+    async def list_rows(*, limit: int = 1000) -> list[dict]:
+        del limit
+        return [older_record, newer_record]
+
+    loaded = await load_matching_pending_resume(
+        follow_up_state,
+        list_action_attempts_func=list_rows,
+    )
+
+    assert loaded is not None
+    assert loaded["resume_id"] == newer_record["resolver_pending_resume"][
+        "resume_id"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_pending_unrelated_turn_can_continue_waiting_without_task_admission() -> None:
+    """Cognition can keep an unrelated pending clarification open."""
+
+    state = ensure_initial_resolver_inputs(_resolver_state(), max_cycles=3)
+    observation = {
+        "schema_version": RESOLVER_OBSERVATION_VERSION,
+        "observation_id": "resolver_obs_waiting_hil",
+        "capability_kind": "human_clarification",
+        "request_objective": "确认原始目标需要的用户事实。",
+        "request_reason": "该事实仍未由用户提供。",
+        "status": "blocked",
+        "prompt_safe_summary": "Human clarification required: 需要用户事实。",
+        "evidence_refs": [],
+        "created_at_utc": "2026-05-29T21:00:00+00:00",
+    }
+    record = build_pending_resume_record(state, observation)
+    follow_up_state = dict(state)
+    follow_up_state["platform_message_id"] = "ordinary-follow-up-waiting"
+    follow_up_state["decontextualized_input"] = "我今天只是想聊聊天。"
+    follow_up_state["reply_context"] = {}
+    pending_rows = [record]
+    applied: list[dict] = []
+
+    async def list_rows(*, limit: int = 1000) -> list[dict]:
+        del limit
+        return list(pending_rows)
+
+    async def apply_resolution(state_with_resolution: dict, resolution: dict) -> None:
+        del state_with_resolution
+        applied.append(dict(resolution))
+
+    follow_up_state = await load_matching_pending_resume_into_state(
+        follow_up_state,
+        list_action_attempts_func=list_rows,
+    )
+    resume_id = follow_up_state["pending_resolver_resume"]["resume_id"]
+
+    async def call_cognition(current_state: dict) -> dict:
+        assert current_state["pending_resolver_resume"]["resume_id"] == resume_id
+        result = _cognition_result(
+            internal_monologue="当前消息没有回答原澄清，继续等待。",
+            action_specs=[_speak_action_spec("先保持原澄清事项等待。")],
+            goal_resolution="answerable_now",
+        )
+        result["resolver_pending_resolution"] = _pending_resolution(
+            decision="continue_waiting",
+            resume_id=resume_id,
+        )
+        return result
+
+    async def execute_capability(_request: dict, _state: dict) -> dict:
+        raise AssertionError("continue_waiting must not admit a task")
+
+    result = await call_cognition_resolver_loop(
+        follow_up_state,
+        call_cognition_subgraph_func=call_cognition,
+        execute_capability_func=execute_capability,
+        max_cycles=3,
+        capability_timeout_seconds=1.0,
+        apply_pending_resolution_func=apply_resolution,
+    )
+
+    assert applied[0]["decision"] == "continue_waiting"
+    assert result["resolver_pending_resolution"]["resume_id"] == resume_id
+    assert result["resolver_state"]["pending_resume"]["status"] == (
+        "waiting_for_user"
+    )
+    assert result["resolver_capability_requests"] == []
 
 
 @pytest.mark.asyncio
@@ -2449,9 +2849,7 @@ async def test_pending_resume_load_restores_original_goal_progress() -> None:
     follow_up_state = _resolver_state()
     follow_up_state["platform_message_id"] = "message-456"
     follow_up_state["decontextualized_input"] = "就在奥克兰 CBD。"
-    follow_up_state["reply_context"] = {
-        "reply_to_message_id": "message-123",
-    }
+    follow_up_state["reply_context"] = {}
     follow_up_state = ensure_initial_resolver_inputs(
         follow_up_state,
         max_cycles=3,
@@ -2531,7 +2929,11 @@ async def test_task_resolution_uses_objective_and_preserves_context(
     assert observation["request_objective"] == request["objective"]
     assert observation["request_reason"] == request["reason"]
     assert observation["prompt_safe_summary"] == "存在一条信任相关记忆。"
-    assert observation["evidence_refs"][0]["owner"] == "local_context"
+    assert observation["evidence_refs"][0]["owner"] == "dsh"
+    assert observation["evidence_refs"][0]["evidence_id"] == "evidence-1"
+    assert observation["evidence_refs"][0]["excerpt"] == (
+        "存在一条信任相关记忆。"
+    )
 
 
 @pytest.mark.asyncio
@@ -2914,7 +3316,7 @@ async def test_public_evidence_projects_through_task_resolution(
         captured["context"] = context
         captured["inline_budget_seconds"] = inline_budget_seconds
         return _task_result(
-            specialist="public_research",
+            specialist="dsh",
             summary="网页证据显示当前事实可用。",
             semantic_objective=request["semantic_goal"],
         )
@@ -2951,7 +3353,7 @@ async def test_public_evidence_projects_through_task_resolution(
         "recommended_next_iteration": [],
         "evidence_boundary_notes": [],
     }
-    assert observation["evidence_refs"][0]["owner"] == "public_research"
+    assert observation["evidence_refs"][0]["owner"] == "dsh"
 
 
 @pytest.mark.asyncio

@@ -1,4 +1,4 @@
-"""Versioned Brain interaction DTOs and their kind-specific rules."""
+"""Strict internal contracts for the Brain-owned DSH interaction boundary."""
 
 from __future__ import annotations
 
@@ -9,33 +9,25 @@ from typing import Any
 
 from kazusa_ai_chatbot.dsh_tool_gateway.contracts import canonical_json
 
-INTERACTION_SCHEMA_VERSION = "dsh_brain_interaction.v1"
-PENDING_SCHEMA_VERSION = "dsh_interaction_pending.v1"
+INTERACTION_SCHEMA_VERSION = "dsh_brain_interaction.v2"
 MAX_INTERACTION_BODY_BYTES = 32 * 1024
 MAX_TRANSIENT_DETAIL_CHARS = 8_000
 MAX_BRAIN_ANSWER_CHARS = 2_000
+MAX_BRAIN_REASON_CHARS = 2_000
 INTERACTION_TIMESTAMP_SKEW_SECONDS = 60
 ACTIVE_INTERACTION_SECONDS = 5 * 60
-PENDING_INTERACTION_SECONDS = 24 * 60 * 60
 GRANT_SECONDS = 10 * 60
 INTERACTION_KINDS = frozenset({"approval", "question", "plan_review"})
-DECISION_KINDS = frozenset({"answer", "allow_once", "reject", "relay_to_user"})
-REPLY_DECISION_KINDS = frozenset({
-    "answer",
-    "allow_once",
-    "reject",
-    "continue_waiting",
-})
-RELAY_MODES = frozenset({"question", "approval", "plan_review"})
+DECISION_KINDS = frozenset({"answer", "allow_once", "reject"})
 
 
 def _object(value: object, field: str) -> Mapping[str, Any]:
-    """Require an object with string keys."""
+    """Require one object with string keys."""
 
     if not isinstance(value, Mapping):
-        raise ValueError(f"{field} must be an object")
+        raise TypeError(f"{field} must be an object")
     if not all(isinstance(key, str) for key in value):
-        raise ValueError(f"{field} keys must be strings")
+        raise TypeError(f"{field} keys must be strings")
     return value
 
 
@@ -52,20 +44,27 @@ def _strict(value: object, fields: set[str], field: str) -> Mapping[str, Any]:
     return result
 
 
-def _text(value: object, field: str, *, empty: bool = False) -> str:
-    """Validate bounded text."""
+def _text(value: object, field: str, *, maximum: int | None = None) -> str:
+    """Validate bounded non-empty text."""
 
-    if not isinstance(value, str) or (not empty and not value.strip()):
+    if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field} must be a non-empty string")
+    if maximum is not None and len(value) > maximum:
+        raise ValueError(f"{field} exceeds the bound")
     return value
 
 
-def _optional_text(value: object, field: str) -> str | None:
-    """Validate optional text."""
+def _optional_text(
+    value: object,
+    field: str,
+    *,
+    maximum: int | None = None,
+) -> str | None:
+    """Validate optional bounded text."""
 
     if value is None:
         return None
-    return _text(value, field)
+    return _text(value, field, maximum=maximum)
 
 
 def _integer(value: object, field: str, minimum: int = 0) -> int:
@@ -76,18 +75,9 @@ def _integer(value: object, field: str, minimum: int = 0) -> int:
     return value
 
 
-def _json_value(value: object, field: str) -> None:
-    """Validate only JSON shape for an internal persisted value."""
-
-    try:
-        canonical_json(value)
-    except ValueError as exc:
-        raise ValueError(f"{field} must be canonical JSON") from exc
-
-
 @dataclass(frozen=True, slots=True)
-class DshBrainInteractionRequestV1:
-    """Signed request from DSH to the Brain semantic boundary."""
+class DshBrainInteractionRequestV2:
+    """Authenticated request for one character-owned DSH interaction."""
 
     schema_version: str
     interaction_id: str
@@ -121,8 +111,8 @@ class DshBrainInteractionRequestV1:
     mac: str
 
     @classmethod
-    def from_mapping(cls, value: object) -> DshBrainInteractionRequestV1:
-        """Parse the exact internal interaction request shape."""
+    def from_mapping(cls, value: object) -> DshBrainInteractionRequestV2:
+        """Parse the exact V2 transport request shape."""
 
         fields = {
             "schema_version", "interaction_id", "kind", "resolution_thread_id",
@@ -142,21 +132,22 @@ class DshBrainInteractionRequestV1:
         kind = _text(data["kind"], "request.kind")
         if kind not in INTERACTION_KINDS:
             raise ValueError("request.kind is unsupported")
-        detail = _text(data["transient_detail"], "request.transient_detail")
-        if len(detail) > MAX_TRANSIENT_DETAIL_CHARS:
-            raise ValueError("request.transient_detail exceeds the bound")
         tool_name_value = data["tool_name"]
         tool_name = (
             None
             if tool_name_value is None
             else _text(tool_name_value, "request.tool_name")
         )
-        mac = _text(data["mac"], "request.mac")
+        if kind == "approval" and tool_name is None:
+            raise ValueError("approval interaction requires tool_name")
         return cls(
             schema_version=version,
             interaction_id=_text(data["interaction_id"], "request.interaction_id"),
             kind=kind,
-            resolution_thread_id=_text(data["resolution_thread_id"], "request.resolution_thread_id"),
+            resolution_thread_id=_text(
+                data["resolution_thread_id"],
+                "request.resolution_thread_id",
+            ),
             segment_id=_text(data["segment_id"], "request.segment_id"),
             activation_id=_text(data["activation_id"], "request.activation_id"),
             lease_epoch=_integer(data["lease_epoch"], "request.lease_epoch", 1),
@@ -167,19 +158,41 @@ class DshBrainInteractionRequestV1:
                 data["operation_payload_digest"],
                 "request.operation_payload_digest",
             ),
-            arguments_digest=_text(data["arguments_digest"], "request.arguments_digest"),
-            transient_detail=detail,
-            brain_conversation_ref=_text(data["brain_conversation_ref"], "request.brain_conversation_ref"),
+            arguments_digest=_text(
+                data["arguments_digest"],
+                "request.arguments_digest",
+            ),
+            transient_detail=_text(
+                data["transient_detail"],
+                "request.transient_detail",
+                maximum=MAX_TRANSIENT_DETAIL_CHARS,
+            ),
+            brain_conversation_ref=_text(
+                data["brain_conversation_ref"],
+                "request.brain_conversation_ref",
+            ),
             platform=_text(data["platform"], "request.platform"),
             platform_channel_id=_text(
                 data["platform_channel_id"],
                 "request.platform_channel_id",
             ),
             global_user_id=_text(data["global_user_id"], "request.global_user_id"),
-            scope_fingerprint=_text(data["scope_fingerprint"], "request.scope_fingerprint"),
-            audience_fingerprint=_text(data["audience_fingerprint"], "request.audience_fingerprint"),
-            profile_version=_text(data["profile_version"], "request.profile_version"),
-            catalog_digest=_text(data["catalog_digest"], "request.catalog_digest"),
+            scope_fingerprint=_text(
+                data["scope_fingerprint"],
+                "request.scope_fingerprint",
+            ),
+            audience_fingerprint=_text(
+                data["audience_fingerprint"],
+                "request.audience_fingerprint",
+            ),
+            profile_version=_text(
+                data["profile_version"],
+                "request.profile_version",
+            ),
+            catalog_digest=_text(
+                data["catalog_digest"],
+                "request.catalog_digest",
+            ),
             model_route_digest=_text(
                 data["model_route_digest"],
                 "request.model_route_digest",
@@ -197,18 +210,18 @@ class DshBrainInteractionRequestV1:
             issued_at=_text(data["issued_at"], "request.issued_at"),
             expires_at=_text(data["expires_at"], "request.expires_at"),
             issuer=_text(data["issuer"], "request.issuer"),
-            mac=mac,
+            mac=_text(data["mac"], "request.mac"),
         )
 
     @property
     def request_digest(self) -> str:
-        """Return the stable digest over the unsigned request identity."""
+        """Return the digest over the unsigned authenticated identity."""
 
         encoded = canonical_json(self.unsigned_dict())
         return f"sha256:{sha256(encoded).hexdigest()}"
 
     def unsigned_dict(self) -> dict[str, object]:
-        """Return request fields excluding transport MAC."""
+        """Return request fields excluding the transport MAC."""
 
         return {
             "schema_version": self.schema_version,
@@ -243,14 +256,14 @@ class DshBrainInteractionRequestV1:
         }
 
     def to_dict(self) -> dict[str, object]:
-        """Return the transport representation."""
+        """Return the signed transport representation."""
 
         return {**self.unsigned_dict(), "mac": self.mac}
 
 
 @dataclass(frozen=True, slots=True)
-class DshOneShotGrantV1:
-    """Brain-authored grant for exactly one matching retry."""
+class DshOneShotGrantV2:
+    """Brain-authored grant bound to one exact native operation."""
 
     schema_version: str
     interaction_id: str
@@ -268,14 +281,14 @@ class DshOneShotGrantV1:
     expires_at: str
 
     @classmethod
-    def from_mapping(cls, value: object) -> DshOneShotGrantV1:
-        """Parse one one-shot grant."""
+    def from_mapping(cls, value: object) -> DshOneShotGrantV2:
+        """Parse one exact one-shot grant."""
 
         fields = {
-            "schema_version", "interaction_id", "resolution_thread_id", "segment_id",
-            "activation_id", "lease_epoch", "tool_name", "arguments_digest",
-            "workspace_fingerprint", "scope_fingerprint", "policy_epoch",
-            "grant_status", "issued_at", "expires_at",
+            "schema_version", "interaction_id", "resolution_thread_id",
+            "segment_id", "activation_id", "lease_epoch", "tool_name",
+            "arguments_digest", "workspace_fingerprint", "scope_fingerprint",
+            "policy_epoch", "grant_status", "issued_at", "expires_at",
         }
         data = _strict(value, fields, "dsh_grant")
         version = _text(data["schema_version"], "grant.schema_version")
@@ -287,14 +300,26 @@ class DshOneShotGrantV1:
         return cls(
             schema_version=version,
             interaction_id=_text(data["interaction_id"], "grant.interaction_id"),
-            resolution_thread_id=_text(data["resolution_thread_id"], "grant.resolution_thread_id"),
+            resolution_thread_id=_text(
+                data["resolution_thread_id"],
+                "grant.resolution_thread_id",
+            ),
             segment_id=_text(data["segment_id"], "grant.segment_id"),
             activation_id=_text(data["activation_id"], "grant.activation_id"),
             lease_epoch=_integer(data["lease_epoch"], "grant.lease_epoch", 1),
             tool_name=_text(data["tool_name"], "grant.tool_name"),
-            arguments_digest=_text(data["arguments_digest"], "grant.arguments_digest"),
-            workspace_fingerprint=_text(data["workspace_fingerprint"], "grant.workspace_fingerprint"),
-            scope_fingerprint=_text(data["scope_fingerprint"], "grant.scope_fingerprint"),
+            arguments_digest=_text(
+                data["arguments_digest"],
+                "grant.arguments_digest",
+            ),
+            workspace_fingerprint=_text(
+                data["workspace_fingerprint"],
+                "grant.workspace_fingerprint",
+            ),
+            scope_fingerprint=_text(
+                data["scope_fingerprint"],
+                "grant.scope_fingerprint",
+            ),
             policy_epoch=_text(data["policy_epoch"], "grant.policy_epoch"),
             grant_status=status,
             issued_at=_text(data["issued_at"], "grant.issued_at"),
@@ -302,7 +327,7 @@ class DshOneShotGrantV1:
         )
 
     def to_dict(self) -> dict[str, object]:
-        """Return the JSON representation."""
+        """Return the exact persisted grant representation."""
 
         return {
             "schema_version": self.schema_version,
@@ -323,8 +348,8 @@ class DshOneShotGrantV1:
 
 
 @dataclass(frozen=True, slots=True)
-class DshBrainInteractionDecisionV1:
-    """Brain semantic decision with kind-compatible payload fields."""
+class DshBrainInteractionDecisionV2:
+    """Validated semantic decision returned by character cognition."""
 
     schema_version: str
     interaction_id: str
@@ -332,19 +357,20 @@ class DshBrainInteractionDecisionV1:
     kind: str
     decision: str
     answer: str | None
-    response_goal: str | None
-    relay_mode: str | None
     reason: str
 
     @classmethod
-    def from_mapping(cls, value: object) -> DshBrainInteractionDecisionV1:
-        """Parse and enforce decision-kind compatibility."""
+    def from_mapping(cls, value: object) -> DshBrainInteractionDecisionV2:
+        """Parse the exact V2 decision shape and enforce kind compatibility."""
 
-        fields = {
-            "schema_version", "interaction_id", "request_digest", "kind",
-            "decision", "answer", "response_goal", "relay_mode", "reason",
-        }
-        data = _strict(value, fields, "dsh_interaction_decision")
+        data = _strict(
+            value,
+            {
+                "schema_version", "interaction_id", "request_digest", "kind",
+                "decision", "answer", "reason",
+            },
+            "dsh_interaction_decision",
+        )
         version = _text(data["schema_version"], "decision.schema_version")
         if version != INTERACTION_SCHEMA_VERSION:
             raise ValueError("decision.schema_version is unsupported")
@@ -356,44 +382,34 @@ class DshBrainInteractionDecisionV1:
             raise ValueError("answer is incompatible with interaction kind")
         if decision == "allow_once" and kind not in {"approval", "plan_review"}:
             raise ValueError("allow_once is incompatible with interaction kind")
-        answer = _optional_text(data["answer"], "decision.answer")
-        if answer is not None and len(answer) > MAX_BRAIN_ANSWER_CHARS:
-            raise ValueError("decision.answer exceeds the bound")
-        response_goal = _optional_text(
-            data["response_goal"],
-            "decision.response_goal",
+        answer = _optional_text(
+            data["answer"],
+            "decision.answer",
+            maximum=MAX_BRAIN_ANSWER_CHARS,
         )
-        if response_goal is not None and len(response_goal) > MAX_BRAIN_ANSWER_CHARS:
-            raise ValueError("decision.response_goal exceeds the bound")
-        relay_mode = _optional_text(data["relay_mode"], "decision.relay_mode")
-        if relay_mode is not None and relay_mode not in RELAY_MODES:
-            raise ValueError("decision.relay_mode is unsupported")
         if decision == "answer" and answer is None:
             raise ValueError("answer is required for answer decision")
         if decision != "answer" and answer is not None:
             raise ValueError("answer is status-specific")
-        if decision == "relay_to_user" and (
-            response_goal is None or relay_mode is None
-        ):
-            raise ValueError("response_goal and relay_mode are required for relay decision")
-        if decision != "relay_to_user" and (
-            response_goal is not None or relay_mode is not None
-        ):
-            raise ValueError("relay fields are status-specific")
         return cls(
             schema_version=version,
             interaction_id=_text(data["interaction_id"], "decision.interaction_id"),
-            request_digest=_text(data["request_digest"], "decision.request_digest"),
+            request_digest=_text(
+                data["request_digest"],
+                "decision.request_digest",
+            ),
             kind=kind,
             decision=decision,
             answer=answer,
-            response_goal=response_goal,
-            relay_mode=relay_mode,
-            reason=_text(data["reason"], "decision.reason"),
+            reason=_text(
+                data["reason"],
+                "decision.reason",
+                maximum=MAX_BRAIN_REASON_CHARS,
+            ),
         )
 
     def to_dict(self) -> dict[str, object]:
-        """Return the JSON representation."""
+        """Return the exact semantic decision representation."""
 
         return {
             "schema_version": self.schema_version,
@@ -402,208 +418,5 @@ class DshBrainInteractionDecisionV1:
             "kind": self.kind,
             "decision": self.decision,
             "answer": self.answer,
-            "response_goal": self.response_goal,
-            "relay_mode": self.relay_mode,
             "reason": self.reason,
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class DshBrainReplyDecisionV1:
-    """Cognition-owned semantic result for one matched user reply."""
-
-    schema_version: str
-    interaction_id: str
-    request_digest: str
-    decision: str
-    answer: str | None
-    reason: str
-
-    @classmethod
-    def from_mapping(cls, value: object) -> DshBrainReplyDecisionV1:
-        """Parse the closed reply result without interpreting reply text."""
-
-        data = _strict(
-            value,
-            {
-                "schema_version", "interaction_id", "request_digest",
-                "decision", "answer", "reason",
-            },
-            "dsh_brain_reply_decision",
-        )
-        version = _text(data["schema_version"], "reply.schema_version")
-        if version != INTERACTION_SCHEMA_VERSION:
-            raise ValueError("reply.schema_version is unsupported")
-        decision = _text(data["decision"], "reply.decision")
-        if decision not in REPLY_DECISION_KINDS:
-            raise ValueError("reply.decision is unsupported")
-        answer = _optional_text(data["answer"], "reply.answer")
-        if answer is not None and len(answer) > MAX_BRAIN_ANSWER_CHARS:
-            raise ValueError("reply.answer exceeds the bound")
-        if decision == "answer" and answer is None:
-            raise ValueError("reply.answer is required for answer decision")
-        if decision != "answer" and answer is not None:
-            raise ValueError("reply.answer is status-specific")
-        return cls(
-            schema_version=version,
-            interaction_id=_text(data["interaction_id"], "reply.interaction_id"),
-            request_digest=_text(data["request_digest"], "reply.request_digest"),
-            decision=decision,
-            answer=answer,
-            reason=_text(data["reason"], "reply.reason"),
-        )
-
-    def to_dict(self) -> dict[str, object]:
-        """Return the JSON representation."""
-
-        return {
-            "schema_version": self.schema_version,
-            "interaction_id": self.interaction_id,
-            "request_digest": self.request_digest,
-            "decision": self.decision,
-            "answer": self.answer,
-            "reason": self.reason,
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class DshInteractionPendingV1:
-    """Durable relay state and exact reply lineage."""
-
-    schema_version: str
-    interaction_id: str
-    request_digest: str
-    resolution_thread_id: str
-    segment_id: str
-    brain_conversation_ref: str
-    platform: str
-    platform_channel_id: str
-    global_user_id: str
-    status: str
-    response_goal: str
-    relay_mode: str
-    created_at: str
-    expires_at: str
-    delivered_platform_message_id: str | None
-    delivery_receipt: dict[str, Any] | None
-    replied_at: str | None
-    reply_platform_message_id: str | None
-    request_identity: dict[str, Any]
-    decision: dict[str, Any] | None
-    reply_result: dict[str, Any] | None
-    grant: DshOneShotGrantV1 | None
-
-    @classmethod
-    def from_mapping(cls, value: object) -> DshInteractionPendingV1:
-        """Parse a durable pending interaction row."""
-
-        fields = {
-            "schema_version", "interaction_id", "request_digest", "resolution_thread_id",
-            "segment_id", "brain_conversation_ref", "platform", "platform_channel_id",
-            "global_user_id", "status", "response_goal", "relay_mode", "created_at",
-            "expires_at", "delivered_platform_message_id", "delivery_receipt", "replied_at",
-            "reply_platform_message_id", "request_identity", "decision", "reply_result", "grant",
-        }
-        data = _strict(value, fields, "dsh_pending")
-        version = _text(data["schema_version"], "pending.schema_version")
-        if version != PENDING_SCHEMA_VERSION:
-            raise ValueError("pending.schema_version is unsupported")
-        status = _text(data["status"], "pending.status")
-        if status not in {
-            "pending",
-            "delivered",
-            "continuation_pending",
-            "replied",
-            "expired",
-            "failed",
-        }:
-            raise ValueError("pending.status is unsupported")
-        response_goal = _text(data["response_goal"], "pending.response_goal")
-        if len(response_goal) > MAX_BRAIN_ANSWER_CHARS:
-            raise ValueError("pending.response_goal exceeds the bound")
-        relay_mode = _text(data["relay_mode"], "pending.relay_mode")
-        if relay_mode not in RELAY_MODES:
-            raise ValueError("pending.relay_mode is unsupported")
-        delivery_receipt_value = data["delivery_receipt"]
-        delivery_receipt = (
-            None
-            if delivery_receipt_value is None
-            else dict(_object(delivery_receipt_value, "pending.delivery_receipt"))
-        )
-        request_identity = dict(
-            _object(data["request_identity"], "pending.request_identity")
-        )
-        _json_value(request_identity, "pending.request_identity")
-        decision_value = data["decision"]
-        decision = (
-            None
-            if decision_value is None
-            else dict(_object(decision_value, "pending.decision"))
-        )
-        if decision is not None:
-            _json_value(decision, "pending.decision")
-        reply_result_value = data["reply_result"]
-        reply_result = (
-            None
-            if reply_result_value is None
-            else dict(_object(reply_result_value, "pending.reply_result"))
-        )
-        if reply_result is not None:
-            _json_value(reply_result, "pending.reply_result")
-        grant_value = data["grant"]
-        grant = None if grant_value is None else DshOneShotGrantV1.from_mapping(grant_value)
-        return cls(
-            schema_version=version,
-            interaction_id=_text(data["interaction_id"], "pending.interaction_id"),
-            request_digest=_text(data["request_digest"], "pending.request_digest"),
-            resolution_thread_id=_text(data["resolution_thread_id"], "pending.resolution_thread_id"),
-            segment_id=_text(data["segment_id"], "pending.segment_id"),
-            brain_conversation_ref=_text(data["brain_conversation_ref"], "pending.brain_conversation_ref"),
-            platform=_text(data["platform"], "pending.platform"),
-            platform_channel_id=_text(data["platform_channel_id"], "pending.platform_channel_id"),
-            global_user_id=_text(data["global_user_id"], "pending.global_user_id"),
-            status=status,
-            response_goal=response_goal,
-            relay_mode=relay_mode,
-            created_at=_text(data["created_at"], "pending.created_at"),
-            expires_at=_text(data["expires_at"], "pending.expires_at"),
-            delivered_platform_message_id=_optional_text(
-                data["delivered_platform_message_id"],
-                "pending.delivered_platform_message_id",
-            ),
-            delivery_receipt=delivery_receipt,
-            replied_at=_optional_text(data["replied_at"], "pending.replied_at"),
-            reply_platform_message_id=_optional_text(data["reply_platform_message_id"], "pending.reply_platform_message_id"),
-            request_identity=request_identity,
-            decision=decision,
-            reply_result=reply_result,
-            grant=grant,
-        )
-
-    def to_dict(self) -> dict[str, object]:
-        """Return the JSON representation."""
-
-        return {
-            "schema_version": self.schema_version,
-            "interaction_id": self.interaction_id,
-            "request_digest": self.request_digest,
-            "resolution_thread_id": self.resolution_thread_id,
-            "segment_id": self.segment_id,
-            "brain_conversation_ref": self.brain_conversation_ref,
-            "platform": self.platform,
-            "platform_channel_id": self.platform_channel_id,
-            "global_user_id": self.global_user_id,
-            "status": self.status,
-            "response_goal": self.response_goal,
-            "relay_mode": self.relay_mode,
-            "created_at": self.created_at,
-            "expires_at": self.expires_at,
-            "delivered_platform_message_id": self.delivered_platform_message_id,
-            "delivery_receipt": self.delivery_receipt,
-            "replied_at": self.replied_at,
-            "reply_platform_message_id": self.reply_platform_message_id,
-            "request_identity": self.request_identity,
-            "decision": self.decision,
-            "reply_result": self.reply_result,
-            "grant": None if self.grant is None else self.grant.to_dict(),
         }

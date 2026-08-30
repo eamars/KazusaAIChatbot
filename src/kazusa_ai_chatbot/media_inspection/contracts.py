@@ -8,9 +8,7 @@ MEDIA_INSPECTION_REQUEST_VERSION = "media_inspection_request.v1"
 MEDIA_INSPECTION_RESULT_VERSION = "media_inspection_result.v1"
 ALLOWED_MEDIA_INSPECTION_SOURCES = frozenset((
     "rag3_session_media",
-    "complex_external_media",
-    "test",
-    "live_llm_review",
+    "dsh_public_media",
 ))
 ALLOWED_MEDIA_INSPECTION_STATUSES = frozenset((
     "answered",
@@ -31,9 +29,7 @@ class MediaInspectionRequestV1(TypedDict):
     schema_version: Literal["media_inspection_request.v1"]
     source: Literal[
         "rag3_session_media",
-        "complex_external_media",
-        "test",
-        "live_llm_review",
+        "dsh_public_media",
     ]
     media_kind: Literal["image"]
     content_type: str

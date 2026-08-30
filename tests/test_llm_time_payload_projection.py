@@ -608,9 +608,9 @@ def test_normalize_future_promises_drops_invalid_due_time() -> None:
 
 
 def test_compact_memory_unit_rows_timestamps_are_local() -> None:
-    """_compact_memory_unit_rows should format updated_at and timestamp."""
-    from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_supervisor2 import (
-        _compact_memory_unit_rows,
+    """The retained RAG3 memory projection formats timestamps locally."""
+    from kazusa_ai_chatbot.nodes.persona_supervisor2_rag_projection import (
+        _memory_evidence_items,
     )
 
     rows = [
@@ -621,10 +621,9 @@ def test_compact_memory_unit_rows_timestamps_are_local() -> None:
             "timestamp": "2026-04-30T08:00:00+00:00",
         },
     ]
-    compacted = _compact_memory_unit_rows(rows)
-    for row in compacted:
-        if isinstance(row, dict):
-            _assert_no_utc_leak(row, "$.compact_memory_unit_rows[]")
+    compacted = _memory_evidence_items(rows, evidence_char_limit=1000)
+    _assert_no_utc_leak(compacted, "$.memory_evidence_items")
+    assert "2026-05-01 22:00:00" in compacted[0]
 
 
 # ---------------------------------------------------------------------------

@@ -15,10 +15,10 @@ def test_mac_timestamp_nonce_digest_and_constant_time_validation_fail_closed() -
         sign_request,
         verify_request,
     )
-    from kazusa_ai_chatbot.dsh_interaction.contracts import DshBrainInteractionRequestV1
+    from kazusa_ai_chatbot.dsh_interaction.contracts import DshBrainInteractionRequestV2
 
     secret = b"brain-secret"
-    request = DshBrainInteractionRequestV1.from_mapping(_request_mapping())
+    request = DshBrainInteractionRequestV2.from_mapping(_request_mapping())
     signed = sign_request(request, secret=secret)
     replay = InteractionNonceReplayStore()
     verified = verify_request(signed, secret=secret, replay_owner=replay)
@@ -33,7 +33,7 @@ def test_signed_interaction_remains_valid_for_its_full_declared_lifetime() -> No
     """Treat clock skew as future tolerance, not a one-minute maximum age."""
 
     from kazusa_ai_chatbot.dsh_interaction.auth import sign_request, validate_request
-    from kazusa_ai_chatbot.dsh_interaction.contracts import DshBrainInteractionRequestV1
+    from kazusa_ai_chatbot.dsh_interaction.contracts import DshBrainInteractionRequestV2
 
     secret = b"brain-secret"
     issued = datetime(2026, 8, 29, 0, 0, tzinfo=UTC)
@@ -42,7 +42,7 @@ def test_signed_interaction_remains_valid_for_its_full_declared_lifetime() -> No
     value["expires_at"] = (
         issued + timedelta(minutes=5)
     ).isoformat().replace("+00:00", "Z")
-    request = DshBrainInteractionRequestV1.from_mapping(value)
+    request = DshBrainInteractionRequestV2.from_mapping(value)
     signed = sign_request(request, secret=secret)
 
     validate_request(

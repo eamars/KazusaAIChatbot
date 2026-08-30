@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from typing import (
@@ -84,7 +83,7 @@ class GoalContinuationRefV1(TypedDict):
 class MediaDescriptionRow(TypedDict):
     content_type: str
     description: str
-    image_observation: NotRequired["ImageObservation"]
+    image_observation: NotRequired[ImageObservation]
 
 
 class ImageObservation(TypedDict):
@@ -243,6 +242,7 @@ class ToolResultReadyV1(TypedDict, total=False):
     source_character_name: str
     source_message_id: str
     goal_continuation_ref: GoalContinuationRefV1
+    task_resolution_context: dict[str, object]
 
 
 class CognitiveEpisodeV1(TypedDict):
@@ -1105,6 +1105,9 @@ def build_tool_result_episode(
         owner="background_work.delivery",
         created_at=created_at,
     )
+    task_resolution_context = result_data.get("task_resolution_context")
+    if isinstance(task_resolution_context, Mapping):
+        origin["task_resolution_context"] = dict(task_resolution_context)
     percept: PerceptV1 = {
         "schema_version": "percept.v1",
         "percept_kind": "tool_result",
@@ -1118,6 +1121,10 @@ def build_tool_result_episode(
         },
         "observed_at": str(result_data.get("completed_at", created_at)),
     }
+    if isinstance(task_resolution_context, Mapping):
+        percept["content"]["task_resolution_context"] = dict(
+            task_resolution_context,
+        )
     return _canonical_episode(
         episode_id=f"tool-result:{task_id}",
         trigger_source="tool_result",

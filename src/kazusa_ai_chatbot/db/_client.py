@@ -194,6 +194,9 @@ _db = None
 _db_loop: asyncio.AbstractEventLoop | None = None
 TEST_DATABASE_NAME = "_test_kazusa_live_llm"
 STAGE3_TEST_DATABASE_NAME = "_test_kazusa_core_v2"
+EPHEMERAL_TEST_DATABASE_PREFIX = "_test_kazusa_"
+EPHEMERAL_TEST_DATABASE_GUARD_ENV = "KAZUSA_EPHEMERAL_TEST_DATABASE_GUARD"
+EPHEMERAL_TEST_DATABASE_NAME_ENV = "KAZUSA_EPHEMERAL_TEST_DATABASE_NAME"
 STAGE3_DATABASE_GUARD_ENV = "STAGE3_DATABASE_GUARD"
 IDENTITY_GROWTH_DATABASE_GUARD_ENV = (
     "IDENTITY_GROWTH_DATABASE_GUARD"
@@ -230,7 +233,36 @@ def _sanitized_mongodb_endpoint_description(
 def _assert_guarded_database_name() -> None:
     """Reject non-isolated database configuration while the test guard is on."""
 
+    ephemeral_guard_enabled = (
+        os.getenv(EPHEMERAL_TEST_DATABASE_GUARD_ENV) == "1"
+    )
     if os.getenv("KAZUSA_TEST_DB_GUARD") != "1":
+        if ephemeral_guard_enabled:
+            raise DatabaseTestGuardError(
+                "the ephemeral database guard requires KAZUSA_TEST_DB_GUARD=1"
+            )
+        return
+    if ephemeral_guard_enabled:
+        ephemeral_database_name = os.getenv(
+            EPHEMERAL_TEST_DATABASE_NAME_ENV,
+            "",
+        ).strip()
+        if not ephemeral_database_name:
+            raise DatabaseTestGuardError(
+                f"{EPHEMERAL_TEST_DATABASE_NAME_ENV} must name the "
+                "ephemeral test database"
+            )
+        if not ephemeral_database_name.startswith(EPHEMERAL_TEST_DATABASE_PREFIX):
+            raise DatabaseTestGuardError(
+                f"{EPHEMERAL_TEST_DATABASE_NAME_ENV} must start with "
+                f"{EPHEMERAL_TEST_DATABASE_PREFIX!r}"
+            )
+        if MONGODB_DB_NAME != ephemeral_database_name:
+            raise DatabaseTestGuardError(
+                "guarded DB access requires the exact ephemeral database name; "
+                f"received {MONGODB_DB_NAME!r}, expected "
+                f"{ephemeral_database_name!r}"
+            )
         return
     allowed_database_names = {TEST_DATABASE_NAME}
     if os.getenv(STAGE3_DATABASE_GUARD_ENV) == "1":

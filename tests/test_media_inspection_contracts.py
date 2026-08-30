@@ -14,7 +14,7 @@ def test_image_request_and_answered_result_are_valid() -> None:
 
     request = validate_media_inspection_request({
         "schema_version": "media_inspection_request.v1",
-        "source": "test",
+        "source": "dsh_public_media",
         "media_kind": "image",
         "content_type": "image/png",
         "base64_data": "aGVsbG8=",
@@ -38,7 +38,7 @@ def test_non_image_media_is_rejected() -> None:
     with pytest.raises(MediaInspectionValidationError):
         validate_media_inspection_request({
             "schema_version": "media_inspection_request.v1",
-            "source": "test",
+            "source": "dsh_public_media",
             "media_kind": "audio",
             "content_type": "audio/mpeg",
             "base64_data": "aGVsbG8=",

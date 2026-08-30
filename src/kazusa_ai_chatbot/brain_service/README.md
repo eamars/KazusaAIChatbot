@@ -1,4 +1,9 @@
-# Brain Service Interface Control Document
+# Brain Service Interface Control Document — Plan 3 DSH
+
+The canonical operator observation carrier is
+cognition_run_observation.v1. The Brain service publishes this bounded
+projection after producer validation; it is separate from task authority,
+worker payloads, and historical persistence.
 
 ## Document Control
 
@@ -38,9 +43,9 @@ both inbound and outbound state:
   reply hydration,
 - runtime adapter registration lets dispatcher/proactive sends call adapter
   callback endpoints.
-- background-work worker lifecycle is started, stopped, and reported by the
-  service runtime as an internal executor while accepted-task result delivery
-  still returns through cognition/dialog.
+- the DSH task worker lifecycle is started, stopped, and reported by the
+  service runtime; accepted-task result delivery still returns through
+  cognition/dialog.
 
 Local process lifecycle management is owned by the separate top-level
 `control_console` package and `kazusa-control-console` command. The brain
@@ -161,25 +166,30 @@ future foreground applications must call the same interface instead of
 importing `/chat` queue state or adding their own gates. Different channel
 scopes remain independent.
 
-## DSH interaction and runtime readiness
+## DSH interaction, task edge, and runtime readiness
 
-The Brain owns the Plan 2 DSH interaction judge, durable Mongo interaction
-store, exact request/decision lineage, cognition observation, normal dialog,
-and adapter delivery. Its authenticated `GET /runtime/dsh/health` reports
-`configured`, `durable_store`, and `cognition_judge` readiness. The internal
-`POST /runtime/dsh/interactions` and
-`POST /runtime/dsh/interactions/checkpoint` routes admit or replay typed
-approval, question, and plan-review requests from the DSH sidecar.
+The Brain owns the `dsh_brain_interaction.v2` judge, durable Mongo audit row,
+exact request/decision lineage, reusable cognition loop, and internal DSH
+handoff. Its authenticated `GET /runtime/dsh/health` reports `configured`,
+`durable_store`, and `cognition_judge` readiness. The sole authenticated
+`POST /runtime/dsh/interactions` route admits one signed approval, question,
+or plan-review request from the DSH sidecar.
 
-The cognition P-stage makes the semantic choice; deterministic Brain code
-validates authority, scope, expiry, persistence, conflict, and one-shot grant
-consumption. A runtime-authored DSH observation is not a user utterance or
-permission. `relay_to_user` is delivered through the ordinary dialog/adapter
-path, and an exact reply resumes the same thread and segment before a fresh
-native call is matched to the grant. The public ChatResponse remains a
-Brain-owned surface rather than a projection of raw DSH prose. See the [DSH
-interaction contract](../dsh_interaction/README.md) and [DSH integration
-architecture](../../../docs/architecture/dsh_integration_architecture.md).
+Each request carries complete bounded semantic context together with its exact
+thread, segment, activation, lease, operation, scope, policy, nonce, and
+digest identities. The existing full reusable cognition loop owns the
+character judgment and advertises only the `self_goal_resolution` resolver
+capability for this internal episode. Its exact decision sets are `question`:
+`answer` or `reject`; `approval`: `allow_once` or `reject`; and `plan_review`:
+`answer`, `allow_once`, or `reject`.
+
+The validated result returns directly to the waiting DSH hook. Deterministic
+Brain code owns authentication, strict shape and kind validation, authority,
+scope, expiry, digest/nonce checks, idempotent audit/replay persistence,
+bounds, and exact one-shot grant creation and consumption. The interaction
+creates no dialog, L3, or adapter surface and no user prompt/reply or
+waiting-state lifecycle. See the [DSH interaction contract](../dsh_interaction/README.md)
+and [DSH integration architecture](../../../docs/architecture/dsh_integration_architecture.md).
 
 ### Live Chat Intake And Settlement
 
@@ -684,18 +694,24 @@ When an episode has no visible text surface, the brain returns an empty
 consolidated when private action results, calendar-triggered action results,
 private surface outputs, or private finalization exist.
 
-When L2d selects `task_resolution_request`, deterministic resolver execution
-first runs the bounded inline task-resolution session. Budget exhaustion or an
-inline coding handover creates or reuses the accepted-task lifecycle row and
-materializes the same checkpoint into a `task_orchestrator` background job
-before selected L3 text runs. Status checks use `accepted_task_status_check`
-and never enqueue a worker job. Completed accepted-task-backed jobs later
-return as `tool_result` cognitive episodes. Background-work workers must not
-call adapters, dispatcher delivery, or cognition directly. Accepted-task
-result delivery resolves the job's original source message row in
-`conversation_history` and uses the same durable age/interleaving gate to
-select `reply_to_msg_id`; the synthetic `tool-result:<task_id>` identity is
-provenance only and never becomes a reply target.
+When L2d selects `task_resolution_request`, the shared DSH runtime handles
+foreground and direct-background work. Direct background admission first
+returns a transient, model-hidden `TaskResolutionAdmissionV1` containing only
+`schema_version`, `accepted_task_id`, `background_work_job_id`, and
+`task_session_id`; it contains no authority or checkpoint. Claim-time code
+creates or verifies `dsh_task_binding.v1` in `dsh_task_bindings`, mints fresh
+authority, and advances `operation_generation` under revision CAS. The worker
+uses `task_orchestrator_worker_payload.v2` with `open_dsh_resolution` or
+`continue_dsh_resolution`. Only a committed checkpoint may produce
+`TaskResolutionResultV1(status="deferred")` with `DshResolutionRefV1`.
+Status checks use `accepted_task_status_check` and never enqueue a worker job.
+Completed accepted-task jobs return as `tool_result` cognitive episodes.
+Background-work workers must not call adapters, dispatcher delivery, or
+cognition directly. Accepted-task result delivery resolves the job's
+original source message row in `conversation_history` and uses the same
+durable age/interleaving gate to select `reply_to_msg_id`; the synthetic
+`tool-result:<task_id>` identity is provenance only and never becomes a
+reply target.
 
 Delivery receipt adapters may still need bounded `not_found` retry behavior
 for transport timing and cross-process delivery, but a non-empty

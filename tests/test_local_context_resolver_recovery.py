@@ -17,7 +17,7 @@ from kazusa_ai_chatbot.local_context_resolver import (
 )
 from kazusa_ai_chatbot.local_context_resolver import service as resolver_service
 from kazusa_ai_chatbot.local_context_resolver import stages as resolver_stages
-from tests.test_task_resolution_orchestrator import _scene_context
+from tests.task_resolution_test_helpers import _scene_context
 
 
 class _QueuedStageLLM:

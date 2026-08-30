@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from typing import Any
+from uuid import uuid4
 
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError, PyMongoError
@@ -15,27 +17,14 @@ from kazusa_ai_chatbot.accepted_task.models import (
     AcceptedTaskCreateResult,
     AcceptedTaskDoc,
     AcceptedTaskStatusCheckRequest,
+    DshAcceptedTaskAffordanceV1,
+    project_dsh_task_affordance,
 )
 from kazusa_ai_chatbot.db._client import get_db
 from kazusa_ai_chatbot.db.errors import DatabaseOperationError
 
-CODING_RUN_CONTEXT_LOAD_MULTIPLIER = 4
-CODING_RUN_CONTEXT_SCHEMA_VERSION = "coding_run_context.v1"
-MAX_CODING_RUN_CONTEXT_TEXT_CHARS = 1200
-MAX_CODING_RUN_CONTEXT_LIST_ITEMS = 8
-OPEN_CODING_RUN_CONTEXT_INDEX_NAME = (
-    "accepted_task_open_coding_run_context_lookup"
-)
-OPEN_CODING_RUN_CONTEXT_INDEX_KEYS = (
-    ("source_platform", 1),
-    ("source_channel_id", 1),
-    ("requester_global_user_id", 1),
-    ("task_kind", 1),
-    ("updated_at", -1),
-)
-OPEN_CODING_RUN_CONTEXT_INDEX_FILTER = {
-    "coding_run_context.followup_open": True,
-}
+DSH_FOLLOWUP_UNIQUE_INDEX_NAME = "accepted_task_open_dsh_followup_unique"
+DSH_FOLLOWUP_LOOKUP_INDEX_NAME = "accepted_task_scope_dsh_followup_lookup"
 
 
 async def ensure_accepted_task_indexes() -> None:
@@ -44,7 +33,6 @@ async def ensure_accepted_task_indexes() -> None:
     db = await get_db()
     collection = db[ACCEPTED_TASKS_COLLECTION]
     try:
-        await _drop_conflicting_open_coding_run_context_index(collection)
         await collection.create_index(
             "accepted_task_id",
             unique=True,
@@ -73,9 +61,34 @@ async def ensure_accepted_task_indexes() -> None:
             name="accepted_task_scope_active_lookup",
         )
         await collection.create_index(
-            list(OPEN_CODING_RUN_CONTEXT_INDEX_KEYS),
-            partialFilterExpression=OPEN_CODING_RUN_CONTEXT_INDEX_FILTER,
-            name=OPEN_CODING_RUN_CONTEXT_INDEX_NAME,
+            [
+                ("dsh_task_session_id", 1),
+            ],
+            unique=True,
+            partialFilterExpression={
+                "schema_version": ACCEPTED_TASK_SCHEMA_VERSION,
+                "task_kind": "task_resolution",
+                "dsh_followup_open": True,
+            },
+            name=DSH_FOLLOWUP_UNIQUE_INDEX_NAME,
+        )
+        await collection.create_index(
+            [
+                ("schema_version", 1),
+                ("source_platform", 1),
+                ("source_channel_id", 1),
+                ("source_channel_type", 1),
+                ("requester_global_user_id", 1),
+                ("requester_platform_user_id", 1),
+                ("dsh_followup_open", 1),
+                ("updated_at", -1),
+            ],
+            partialFilterExpression={
+                "schema_version": ACCEPTED_TASK_SCHEMA_VERSION,
+                "task_kind": "task_resolution",
+                "dsh_followup_open": True,
+            },
+            name=DSH_FOLLOWUP_LOOKUP_INDEX_NAME,
         )
     except PyMongoError as exc:
         raise DatabaseOperationError(
@@ -83,28 +96,218 @@ async def ensure_accepted_task_indexes() -> None:
         ) from exc
 
 
-async def _drop_conflicting_open_coding_run_context_index(
-    collection: Any,
-) -> None:
-    """Remove the v1 named-index definition before v2 index creation."""
+async def claim_dsh_followup(
+    *,
+    accepted_task_id: str,
+    action_attempt_id: str,
+    expected_revision: int,
+    operation: str,
+    instruction: str | None,
+    updated_at: str | None = None,
+) -> AcceptedTaskDoc:
+    """Claim one open DSH follow-up with revision and attempt fencing."""
 
-    index_information = await collection.index_information()
-    existing = index_information.get(OPEN_CODING_RUN_CONTEXT_INDEX_NAME)
-    if not isinstance(existing, Mapping):
-        return
-    raw_keys = existing.get("key")
-    existing_keys = tuple(
-        tuple(row)
-        for row in raw_keys
-        if isinstance(row, (list, tuple)) and len(row) == 2
-    ) if isinstance(raw_keys, list) else ()
-    existing_filter = existing.get("partialFilterExpression")
-    if (
-        existing_keys == OPEN_CODING_RUN_CONTEXT_INDEX_KEYS
-        and existing_filter == OPEN_CODING_RUN_CONTEXT_INDEX_FILTER
+    if operation not in {"continue", "summarize", "cancel"}:
+        raise ValueError("unsupported DSH follow-up operation")
+    if not isinstance(action_attempt_id, str) or not action_attempt_id.strip():
+        raise ValueError("action_attempt_id is required")
+    if operation == "continue" and (
+        not isinstance(instruction, str) or not instruction.strip()
     ):
-        return
-    await collection.drop_index(OPEN_CODING_RUN_CONTEXT_INDEX_NAME)
+        raise ValueError("continue follow-up instruction is required")
+    if operation != "continue" and instruction is not None:
+        raise ValueError("instruction is operation-specific")
+    claim_query = {
+        "accepted_task_id": accepted_task_id,
+        "task_kind": "task_resolution",
+        "dsh_followup_open": True,
+        "revision": expected_revision,
+    }
+    candidate = await _find_task(claim_query)
+    if candidate is None:
+        existing = await _find_task({
+            "accepted_task_id": accepted_task_id,
+            "schema_version": ACCEPTED_TASK_SCHEMA_VERSION,
+        })
+        if (
+            existing is not None
+            and existing.get("dsh_followup_claim_action_attempt_id")
+            == action_attempt_id
+        ):
+            return existing
+        raise ValueError("accepted task follow-up revision or openness mismatch")
+    current_generation = candidate.get("dsh_operation_generation", 0) if candidate else 0
+    if not isinstance(current_generation, int):
+        raise TypeError("accepted task DSH generation is invalid")
+    update = {
+        "$set": {
+            "dsh_followup_open": False,
+            "dsh_followup_claim_action_attempt_id": action_attempt_id,
+            "revision": expected_revision + 1,
+            "updated_at": updated_at or candidate.get("updated_at", ""),
+        }
+    }
+    if operation == "cancel":
+        update["$set"].update({
+            "state": "cancelled",
+            "completion_status": "failed",
+            "result_kind": "failed",
+            "failure_summary": "The accepted task was canceled.",
+        })
+    task = await _update_task(claim_query, update)
+    if task is None:
+        existing = await _find_task({
+            "accepted_task_id": accepted_task_id,
+            "schema_version": ACCEPTED_TASK_SCHEMA_VERSION,
+        })
+        if (
+            existing is not None
+            and existing.get("dsh_followup_claim_action_attempt_id")
+            == action_attempt_id
+        ):
+            return existing
+        raise ValueError("accepted task follow-up revision or openness mismatch")
+    return task
+
+
+async def create_followup(
+    *,
+    accepted_task_id: str,
+    task_session_id: str,
+    operation: str,
+    instruction: str | None,
+    action_attempt_id: str,
+    operation_generation: int,
+    binding: Mapping[str, object],
+    expected_revision: int | None = None,
+    updated_at: str | None = None,
+) -> AcceptedTaskDoc:
+    """Close one delivered affordance and create its next DSH task row."""
+
+    if operation not in {"continue", "summarize", "cancel"}:
+        raise ValueError("unsupported DSH follow-up operation")
+    if not isinstance(task_session_id, str) or not task_session_id.strip():
+        raise ValueError("task_session_id is required")
+    if not isinstance(operation_generation, int) or isinstance(
+        operation_generation,
+        bool,
+    ) or operation_generation < 1:
+        raise ValueError("operation_generation is invalid")
+    if not isinstance(binding, Mapping):
+        raise TypeError("binding is required")
+    bound_session = binding.get("task_session_id")
+    if bound_session != task_session_id:
+        raise ValueError("binding task session does not match follow-up")
+    bound_generation = binding.get("operation_generation")
+    if (
+        not isinstance(bound_generation, int)
+        or isinstance(bound_generation, bool)
+        or operation_generation != bound_generation + 1
+    ):
+        raise ValueError("follow-up generation does not match binding")
+    if binding.get("state") != "terminal":
+        raise ValueError("follow-up requires a terminal binding")
+    current = await _find_task({
+        "accepted_task_id": accepted_task_id,
+        "task_kind": "task_resolution",
+        "dsh_task_session_id": task_session_id,
+        "dsh_followup_open": True,
+        "state": "delivered",
+        "dsh_operation_generation": bound_generation,
+        **(
+            {"revision": expected_revision}
+            if expected_revision is not None
+            else {}
+        ),
+    })
+    if current is None:
+        replay = await _find_task({
+            "task_kind": "task_resolution",
+            "dsh_task_session_id": task_session_id,
+            "dsh_operation_generation": operation_generation,
+            "dsh_followup_claim_action_attempt_id": action_attempt_id,
+        })
+        if replay is not None:
+            return replay
+        raise ValueError("accepted task follow-up is not open")
+    revision = current.get("revision", 0)
+    if not isinstance(revision, int) or isinstance(revision, bool):
+        raise TypeError("accepted task revision is invalid")
+    claimed = await claim_dsh_followup(
+        accepted_task_id=accepted_task_id,
+        action_attempt_id=action_attempt_id,
+        expected_revision=(
+            expected_revision if expected_revision is not None else revision
+        ),
+        operation=operation,
+        instruction=instruction,
+        updated_at=updated_at,
+    )
+    if operation == "cancel":
+        return claimed
+    collection = (await get_db())[ACCEPTED_TASKS_COLLECTION]
+    next_task = deepcopy(dict(claimed))
+    next_task.update({
+        "accepted_task_id": f"task-{uuid4().hex}",
+        "active_identity_key": (
+            f"{claimed.get('task_identity_key', accepted_task_id)}:dsh:{operation_generation}"
+        ),
+        "state": "pending",
+        "completion_status": "none",
+        "result_kind": "none",
+        "executor_ref": "",
+        "started_at": "",
+        "completed_at": "",
+        "delivered_at": "",
+        "result_summary": "",
+        "artifact_text": "",
+        "remaining_needs": [],
+        "failure_summary": "",
+        "delivery_failure_summary": "",
+        "delivery_tracking_id": "",
+        "delivered_conversation_message_id": "",
+        "last_progress_reported_at": "",
+        "dsh_operation_generation": operation_generation,
+        "dsh_followup_open": False,
+        "dsh_followup_claim_action_attempt_id": action_attempt_id,
+        "revision": 0,
+        "updated_at": updated_at or str(claimed.get("updated_at", "")),
+    })
+    try:
+        await collection.insert_one(next_task)
+    except DuplicateKeyError:
+        replay = await _find_task({
+            "task_kind": "task_resolution",
+            "dsh_task_session_id": task_session_id,
+            "dsh_operation_generation": operation_generation,
+            "dsh_followup_claim_action_attempt_id": action_attempt_id,
+        })
+        if replay is None:
+            raise DatabaseOperationError(
+                "DSH follow-up duplicate could not be loaded",
+            )
+        return replay
+    except PyMongoError as exc:
+        try:
+            await _update_task(
+                {
+                    "accepted_task_id": accepted_task_id,
+                    "task_kind": "task_resolution",
+                    "dsh_task_session_id": task_session_id,
+                    "dsh_followup_open": False,
+                    "dsh_followup_claim_action_attempt_id": action_attempt_id,
+                    "revision": revision + 1,
+                },
+                {
+                    "$set": {"dsh_followup_open": True},
+                    "$unset": {"dsh_followup_claim_action_attempt_id": ""},
+                    "$inc": {"revision": 1},
+                },
+            )
+        except (DatabaseOperationError, PyMongoError):
+            pass
+        raise DatabaseOperationError("failed to create DSH follow-up task") from exc
+    return next_task
 
 
 async def insert_or_get_active_accepted_task(
@@ -164,24 +367,16 @@ async def insert_or_get_active_accepted_task(
     return result
 
 
-async def load_open_coding_run_contexts_for_scope(
+async def load_open_dsh_task_affordances_for_scope(
     *,
-    source_platform: str,
+    platform: str,
     source_channel_id: str,
     requester_global_user_id: str,
+    source_channel_type: str | None = None,
+    requester_platform_user_id: str | None = None,
     limit: int = 3,
-) -> list[dict[str, object]]:
-    """Load newest unique open coding contexts for one trusted user scope.
-
-    Args:
-        source_platform: Adapter platform owning the current user turn.
-        source_channel_id: Channel owning the current user turn.
-        requester_global_user_id: Durable requester identity for the turn.
-        limit: Maximum number of newest distinct run contexts to project.
-
-    Returns:
-        Prompt-safe contexts collapsed by coding-run reference.
-    """
+) -> list[DshAcceptedTaskAffordanceV1]:
+    """Load prompt-safe DSH task controls for one exact user scope."""
 
     if limit < 1:
         return []
@@ -189,42 +384,44 @@ async def load_open_coding_run_contexts_for_scope(
     collection = db[ACCEPTED_TASKS_COLLECTION]
     query = {
         "schema_version": ACCEPTED_TASK_SCHEMA_VERSION,
-        "source_platform": source_platform,
+        "source_platform": platform,
         "source_channel_id": source_channel_id,
         "requester_global_user_id": requester_global_user_id,
-        "task_kind": "coding_continuation",
-        "coding_run_context.followup_open": True,
+        "task_kind": "task_resolution",
+        "dsh_followup_open": True,
+        "state": {
+            "$in": [
+                *ACTIVE_ACCEPTED_TASK_STATES,
+                "delivered",
+            ],
+        },
     }
+    if isinstance(source_channel_type, str) and source_channel_type.strip():
+        query["source_channel_type"] = source_channel_type.strip()
+    if (
+        isinstance(requester_platform_user_id, str)
+        and requester_platform_user_id.strip()
+    ):
+        query["requester_platform_user_id"] = requester_platform_user_id.strip()
     try:
-        cursor = collection.find(
-            query,
-            projection={"_id": 0, "coding_run_context": 1},
-        ).sort("updated_at", -1).limit(
-            limit * CODING_RUN_CONTEXT_LOAD_MULTIPLIER,
-        )
-        rows = await cursor.to_list(
-            length=limit * CODING_RUN_CONTEXT_LOAD_MULTIPLIER,
-        )
+        cursor = collection.find(query, {"_id": 0}).sort(
+            "updated_at",
+            -1,
+        ).limit(limit)
+        rows = await cursor.to_list(length=limit)
     except PyMongoError as exc:
         raise DatabaseOperationError(
-            f"failed to load open coding-run contexts: {exc}"
+            f"failed to load open DSH task affordances: {exc}"
         ) from exc
-    contexts: list[dict[str, object]] = []
-    seen_refs: set[str] = set()
+    affordances: list[DshAcceptedTaskAffordanceV1] = []
     for row in rows:
-        context = _sanitize_prompt_safe_coding_context(
-            row.get("coding_run_context"),
-        )
-        if context is None:
+        if not isinstance(row, Mapping):
             continue
-        context_ref = context["coding_run_ref"]
-        if context_ref in seen_refs:
+        try:
+            affordances.append(project_dsh_task_affordance(row, row))
+        except (TypeError, ValueError):
             continue
-        seen_refs.add(context_ref)
-        contexts.append(context)
-        if len(contexts) >= limit:
-            break
-    return contexts
+    return affordances
 
 
 async def mark_accepted_task_pending(
@@ -400,6 +597,74 @@ async def find_active_accepted_task_for_scope(
     return return_value
 
 
+async def find_open_dsh_followup_for_scope(
+    request: AcceptedTaskStatusCheckRequest,
+) -> AcceptedTaskDoc | None:
+    """Return the sole delivered DSH follow-up for one trusted scope."""
+
+    db = await get_db()
+    collection = db[ACCEPTED_TASKS_COLLECTION]
+    query = _scope_query(request)
+    if query is None:
+        return None
+    query.update({
+        "task_kind": "task_resolution",
+        "dsh_followup_open": True,
+        "state": "delivered",
+    })
+    try:
+        cursor = (
+            collection.find(query, {"_id": 0})
+            .sort("updated_at", -1)
+            .limit(1)
+        )
+        rows = await cursor.to_list(length=1)
+    except PyMongoError as exc:
+        raise DatabaseOperationError(
+            f"failed to load open DSH follow-up: {exc}"
+        ) from exc
+    if not rows:
+        return None
+    return dict(rows[0])
+
+
+async def find_accepted_task_by_id(
+    *,
+    accepted_task_id: str,
+) -> AcceptedTaskDoc | None:
+    """Load one accepted-task row by its opaque durable identity."""
+
+    if not isinstance(accepted_task_id, str) or not accepted_task_id.strip():
+        raise ValueError("accepted_task_id is required")
+    return await _find_task({"accepted_task_id": accepted_task_id.strip()})
+
+
+async def find_dsh_followup_by_action_attempt(
+    *,
+    task_session_id: str,
+    action_attempt_id: str,
+    operation_generation: int,
+) -> AcceptedTaskDoc | None:
+    """Load a durable DSH follow-up replay for one action attempt."""
+
+    if not isinstance(task_session_id, str) or not task_session_id.strip():
+        raise ValueError("task_session_id is required")
+    if not isinstance(action_attempt_id, str) or not action_attempt_id.strip():
+        raise ValueError("action_attempt_id is required")
+    if (
+        not isinstance(operation_generation, int)
+        or isinstance(operation_generation, bool)
+        or operation_generation < 0
+    ):
+        raise ValueError("operation_generation is invalid")
+    return await _find_task({
+        "task_kind": "task_resolution",
+        "dsh_task_session_id": task_session_id.strip(),
+        "dsh_operation_generation": operation_generation,
+        "dsh_followup_claim_action_attempt_id": action_attempt_id.strip(),
+    })
+
+
 async def mark_accepted_task_running(
     *,
     accepted_task_id: str,
@@ -433,7 +698,6 @@ async def mark_tool_result_ready(
     result_kind: str,
     completion_status: str,
     remaining_needs: list[str],
-    coding_run_context: dict[str, object] | None,
 ) -> AcceptedTaskDoc | None:
     """Record a completed artifact result for source-bound delivery."""
 
@@ -449,12 +713,12 @@ async def mark_tool_result_ready(
             "updated_at": completed_at,
         }
     }
-    if coding_run_context is not None:
-        update["$set"]["coding_run_context"] = dict(coding_run_context)
     task = await _update_task(
         {
             "accepted_task_id": accepted_task_id,
-            "state": {"$in": ["running", "result_ready"]},
+            "state": {
+                "$in": ["running", "result_ready"],
+            },
         },
         update,
     )
@@ -468,7 +732,6 @@ async def mark_accepted_task_failure_ready(
     completed_at: str,
     result_kind: str,
     remaining_needs: list[str],
-    coding_run_context: dict[str, object] | None,
 ) -> AcceptedTaskDoc | None:
     """Record a failed executor result for source-bound delivery."""
 
@@ -483,12 +746,12 @@ async def mark_accepted_task_failure_ready(
             "updated_at": completed_at,
         }
     }
-    if coding_run_context is not None:
-        update["$set"]["coding_run_context"] = dict(coding_run_context)
     task = await _update_task(
         {
             "accepted_task_id": accepted_task_id,
-            "state": {"$in": ["running", "failure_ready"]},
+            "state": {
+                "$in": ["running", "failure_ready"],
+            },
         },
         update,
     )
@@ -563,24 +826,33 @@ async def mark_accepted_task_delivered(
 ) -> AcceptedTaskDoc | None:
     """Mark delivery success and release active duplicate suppression."""
 
+    query = {
+        "accepted_task_id": accepted_task_id,
+        "state": {"$in": ["delivery_in_progress", "delivered"]},
+    }
+    current = await _find_task(query)
+    if current is None:
+        return None
+    set_fields: dict[str, object] = {
+        "state": "delivered",
+        "delivered_conversation_message_id": (
+            delivered_conversation_message_id
+        ),
+        "delivered_at": delivered_at,
+        "updated_at": delivered_at,
+    }
+    if current.get("task_kind") == "task_resolution":
+        set_fields["dsh_followup_open"] = True
     update = {
         "$set": {
-            "state": "delivered",
-            "delivered_conversation_message_id": (
-                delivered_conversation_message_id
-            ),
-            "delivered_at": delivered_at,
-            "updated_at": delivered_at,
+            **set_fields,
         },
         "$unset": {
             "active_identity_key": "",
         },
     }
     task = await _update_task(
-        {
-            "accepted_task_id": accepted_task_id,
-            "state": {"$in": ["delivery_in_progress", "delivered"]},
-        },
+        query,
         update,
     )
     return task
@@ -682,6 +954,25 @@ async def _update_task(
     return return_value
 
 
+async def _find_task(query: Mapping[str, object]) -> AcceptedTaskDoc | None:
+    """Load one accepted-task row for a deterministic CAS preflight."""
+
+    db = await get_db()
+    collection = db[ACCEPTED_TASKS_COLLECTION]
+    try:
+        document = await collection.find_one(
+            {"schema_version": ACCEPTED_TASK_SCHEMA_VERSION, **dict(query)},
+            {"_id": 0},
+        )
+    except PyMongoError as exc:
+        raise DatabaseOperationError(
+            f"failed to load accepted task: {exc}"
+        ) from exc
+    if document is None:
+        return None
+    return dict(document)
+
+
 def _scope_query(request: Mapping[str, object]) -> dict[str, object] | None:
     """Build the trusted requester/channel lookup for progress checks."""
 
@@ -706,71 +997,3 @@ def _validate_v2_task_document(task: AcceptedTaskDoc) -> None:
 
     if task.get("schema_version") != ACCEPTED_TASK_SCHEMA_VERSION:
         raise DatabaseOperationError("accepted task schema_version is invalid")
-
-
-def _sanitize_prompt_safe_coding_context(
-    value: object,
-) -> dict[str, object] | None:
-    """Validate the persisted public coding projection without coding internals."""
-
-    if not isinstance(value, Mapping):
-        return None
-    expected_fields = {
-        "schema_version",
-        "coding_run_ref",
-        "status",
-        "summary",
-        "limitations",
-        "allowed_next_actions",
-        "followup_open",
-    }
-    if set(value) != expected_fields:
-        return None
-    if value["schema_version"] != CODING_RUN_CONTEXT_SCHEMA_VERSION:
-        return None
-    coding_run_ref = _bounded_context_text(value["coding_run_ref"])
-    status = _bounded_context_text(value["status"])
-    summary = _bounded_context_text(value["summary"])
-    if not coding_run_ref or not status or not summary:
-        return None
-    limitations = _bounded_context_text_list(value["limitations"])
-    allowed_next_actions = _bounded_context_text_list(
-        value["allowed_next_actions"],
-    )
-    if limitations is None or allowed_next_actions is None:
-        return None
-    followup_open = value["followup_open"]
-    if not isinstance(followup_open, bool):
-        return None
-    context = {
-        "schema_version": CODING_RUN_CONTEXT_SCHEMA_VERSION,
-        "coding_run_ref": coding_run_ref,
-        "status": status,
-        "summary": summary,
-        "limitations": limitations,
-        "allowed_next_actions": allowed_next_actions,
-        "followup_open": followup_open,
-    }
-    return context
-
-
-def _bounded_context_text(value: object) -> str:
-    """Return one bounded text value from an already prompt-safe projection."""
-
-    if not isinstance(value, str):
-        return ""
-    return value.strip()[:MAX_CODING_RUN_CONTEXT_TEXT_CHARS]
-
-
-def _bounded_context_text_list(value: object) -> list[str] | None:
-    """Return bounded text list values or reject an invalid public projection."""
-
-    if not isinstance(value, list):
-        return None
-    texts: list[str] = []
-    for item in value[:MAX_CODING_RUN_CONTEXT_LIST_ITEMS]:
-        text = _bounded_context_text(item)
-        if not text:
-            return None
-        texts.append(text)
-    return texts

@@ -2,25 +2,22 @@
 
 from __future__ import annotations
 
+import inspect
+import json
 import re
 
 from kazusa_ai_chatbot.cognition_core_v3 import facade as facade_module
 from kazusa_ai_chatbot.cognition_core_v3 import prompt as prompt_module
 from kazusa_ai_chatbot.cognition_core_v3.prompt import (
-    A1_QUESTION_GUIDANCE,
-    A2_QUESTION_GUIDANCE,
-    APPRAISAL_QUESTION_GUIDANCE,
-    BACKGROUND_CONTEXT_GOAL_AUTHORITY_GUIDANCE,
-    CURRENT_OBSERVATION_AUTHORITY_GUIDANCE,
-    GOAL_QUESTION_GUIDANCE,
-    ORDINARY_PLAN_GUIDANCE,
-    RECIPIENT_APPLICABILITY_GUIDANCE,
-    SELF_PLAN_GUIDANCE,
     build_canonical_appraisal_question,
     build_canonical_goal_question,
     build_canonical_plan_question,
     build_canonical_turn_workspace,
     build_turn_workspace_stage_contracts,
+)
+from kazusa_ai_chatbot.cognition_resolver.contracts import (
+    PENDING_TASK_CONTINUATION_VERSION,
+    RESOLVER_PENDING_CONTINUATION_VERSION,
 )
 from kazusa_ai_chatbot.cognition_shared.state_models import validate_cognition_state
 from kazusa_ai_chatbot.cognition_shared.state_reducers import materialize_causal_root
@@ -60,7 +57,14 @@ def _workspace(
         relationship_context=payload["mutable_state"].get("relationship", {}),
         character_affect_context=character_affect_context,
         overused_moves=payload.get("overused_moves", []),
+        response_plan_contract_variant=payload[
+            "response_plan_contract_variant"
+        ],
     )
+
+
+def _effective_prompt(stage: str, packet: dict[str, object]) -> str:
+    return facade_module._system_prompt_for_stage(stage=stage, packet=packet)
 
 
 def test_cognition_chain_guidance_uses_native_chinese() -> None:
@@ -73,18 +77,8 @@ def test_cognition_chain_guidance_uses_native_chinese() -> None:
         appraisal_summary=[],
         self_cognition=True,
     )
-    guidance_values = (
-        A1_QUESTION_GUIDANCE,
-        A2_QUESTION_GUIDANCE,
-        APPRAISAL_QUESTION_GUIDANCE,
-        GOAL_QUESTION_GUIDANCE,
-        ORDINARY_PLAN_GUIDANCE,
-        SELF_PLAN_GUIDANCE,
-        *(packet["guidance"] for packet in packets.values()),
-        self_plan["guidance"],
-    )
-    for guidance in guidance_values:
-        _assert_native_chinese_instruction(guidance)
+    for stage, packet in (*packets.items(), ("P", self_plan)):
+        _assert_native_chinese_instruction(_effective_prompt(stage, packet))
     assert workspace["orientation"]["operation"] == "回应当前观察"
     assert "response_content_provider" not in workspace["orientation"]
     assert "selection_owner" not in workspace["orientation"]
@@ -117,9 +111,7 @@ def test_ordinary_plan_declares_response_goal_text_contract() -> None:
         "minimum_characters": 1,
         "maximum_characters": 2000,
     }
-    assert "`response_goal` 的值必须是一个非空的简体中文字符串" in (
-        facade_module._STAGE_SYSTEM_PROMPTS["P"]
-    )
+    assert "可见措辞能够断言的内容" in _effective_prompt("P", packet)
 
 
 def test_stage_context_preserves_identity_relationship_and_emotion_cause() -> None:
@@ -402,9 +394,9 @@ def test_stage_authority_lanes_partition_fact_continuity_and_character_context()
     assert goal["participant_continuity"] == a2["participant_continuity"]
     assert plan["participant_continuity"] == a2["participant_continuity"]
     assert "conditional_character_context" not in plan
-    assert "缺少证据" in plan["guidance"]
-    assert "明确表达不确定性" in plan["guidance"]
-    assert "不得把输入中的权威通道名称复制到输出对象中" in plan["guidance"]
+    prompt = _effective_prompt("P", plan)
+    assert "缺少证据不等于否定事实" in prompt
+    assert "不确定的解释" in prompt
 
 
 def test_overused_moves_reach_participant_continuity_after_a1_only() -> None:
@@ -462,9 +454,10 @@ def test_user_owned_semantic_correction_guides_a1_goal_and_plan_without_hidden_i
         appraisal_summary=[],
     )
 
-    for packet in (a1, goal, plan):
-        assert "当前用户明确纠正自己的意思时" in packet["guidance"]
-        assert "纠正本身不是相反意思的证据" in packet["guidance"]
+    for stage, packet in (("A1", a1), ("G", goal), ("P", plan)):
+        prompt = _effective_prompt(stage, packet)
+        assert "当前用户明确纠正自己的意思或感受时" in prompt
+        assert "纠正本身不证明相反意思" in prompt
 
 
 def test_goal_guidance_progresses_current_delta_and_preserves_deliberate_reopening() -> None:
@@ -472,15 +465,9 @@ def test_goal_guidance_progresses_current_delta_and_preserves_deliberate_reopeni
 
     payload = _input()
     workspace = _workspace(payload, payload["evidence"])
-    authority_distinctions = (
-        "继续处理同一任务或话题，本身不会继续或重新打开角色此前使用或提出的回应方式、提议、要求、条件或关系性回报。",
-        "角色尚未得到回应的提议只能作为参与者连续性，不能当作当前用户的意图、接受、承诺或必须追求的当前目标。",
-        "只有当前用户回应、接受、拒绝、提及、询问、实质改变或明确重新打开该回应事项时，才可以再次选择它。",
-        "角色倾向可以影响语气和立场，但不能取代当前语义增量成为主要目标。",
-    )
-    for packet in (
-        build_canonical_goal_question(workspace=workspace, appraisal_summary=[]),
-        build_canonical_plan_question(
+    for stage, packet in (
+        ("G", build_canonical_goal_question(workspace=workspace, appraisal_summary=[])),
+        ("P", build_canonical_plan_question(
             workspace=workspace,
             goal={
                 "goal_kind": "clarify",
@@ -489,12 +476,12 @@ def test_goal_guidance_progresses_current_delta_and_preserves_deliberate_reopeni
                 "cause_summary": "the current observation",
             },
             appraisal_summary=[],
-        ),
+        )),
     ):
-        assert "当前观察新增加、改变、纠正、询问或仍未解决的内容" in packet["guidance"]
-        assert "只有当前用户继续、深化、实质改变或重新打开同一事项时" in packet["guidance"]
-        for distinction in authority_distinctions:
-            assert distinction in packet["guidance"]
+        prompt = _effective_prompt(stage, packet)
+        assert "当前观察新增加、改变、纠正、询问或仍未解决的内容" in prompt
+        assert "此前回应模式" in prompt
+        assert "当前明确重新打开相关事项" in prompt or "用户当前重新打开它们" in prompt
 
 
 def test_recipient_scoped_permission_rule_reaches_a2_goal_and_plan() -> None:
@@ -520,11 +507,11 @@ def test_recipient_scoped_permission_rule_reaches_a2_goal_and_plan() -> None:
         appraisal_summary=[],
     )
 
-    normalized_rule = "".join(RECIPIENT_APPLICABILITY_GUIDANCE.split())
-    assert normalized_rule not in "".join(a1["guidance"].split())
-    assert normalized_rule in "".join(a2["guidance"].split())
-    assert normalized_rule in "".join(goal["guidance"].split())
-    assert normalized_rule in "".join(plan["guidance"].split())
+    recipient_rule = "公开可见不把一名参与者的同意、许可、承诺、关系或角色转移给另一名参与者"
+    assert recipient_rule not in _effective_prompt("A1", a1)
+    assert recipient_rule in _effective_prompt("A2", a2)
+    assert recipient_rule in _effective_prompt("G", goal)
+    assert recipient_rule in _effective_prompt("P", plan)
 
 
 def test_semantic_progression_context_preserves_all_existing_multi_affect_rows_and_causes() -> None:
@@ -671,7 +658,6 @@ def test_goal_and_plan_packets_share_background_goal_authority_contract() -> Non
 
     payload = _input()
     workspace = _workspace(payload, payload["evidence"])
-    authority_contract = BACKGROUND_CONTEXT_GOAL_AUTHORITY_GUIDANCE.strip()
     goal = build_canonical_goal_question(
         workspace=workspace,
         appraisal_summary=[],
@@ -687,8 +673,9 @@ def test_goal_and_plan_packets_share_background_goal_authority_contract() -> Non
         appraisal_summary=[],
     )
 
-    assert goal["guidance"].count(authority_contract) == 1
-    assert plan["guidance"].count(authority_contract) == 1
+    for stage, packet in (("G", goal), ("P", plan)):
+        prompt = _effective_prompt(stage, packet)
+        assert "只有当前观察把它们带入当前请求、决定或未解决事项时" in prompt
 
 
 def test_request_agency_authority_contract_reaches_all_cognition_stage_packets() -> None:
@@ -697,24 +684,29 @@ def test_request_agency_authority_contract_reaches_all_cognition_stage_packets()
     payload = _input()
     workspace = _workspace(payload, payload["evidence"])
     packets = build_turn_workspace_stage_contracts(workspace=workspace)
-    authority_contract = CURRENT_OBSERVATION_AUTHORITY_GUIDANCE.strip()
-
     for stage in ("A1", "A2", "G", "P"):
-        assert packets[stage]["guidance"].count(authority_contract) == 1
+        prompt = _effective_prompt(stage, packets[stage])
+        assert "current_observation` 是用户当下行动、意图、接受、许可和回应对象的唯一当前依据" in prompt
+        assert "guidance" not in packets[stage]
 
 
 def test_request_agency_contract_rejects_circular_restated_evidence() -> None:
     """The agency contract distinguishes independent facts from restatements."""
 
-    contract = CURRENT_OBSERVATION_AUTHORITY_GUIDANCE
     required_invariants = (
         "同一请求的存在或清晰程度",
+        "邀请参与",
         "上游改述",
         "独立证据",
-        "另行表达的`current_observation`事实",
+        "另行表达的当前观察事实",
     )
-
-    assert all(invariant in contract for invariant in required_invariants)
+    for prompt in (
+        facade_module._A1_SYSTEM_PROMPT,
+        facade_module._A2_SYSTEM_PROMPT,
+        facade_module._G_SYSTEM_PROMPT,
+        facade_module._P_ORDINARY_SYSTEM_PROMPT,
+    ):
+        assert all(invariant in prompt for invariant in required_invariants)
 
 
 def test_response_content_provider_is_reply_content_fact_across_all_stages() -> None:
@@ -728,44 +720,23 @@ def test_response_content_provider_is_reply_content_fact_across_all_stages() -> 
         "response_content_provider",
     )
 
-    assert all(
-        field not in CURRENT_OBSERVATION_AUTHORITY_GUIDANCE
-        for field in hidden_fields
-    )
     for stage in ("A1", "A2", "G", "P"):
         rendered_packet = str(packets[stage])
         assert all(field not in rendered_packet for field in hidden_fields)
-        assert all(field not in packets[stage]["guidance"] for field in hidden_fields)
-        assert all(
-            field not in facade_module._STAGE_SYSTEM_PROMPTS[stage]
-            for field in hidden_fields
-        )
+        assert all(field not in _effective_prompt(stage, packets[stage]) for field in hidden_fields)
 
 
 def test_a2_existential_drive_keeps_character_experience_distinct_from_user_state() -> None:
     """Existential-drive axes remain character-owned rather than user-owned."""
 
-    contract = getattr(
-        prompt_module,
-        "A2_EXISTENTIAL_DRIVE_EVIDENCE_GUIDANCE",
-        "",
-    ).strip()
-
     required_invariants = ("existential_drive", "独立当前事实")
-    assert contract
-    assert all(invariant in contract for invariant in required_invariants)
-    assert A2_QUESTION_GUIDANCE.count(contract) == 1
-    assert facade_module._STAGE_SYSTEM_PROMPTS["A2"].count(contract) == 1
+    prompt = facade_module._A2_SYSTEM_PROMPT
+    assert all(invariant in prompt for invariant in required_invariants)
 
 
 def test_g_relational_carriers_separate_character_motive_from_user_relationship_fact() -> None:
     """G carrier fields keep character motive distinct from user relationship facts."""
 
-    contract = getattr(
-        prompt_module,
-        "G_RELATIONAL_CARRIER_EVIDENCE_GUIDANCE",
-        "",
-    ).strip()
     required_invariants = (
         "relational_willingness.reason",
         "cause_summary",
@@ -773,43 +744,38 @@ def test_g_relational_carriers_separate_character_motive_from_user_relationship_
         "current_observation",
     )
 
-    assert contract
-    assert all(invariant in contract for invariant in required_invariants)
-    assert GOAL_QUESTION_GUIDANCE.count(contract) == 1
-    assert facade_module._STAGE_SYSTEM_PROMPTS["G"].count(contract) == 1
+    prompt = facade_module._G_SYSTEM_PROMPT
+    assert all(invariant in prompt for invariant in required_invariants)
 
 
 def test_request_agency_contract_separates_authorization_from_motivation() -> None:
     """Authorization scope does not establish motive or broader meaning."""
 
-    contract = CURRENT_OBSERVATION_AUTHORITY_GUIDANCE
     required_invariants = (
-        "授权只证明",
-        "当前观察所写对象、行动、时间和条件内的许可",
-        "授权本身不证明动机",
-        "上述更广含义",
+        "授权只在当前观察写明的对象、行动、时间和条件内成立",
+        "并不证明动机或更广含义",
     )
-
-    assert all(invariant in contract for invariant in required_invariants)
+    for prompt in (
+        facade_module._A1_SYSTEM_PROMPT,
+        facade_module._A2_SYSTEM_PROMPT,
+        facade_module._G_SYSTEM_PROMPT,
+        facade_module._P_ORDINARY_SYSTEM_PROMPT,
+    ):
+        assert all(invariant in prompt for invariant in required_invariants)
 
 
 def test_response_content_provider_is_reply_content_source_not_external_agency_transfer() -> None:
     """Explicit dialog meaning remains the model-facing authority source."""
 
-    contract = CURRENT_OBSERVATION_AUTHORITY_GUIDANCE
-    assert "`current_observation`" in contract
-    assert "response_content_provider_role" not in contract
-    assert "response_content_provider" not in contract
+    prompt = facade_module._G_SYSTEM_PROMPT
+    assert "`current_observation`" in prompt
+    assert "response_content_provider_role" not in prompt
+    assert "response_content_provider" not in prompt
 
 
 def test_a2_system_and_packet_share_relationship_state_evidence_contract() -> None:
     """A2 packet and system guidance share one relationship evidence owner."""
 
-    contract = getattr(
-        prompt_module,
-        "A2_RELATIONSHIP_STATE_EVIDENCE_GUIDANCE",
-        "",
-    ).strip()
     required_invariants = (
         "relationship_social",
         "当前交互角色或范围许可",
@@ -817,56 +783,173 @@ def test_a2_system_and_packet_share_relationship_state_evidence_contract() -> No
         "另行表达的`current_observation`关系事实",
     )
 
-    assert contract
-    assert all(invariant in contract for invariant in required_invariants)
-    assert A2_QUESTION_GUIDANCE.count(contract) == 1
-    assert facade_module._STAGE_SYSTEM_PROMPTS["A2"].count(contract) == 1
+    prompt = facade_module._A2_SYSTEM_PROMPT
+    assert all(invariant in prompt for invariant in required_invariants)
 
 
 def test_g_system_and_packet_share_relational_carrier_evidence_contract() -> None:
     """G packet and system guidance share one relational carrier owner."""
 
-    contract = getattr(
-        prompt_module,
-        "G_RELATIONAL_CARRIER_EVIDENCE_GUIDANCE",
-        "",
-    ).strip()
     required_invariants = (
         "relational_willingness",
         "private_monologue",
         "当前交互角色或范围许可",
-        "不能成为用户",
-        "另行表达的`current_observation`关系事实",
+        "不能为用户补写关系事实",
+        "当前关系事实",
     )
 
-    assert contract
-    assert "G_RELATIONAL_CARRIER_EVIDENCE_GUIDANCE" in prompt_module.__all__
-    assert all(invariant in contract for invariant in required_invariants)
-    assert GOAL_QUESTION_GUIDANCE.count(contract) == 1
-    assert facade_module._STAGE_SYSTEM_PROMPTS["G"].count(contract) == 1
-    for stage, guidance in (
-        ("A1", A1_QUESTION_GUIDANCE),
-        ("A2", A2_QUESTION_GUIDANCE),
-        ("P", ORDINARY_PLAN_GUIDANCE),
-    ):
-        assert guidance.count(contract) == 0
-        assert facade_module._STAGE_SYSTEM_PROMPTS[stage].count(contract) == 0
+    prompt = facade_module._G_SYSTEM_PROMPT
+    assert all(invariant in prompt for invariant in required_invariants)
+    assert "relational_willingness" not in facade_module._A1_SYSTEM_PROMPT
 
 
 def test_g_relational_carrier_does_not_turn_unsupported_user_meaning_into_first_person_feeling() -> None:
     """Private monologue cannot launder unsupported user relationship meaning."""
 
-    contract = getattr(
-        prompt_module,
-        "G_RELATIONAL_CARRIER_EVIDENCE_GUIDANCE",
-        "",
-    )
     required_invariants = (
         "未经当前关系事实支持的用户关系含义",
-        "第一人称感受、内心判断或被动经历",
-        "放入`private_monologue`",
-        "获得依据",
+        "第一人称感受、内心独白、被动经历",
+        "relational_willingness",
+        "private_monologue",
+        "取得依据",
     )
 
-    assert contract
-    assert all(invariant in contract for invariant in required_invariants)
+    assert all(
+        invariant in facade_module._G_SYSTEM_PROMPT
+        for invariant in required_invariants
+    )
+
+
+def test_packets_project_only_state_and_typed_output_contracts() -> None:
+    payload = _input()
+    packets = build_turn_workspace_stage_contracts(
+        workspace=_workspace(payload, payload["evidence"]),
+    )
+
+    for packet in packets.values():
+        assert "guidance" not in packet
+        assert "current_observation" in packet
+        assert "output_contract" in packet
+    rendered = json.dumps(packets, ensure_ascii=False)
+    assert "repair_instruction" not in rendered
+    assert "source_id" not in rendered
+
+
+def test_all_complete_prompts_own_current_authority_and_repair_semantics() -> None:
+    prompts = (
+        facade_module._A1_SYSTEM_PROMPT,
+        facade_module._A2_SYSTEM_PROMPT,
+        facade_module._G_SYSTEM_PROMPT,
+        facade_module._P_ORDINARY_SYSTEM_PROMPT,
+        facade_module._P_PENDING_CLARIFICATION_SYSTEM_PROMPT,
+        facade_module._P_DSH_INTERACTION_SYSTEM_PROMPT,
+        facade_module._P_PENDING_AND_DSH_SYSTEM_PROMPT,
+        facade_module._P_SELF_COGNITION_SYSTEM_PROMPT,
+    )
+
+    for prompt in prompts:
+        assert "current_observation" in prompt
+        assert "resolver_goal_progress" in prompt
+        assert "contract_repair" in prompt
+        assert "JSON" not in prompt
+        assert "严格返回" not in prompt
+
+
+def test_cognition_prompt_owners_do_not_compose_authored_prompt_fragments() -> None:
+    """Prompt wording is one literal per exact model-call contract."""
+
+    source = inspect.getsource(facade_module)
+    assert ".format(" not in source
+    assert "join((" not in source
+    assert "repair_instruction" not in source
+    assert "\"guidance\"" not in inspect.getsource(prompt_module)
+
+
+def test_plan_variant_selection_matches_projected_pending_lanes() -> None:
+    payload = _input()
+    workspace = _workspace(payload, payload["evidence"])
+    ordinary = build_canonical_plan_question(
+        workspace=workspace,
+        goal={"goal_kind": "open_goal"},
+        appraisal_summary=[],
+    )
+    assert _effective_prompt("P", ordinary) == facade_module._P_ORDINARY_SYSTEM_PROMPT
+
+    workspace["pending_resolver_continuation"] = {
+        "schema_version": RESOLVER_PENDING_CONTINUATION_VERSION,
+        "capability_kind": "human_clarification",
+        "status": "waiting_for_user",
+        "original_goal": "取得带背景要求的证据。",
+        "question": "请补充地点。",
+        "pending_task_continuation": {
+            "schema_version": PENDING_TASK_CONTINUATION_VERSION,
+            "on_answered_clarification": "background_task_admission",
+        },
+    }
+    workspace["response_plan_contract_variant"] = "open_pending_resolution"
+    pending = build_canonical_plan_question(
+        workspace=workspace,
+        goal={"goal_kind": "open_goal"},
+        appraisal_summary=[],
+    )
+    assert "pending_resolver_continuation" in pending
+    assert "response_plan_contract_variant" not in json.dumps(pending)
+    assert _effective_prompt("P", pending) == (
+        facade_module._P_PENDING_CLARIFICATION_SYSTEM_PROMPT
+    )
+
+    post_workspace = _workspace(payload, payload["evidence"])
+    post_workspace["response_plan_contract_variant"] = "post_pending_resolution"
+    post_workspace["capabilities"] = {
+        **post_workspace["capabilities"],
+        "resolvers": [
+            row
+            for row in post_workspace["capabilities"]["resolvers"]
+            if row["capability"] != "human_clarification"
+        ],
+    }
+    post_pending = build_canonical_plan_question(
+        workspace=post_workspace,
+        goal={"goal_kind": "open_goal"},
+        appraisal_summary=[],
+    )
+    assert "response_plan_contract_variant" not in post_pending["output_contract"]
+    assert "pending_resolver_continuation" not in post_pending
+    assert "pending_task_continuation" not in post_pending["output_contract"]
+    assert "pending_resolution_fields" not in post_pending["output_contract"]
+    assert "post_pending_resolution" not in json.dumps(post_pending)
+    assert all(
+        row["capability"] != "human_clarification"
+        for row in post_pending["capabilities"]["resolvers"]
+    )
+    assert _effective_prompt("P", post_pending) == (
+        facade_module._P_ORDINARY_SYSTEM_PROMPT
+    )
+
+
+def test_resolver_goal_progress_survives_without_pending_clarification() -> None:
+    payload = _input()
+    workspace = _workspace(payload, payload["evidence"])
+    workspace["resolver_goal_progress"] = {
+        "schema_version": "resolver_goal_progress.v1",
+        "original_goal": "完成带背景要求的证据任务。",
+        "current_focus": "取得证据。",
+        "deliverables": [],
+        "missing_user_inputs": [],
+        "evidence_dependencies": ["来源证据"],
+        "attempted_paths": [],
+        "source_backed_facts": [],
+        "assumptions_or_inferences": [],
+        "blockers": [],
+        "final_response_requirements": ["精确标记：已完成"],
+    }
+    packets = build_turn_workspace_stage_contracts(workspace=workspace)
+
+    for packet in packets.values():
+        assert packet["resolver_goal_progress"]["original_goal"] == (
+            "完成带背景要求的证据任务。"
+        )
+        assert "pending_resolver_continuation" not in packet
+    assert "pending_resolution" not in packets["P"]["output_contract"][
+        "required_fields"
+    ]

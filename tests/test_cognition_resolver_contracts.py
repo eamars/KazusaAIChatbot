@@ -11,6 +11,7 @@ from kazusa_ai_chatbot.cognition_resolver.capabilities import (
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     MAX_RESOLVER_SUMMARY_CHARS,
     MAX_RESOLVER_TRACE_CHARS,
+    PENDING_TASK_CONTINUATION_VERSION,
     RESOLVER_CAPABILITY_REQUEST_VERSION,
     RESOLVER_CYCLE_STATE_VERSION,
     RESOLVER_GOAL_PROGRESS_VERSION,
@@ -22,6 +23,7 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     project_goal_progress_for_cognition,
     project_observations_for_cognition,
     project_pending_resume_for_cognition,
+    validate_pending_task_continuation,
     validate_resolver_capability_request,
     validate_resolver_cycle_trace,
     validate_resolver_goal_progress,
@@ -175,6 +177,10 @@ def _pending_resume() -> dict:
         "prompt_safe_original_goal": "Plan a low-cost evening after location.",
         "prompt_safe_question": "Which city are you in?",
         "prompt_safe_approval_summary": "",
+        "pending_task_continuation": {
+            "schema_version": PENDING_TASK_CONTINUATION_VERSION,
+            "on_answered_clarification": "background_task_admission",
+        },
         "created_at_utc": "2026-05-30T00:00:00+00:00",
         "expires_at_utc": "2026-05-31T00:00:00+00:00",
     }
@@ -435,6 +441,46 @@ def test_pending_resume_validator_and_projection_are_prompt_safe() -> None:
     assert "expires_at_utc" not in projection
     assert "channel-1" not in projection
     assert "user-1" not in projection
+
+
+def test_pending_task_continuation_validator_requires_exact_v1_shape() -> None:
+    """The answer-conditioned admission decision has no timing fallback shape."""
+
+    valid = {
+        "schema_version": PENDING_TASK_CONTINUATION_VERSION,
+        "on_answered_clarification": "background_task_admission",
+    }
+
+    assert validate_pending_task_continuation(valid) == valid
+
+    invalid = {
+        "schema_version": PENDING_TASK_CONTINUATION_VERSION,
+        "value": "background",
+    }
+    with pytest.raises(ResolverValidationError, match="fields are not exact"):
+        validate_pending_task_continuation(invalid)
+
+    invalid["on_answered_clarification"] = "background"
+    invalid.pop("value")
+    with pytest.raises(
+        ResolverValidationError,
+        match="on_answered_clarification: expected one of",
+    ):
+        validate_pending_task_continuation(invalid)
+
+
+def test_pending_resume_v1_and_v2_fail_closed_without_continuation_fallback() -> None:
+    """Earlier pending schemas cannot enter the V3 clarification lane."""
+
+    legacy_pending = _pending_resume()
+    legacy_pending["schema_version"] = "resolver_pending_resume.v1"
+
+    with pytest.raises(ResolverValidationError, match="schema_version"):
+        validate_resolver_pending_resume(legacy_pending)
+
+    legacy_pending["schema_version"] = "resolver_pending_resume.v2"
+    with pytest.raises(ResolverValidationError, match="schema_version"):
+        validate_resolver_pending_resume(legacy_pending)
 
 
 def test_pending_resolution_validator_accepts_cognition_decision() -> None:

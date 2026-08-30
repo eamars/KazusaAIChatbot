@@ -42,22 +42,6 @@
       "fault_selector": "producer_resolver_contract"
     },
     {
-      "pattern": "src/kazusa_ai_chatbot/complex_task_resolver/**",
-      "owner": "resolver",
-      "route": "complex_task_resolver",
-      "parser": "parse_llm_json_output",
-      "attempt_cap": 2,
-      "fault_selector": "producer_resolver_contract"
-    },
-    {
-      "pattern": "src/kazusa_ai_chatbot/coding_agent/**",
-      "owner": "coding_agent",
-      "route": "coding_agent",
-      "parser": "parse_llm_json_output",
-      "attempt_cap": 2,
-      "fault_selector": "producer_coding_contract"
-    },
-    {
       "pattern": "src/kazusa_ai_chatbot/background_work/**",
       "owner": "background_work",
       "route": "background_work",
@@ -147,6 +131,7 @@
     "goal_selection",
     "action_authorization",
     "resolver_authorization",
+    "dsh_task_resolution",
     "dialog_surface",
     "dialog_generator",
     "memory_lifecycle",
@@ -155,6 +140,6 @@
     "consolidation",
     "reflection",
     "self_cognition",
-    "coding_agent"
+    "accepted_task_control"
   ]
 }

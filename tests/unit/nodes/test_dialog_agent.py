@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 from copy import deepcopy
 from types import SimpleNamespace
@@ -17,7 +18,6 @@ from kazusa_ai_chatbot.cognition_episode import (
     build_goal_continuation_ref,
     build_tool_result_episode,
 )
-from kazusa_ai_chatbot.cognition_shared import surface_stages
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes.dialog_agent import dialog_generator
 from tests.unit.nodes.dialog_fixtures import build_dialog_state
@@ -140,13 +140,20 @@ def _source_dialog_state(
     return state
 
 
-def test_dialog_prompt_uses_shared_visible_content_authority_contract() -> None:
-    """Keep dialog rendering attached to the shared visible-content authority."""
+def test_dialog_prompt_is_a_complete_literal_with_owned_authority() -> None:
+    """Keep dialog authority local to its complete immutable prompt."""
 
-    authority = surface_stages.VISIBLE_CONTENT_AUTHORITY_GUIDANCE
+    source = inspect.getsource(dialog_module)
+    prompt = dialog_module._V2_DIALOG_GENERATOR_PROMPT
 
-    assert authority
-    assert dialog_module._V2_DIALOG_GENERATOR_PROMPT.count(authority) == 1
+    assert "VISIBLE_CONTENT_AUTHORITY_GUIDANCE" not in source
+    assert "_V2_DIALOG_GENERATOR_PROMPT_TEMPLATE" not in source
+    assert "_DIALOG_REPAIR_INSTRUCTION" not in source
+    assert ".format(" not in source
+    assert prompt.count("可见语义的选择权属于") == 1
+    assert "dialog 必须服从已选 content_plan" in prompt
+    assert "# 输出格式" not in prompt
+    assert "字段必须恰好是 final_dialog" not in prompt
 
 
 @pytest.mark.asyncio
@@ -195,7 +202,7 @@ def test_dialog_prompt_prioritizes_epistemic_boundary() -> None:
     assert "低于 permitted_action_results 的事实权威" in prompt
     assert "action_kind=speak 只授权说出或发送 final_dialog 的文字" in prompt
     assert "同一类型、同一效果的 executed 行精确支持" in prompt
-    assert "输出前不可跳过的合同检查" in prompt
+    assert "# 语义审计" in prompt
     assert "对未来外部效果的具体承诺也属于行动主张" in prompt
     assert "pending、scheduled 或 executed 行" in prompt
 
@@ -235,7 +242,7 @@ async def test_dialog_retry_prompt_carries_rejected_candidate_and_contract_error
 
     _, _, quality_events = _patch_dialog_recorders(monkeypatch)
     fake_llm = _SequencedLLM([
-        {"unexpected": "field"},
+        {"final_dialog": "invalid string candidate"},
         {"final_dialog": ["repaired answer"]},
     ])
     monkeypatch.setattr(dialog_module, "_dialog_generator_llm", fake_llm)
@@ -250,16 +257,23 @@ async def test_dialog_retry_prompt_carries_rejected_candidate_and_contract_error
     first_payload = json.loads(first_messages[1].content)
     second_payload = json.loads(second_messages[1].content)
     assert set(second_payload) == set(first_payload) | {"contract_repair"}
+    assert first_payload["output_contract"] == (
+        dialog_module._DIALOG_OUTPUT_CONTRACT
+    )
+    assert second_payload["output_contract"] == first_payload["output_contract"]
     repair = second_payload["contract_repair"]
     assert set(repair) == {
-        "repair_instruction",
         "reason",
         "contract_error",
         "invalid_candidate",
     }
-    assert repair["contract_error"] == "dialog output fields are not exact"
-    assert '"unexpected": "field"' in repair["invalid_candidate"]
-    assert "JSON" not in repair["repair_instruction"]
+    assert repair["contract_error"] == "dialog output messages are invalid"
+    assert '"final_dialog": "invalid string candidate"' in (
+        repair["invalid_candidate"]
+    )
+    assert "repair_instruction" not in json.dumps(second_payload)
+    assert "guidance" not in json.dumps(first_payload)
+    assert "instruction" not in json.dumps(first_payload)
     assert quality_events[0]["quality_status"] == "passed"
 
 
@@ -404,7 +418,6 @@ async def test_dialog_projects_content_plan_when_no_candidate_survives(
     for messages in fake_llm.calls[1:]:
         payload = json.loads(messages[1].content)
         assert set(payload["contract_repair"]) == {
-            "repair_instruction",
             "reason",
             "contract_error",
             "invalid_candidate",

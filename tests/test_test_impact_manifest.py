@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from pathlib import Path
 
@@ -10,6 +11,7 @@ import pytest
 from scripts.validate_test_impact import (
     ImpactValidationError,
     load_manifest,
+    manifest_test_nodes,
     missing_collected_nodes,
     resolve_impacted_test_nodes,
     validate_manifest,
@@ -125,6 +127,81 @@ def test_manifest_contains_agentic_resolver_owner_rows() -> None:
     assert validate_manifest(manifest, REPOSITORY_ROOT) == []
 
 
+def test_manifest_contains_dsh_plan3_owner_rows() -> None:
+    """Every Plan 3 owner node is represented by an exact manifest row."""
+
+    plan_path = (
+        REPOSITORY_ROOT
+        / "development_plans"
+        / "active"
+        / "short_term"
+        / "dsh_brain_bigbang_cutover_and_legacy_resolution_decommission_plan_2026-08-26.md"
+    )
+    plan_text = plan_path.read_text(encoding="utf-8")
+    owner_paths = {
+        "tests/test_accepted_task_lifecycle.py",
+        "tests/test_agentic_resolver_sidecar_process.py",
+        "tests/test_background_work_delivery.py",
+        "tests/test_background_work_future_speak.py",
+        "tests/test_cognition_llm_producer_matrix.py",
+        "tests/test_cognition_resolver_loop.py",
+        "tests/test_dsh_brain_interaction_resume.py",
+        "tests/test_dsh_brain_interaction_service.py",
+        "tests/test_dsh_plan3_documentation.py",
+        "tests/test_dsh_plan3_e2e_live_llm.py",
+        "tests/test_dsh_plan3_task_resolution.py",
+        "tests/test_dsh_plan3_task_resolution_live_db.py",
+        "tests/test_dsh_tool_gateway_contracts.py",
+        "tests/test_dsh_tool_gateway_media.py",
+        "tests/test_stage3_fresh_database_bootstrap.py",
+        "tests/test_test_impact_manifest.py",
+        "tests/unit/accepted_task/test_dsh_task_lifecycle.py",
+        "tests/unit/action_spec/test_accepted_task_control.py",
+        "tests/unit/agentic_resolver/test_runtime_task_lifecycle.py",
+        "tests/unit/background_work/test_dsh_jobs.py",
+        "tests/unit/background_work/test_dsh_worker.py",
+        "tests/unit/background_work/test_result_source.py",
+        "tests/unit/brain_service/test_dsh_task_readiness.py",
+        "tests/unit/cognition_core_v3/test_dsh_task_handoff.py",
+        "tests/unit/cognition_episode/test_task_result_source.py",
+        "tests/unit/cognition_resolver/test_capabilities.py",
+        "tests/unit/db/test_accepted_tasks.py",
+        "tests/unit/db/test_task_resolution_sessions.py",
+        "tests/unit/llm_interface/test_route_report.py",
+        "tests/unit/nodes/test_persona_supervisor2_dsh_task_actions.py",
+        "tests/unit/scripts/test_check_dsh_plan3_drain.py",
+        "tests/unit/service/test_dsh_task_composition.py",
+        "tests/unit/task_resolution/test_contracts.py",
+        "tests/unit/task_resolution/test_decommission.py",
+        "tests/unit/task_resolution/test_projection.py",
+        "tests/unit/task_resolution/test_service.py",
+        "tests/unit/test_config_dsh_cutover.py",
+    }
+    planned_nodes = {
+        match.group(1)
+        for match in re.finditer(r"`(tests/[^`]+::[^`]+)`", plan_text)
+        if match.group(1).split("::", 1)[0] in owner_paths
+    }
+    superseded_nodes = {
+        (
+            "tests/test_dsh_plan3_e2e_live_llm.py::"
+            "test_e2e_real_debug_user_replies_to_dsh_relay_and_resumes_same_session"
+        ),
+        (
+            "tests/unit/background_work/test_dsh_jobs.py::"
+            "test_job_claim_excludes_waiting_and_v1_payloads"
+        ),
+    }
+    manifest = load_manifest(REPOSITORY_ROOT)
+
+    missing = sorted(
+        (set(planned_nodes) - superseded_nodes)
+        - set(manifest_test_nodes(manifest, unit_only=False))
+    )
+
+    assert not missing, f"Plan 3 nodes lack manifest ownership rows: {missing}"
+
+
 def test_manifest_contains_group_topic_continuity_owner_rows() -> None:
     """Every changed continuity owner has an exact required gate."""
 
@@ -173,11 +250,48 @@ def test_unmapped_changed_source_fails_closed() -> None:
 
     manifest = load_manifest(REPOSITORY_ROOT)
 
-    with pytest.raises(ImpactValidationError, match="no manifest entry"):
-        resolve_impacted_test_nodes(
-            manifest,
-            ["src/kazusa_ai_chatbot/cognition_core_v3/new_owner.py"],
-        )
+    for changed_path in (
+        "src/kazusa_ai_chatbot/cognition_core_v3/new_owner.py",
+        "scripts/new_owner.py",
+    ):
+        with pytest.raises(ImpactValidationError, match="no manifest entry"):
+            resolve_impacted_test_nodes(manifest, [changed_path])
+
+
+def test_removed_source_manifest_maps_deleted_sources_to_surviving_nodes() -> None:
+    """Every planned deleted source resolves through explicit decommission rows."""
+
+    manifest = load_manifest(REPOSITORY_ROOT)
+    removed_sources = manifest["removed_sources"]
+    assert isinstance(removed_sources, dict)
+    assert len(removed_sources) == 119
+
+    common_nodes = {
+        (
+            "tests/unit/task_resolution/test_decommission.py::"
+            "test_legacy_task_complex_coding_and_rag2_executor_sources_are_absent"
+        ),
+        (
+            "tests/unit/task_resolution/test_decommission.py::"
+            "test_runtime_import_graph_contains_no_legacy_executor_imports"
+        ),
+    }
+    media_path = "src/kazusa_ai_chatbot/complex_task_resolver/subagent/media.py"
+    media_nodes = set(resolve_impacted_test_nodes(manifest, [media_path]))
+    assert media_nodes == common_nodes | {
+        (
+            "tests/test_dsh_tool_gateway_media.py::"
+            "test_public_media_inspection_preserves_bounded_safe_fetch_and_visual_result"
+        ),
+        (
+            "tests/test_dsh_tool_gateway_media.py::"
+            "test_public_media_rejects_private_redirect_oversize_or_invalid_image_before_inspection"
+        ),
+    }
+    assert set(resolve_impacted_test_nodes(
+        manifest,
+        ["scripts/run_coding_agent_benchmark.py"],
+    )) == common_nodes
 
 
 def test_stale_required_node_fails_closed() -> None:

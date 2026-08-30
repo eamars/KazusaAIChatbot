@@ -16,8 +16,9 @@ def test_dispatch_exposes_only_approved_semantic_services_and_routes_no_standard
     from kazusa_ai_chatbot.dsh_tool_gateway.catalog import SEMANTIC_TOOL_NAMES
     from kazusa_ai_chatbot.dsh_tool_gateway.dispatch import SemanticCapabilityDispatcher
 
-    assert len(SEMANTIC_TOOL_NAMES) == 13
+    assert len(SEMANTIC_TOOL_NAMES) == 14
     assert all(name.startswith("kazusa_") for name in SEMANTIC_TOOL_NAMES)
+    assert "kazusa_inspect_public_media" in SEMANTIC_TOOL_NAMES
     assert not any(name in {"read_file", "shell", "submit_resolution"} for name in SEMANTIC_TOOL_NAMES)
     assert SemanticCapabilityDispatcher
 

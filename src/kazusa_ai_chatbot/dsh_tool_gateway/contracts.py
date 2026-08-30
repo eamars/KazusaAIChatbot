@@ -549,7 +549,7 @@ class EvidenceReceiptV2:
 
 @dataclass(frozen=True, slots=True)
 class KazusaSemanticCapabilityResultV1:
-    """Common result envelope shared by all thirteen semantic tools."""
+    """Common result envelope shared by all fourteen semantic tools."""
 
     schema_version: str
     status: str

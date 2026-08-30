@@ -1,4 +1,4 @@
-"""Closed dispatcher for the thirteen Kazusa semantic capabilities."""
+"""Closed dispatcher for the fourteen Kazusa semantic capabilities."""
 
 from __future__ import annotations
 
@@ -59,6 +59,7 @@ class SemanticCapabilityDispatcher:
             "kazusa_recall_active_context": ("recall_calendar", "recall_active_context"),
             "kazusa_read_calendar_context": ("recall_calendar", "read_calendar_context"),
             "kazusa_inspect_attached_media": ("media", "inspect_attached_media"),
+            "kazusa_inspect_public_media": ("media", "inspect_public_media"),
         }
 
     @property
@@ -163,6 +164,9 @@ _OPERATION_ARGUMENTS: dict[str, frozenset[str]] = {
     }),
     "kazusa_inspect_attached_media": frozenset({
         "attached_media_ref", "question",
+    }),
+    "kazusa_inspect_public_media": frozenset({
+        "public_media_url", "question",
     }),
 }
 

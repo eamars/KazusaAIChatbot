@@ -311,9 +311,9 @@ def bind_axis_changes(
         and row.get("capability") == "task_resolution_request"
         for row in resolver_requests
     )
-    coding_task_requested = any(
+    accepted_task_control_requested = any(
         isinstance(row, Mapping)
-        and row.get("action_kind") == "accepted_coding_task_request"
+        and row.get("action_kind") == "accepted_task_control"
         for row in action_requests
     )
     needs_continuation_goal = (
@@ -322,7 +322,7 @@ def bind_axis_changes(
         else (
             goal_resolution != "answerable_now"
             or task_resolution_requested
-            or coding_task_requested
+            or accepted_task_control_requested
         )
     )
     need_goal = needs_continuation_goal

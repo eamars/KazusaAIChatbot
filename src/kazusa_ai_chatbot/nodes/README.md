@@ -22,6 +22,21 @@ meaning remains owned by the selected response plan and current observation;
 rewriting an unselected relationship interpretation as a content requirement or
 delivery effect does not turn it into delivery-only context.
 
+## Plan 3 DSH task edge
+
+The node graph emits task_resolution_request only from the validated cognition
+result. One shared DSH runtime handles foreground and direct-background work.
+The transient model-hidden TaskResolutionAdmissionV1 is an acknowledgement
+observation; only a committed checkpoint may become a deferred
+TaskResolutionResultV1 with DshResolutionRefV1. The accepted task binds to
+dsh_task_binding.v1 in dsh_task_bindings, and operation_generation plus
+revision CAS fence recovery. Result-ready state returns through normal
+cognition, dialog, dispatcher, and adapter delivery.
+
+RAG3/local-context and its prewarm owner remain the ordinary evidence path.
+DSH semantic evidence is bounded and provenance-bearing; it does not become
+persona stance or final wording by itself.
+
 ## Module Boundary
 
 | Area | Main files | Ownership |
@@ -157,15 +172,18 @@ capability requests. The caller validates capability availability, permissions,
 target bindings, and parameters before materializing action or resolver work.
 Malformed canonical output fails before execution; it cannot grant work.
 
-Memory-lifecycle requests follow a specialist boundary. Cognition may request
-a semantic lifecycle review, while the specialist chooses prompt-safe aliases
-and deterministic code resolves an eligible persistent row. Cognition does not
-select database identifiers or write lifecycle state directly.
+Memory-lifecycle requests remain a semantic boundary. Cognition may request a
+lifecycle review, while deterministic code resolves an eligible persistent
+row from prompt-safe references. Cognition does not select database
+identifiers or write lifecycle state directly.
 
-Accepted background work is queued before a selected speech surface so the
-surface can describe only the actual semantic outcome. A background request
-without a visible acknowledgement route receives a deterministic failure
-result instead of silently promising work.
+Accepted DSH work is queued before a selected speech surface so the surface
+can describe only the actual semantic outcome. Direct background admission
+returns transient, model-hidden TaskResolutionAdmissionV1 only; binding,
+checkpoint, and recovery use dsh_task_binding.v1,
+operation_generation, and revision CAS. A request without a visible
+acknowledgement route receives a deterministic failure result instead of
+silently promising work.
 
 ## Text, Terminal Visual, And Dialog
 

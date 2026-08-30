@@ -4,11 +4,39 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Literal, cast
 
 from kazusa_ai_chatbot.llm_interface import LLMCallConfig, LLMInvoker
 
 CANONICAL_COGNITION_INPUT_SCHEMA = "cognition_input.v3"
 CANONICAL_COGNITION_OUTPUT_SCHEMA = "cognition_output.v3"
+RESPONSE_PLAN_CONTRACT_VARIANT_VALUES = frozenset({
+    "fresh_ordinary",
+    "open_pending_resolution",
+    "post_pending_resolution",
+    "tool_result_delivery",
+})
+ResponsePlanContractVariant = Literal[
+    "fresh_ordinary",
+    "open_pending_resolution",
+    "post_pending_resolution",
+    "tool_result_delivery",
+]
+
+
+def validate_response_plan_contract_variant(
+    value: object,
+) -> ResponsePlanContractVariant:
+    """Validate the transient P-stage lifecycle variant."""
+
+    if (
+        not isinstance(value, str)
+        or value not in RESPONSE_PLAN_CONTRACT_VARIANT_VALUES
+    ):
+        raise ValueError("response plan contract variant is invalid")
+    return cast(ResponsePlanContractVariant, value)
+
+
 CANONICAL_SHIFT_VALUES = frozenset({
     "slight_increase", "moderate_increase", "strong_increase",
     "slight_decrease", "moderate_decrease", "strong_decrease",
@@ -81,6 +109,8 @@ class CanonicalResponsePlan:
     resolver_requests: tuple[Mapping[str, object], ...]
     epistemic_boundary: str
     self_cognition_response: Mapping[str, object] | None = None
+    pending_resolution: Mapping[str, object] | None = None
+    pending_task_continuation: Mapping[str, object] | None = None
     dsh_interaction_decision: Mapping[str, object] | None = None
 
 @dataclass(frozen=True)
@@ -132,6 +162,14 @@ class CanonicalCognitionOutput:
         if self.response_plan.self_cognition_response is not None:
             result["response_plan"]["self_cognition_response"] = dict(
                 self.response_plan.self_cognition_response
+            )
+        if self.response_plan.pending_resolution is not None:
+            result["response_plan"]["pending_resolution"] = dict(
+                self.response_plan.pending_resolution
+            )
+        if self.response_plan.pending_task_continuation is not None:
+            result["response_plan"]["pending_task_continuation"] = dict(
+                self.response_plan.pending_task_continuation
             )
         if self.response_plan.dsh_interaction_decision is not None:
             result["response_plan"]["dsh_interaction_decision"] = dict(
@@ -231,11 +269,22 @@ class CognitionChainServicesV3:
         _validate_lane(self.chain_lane, label="chain", context_required=True)
 
 __all__ = [
-    "CANONICAL_A1_FAMILIES", "CANONICAL_A2_FAMILIES",
-    "CANONICAL_APPRAISAL_FAMILIES", "CANONICAL_COGNITION_INPUT_SCHEMA",
-    "CANONICAL_COGNITION_OUTPUT_SCHEMA", "CANONICAL_FAMILY_AXES",
-    "CANONICAL_SHIFT_VALUES", "CanonicalAppraisal", "CanonicalCognitionOutput",
-    "CanonicalGoal", "CanonicalResponsePlan", "CanonicalTurnWorkspace",
-    "CognitionChainServicesV3", "validate_canonical_cognition_output",
+    "CANONICAL_A1_FAMILIES",
+    "CANONICAL_A2_FAMILIES",
+    "CANONICAL_APPRAISAL_FAMILIES",
+    "CANONICAL_COGNITION_INPUT_SCHEMA",
+    "CANONICAL_COGNITION_OUTPUT_SCHEMA",
+    "CANONICAL_FAMILY_AXES",
+    "CANONICAL_SHIFT_VALUES",
+    "RESPONSE_PLAN_CONTRACT_VARIANT_VALUES",
+    "CanonicalAppraisal",
+    "CanonicalCognitionOutput",
+    "CanonicalGoal",
+    "CanonicalResponsePlan",
+    "CanonicalTurnWorkspace",
+    "CognitionChainServicesV3",
+    "ResponsePlanContractVariant",
+    "validate_canonical_cognition_output",
     "validate_canonical_state_projection",
+    "validate_response_plan_contract_variant",
 ]

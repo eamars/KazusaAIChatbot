@@ -36,7 +36,6 @@ from kazusa_ai_chatbot.cognition_shared.contracts import (
 )
 from kazusa_ai_chatbot.config import (
     BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
-    CODING_AGENT_WORKSPACE_ROOT,
     TASK_RESOLUTION_INLINE_BUDGET_SECONDS,
 )
 from kazusa_ai_chatbot.db.errors import DatabaseBackendError
@@ -74,10 +73,12 @@ from kazusa_ai_chatbot.rag.user_memory_unit_retrieval import (
 from kazusa_ai_chatbot.task_resolution.contracts import (
     MAX_TASK_RESOLUTION_TEXT_CHARS,
     MAX_TASK_RESOLUTION_TEXT_ITEMS,
-    TASK_RESOLUTION_EXECUTION_CONTEXT_VERSION,
+    TASK_RESOLUTION_EXECUTION_CONTEXT_V2_VERSION,
+    TaskResolutionAdmissionV1,
     TaskResolutionContractError,
-    TaskResolutionExecutionContextV1,
+    TaskResolutionExecutionContextV2,
     TaskResolutionResultV1,
+    validate_task_resolution_admission,
     validate_task_resolution_execution_context,
     validate_task_resolution_result,
 )
@@ -786,7 +787,7 @@ async def _execute_task_resolution_request(
     }
     if request["priority"] == "background":
         try:
-            deferred_result = await start_task_resolution_in_background(
+            admission = await start_task_resolution_in_background(
                 task_request,
                 execution_context,
                 source_trigger_source=_cognitive_episode_trigger_source(state),
@@ -799,12 +800,12 @@ async def _execute_task_resolution_request(
             )
         except TaskResolutionContractError as exc:
             return _task_resolution_failure_observation(request, state, exc)
-        return _task_resolution_observation(
+        admission_observation = _task_resolution_admission_observation(
             request,
             state,
-            deferred_result,
-            durably_promoted=True,
+            admission,
         )
+        return admission_observation
     try:
         result = await resolve_task_inline(
             task_request,
@@ -841,7 +842,7 @@ def _task_resolution_execution_context_from_state(
     state: GlobalPersonaState,
     *,
     goal_continuation_ref: GoalContinuationRefV1,
-) -> TaskResolutionExecutionContextV1:
+) -> TaskResolutionExecutionContextV2:
     """Project trusted persona state into the exact specialist context shape."""
 
     cognition_scene_context = _required_scene_context_from_state(state)
@@ -859,8 +860,8 @@ def _task_resolution_execution_context_from_state(
         if isinstance(conversation_progress, Mapping)
         else {}
     )
-    context: TaskResolutionExecutionContextV1 = {
-        "schema_version": TASK_RESOLUTION_EXECUTION_CONTEXT_VERSION,
+    context: TaskResolutionExecutionContextV2 = {
+        "schema_version": TASK_RESOLUTION_EXECUTION_CONTEXT_V2_VERSION,
         "character_name": character_name,
         "platform": _required_state_text(state, "platform"),
         "channel_id": _required_state_text(state, "platform_channel_id"),
@@ -873,10 +874,18 @@ def _task_resolution_execution_context_from_state(
             state,
             "platform_user_id",
         ),
+        "requester_display_name": _required_state_text(state, "user_name"),
         "source_message_id": _required_state_text(
             state,
             "platform_message_id",
         ),
+        "source_platform_bot_id": _required_state_text(
+            state,
+            "platform_bot_id",
+        ),
+        "source_trigger_source": _cognitive_episode_trigger_source(state),
+        "source_llm_trace_id": text_or_empty(state.get("llm_trace_id")),
+        "brain_conversation_ref": _brain_conversation_ref(state),
         "scene_context": cognition_scene_context,
         "goal_continuation_ref": goal_continuation_ref,
         "local_time_context": dict(state["local_time_context"]),
@@ -907,11 +916,23 @@ def _task_resolution_execution_context_from_state(
             state["platform_channel_id"],
             state["global_user_id"],
         )),
-        "coding_workspace_root": text_or_empty(CODING_AGENT_WORKSPACE_ROOT),
         "max_output_chars": BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
     }
     validated_context = validate_task_resolution_execution_context(context)
     return validated_context
+
+
+def _brain_conversation_ref(state: Mapping[str, object]) -> str:
+    """Return the current validated cognitive-episode identity for DSH."""
+
+    episode = state.get("cognitive_episode")
+    if isinstance(episode, Mapping):
+        value = episode.get("episode_id")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    raise ResolverValidationError(
+        "cognitive_episode.episode_id is required for DSH lineage",
+    )
 
 
 def _task_resolution_observation(
@@ -988,7 +1009,7 @@ def _task_resolution_observation(
         observation["blocker_kind"] = "requires_user_input"
         observation["task_resolution_evidence_state"] = {
             "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
-            "state": validated_result["evidence_state"],
+            "state": "blocked",
             "remaining_needs": list(validated_result["remaining_needs"]),
         }
         validated_observation = validate_resolver_observation(observation)
@@ -1002,7 +1023,7 @@ def _task_resolution_observation(
         )
         observation["task_resolution_evidence_state"] = {
             "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
-            "state": validated_result["evidence_state"],
+            "state": "blocked",
             "remaining_needs": list(validated_result["remaining_needs"]),
         }
         validated_observation = validate_resolver_observation(observation)
@@ -1016,12 +1037,38 @@ def _task_resolution_observation(
         )
         observation["task_resolution_evidence_state"] = {
             "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
-            "state": validated_result["evidence_state"],
+            "state": "blocked",
             "remaining_needs": list(validated_result["remaining_needs"]),
         }
         validated_observation = validate_resolver_observation(observation)
         return validated_observation
     raise ResolverValidationError("task-resolution result status is unsupported")
+
+
+def _task_resolution_admission_observation(
+    request: ResolverCapabilityRequestV1,
+    state: GlobalPersonaState,
+    admission: TaskResolutionAdmissionV1,
+) -> ResolverObservationV1:
+    """Project queued identity into cognition without exposing its carriers."""
+
+    validate_task_resolution_admission(admission)
+    observation = _observation_base(
+        request,
+        state,
+        status="succeeded",
+        prompt_safe_summary=(
+            "The bounded task was accepted for continued work; its later "
+            "result will return through the normal conversation path."
+        ),
+    )
+    observation["task_resolution_evidence_state"] = {
+        "schema_version": RESOLVER_EVIDENCE_STATE_VERSION,
+        "state": "pending",
+        "remaining_needs": ["DSH resolution continuation"],
+    }
+    validated_observation = validate_resolver_observation(observation)
+    return validated_observation
 
 
 def _task_resolution_failure_observation(
@@ -1151,12 +1198,19 @@ def _task_resolution_evidence_refs(
     """Project result-owned factual evidence into resolver-safe references."""
 
     references: list[dict[str, object]] = []
-    for evidence, evidence_handle, evidence_excerpt in zip(
-        result["evidence"],
-        result["evidence_handles"],
-        result["evidence_excerpts"],
-        strict=True,
-    ):
+    evidence_handles = result["evidence_handles"]
+    evidence_excerpts = result["evidence_excerpts"]
+    for evidence_index, evidence in enumerate(result["evidence"]):
+        evidence_handle = evidence["summary"]
+        if evidence_handle not in evidence_handles:
+            raise ResolverValidationError(
+                "task result evidence handle is missing its semantic reference"
+            )
+        evidence_excerpt = (
+            evidence_excerpts[evidence_index]
+            if evidence_index < len(evidence_excerpts)
+            else evidence["summary"]
+        )
         references.append({
             "schema_version": "evidence_ref.v1",
             "evidence_kind": "tool_result",

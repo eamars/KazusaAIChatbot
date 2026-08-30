@@ -21,10 +21,6 @@ EXPECTED_ROUTE_TABLE_ROWS = (
     "DIALOG_GENERATOR_LLM",
     "CONSOLIDATION_LLM",
     "JSON_REPAIR_LLM",
-    "BACKGROUND_WORK_LLM",
-    "CODING_AGENT_PM_LLM",
-    "CODING_AGENT_PROGRAMMER_LLM",
-    "CODING_AGENT_ACTION_LOOP_LLM",
     "EMBEDDING",
 )
 
@@ -44,12 +40,13 @@ def test_llm_route_inventory_contains_all_routes_once() -> None:
 
     assert tuple(route_names) == EXPECTED_ROUTE_TABLE_ROWS
     assert len(route_names) == len(set(route_names))
-    action_loop_diagnostic = next(
-        diagnostic
-        for diagnostic in configured_route_diagnostics()
-        if diagnostic.route_name == "CODING_AGENT_ACTION_LOOP_LLM"
-    )
-    assert action_loop_diagnostic.required is False
+    assert "JSON_REPAIR_LLM" in route_names
+    assert not {
+        "BACKGROUND_WORK_LLM",
+        "CODING_AGENT_PM_LLM",
+        "CODING_AGENT_PROGRAMMER_LLM",
+        "CODING_AGENT_ACTION_LOOP_LLM",
+    }.intersection(route_names)
 
 
 def test_llm_route_inventory_uses_configured_models_and_sources() -> None:

@@ -31,6 +31,12 @@ from kazusa_ai_chatbot.db.conversation import (
     CONVERSATION_VECTOR_FILTER_FIELDS,
     CONVERSATION_VECTOR_INDEX_NAME,
 )
+from kazusa_ai_chatbot.db.dsh_interactions import (
+    DSH_INTERACTIONS_COLLECTION,
+)
+from kazusa_ai_chatbot.db.dsh_interactions import (
+    ensure_indexes as ensure_dsh_interaction_indexes,
+)
 from kazusa_ai_chatbot.db.event_logging import (
     EVENT_LOG_EVENTS_COLLECTION,
     EVENT_LOG_SNAPSHOTS_COLLECTION,
@@ -69,12 +75,23 @@ from kazusa_ai_chatbot.db.self_cognition import (
     SELF_COGNITION_ACTION_ATTEMPTS_COLLECTION,
     SELF_COGNITION_GROUP_REVIEW_WINDOWS_COLLECTION,
 )
+from kazusa_ai_chatbot.db.task_resolution_sessions import (
+    DSH_TASK_BINDINGS_COLLECTION,
+    ensure_task_binding_indexes,
+)
 from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
 
 logger = logging.getLogger(__name__)
 
 CALENDAR_SCHEDULES_COLLECTION = "calendar_schedules"
 CALENDAR_RUNS_COLLECTION = "calendar_runs"
+
+
+async def ensure_task_resolution_indexes() -> None:
+    """Create the DSH task-binding indexes without legacy TTL state."""
+
+    db = await get_db()
+    await ensure_task_binding_indexes(db[DSH_TASK_BINDINGS_COLLECTION])
 
 
 async def db_bootstrap() -> None:
@@ -107,6 +124,8 @@ async def db_bootstrap() -> None:
         SELF_COGNITION_GROUP_REVIEW_WINDOWS_COLLECTION,
         ACCEPTED_TASKS_COLLECTION,
         BACKGROUND_WORK_JOBS_COLLECTION,
+        DSH_TASK_BINDINGS_COLLECTION,
+        DSH_INTERACTIONS_COLLECTION,
         INTERNAL_MONOLOGUE_RESIDUE_COLLECTION,
         INTERNAL_ACTION_LATCHES_COLLECTION,
         POST_TURN_LIFECYCLE_RECORDS_COLLECTION,
@@ -255,6 +274,8 @@ async def db_bootstrap() -> None:
     )
     await ensure_accepted_task_indexes()
     await ensure_background_work_job_indexes()
+    await ensure_task_resolution_indexes()
+    await ensure_dsh_interaction_indexes()
     await ensure_internal_action_latch_indexes()
     await ensure_post_turn_lifecycle_record_indexes()
     await expire_character_operational_receipts(

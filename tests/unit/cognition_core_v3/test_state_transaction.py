@@ -373,13 +373,13 @@ def test_relationship_maintenance_rotates_same_day_source_ids() -> None:
     assert processed[0] == "episode:old-1"
 
 
-def test_continuation_goal_admission_is_exact_for_coding_and_task_resolution() -> None:
+def test_continuation_goal_admission_is_exact_for_task_control_and_resolution() -> None:
     payload = _input()
     evidence = payload["evidence"]
     for action_requests, resolver_requests, expected_continuation in (
-        ([{"action_kind": "accepted_coding_task_request", "decision": "status"}], [], True),
-        ([{"action_kind": "accepted_coding_task_request", "decision": "approve_and_verify"}], [], True),
-        ([{"action_kind": "accepted_coding_task_request", "decision": "cancel"}], [], True),
+        ([{"action_kind": "accepted_task_control", "decision": "continue"}], [], True),
+        ([{"action_kind": "accepted_task_control", "decision": "summarize"}], [], True),
+        ([{"action_kind": "accepted_task_control", "decision": "cancel"}], [], True),
         ([], [{"capability": "task_resolution_request"}], True),
         ([], [{"capability": "human_clarification"}], False),
         ([], [{"capability": "approval_preparation"}], False),

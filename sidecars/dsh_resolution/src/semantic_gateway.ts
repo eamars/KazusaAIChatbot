@@ -138,6 +138,7 @@ export function createSemanticGateway(options: {
       if (argumentsValue === null || typeof argumentsValue !== "object" || Array.isArray(argumentsValue)) {
         throw new Error("semantic arguments must be an object");
       }
+      validateSemanticArguments(operation, argumentsValue as Record<string, unknown>);
       const callId = suppliedCallId === undefined
         ? `semantic-call-${++sequence}-${randomUUID()}`
         : text(suppliedCallId, "semantic call id");
@@ -318,7 +319,29 @@ const SEMANTIC_PARAMETERS: Record<string, Record<string, unknown>> = {
     attached_media_ref: { type: "string", required: true },
     question: { type: "string", required: true },
   },
+  kazusa_inspect_public_media: {
+    public_media_url: { type: "string", required: true },
+    question: { type: "string", required: true },
+  },
 };
+
+function validateSemanticArguments(
+  operation: string,
+  argumentsValue: Record<string, unknown>,
+): void {
+  const parameters = SEMANTIC_PARAMETERS[operation];
+  if (parameters === undefined) throw new Error("semantic operation parameters are unsupported");
+  for (const key of Object.keys(argumentsValue)) {
+    if (!(key in parameters)) throw new Error("semantic arguments contain unsupported fields");
+  }
+  for (const [key, parameter] of Object.entries(parameters)) {
+    if (typeof parameter === "object" && parameter !== null
+      && "required" in parameter && parameter.required === true
+      && !(key in argumentsValue)) {
+      throw new Error("semantic arguments are missing a required field");
+    }
+  }
+}
 
 function unavailableSemanticResult(): SemanticGatewayResult {
   return {

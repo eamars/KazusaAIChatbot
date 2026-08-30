@@ -169,7 +169,7 @@ class CognitionContextLimitError(CognitionContractError):
 class DshPendingInteractionContext(TypedDict, total=False):
     """Bounded, untrusted DSH interaction context for cognition input."""
 
-    schema_version: Literal["dsh_brain_interaction.v1"]
+    schema_version: Literal["dsh_brain_interaction.v2"]
     interaction_id: str
     kind: Literal["approval", "question", "plan_review"]
     resolution_thread_id: str
@@ -219,7 +219,7 @@ def validate_pending_dsh_interaction(value: object) -> DshPendingInteractionCont
     if set(value) - allowed or required - set(value):
         raise CognitionContractError("pending_dsh_interaction fields are not exact")
     schema_version = value.get("schema_version")
-    if schema_version != "dsh_brain_interaction.v1":
+    if schema_version != "dsh_brain_interaction.v2":
         raise CognitionContractError("pending_dsh_interaction schema is invalid")
     kind = value["kind"]
     if kind not in {"approval", "question", "plan_review"}:
@@ -252,7 +252,7 @@ def project_pending_dsh_interaction_for_prompt(
         "transient_detail",
     }
     if set(value) == prompt_fields:
-        if value["schema_version"] != "dsh_brain_interaction.v1":
+        if value["schema_version"] != "dsh_brain_interaction.v2":
             raise CognitionContractError("pending_dsh_interaction schema is invalid")
         if value["kind"] not in {"approval", "question", "plan_review"}:
             raise CognitionContractError("pending_dsh_interaction kind is invalid")
@@ -276,7 +276,7 @@ def project_pending_dsh_interaction_for_prompt(
         "interaction_id": validated["interaction_id"],
         "kind": validated["kind"],
         "tool_name": validated["tool_name"],
-        "transient_detail": str(validated["transient_detail"])[:8_000],
+        "transient_detail": validated["transient_detail"],
     }
 
 
@@ -4049,6 +4049,7 @@ class TextSurfaceInput(TypedDict, total=False):
     overused_moves: list[str]
     recent_character_dialog: NotRequired[list[str]]
     relational_willingness: NotRequired[RelationalWillingness]
+    resolver_result: NotRequired[SurfaceResolverResultV2]
 
 
 def validate_text_surface_input_canonical(
@@ -4071,8 +4072,16 @@ def validate_text_surface_input_canonical(
         "visual_character_context",
         "overused_moves",
     }
-    optional = {"recent_character_dialog", "relational_willingness"}
-    _require_exact_keys(payload, required | (set(payload) & optional), "text surface input")
+    optional = {
+        "recent_character_dialog",
+        "relational_willingness",
+        "resolver_result",
+    }
+    _require_exact_keys(
+        payload,
+        required | (set(payload) & optional),
+        "text surface input",
+    )
     if payload["schema_version"] != "text_surface_input.v4":
         raise CognitionContractError("unsupported canonical text surface input schema")
     if not isinstance(payload["episode"], Mapping):
@@ -4114,4 +4123,6 @@ def validate_text_surface_input_canonical(
         _validate_recent_character_dialog(payload["recent_character_dialog"])
     if "relational_willingness" in payload:
         validate_relational_willingness(payload["relational_willingness"])
+    if "resolver_result" in payload:
+        _validate_surface_resolver_result(payload["resolver_result"])
     return dict(payload)  # type: ignore[return-value]

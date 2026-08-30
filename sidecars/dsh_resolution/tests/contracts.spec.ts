@@ -1,3 +1,5 @@
+import { execFileSync } from "node:child_process";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -121,6 +123,27 @@ describe("contracts", () => {
 });
 
 describe("V2 contracts", () => {
+  it("matches the normalized Python semantic catalog exactly", () => {
+    const repositoryRoot = resolve(process.cwd(), "..", "..");
+    const python = resolve(repositoryRoot, "venv", "Scripts", "python.exe");
+    const script = [
+      "import json",
+      "from kazusa_ai_chatbot.dsh_tool_gateway.catalog import description_stripped_catalog",
+      "print(json.dumps(description_stripped_catalog(set()), ensure_ascii=False, sort_keys=True, separators=(',', ':')))",
+    ].join("; ");
+    const output = execFileSync(python, ["-c", script], {
+      cwd: repositoryRoot,
+      env: {
+        ...process.env,
+        PYTHONPATH: resolve(repositoryRoot, "src"),
+      },
+      encoding: "utf8",
+    });
+    const pythonProjection = JSON.parse(output) as unknown;
+    expect(pythonProjection).toEqual(semanticCatalogProjection());
+    expect(semanticCatalogProjection()).toHaveLength(14);
+  });
+
   it("rejects V1 and separates model-visible input from authority", async () => {
     const contracts = await import("../src/contracts.js");
     const validateIntake = contracts.validateIntake as unknown as (
@@ -156,13 +179,33 @@ describe("V2 contracts", () => {
     expect(intake.semantic_tool_authority.token).toBe("opaque");
   });
 
-  it("uses the byte-identical description-free thirteen-tool catalog projection", () => {
+  it("uses the byte-identical description-free fourteen-tool catalog projection", () => {
     const projection = semanticCatalogProjection();
-    expect(projection).toHaveLength(13);
+    expect(projection).toHaveLength(14);
     expect(JSON.stringify(projection)).not.toContain("description");
-    expect(semanticCatalogDigest()).toBe(
+    expect(semanticCatalogDigest()).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(semanticCatalogDigest()).not.toBe(
       "sha256:495baf34779da92da5d554e70e51dc47579fb88f6af2c0a7992c46b2f88e02d4",
     );
+  });
+
+  it("declares the exact public-media input schema", () => {
+    const media = semanticCatalogProjection().find(
+      (item) => item.name === "kazusa_inspect_public_media",
+    );
+
+    expect(media).toMatchObject({
+      name: "kazusa_inspect_public_media",
+      input_schema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["public_media_url", "question"],
+        properties: {
+          public_media_url: { type: "string" },
+          question: { type: "string" },
+        },
+      },
+    });
   });
 
   it("requires an explicit model-hidden audience fingerprint", () => {

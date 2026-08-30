@@ -62,29 +62,9 @@ def _live_service():
         service_module.build_cognition_core_services()
     )
 
-    async def deliver(_surface, request):
-        return {
-            "platform_message_id": f"delivered-{request.interaction_id}",
-            "delivered_at": request.issued_at,
-        }
-
-    async def continue_resolution(**fields):
-        return {
-            "status": "continued",
-            "resolution_thread_id": fields["resolution_thread_id"],
-            "segment_id": fields["segment_id"],
-        }
-
-    async def issue_authority(_request, _row, _grant):
-        return f"live-continuation-{uuid4().hex}"
-
     return BrainInteractionService.from_environment(
         judge=BrainDecisionEngine(judge=service_module._production_dsh_judge),
-        reply_judge=service_module._production_dsh_reply_judge,
-        deliver=deliver,
         context_provider=service_module._production_dsh_context,
-        continue_resolution=continue_resolution,
-        issue_continuation_authority=issue_authority,
     )
 
 
@@ -104,11 +84,11 @@ async def test_brain_cognition_answers_or_rejects_dsh_request_from_context() -> 
 
     _require_live_backend()
     from kazusa_ai_chatbot.dsh_interaction.auth import sign_request
-    from kazusa_ai_chatbot.dsh_interaction.contracts import DshBrainInteractionRequestV1
+    from kazusa_ai_chatbot.dsh_interaction.contracts import DshBrainInteractionRequestV2
     interaction_id = f"live-question-{uuid4().hex}"
     secret = os.environ["KAZUSA_DSH_BRAIN_SHARED_SECRET"].encode("utf-8")
     service = _live_service()
-    request = DshBrainInteractionRequestV1.from_mapping(
+    request = DshBrainInteractionRequestV2.from_mapping(
         _request("question", interaction_id)
     )
     try:
@@ -116,40 +96,45 @@ async def test_brain_cognition_answers_or_rejects_dsh_request_from_context() -> 
             sign_request(request, secret=secret)
         )
         assert result["decision"] in {"answer", "reject"}
-        assert result.get("checkpoint_required") is not True
-        assert "delivered-" not in json.dumps(result, ensure_ascii=False)
+        assert result["kind"] == "question"
+        assert set(result) == {
+            "schema_version",
+            "interaction_id",
+            "request_digest",
+            "kind",
+            "decision",
+            "answer",
+            "reason",
+        }
+        assert "checkpoint" not in json.dumps(result, ensure_ascii=False)
     finally:
         await _delete_interaction(interaction_id)
 
 
 @pytest.mark.asyncio
-async def test_brain_cognition_relays_ambiguous_permission_then_interprets_user_reply() -> None:
-    """Brain cognition relays approval and resumes only after typed reply judgment."""
+async def test_brain_cognition_decides_native_approval_without_user_relay() -> None:
+    """Brain cognition owns the approval decision without a user relay."""
 
     _require_live_backend()
     from kazusa_ai_chatbot.dsh_interaction.auth import sign_request
-    from kazusa_ai_chatbot.dsh_interaction.contracts import DshBrainInteractionRequestV1
-    interaction_id = f"live-relay-{uuid4().hex}"
+    from kazusa_ai_chatbot.dsh_interaction.contracts import DshBrainInteractionRequestV2
+    interaction_id = f"live-approval-{uuid4().hex}"
     secret = os.environ["KAZUSA_DSH_BRAIN_SHARED_SECRET"].encode("utf-8")
     service = _live_service()
-    request = DshBrainInteractionRequestV1.from_mapping(
+    request = DshBrainInteractionRequestV2.from_mapping(
         _request("approval", interaction_id)
     )
     try:
-        first = await service.handle_signed(
+        result = await service.handle_signed(
             sign_request(request, secret=secret)
         )
-        assert first["decision"] == "relay_to_user"
-        assert first["checkpoint_required"] is True
-        resumed = await service.handle_user_reply(
-            platform="debug",
-            platform_channel_id="channel-1",
-            global_user_id="user-1",
-            reply_to_platform_message_id=first["delivered_platform_message_id"],
-            reply_platform_message_id=f"reply-{interaction_id}",
-            reply_text="I approve this exact operation once.",
-        )
-        assert resumed["status"] in {"continued", "rejected", "waiting"}
-        assert "reply_text" not in json.dumps(resumed, ensure_ascii=False)
+        assert result["kind"] == "approval"
+        assert result["decision"] in {"allow_once", "reject"}
+        assert "relay" not in json.dumps(result, ensure_ascii=False)
+        assert "checkpoint" not in json.dumps(result, ensure_ascii=False)
+        if result["decision"] == "allow_once":
+            grant = result.get("grant")
+            assert isinstance(grant, dict)
+            assert grant["grant_status"] == "consumed"
     finally:
         await _delete_interaction(interaction_id)

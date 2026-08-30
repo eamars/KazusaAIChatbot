@@ -12,7 +12,7 @@ from typing import Protocol
 from kazusa_ai_chatbot.dsh_interaction.contracts import (
     ACTIVE_INTERACTION_SECONDS,
     INTERACTION_TIMESTAMP_SKEW_SECONDS,
-    DshBrainInteractionRequestV1,
+    DshBrainInteractionRequestV2,
 )
 from kazusa_ai_chatbot.dsh_tool_gateway.contracts import canonical_json
 
@@ -45,10 +45,10 @@ class InteractionNonceReplayStore:
 
 
 def sign_request(
-    request: DshBrainInteractionRequestV1,
+    request: DshBrainInteractionRequestV2,
     *,
     secret: bytes,
-) -> DshBrainInteractionRequestV1:
+) -> DshBrainInteractionRequestV2:
     """Attach a canonical HMAC-SHA256 MAC to one request."""
 
     if not isinstance(secret, bytes) or not secret:
@@ -58,12 +58,12 @@ def sign_request(
 
 
 def verify_request(
-    request: DshBrainInteractionRequestV1,
+    request: DshBrainInteractionRequestV2,
     *,
     secret: bytes,
     replay_owner: InteractionNonceReplayOwner,
     now: str | None = None,
-) -> DshBrainInteractionRequestV1:
+) -> DshBrainInteractionRequestV2:
     """Verify MAC, timestamp window, and nonce replay before cognition."""
 
     validate_request(request, secret=secret, now=now)
@@ -72,7 +72,7 @@ def verify_request(
 
 
 def validate_request(
-    request: DshBrainInteractionRequestV1,
+    request: DshBrainInteractionRequestV2,
     *,
     secret: bytes,
     now: str | None = None,

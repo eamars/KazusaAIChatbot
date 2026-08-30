@@ -7,8 +7,8 @@ declared explicitly only on document contracts that actually permit them.
 
 from __future__ import annotations
 
-from datetime import datetime
 from collections.abc import Mapping
+from datetime import datetime
 from typing import Literal, TypedDict
 
 from kazusa_ai_chatbot.character_identity_growth.models import (
@@ -932,3 +932,25 @@ class ResolutionThreadDoc(TypedDict):
     current_lease: ResolutionLeaseDoc | None
     segments: list[ResolverSessionSegmentDoc]
     operations: list[ResolutionOperationDoc]
+
+
+class DshTaskBindingDoc(TypedDict):
+    """Durable identity binding between Brain task delivery and DSH state."""
+
+    schema_version: Literal["dsh_task_binding.v1"]
+    task_session_id: str
+    semantic_objective: str
+    goal_continuation_ref: dict[str, object]
+    source_scope: dict[str, object]
+    state: str
+    start_spec: dict[str, object]
+    resolution_thread_id: str | None
+    segment_id: str | None
+    resolution_ref: dict[str, object] | None
+    operation_generation: int
+    current_accepted_task_id: str | None
+    current_background_work_job_id: str | None
+    latest_task_resolution_result: dict[str, object] | None
+    revision: int
+    created_at: str
+    updated_at: str

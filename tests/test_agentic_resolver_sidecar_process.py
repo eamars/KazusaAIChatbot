@@ -29,7 +29,10 @@ from kazusa_ai_chatbot.dsh_tool_gateway.authority import (
     activation_id_for,
     issue_activation_token,
 )
-from kazusa_ai_chatbot.dsh_tool_gateway.catalog import semantic_catalog_digest
+from kazusa_ai_chatbot.dsh_tool_gateway.catalog import (
+    SEMANTIC_TOOL_NAMES,
+    semantic_catalog_digest,
+)
 from kazusa_ai_chatbot.dsh_tool_gateway.contracts import content_digest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -437,7 +440,7 @@ def test_real_sidecar_worker_accepts_python_semantic_call_contract(
     try:
         response = _open(url, "op_semantic", "res_semantic", "seg_semantic")
         assert response["result"]["exhaust"]["kind"] == "terminal"
-        fake_openai = getattr(process, "_fake_openai")
+        fake_openai = process._fake_openai
         rendered = json.dumps(fake_openai.requests, ensure_ascii=False)
         assert "kazusa_semantic_capability_result.v1" in rendered
         assert "SEMANTIC_AUTHORITY_INVALID" not in rendered
@@ -808,3 +811,116 @@ def test_standard_pwsh_reads_edits_runs_fixture_test_and_imports_no_kazusa_codin
     assert probe.returncode == 0, probe.stderr
     assert "calculator.py" in probe.stdout
     assert "test_calculator.py" in probe.stdout
+
+
+def test_plan3_public_media_tool_is_advertised_with_matching_fourteen_tool_digest(
+    tmp_path: Path,
+) -> None:
+    """A healthy sidecar publishes the additive fourteen-tool digest."""
+
+    process, url = _start(tmp_path)
+    try:
+        health = _rpc(url, "system.health", {})["result"]
+        catalog = health["catalog"]
+        assert semantic_catalog_digest().startswith("sha256:")
+        assert len(SEMANTIC_TOOL_NAMES) == 14
+        assert catalog["semantic_catalog_digest"] == semantic_catalog_digest()
+        assert catalog["published_catalog_digest"].startswith("sha256:")
+    finally:
+        _stop(process)
+
+
+def test_plan3_public_media_tool_forwards_only_url_and_question() -> None:
+    """The executable sidecar gateway forwards only URL and question inputs."""
+
+    sidecar_root = PROJECT_ROOT / "sidecars" / "dsh_resolution"
+    node_script = r'''
+import { createSemanticGateway } from "./dist/src/semantic_gateway.js";
+import {
+  issueActivationToken,
+  scopeFingerprint,
+  workspaceFingerprint,
+} from "./dist/src/contracts.js";
+
+const serviceScope = {
+  platform: "debug",
+  platform_channel_id: "channel-1",
+  global_user_id: "user-1",
+};
+const workspaceRoot = "C:/workspace/project";
+const authority = {
+  schema_version: "kazusa_semantic_tool_authority.v1",
+  resolution_thread_id: "thread-v2",
+  segment_id: "segment-v2",
+  activation_id: "activation-v2",
+  lease_epoch: 1,
+  brain_conversation_ref: "chat:debug:one",
+  service_scope: serviceScope,
+  scope_fingerprint: scopeFingerprint(serviceScope),
+  audience_fingerprint: "sha256:audience",
+  workspace_root: workspaceRoot,
+  route_digest: "sha256:route",
+  catalog_digest: "sha256:catalog",
+  profile_version: "kazusa-resolver-standard-v2",
+  model_route_digest: "sha256:route",
+  workspace_fingerprint: workspaceFingerprint(workspaceRoot),
+  issued_reference_digest: "sha256:issued",
+  policy_epoch: "dsh-standard-policy-v2",
+  interaction_issuer: "dsh-sidecar-test",
+  issued_at: "2026-08-30T00:00:00.000Z",
+  expires_at: "2026-08-30T00:05:00.000Z",
+  token_id: "token-1",
+  nonce: "nonce-1",
+};
+const frames = [];
+const gateway = createSemanticGateway({
+  secret: "gateway-secret",
+  authority,
+  authorityToken: issueActivationToken(authority, "gateway-secret"),
+  call: async (frame) => {
+    frames.push(frame);
+    return {
+      schema_version: "kazusa_semantic_capability_result.v1",
+      status: "ok",
+      entities: [{ status: "answered" }],
+      page: { has_more: false, next_page_ref: null },
+      evidence: [],
+      mutation: null,
+      error: null,
+    };
+  },
+  persistEvidence: async () => {},
+  now: () => new Date("2026-08-30T00:01:00.000Z"),
+});
+await gateway.invoke("kazusa_inspect_public_media", {
+  public_media_url: "https://example.test/image.png",
+  question: "What is visible?",
+});
+let rejected = false;
+try {
+  await gateway.invoke("kazusa_inspect_public_media", {
+    public_media_url: "https://example.test/image.png",
+    question: "What is visible?",
+    capability_token: "must-be-rejected",
+  });
+} catch {
+  rejected = true;
+}
+process.stdout.write(JSON.stringify({ frames, rejected }));
+'''
+    completed = subprocess.run(
+        ["node", "--input-type=module", "-e", node_script],
+        cwd=sidecar_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["rejected"] is True
+    assert payload["frames"][0]["arguments"] == {
+        "public_media_url": "https://example.test/image.png",
+        "question": "What is visible?",
+    }
+    assert "capability_token" not in payload["frames"][0]["arguments"]
+    assert "authority" not in payload["frames"][0]["arguments"]

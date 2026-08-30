@@ -9,7 +9,8 @@ from typing import Any
 
 import pytest
 from pymongo.errors import DuplicateKeyError
-from tests.test_task_resolution_orchestrator import _goal_continuation_ref
+
+from tests.task_resolution_test_helpers import _goal_continuation_ref
 
 
 def _create_request(**overrides: object) -> dict[str, object]:
@@ -379,10 +380,10 @@ async def test_repository_rejects_v1_task_document() -> None:
 
 
 @pytest.mark.asyncio
-async def test_v2_index_setup_replaces_conflicting_v1_named_index(
+async def test_v2_index_setup_creates_dsh_followup_indexes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The big-bang startup drops the old action-kind index definition."""
+    """The big-bang startup creates only the DSH follow-up indexes."""
 
     from kazusa_ai_chatbot.accepted_task import lifecycle
     from kazusa_ai_chatbot.db import accepted_tasks as repository
@@ -390,27 +391,17 @@ async def test_v2_index_setup_replaces_conflicting_v1_named_index(
     assert lifecycle is not None
 
     fake_db = _FakeDb()
-    index_name = "accepted_task_open_coding_run_context_lookup"
-    fake_db.accepted_tasks.indexes[index_name] = {
-        "key": [
-            ("source_platform", 1),
-            ("source_channel_id", 1),
-            ("requester_global_user_id", 1),
-            ("action_kind", 1),
-            ("updated_at", -1),
-        ],
-        "partialFilterExpression": {
-            "coding_run_context.followup_open": True,
-        },
-    }
     monkeypatch.setattr(repository, "get_db", _fake_get_db(fake_db))
 
     await repository.ensure_accepted_task_indexes()
 
-    assert fake_db.accepted_tasks.dropped_indexes == [index_name]
-    replacement = fake_db.accepted_tasks.indexes[index_name]
-    assert ("task_kind", 1) in replacement["key"]
-    assert ("action_kind", 1) not in replacement["key"]
+    assert fake_db.accepted_tasks.dropped_indexes == []
+    assert "accepted_task_open_dsh_followup_unique" in (
+        fake_db.accepted_tasks.indexes
+    )
+    assert "accepted_task_scope_dsh_followup_lookup" in (
+        fake_db.accepted_tasks.indexes
+    )
 
 
 @pytest.mark.asyncio
@@ -775,7 +766,7 @@ class _FakeCursor:
     def __init__(self, rows: list[dict[str, Any]]) -> None:
         self._rows = rows
 
-    def sort(self, field_name: str, direction: int) -> "_FakeCursor":
+    def sort(self, field_name: str, direction: int) -> _FakeCursor:
         reverse = direction < 0
         self._rows = sorted(
             self._rows,
@@ -784,7 +775,7 @@ class _FakeCursor:
         )
         return self
 
-    def limit(self, limit: int) -> "_FakeCursor":
+    def limit(self, limit: int) -> _FakeCursor:
         self._rows = self._rows[:limit]
         return self
 

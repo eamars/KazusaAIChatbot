@@ -6,7 +6,7 @@ import json
 
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
 from kazusa_ai_chatbot.action_spec.registry import (
-    ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
+    ACCEPTED_TASK_CONTROL_CAPABILITY,
     ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     FUTURE_SPEAK_CAPABILITY,
@@ -194,7 +194,7 @@ def test_initial_registry_contains_only_approved_runtime_capabilities() -> None:
     capabilities = build_initial_action_capabilities()
 
     assert set(capabilities) == {
-        ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
+        ACCEPTED_TASK_CONTROL_CAPABILITY,
         ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
         FUTURE_SPEAK_CAPABILITY,
         MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
@@ -203,8 +203,8 @@ def test_initial_registry_contains_only_approved_runtime_capabilities() -> None:
         TRIGGER_FUTURE_COGNITION_CAPABILITY,
     }
     assert (
-        capabilities[ACCEPTED_CODING_TASK_REQUEST_CAPABILITY]["owner_module"]
-        == "background_work"
+        capabilities[ACCEPTED_TASK_CONTROL_CAPABILITY]["owner_module"]
+        == "accepted_task"
     )
     assert (
         capabilities[ACCEPTED_TASK_STATUS_CHECK_CAPABILITY]["owner_module"]

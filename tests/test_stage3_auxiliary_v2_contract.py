@@ -16,13 +16,13 @@ EXPECTED_CAPABILITIES = {
     "speak",
     "trigger_future_cognition",
     "future_speak",
-    "accepted_coding_task_request",
+    "accepted_task_control",
     "accepted_task_status_check",
 }
 
 
 def test_action_registry_contains_the_complete_native_roster() -> None:
-    """The registry excludes the retired generic accepted-task action."""
+    """The registry includes the closed DSH accepted-task control action."""
 
     registry_module = importlib.import_module(
         "kazusa_ai_chatbot.action_spec.registry",
@@ -52,6 +52,7 @@ def test_tool_result_affordances_exclude_new_delayed_task_creation() -> None:
         for row in affordances
     }
     assert projected_capabilities == {
+        "accepted_task_control",
         "accepted_task_status_check",
         "memory_lifecycle_update",
         "speak",

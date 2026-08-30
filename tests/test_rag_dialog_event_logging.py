@@ -15,8 +15,6 @@ from kazusa_ai_chatbot.conversation_progress.projection import (
 )
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from kazusa_ai_chatbot.nodes import persona_supervisor2 as supervisor_module
-from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_dispatch as dispatch_module
-from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_supervisor2 as rag2_module
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 from tests.cognition_test_helpers import canonical_user_message_episode
 
@@ -438,89 +436,6 @@ async def test_rag_evidence_success_records_safety_recovery_count(monkeypatch) -
     assert kwargs["safety_recovery_count"] > 0
     assert kwargs["safety_recovery_first"] == "dropped_text_line:rag_result.answer"
     assert "[CQ:" not in _serialized(kwargs)
-
-
-@pytest.mark.asyncio
-async def test_rag_dispatcher_records_llm_metadata_without_slot_text(monkeypatch) -> None:
-    """RAG dispatcher telemetry should store counts and status, not slot text."""
-
-    record_llm_stage_event = AsyncMock()
-    record_model_contract_event = AsyncMock()
-    dispatch = {
-        "agent_name": "user_lookup_agent",
-        "task": "private dispatched task",
-        "context": {},
-        "max_attempts": 1,
-    }
-    monkeypatch.setattr(dispatch_module, "_dispatcher_llm", _StaticLLM(json.dumps(dispatch)))
-    monkeypatch.setattr(
-        dispatch_module.event_logging,
-        "record_llm_stage_event",
-        record_llm_stage_event,
-    )
-    monkeypatch.setattr(
-        dispatch_module.event_logging,
-        "record_model_contract_event",
-        record_model_contract_event,
-    )
-
-    state = _progressive_state()
-    state["unknown_slots"] = ["unprefixed private dispatch slot"]
-    result = await dispatch_module.rag_dispatcher(state)
-
-    assert result["current_dispatch"]["agent_name"] == "user_lookup_agent"
-    record_llm_stage_event.assert_awaited_once()
-    record_model_contract_event.assert_not_awaited()
-    kwargs = record_llm_stage_event.await_args.kwargs
-    assert kwargs["stage_name"] == "rag_dispatcher"
-    assert kwargs["route_name"] == "dispatcher_llm"
-    event_text = _serialized(kwargs)
-    assert "unprefixed private dispatch slot" not in event_text
-    assert "private dispatched task" not in event_text
-    assert "private-channel" not in event_text
-
-
-@pytest.mark.asyncio
-async def test_rag_executor_wrapper_records_metadata_without_raw_result(
-    monkeypatch,
-) -> None:
-    """RAG executor wrapper should not copy helper evidence into telemetry."""
-
-    record_rag_stage_event = AsyncMock()
-    monkeypatch.setattr(
-        rag2_module.event_logging,
-        "record_rag_stage_event",
-        record_rag_stage_event,
-    )
-
-    async def rag_executor(state: dict[str, object]) -> dict[str, object]:
-        """Return one raw helper result containing private evidence."""
-
-        del state
-        result = {
-            "last_agent_result": {
-                "agent": "memory_evidence_agent",
-                "resolved": True,
-                "result": {"evidence": ["secret helper evidence"]},
-                "attempts": 1,
-            },
-            "messages": [],
-        }
-        return result
-
-    monkeypatch.setattr(rag2_module._dispatch_domain, "rag_executor", rag_executor)
-
-    state = _progressive_state()
-    result = await rag2_module.rag_executor(state)
-
-    assert result["last_agent_result"]["resolved"] is True
-    record_rag_stage_event.assert_awaited_once()
-    kwargs = record_rag_stage_event.await_args.kwargs
-    assert kwargs["agent_name"] == "memory_evidence_agent"
-    assert kwargs["retrieval_count"] == 1
-    event_text = _serialized(kwargs)
-    assert "secret helper evidence" not in event_text
-    assert "private task text" not in event_text
 
 
 @pytest.mark.asyncio

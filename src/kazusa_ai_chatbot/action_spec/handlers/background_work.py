@@ -1,4 +1,4 @@
-"""Queue handlers for retained future-speak and bound coding lifecycles."""
+"""Queue handlers for retained future-speak and DSH task controls."""
 
 from __future__ import annotations
 
@@ -10,22 +10,12 @@ from kazusa_ai_chatbot.action_spec.models import (
     ActionValidationError,
     validate_action_spec,
 )
-from kazusa_ai_chatbot.action_spec.registry import (
-    ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
-    FUTURE_SPEAK_CAPABILITY,
-)
+from kazusa_ai_chatbot.action_spec.registry import FUTURE_SPEAK_CAPABILITY
 from kazusa_ai_chatbot.background_work import enqueue_background_work_request
 from kazusa_ai_chatbot.background_work.models import (
     BACKGROUND_WORK_REQUESTED_DELIVERY,
-    TASK_ORCHESTRATOR_WORKER,
-    TASK_ORCHESTRATOR_WORKER_PAYLOAD_VERSION,
     BackgroundWorkQueueRequest,
     BackgroundWorkQueueResult,
-)
-from kazusa_ai_chatbot.config import (
-    BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
-    CHARACTER_TIME_ZONE,
-    CODING_AGENT_WORKSPACE_ROOT,
 )
 from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionContractError,
@@ -33,12 +23,15 @@ from kazusa_ai_chatbot.cognition_shared.contracts import (
     validate_scheduled_authority_proposal,
     validate_scheduled_future_speech_authority,
 )
+from kazusa_ai_chatbot.config import (
+    BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
+    CHARACTER_TIME_ZONE,
+)
 from kazusa_ai_chatbot.db import DatabaseOperationError
 from kazusa_ai_chatbot.task_resolution.contracts import (
-    validate_task_resolution_execution_context,
+    validate_accepted_task_control,
 )
 from kazusa_ai_chatbot.time_boundary import local_llm_datetime_to_storage_utc_iso
-
 
 BackgroundWorkEnqueueFunc = Callable[
     [BackgroundWorkQueueRequest],
@@ -57,25 +50,35 @@ _REQUIRED_DELIVERY_TARGET_SCOPE_FIELDS = (
     "requester_platform_user_id",
     "requester_display_name",
 )
-_BOUND_CODING_ACTIONS = frozenset((
-    "revise_proposal",
-    "summarize",
-    "status",
-    "approve_and_verify",
-    "respond_to_blocker",
-    "cancel",
-))
-_BOUND_CODING_PARAM_FIELDS = frozenset((
-    "task_brief",
-    "coding_action",
-    "coding_run_ref",
-    "revision_instruction",
-    "execution_request",
-    "approval_evidence",
-    "requested_delivery",
-    "max_output_chars",
-    "task_execution_context",
-))
+async def handle_accepted_task_control(
+    *,
+    control: Mapping[str, object],
+    affordance: Mapping[str, object],
+    trusted_scope: Mapping[str, object],
+    claim_followup: Callable[..., Awaitable[object]],
+) -> dict[str, object]:
+    """Bind a typed control to the advertised task and trusted source scope."""
+
+    del trusted_scope
+    validated = validate_accepted_task_control(control)
+    advertised_ref = affordance.get("accepted_task_ref")
+    if validated["accepted_task_ref"] != advertised_ref:
+        raise ValueError("accepted task control reference is not advertised")
+    allowed = affordance.get("allowed_next_actions")
+    if not isinstance(allowed, list) or validated["operation"] not in allowed:
+        raise ValueError("accepted task control operation is unavailable")
+    value = claim_followup(
+        control=dict(validated),
+        affordance=dict(affordance),
+    )
+    if hasattr(value, "__await__"):
+        value = await value
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {
+        "status": "claimed",
+        "accepted_task_ref": validated["accepted_task_ref"],
+    }
 
 
 def validate_future_speak_action(
@@ -134,43 +137,6 @@ def _validate_scheduled_authority_input(
         )
 
 
-def validate_accepted_coding_task_action(
-    action_spec: dict[str, Any],
-) -> dict[str, Any]:
-    """Validate a bound coding-run continuation without widening authority."""
-
-    validated = validate_action_spec(action_spec)
-    if validated["kind"] != ACCEPTED_CODING_TASK_REQUEST_CAPABILITY:
-        raise ActionValidationError(
-            "kind: expected accepted_coding_task_request"
-        )
-    if validated["surface_role"] != "task_acknowledgement":
-        raise ActionValidationError(
-            "surface_role: expected task_acknowledgement for accepted coding"
-        )
-    _validate_private_background_target(validated)
-    params = validated["params"]
-    unsupported = set(params) - _BOUND_CODING_PARAM_FIELDS
-    if unsupported:
-        raise ActionValidationError("params: unsupported coding fields")
-    _validate_requested_delivery_and_output_limit(params)
-    _required_param_text(params, "task_brief")
-    coding_action = _required_param_text(params, "coding_action")
-    if coding_action not in _BOUND_CODING_ACTIONS:
-        raise ActionValidationError("coding_action: unsupported value")
-    _coding_run_id(_required_param_text(params, "coding_run_ref"))
-    _validate_optional_param_text(params, "revision_instruction")
-    _validate_optional_param_text(params, "execution_request")
-    if coding_action == "revise_proposal":
-        _required_param_text(params, "revision_instruction")
-    if coding_action == "approve_and_verify":
-        _validate_approval_evidence(params.get("approval_evidence"), validated)
-    elif "approval_evidence" in params:
-        raise ActionValidationError("approval_evidence: unexpected parameter")
-    _validate_accepted_coding_continuation(validated, params)
-    return validated
-
-
 async def enqueue_future_speak_action(
     action_spec: dict[str, Any],
     *,
@@ -220,51 +186,6 @@ async def enqueue_future_speak_action(
     )
 
 
-async def enqueue_accepted_coding_task_action(
-    action_spec: dict[str, Any],
-    *,
-    storage_timestamp_utc: str,
-    action_attempt_id: str,
-    enqueue_background_work_func: BackgroundWorkEnqueueFunc | None = None,
-    source_llm_trace_id: str = "",
-) -> BackgroundWorkQueueResult:
-    """Persist one reviewed continuation for an existing coding run."""
-
-    validated = validate_accepted_coding_task_action(action_spec)
-    params = validated["params"]
-    coding_action = _required_param_text(params, "coding_action")
-    coding_run_ref = _required_param_text(params, "coding_run_ref")
-    task_brief = _required_param_text(params, "task_brief")
-    coding_request = _bound_coding_request(
-        params,
-        validated=validated,
-        storage_timestamp_utc=storage_timestamp_utc,
-    )
-    semantic_objective = _coding_semantic_objective(
-        coding_action=coding_action,
-        coding_run_ref=coding_run_ref,
-        task_brief=task_brief,
-    )
-    return await _create_or_queue_accepted_task(
-        validated,
-        storage_timestamp_utc=storage_timestamp_utc,
-        action_attempt_id=action_attempt_id,
-        source_llm_trace_id=source_llm_trace_id,
-        task_kind="coding_continuation",
-        semantic_objective=semantic_objective,
-        accepted_task_summary=semantic_objective,
-        requested_worker=TASK_ORCHESTRATOR_WORKER,
-        worker_payload={
-            "schema_version": TASK_ORCHESTRATOR_WORKER_PAYLOAD_VERSION,
-            "operation": "continue_bound_coding_run",
-            "checkpoint": None,
-            "coding_request": coding_request,
-        },
-        enqueue_background_work_func=enqueue_background_work_func,
-        task_brief=task_brief,
-    )
-
-
 def _validate_private_background_target(validated: Mapping[str, Any]) -> None:
     """Require the shared private user-scope queue boundary."""
 
@@ -305,78 +226,6 @@ def _validate_requested_delivery_and_output_limit(
         raise ActionValidationError("max_output_chars: expected positive integer")
     if max_output_chars > BACKGROUND_WORK_OUTPUT_CHAR_LIMIT:
         raise ActionValidationError("max_output_chars: exceeds configured limit")
-
-
-def _validate_approval_evidence(
-    value: object,
-    validated: Mapping[str, Any],
-) -> None:
-    """Require trusted current-turn approval provenance for coding mutation."""
-
-    if not isinstance(value, Mapping):
-        raise ActionValidationError("approval_evidence: required for approval")
-    scope = validated["target"]["scope"]
-    for field_name in (
-        "source_message_id",
-        "source_trigger_source",
-        "requester_global_user_id",
-        "quote",
-        "storage_timestamp_utc",
-    ):
-        _required_mapping_text(value, field_name, "approval_evidence")
-    if value["source_trigger_source"] != "user_message":
-        raise ActionValidationError(
-            "approval_evidence.source_trigger_source: expected user_message"
-        )
-    if value["requester_global_user_id"] != scope[
-        "requester_global_user_id"
-    ]:
-        raise ActionValidationError(
-            "approval_evidence.requester_global_user_id: scope mismatch"
-        )
-
-
-def _validate_accepted_coding_continuation(
-    validated: Mapping[str, Any],
-    params: Mapping[str, object],
-) -> None:
-    """Require the action reference to bind the full execution context."""
-
-    goal_continuation_ref = validated["goal_continuation_ref"]
-    if goal_continuation_ref is None:
-        raise ActionValidationError(
-            "goal_continuation_ref: required for accepted coding"
-        )
-    task_execution_context = _validated_task_execution_context(params)
-    if (
-        task_execution_context["goal_continuation_ref"]
-        != goal_continuation_ref
-    ):
-        raise ActionValidationError(
-            "task_execution_context.goal_continuation_ref: conflicts with "
-            "action goal_continuation_ref"
-        )
-
-
-def _validated_task_execution_context(
-    params: Mapping[str, object],
-) -> dict[str, object]:
-    """Require the complete typed context for a coding continuation."""
-
-    raw_context = params.get("task_execution_context")
-    if not isinstance(raw_context, Mapping):
-        raise ActionValidationError(
-            "task_execution_context: required for coding continuation"
-        )
-    try:
-        validated_context = validate_task_resolution_execution_context(
-            raw_context
-        )
-    except ValueError as exc:
-        raise ActionValidationError(
-            f"task_execution_context: invalid execution context: {exc}"
-        ) from exc
-    return dict(validated_context)
 
 
 def _build_scheduled_authority(
@@ -447,55 +296,6 @@ def _build_scheduled_authority(
         ) from exc
     validate_scheduled_future_speech_authority(authority)
     return dict(authority)
-
-
-def _bound_coding_request(
-    params: Mapping[str, object],
-    *,
-    validated: Mapping[str, Any],
-    storage_timestamp_utc: str,
-) -> dict[str, object]:
-    """Build the frozen public continuation request from reviewed state."""
-
-    workspace_root = CODING_AGENT_WORKSPACE_ROOT.strip()
-    if not workspace_root:
-        raise ActionValidationError("coding workspace is unavailable")
-    coding_action = _required_param_text(params, "coding_action")
-    request: dict[str, object] = {
-        "workspace_root": workspace_root,
-        "run_id": _coding_run_id(_required_param_text(params, "coding_run_ref")),
-        "action": coding_action,
-        "reason": str(validated["reason"]).strip(),
-    }
-    revision_instruction = _optional_param_text(params, "revision_instruction")
-    execution_request = _optional_param_text(params, "execution_request")
-    if revision_instruction:
-        request["revision_instruction"] = revision_instruction
-    if execution_request:
-        request["execution_request"] = execution_request
-    if coding_action == "approve_and_verify":
-        approval_evidence = params["approval_evidence"]
-        if not isinstance(approval_evidence, Mapping):
-            raise ActionValidationError("approval_evidence: required for approval")
-        request["approval"] = {
-            "approved": True,
-            "approved_by": _required_mapping_text(
-                approval_evidence,
-                "requester_global_user_id",
-                "approval_evidence",
-            ),
-            "approved_at": _required_mapping_text(
-                approval_evidence,
-                "storage_timestamp_utc",
-                "approval_evidence",
-            ),
-            "approval_reason": _required_mapping_text(
-                approval_evidence,
-                "quote",
-                "approval_evidence",
-            ),
-        }
-    return request
 
 
 async def _create_or_queue_accepted_task(
@@ -659,7 +459,7 @@ def _accepted_task_create_request(
 ) -> AcceptedTaskCreateRequest:
     """Build one trusted v2 accepted-task request from the action scope."""
 
-    if task_kind not in {"future_speak", "coding_continuation"}:
+    if task_kind != "future_speak":
         raise ActionValidationError("accepted task kind is unsupported")
     params = validated["params"]
     scope = validated["target"]["scope"]
@@ -767,10 +567,6 @@ def _queue_request_from_accepted_task(
         request["scheduled_future_speech_authority"] = dict(
             scheduled_future_speech_authority
         )
-    if requested_worker == TASK_ORCHESTRATOR_WORKER:
-        request["task_execution_context"] = _validated_task_execution_context(
-            params
-        )
     return request
 
 
@@ -801,52 +597,9 @@ def _accepted_task_queue_result(
     return result
 
 
-def _coding_semantic_objective(
-    *,
-    coding_action: str,
-    coding_run_ref: str,
-    task_brief: str,
-) -> str:
-    """Build stable task identity material for a bound coding continuation."""
-
-    return f"{coding_action} {coding_run_ref}: {task_brief}"
-
-
-def _coding_run_id(coding_run_ref: str) -> str:
-    """Extract the frozen public run id from its prompt-safe reference."""
-
-    prefix = "coding_run:"
-    if not coding_run_ref.startswith(prefix):
-        raise ActionValidationError(
-            "coding_run_ref: expected prompt-safe coding_run:<run_id>"
-        )
-    run_id = coding_run_ref[len(prefix):].strip()
-    if not run_id:
-        raise ActionValidationError("coding_run_ref: expected a run id")
-    return run_id
-
-
 def _required_param_text(params: Mapping[str, object], field_name: str) -> str:
     """Return one required semantic action parameter."""
 
-    return _required_mapping_text(params, field_name, "params")
-
-
-def _validate_optional_param_text(
-    params: Mapping[str, object],
-    field_name: str,
-) -> None:
-    """Validate an optional parameter when the caller supplied it."""
-
-    if field_name in params:
-        _required_param_text(params, field_name)
-
-
-def _optional_param_text(params: Mapping[str, object], field_name: str) -> str:
-    """Return one optional semantic action parameter."""
-
-    if field_name not in params:
-        return ""
     return _required_mapping_text(params, field_name, "params")
 
 

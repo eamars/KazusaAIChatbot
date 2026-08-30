@@ -26,6 +26,112 @@ from kazusa_ai_chatbot.cognition_episode import (
 from kazusa_ai_chatbot.db import accepted_tasks as repository
 
 
+async def claim_dsh_followup(
+    *,
+    control: Mapping[str, object],
+    action_attempt_id: str,
+    task: Mapping[str, object],
+    binding: Mapping[str, object],
+    repository: object | None = None,
+) -> dict[str, object]:
+    """Claim one typed follow-up for the same DSH session exactly once."""
+
+    from kazusa_ai_chatbot.task_resolution.contracts import (
+        validate_accepted_task_control,
+    )
+
+    validated = validate_accepted_task_control(control)
+    task_id = _text(task, "accepted_task_id")
+    expected_ref = f"accepted_task:{task_id}"
+    if validated["accepted_task_ref"] != expected_ref:
+        raise ValueError("accepted_task_ref does not match the affordance")
+    if not action_attempt_id.strip():
+        raise ValueError("action_attempt_id is required")
+    followup_open = task.get("dsh_followup_open")
+    if followup_open is not True:
+        raise ValueError("accepted task follow-up is not open")
+    session_id = _text(binding, "task_session_id")
+    generation = binding.get("operation_generation")
+    if not session_id or not isinstance(generation, int) or generation < 0:
+        raise ValueError("DSH binding identity is invalid")
+    next_generation = generation + 1
+    target_repository = repository or globals()["repository"]
+    method = getattr(target_repository, "create_followup", None)
+    if not callable(method):
+        raise TypeError("accepted-task repository lacks create_followup")
+    value = method(
+        accepted_task_id=task_id,
+        task_session_id=session_id,
+        operation=validated["operation"],
+        instruction=validated["instruction"],
+        action_attempt_id=action_attempt_id,
+        operation_generation=next_generation,
+        binding=dict(binding),
+    )
+    if hasattr(value, "__await__"):
+        value = await value
+    if not isinstance(value, Mapping):
+        raise TypeError("accepted-task repository returned an invalid follow-up")
+    return dict(value)
+
+
+async def create_followup(
+    *,
+    accepted_task_id: str,
+    task_session_id: str,
+    operation: str,
+    instruction: str | None,
+    action_attempt_id: str,
+    operation_generation: int,
+    binding: Mapping[str, object],
+    expected_revision: int | None = None,
+    updated_at: str | None = None,
+) -> AcceptedTaskDoc:
+    """Create one generation-bound accepted-task continuation row."""
+
+    if not isinstance(binding, Mapping):
+        raise TypeError("DSH binding is required")
+    bound_session = _text(binding, "task_session_id")
+    if bound_session != task_session_id:
+        raise ValueError("DSH binding session does not match follow-up")
+    bound_generation = binding.get("operation_generation")
+    if (
+        not isinstance(bound_generation, int)
+        or isinstance(bound_generation, bool)
+        or operation_generation != bound_generation + 1
+    ):
+        raise ValueError("DSH follow-up generation does not match binding")
+    if binding.get("state") != "terminal":
+        raise ValueError("DSH follow-up requires a terminal binding")
+    revision = expected_revision
+    if revision is None:
+        candidate = binding.get("revision", 0)
+        if not isinstance(candidate, int) or isinstance(candidate, bool):
+            raise ValueError("DSH binding revision is invalid")
+        revision = candidate
+    value = repository.create_followup(
+        accepted_task_id=accepted_task_id,
+        task_session_id=task_session_id,
+        operation=operation,
+        instruction=instruction,
+        action_attempt_id=action_attempt_id,
+        operation_generation=operation_generation,
+        binding=dict(binding),
+        expected_revision=revision,
+        updated_at=updated_at,
+    )
+    if hasattr(value, "__await__"):
+        value = await value
+    if not isinstance(value, Mapping):
+        raise TypeError("accepted-task repository returned an invalid follow-up")
+    return dict(value)
+
+
+def _text(value: Mapping[str, object], field_name: str) -> str:
+    field_value = value.get(field_name)
+    return field_value.strip() if isinstance(field_value, str) else ""
+
+
 def build_task_identity_key(request: Mapping[str, object]) -> str:
     """Build the active-task duplicate key from trusted scope and semantics.
 
@@ -52,6 +158,10 @@ def build_task_identity_key(request: Mapping[str, object]) -> str:
 
 async def create_or_return_active_accepted_task(
     request: AcceptedTaskCreateRequest,
+    *,
+    dsh_task_session_id: str | None = None,
+    dsh_operation_generation: int = 0,
+    dsh_followup_open: bool = False,
 ) -> AcceptedTaskCreateResult:
     """Create an enqueueing task or return the active duplicate.
 
@@ -67,6 +177,9 @@ async def create_or_return_active_accepted_task(
     task = _build_enqueueing_task_doc(
         request,
         task_identity_key=task_identity_key,
+        dsh_task_session_id=dsh_task_session_id,
+        dsh_operation_generation=dsh_operation_generation,
+        dsh_followup_open=dsh_followup_open,
     )
     result = await repository.insert_or_get_active_accepted_task(
         task,
@@ -74,6 +187,50 @@ async def create_or_return_active_accepted_task(
         observed_at=_text(request, "storage_timestamp_utc"),
     )
     return result
+
+
+async def find_accepted_task_by_id(
+    *,
+    accepted_task_id: str,
+) -> AcceptedTaskDoc | None:
+    """Load one accepted-task row for durable DSH control resolution."""
+
+    method = getattr(repository, "find_accepted_task_by_id", None)
+    if not callable(method):
+        raise TypeError("accepted-task repository lacks id lookup")
+    value = method(accepted_task_id=accepted_task_id)
+    if hasattr(value, "__await__"):
+        value = await value
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise TypeError("accepted-task repository returned an invalid task")
+    return dict(value)
+
+
+async def find_dsh_followup_by_action_attempt(
+    *,
+    task_session_id: str,
+    action_attempt_id: str,
+    operation_generation: int,
+) -> AcceptedTaskDoc | None:
+    """Load one durable follow-up replay without process-local state."""
+
+    method = getattr(repository, "find_dsh_followup_by_action_attempt", None)
+    if not callable(method):
+        raise TypeError("accepted-task repository lacks follow-up replay lookup")
+    value = method(
+        task_session_id=task_session_id,
+        action_attempt_id=action_attempt_id,
+        operation_generation=operation_generation,
+    )
+    if hasattr(value, "__await__"):
+        value = await value
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise TypeError("accepted-task repository returned an invalid replay")
+    return dict(value)
 
 
 async def mark_accepted_task_pending(
@@ -143,6 +300,8 @@ async def check_accepted_task_status(
 
     task = await repository.find_active_accepted_task_for_scope(request)
     if task is None:
+        task = await repository.find_open_dsh_followup_for_scope(request)
+    if task is None:
         result: AcceptedTaskStatusResult = {"status": "none"}
         return result
     result = {
@@ -152,22 +311,26 @@ async def check_accepted_task_status(
     return result
 
 
-async def load_open_coding_run_contexts_for_scope(
+async def load_open_dsh_task_affordances_for_scope(
     *,
-    source_platform: str,
+    platform: str,
     source_channel_id: str,
     requester_global_user_id: str,
+    source_channel_type: str | None = None,
+    requester_platform_user_id: str | None = None,
     limit: int = 3,
 ) -> list[dict[str, object]]:
-    """Load current prompt-safe coding contexts for a trusted user turn."""
+    """Load prompt-safe DSH task affordances for one trusted scope."""
 
-    contexts = await repository.load_open_coding_run_contexts_for_scope(
-        source_platform=source_platform,
+    affordances = await repository.load_open_dsh_task_affordances_for_scope(
+        platform=platform,
         source_channel_id=source_channel_id,
         requester_global_user_id=requester_global_user_id,
+        source_channel_type=source_channel_type,
+        requester_platform_user_id=requester_platform_user_id,
         limit=limit,
     )
-    return contexts
+    return [dict(affordance) for affordance in affordances]
 
 
 async def mark_accepted_task_running(
@@ -193,7 +356,6 @@ async def mark_tool_result_ready(
     result_kind: str = "resolved",
     completion_status: str = "resolved",
     remaining_needs: list[str] | None = None,
-    coding_run_context: dict[str, object] | None = None,
 ) -> AcceptedTaskDoc | None:
     """Record a prompt-safe terminal task result for source-bound delivery."""
 
@@ -205,7 +367,6 @@ async def mark_tool_result_ready(
         result_kind=result_kind,
         completion_status=completion_status,
         remaining_needs=remaining_needs or [],
-        coding_run_context=coding_run_context,
     )
     return task
 
@@ -217,7 +378,6 @@ async def mark_accepted_task_failure_ready(
     completed_at: str,
     result_kind: str = "failed",
     remaining_needs: list[str] | None = None,
-    coding_run_context: dict[str, object] | None = None,
 ) -> AcceptedTaskDoc | None:
     """Record a failed executor result and make it ready for delivery."""
 
@@ -227,7 +387,6 @@ async def mark_accepted_task_failure_ready(
         completed_at=completed_at,
         result_kind=result_kind,
         remaining_needs=remaining_needs or [],
-        coding_run_context=coding_run_context,
     )
     return task
 
@@ -298,6 +457,9 @@ def _build_enqueueing_task_doc(
     request: AcceptedTaskCreateRequest,
     *,
     task_identity_key: str,
+    dsh_task_session_id: str | None = None,
+    dsh_operation_generation: int = 0,
+    dsh_followup_open: bool = False,
 ) -> AcceptedTaskDoc:
     """Build the durable enqueueing task row."""
 
@@ -355,8 +517,25 @@ def _build_enqueueing_task_doc(
         "delivery_tracking_id": "",
         "delivered_conversation_message_id": "",
         "last_progress_reported_at": "",
-        "coding_run_context": {},
+        "revision": 0,
     }
+    if task_kind == "task_resolution":
+        if not isinstance(dsh_task_session_id, str) or not dsh_task_session_id.strip():
+            dsh_task_session_id = (
+                "session-" + task_identity_key.rsplit(":", 1)[-1][:32]
+            )
+        if (
+            isinstance(dsh_operation_generation, bool)
+            or not isinstance(dsh_operation_generation, int)
+            or dsh_operation_generation < 0
+        ):
+            raise ValueError("dsh_operation_generation is invalid")
+        task.update({
+            "dsh_task_session_id": dsh_task_session_id.strip(),
+            "dsh_operation_generation": dsh_operation_generation,
+            "dsh_followup_open": bool(dsh_followup_open),
+            "dsh_followup_claim_action_attempt_id": None,
+        })
     authority = request.get("scheduled_future_speech_authority")
     if isinstance(authority, dict):
         task["scheduled_future_speech_authority"] = deepcopy(authority)
@@ -368,7 +547,9 @@ def _identity_material(
 ) -> AcceptedTaskIdentityMaterial:
     """Return canonical material for active duplicate matching."""
 
+    task_kind = _task_kind(request)
     material: AcceptedTaskIdentityMaterial = {
+        "task_kind": task_kind,
         "source_platform": _text(request, "source_platform"),
         "source_channel_id": _text(request, "source_channel_id"),
         "source_channel_type": _text(request, "source_channel_type"),
@@ -377,11 +558,22 @@ def _identity_material(
             request,
             "requester_platform_user_id",
         ),
-        "semantic_objective": _normalized_semantic_text(
+    }
+    if task_kind == "task_resolution":
+        continuation_ref = _validated_goal_continuation_ref(
+            request,
+            task_kind=task_kind,
+        )
+        if continuation_ref is None:
+            raise ValueError(
+                "task_resolution identity requires goal_continuation_ref"
+            )
+        material["goal_continuation_ref"] = continuation_ref
+    else:
+        material["semantic_objective"] = _normalized_semantic_text(
             request,
             "semantic_objective",
-        ),
-    }
+        )
     return material
 
 
@@ -409,7 +601,7 @@ def _task_kind(request: Mapping[str, object]) -> str:
     """Return one declared v2 lifecycle kind from trusted creation material."""
 
     value = _text(request, "task_kind")
-    if value not in {"task_resolution", "future_speak", "coding_continuation"}:
+    if value not in {"task_resolution", "future_speak"}:
         raise ValueError("task_kind is invalid")
     return value
 
@@ -422,8 +614,8 @@ def _validated_goal_continuation_ref(
     """Return the exact persisted continuation reference for one task kind.
 
     Task-resolution rows require the deterministic reference selected by
-    cognition; future-speak and coding continuations carry an explicit null
-    reference until their own continuation lineage is bound.
+    cognition; future-speak carries an explicit null reference until its own
+    continuation lineage is bound.
     """
 
     raw_ref = request.get("goal_continuation_ref")

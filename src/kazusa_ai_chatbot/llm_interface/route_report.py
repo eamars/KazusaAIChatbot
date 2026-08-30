@@ -25,15 +25,11 @@ _ROUTES_AFTER_COGNITION_CORE = (
     "DIALOG_GENERATOR_LLM",
     "CONSOLIDATION_LLM",
     "JSON_REPAIR_LLM",
-    "BACKGROUND_WORK_LLM",
-    "CODING_AGENT_PM_LLM",
-    "CODING_AGENT_PROGRAMMER_LLM",
-    "CODING_AGENT_ACTION_LOOP_LLM",
 )
 _V3_COGNITION_ROUTE_NAMES = frozenset({"COGNITION_V3_CHAIN_LLM"})
 _SHARED_REQUIRED_ROUTES = frozenset({
     *_ROUTES_BEFORE_COGNITION_CORE,
-    *_ROUTES_AFTER_COGNITION_CORE[:-1],
+    *_ROUTES_AFTER_COGNITION_CORE,
 })
 _FALLBACK_BACKED_ROUTES = frozenset()
 
@@ -107,10 +103,7 @@ def _configured_chat_routes() -> tuple[LLMCallConfig, ...]:
             for route_name in _ROUTES_BEFORE_COGNITION_CORE
         ),
         *_selected_cognition_routes(),
-        *(
-            _route_config(route_name)
-            for route_name in _ROUTES_AFTER_COGNITION_CORE
-        ),
+        *(_route_config(route_name) for route_name in _ROUTES_AFTER_COGNITION_CORE),
     )
     return routes
 
@@ -126,9 +119,15 @@ def _required_routes() -> set[str]:
 def configured_route_diagnostics() -> tuple[RouteDiagnostic, ...]:
     """Return sanitized backend diagnostics for configured chat routes."""
 
+    required_routes = _required_routes()
+    configured_routes = tuple(
+        route
+        for route in _configured_chat_routes()
+        if route.route_name in required_routes
+    )
     diagnostics = build_route_diagnostics(
-        _configured_chat_routes(),
-        required_routes=_required_routes(),
+        configured_routes,
+        required_routes=required_routes,
         fallback_backed_routes=set(_FALLBACK_BACKED_ROUTES),
     )
     return diagnostics

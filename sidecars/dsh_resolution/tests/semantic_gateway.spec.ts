@@ -125,5 +125,25 @@ describe("semantic gateway", () => {
     expect(firstRetry?.idempotency_key).not.toMatch(/^idem:sha256:sha256:/u);
     expect(firstRetry?.call_id).not.toBe(secondRetry?.call_id);
     expect(firstRetry).not.toHaveProperty("claim");
+
+    await gateway.invoke("kazusa_inspect_public_media", {
+      public_media_url: "https://example.test/image.png",
+      question: "What is visible?",
+    });
+    const mediaFrame = frames[3];
+    expect(mediaFrame?.operation).toBe("kazusa_inspect_public_media");
+    expect(mediaFrame?.arguments).toEqual({
+      public_media_url: "https://example.test/image.png",
+      question: "What is visible?",
+    });
+    expect(mediaFrame?.arguments).not.toHaveProperty("capability_token");
+    expect(mediaFrame?.arguments).not.toHaveProperty("authority");
+    expect(mediaFrame).toHaveProperty("authority");
+
+    await expect(gateway.invoke("kazusa_inspect_public_media", {
+      public_media_url: "https://example.test/image.png",
+      question: "What is visible?",
+      capability_token: "must-be-rejected",
+    })).rejects.toThrow();
   });
 });

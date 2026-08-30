@@ -32,6 +32,10 @@ def test_persona_supervisor2_schema_exposes_owned_contract() -> None:
         assert state_hints["public_group_scene_projection_reason"]
         assert state_hints["attempt_diagnostics"]
 
+    global_state_hints = get_type_hints(module.GlobalPersonaState)
+    assert global_state_hints["pending_resolver_resume"]
+    assert global_state_hints["pending_task_continuation"]
+
 
 def test_persona_states_carry_attempt_diagnostics() -> None:
     """Both persona state contracts expose the shared reducer field."""

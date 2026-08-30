@@ -2,23 +2,22 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from typing import Any
 
 from kazusa_ai_chatbot.action_spec.attempt_ledger import (
     build_action_attempt_record,
 )
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
-from kazusa_ai_chatbot.action_spec.handlers.future_cognition import (
-    execute_future_cognition_action,
+from kazusa_ai_chatbot.action_spec.handlers.accepted_task import (
+    execute_accepted_task_status_check_action,
 )
 from kazusa_ai_chatbot.action_spec.handlers.background_work import (
     BackgroundWorkEnqueueFunc,
-    enqueue_accepted_coding_task_action,
     enqueue_future_speak_action,
 )
-from kazusa_ai_chatbot.action_spec.handlers.accepted_task import (
-    execute_accepted_task_status_check_action,
+from kazusa_ai_chatbot.action_spec.handlers.future_cognition import (
+    execute_future_cognition_action,
 )
 from kazusa_ai_chatbot.action_spec.handlers.memory_lifecycle import (
     execute_user_memory_lifecycle_action,
@@ -30,7 +29,6 @@ from kazusa_ai_chatbot.action_spec.models import (
 )
 from kazusa_ai_chatbot.action_spec.registry import (
     ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
-    ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     FUTURE_SPEAK_CAPABILITY,
     SPEAK_CAPABILITY,
@@ -38,10 +36,70 @@ from kazusa_ai_chatbot.action_spec.registry import (
     build_runtime_capability_snapshot,
     recheck_action_affordance,
 )
+from kazusa_ai_chatbot.task_resolution.contracts import (
+    validate_accepted_task_control,
+)
+
+
+async def execute_accepted_task_control(
+    *,
+    control: Mapping[str, object],
+    affordance: Mapping[str, object] | None = None,
+    action_attempt_id: str,
+    lifecycle: object,
+    advertised_refs: Collection[str] | None = None,
+) -> dict[str, object]:
+    """Execute one model-selected control against an advertised affordance."""
+
+    validated = validate_accepted_task_control(control)
+    affordance_ref = (
+        affordance.get("accepted_task_ref")
+        if affordance is not None
+        else validated["accepted_task_ref"]
+    )
+    if advertised_refs is not None and validated["accepted_task_ref"] not in {
+        str(value) for value in advertised_refs
+    }:
+        raise ActionValidationError("accepted task control ref is not advertised")
+    if validated["accepted_task_ref"] != affordance_ref:
+        raise ActionValidationError("accepted task control ref is not advertised")
+    effective_affordance = dict(affordance or {
+        "accepted_task_ref": validated["accepted_task_ref"],
+        "allowed_next_actions": ["continue", "summarize", "cancel"],
+    })
+    allowed = effective_affordance.get("allowed_next_actions")
+    if not isinstance(allowed, list) or validated["operation"] not in allowed:
+        raise ActionValidationError("accepted task control operation is unavailable")
+    method = lifecycle if callable(lifecycle) else getattr(
+        lifecycle,
+        "apply_control",
+        None,
+    )
+    if not callable(method):
+        method = getattr(lifecycle, "execute", None)
+    if not callable(method):
+        raise ActionValidationError("accepted task lifecycle is unavailable")
+    value = method(
+        control=dict(validated),
+        affordance=effective_affordance,
+        action_attempt_id=action_attempt_id,
+        accepted_task_ref=validated["accepted_task_ref"],
+        operation=validated["operation"],
+        instruction=validated["instruction"],
+    )
+    if hasattr(value, "__await__"):
+        value = await value
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {
+        "status": "queued" if validated["operation"] == "continue" else "claimed",
+        "accepted_task_ref": validated["accepted_task_ref"],
+        "operation": validated["operation"],
+    }
 from kazusa_ai_chatbot.action_spec.results import (
     ACTION_RESULT_VERSION,
-    ActionResultV1,
     DEFAULT_ACTION_CONTINUATION,
+    ActionResultV1,
     action_attempt_id_from_eval_result,
     build_action_result,
     project_trace_action_result_v2,
@@ -304,70 +362,6 @@ async def execute_action_specs_for_trace(
                     ),
                     "wait_guidance": queue_result["wait_guidance"],
                 }
-        elif validated_spec["kind"] == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY:
-            try:
-                queue_kwargs = {
-                    "storage_timestamp_utc": normalized_storage_timestamp_utc,
-                    "action_attempt_id": action_attempt_id,
-                    "enqueue_background_work_func": enqueue_background_work_func,
-                }
-                if source_llm_trace_id.strip():
-                    queue_kwargs["source_llm_trace_id"] = (
-                        source_llm_trace_id.strip()
-                    )
-                queue_result = await enqueue_accepted_coding_task_action(
-                    validated_spec,
-                    **queue_kwargs,
-                )
-            except ActionValidationError as exc:
-                status = "rejected"
-                result_summary = f"accepted_coding_task_request rejected: {exc}"
-                execution_result = {
-                    "status": status,
-                    "error": str(exc),
-                }
-            except DatabaseOperationError as exc:
-                status = "failed"
-                result_summary = f"accepted_coding_task_request failed: {exc}"
-                execution_result = {
-                    "status": status,
-                    "error": str(exc),
-                }
-            except ValueError as exc:
-                status = "rejected"
-                result_summary = f"accepted_coding_task_request rejected: {exc}"
-                execution_result = {
-                    "status": status,
-                    "error": str(exc),
-                }
-            else:
-                status = _accepted_task_execution_status(queue_result)
-                result_summary = queue_result["result_summary"]
-                execution_result = {
-                    "status": status,
-                    "accepted_task_state": (
-                        queue_result["accepted_task_state"]
-                    ),
-                    "accepted_task_summary": (
-                        queue_result["accepted_task_summary"]
-                    ),
-                    "acknowledgement_constraint": (
-                        queue_result["acknowledgement_constraint"]
-                    ),
-                    "wait_guidance": queue_result["wait_guidance"],
-                }
-                prompt_result_fields = {
-                    "accepted_task_state": (
-                        queue_result["accepted_task_state"]
-                    ),
-                    "accepted_task_summary": (
-                        queue_result["accepted_task_summary"]
-                    ),
-                    "acknowledgement_constraint": (
-                        queue_result["acknowledgement_constraint"]
-                    ),
-                    "wait_guidance": queue_result["wait_guidance"],
-                }
         elif validated_spec["kind"] == ACCEPTED_TASK_STATUS_CHECK_CAPABILITY:
             try:
                 status_result = await execute_accepted_task_status_check_action(
@@ -584,9 +578,6 @@ def _accepted_task_status_prompt_fields(
         return fields
     task = status_result["task"]
     accepted_task_state = _accepted_task_prompt_state(str(task["state"]))
-    coding_run_context = _project_coding_run_context(
-        task.get("coding_run_context")
-    )
     fields = {
         "result_summary": _accepted_task_result_summary(task),
         "accepted_task_state": accepted_task_state,
@@ -594,8 +585,6 @@ def _accepted_task_status_prompt_fields(
         "acknowledgement_constraint": "progress_report_allowed",
         "wait_guidance": _accepted_task_wait_guidance(accepted_task_state),
     }
-    if coding_run_context is not None:
-        fields["coding_run_context"] = coding_run_context
     return fields
 
 
@@ -642,68 +631,14 @@ def _accepted_task_result_summary(task: dict[str, Any]) -> str:
         result_summary = str(task.get("result_summary", "")).strip()
         if result_summary:
             summary = f"任务已有结果：{result_summary}"
-            return _append_coding_run_summary(summary, task)
+            return summary
     if state in ("failure_ready", "enqueue_failed", "delivery_retryable"):
         failure_summary = str(task.get("failure_summary", "")).strip()
         if failure_summary:
             summary = f"任务失败：{failure_summary}"
-            return _append_coding_run_summary(summary, task)
+            return summary
     if summary:
         result_summary = f"已接纳任务当前状态为 {state}：{summary}"
     else:
         result_summary = f"已接纳任务当前状态为 {state}。"
-    return _append_coding_run_summary(result_summary, task)
-
-
-def _append_coding_run_summary(
-    summary: str,
-    task: Mapping[str, Any],
-) -> str:
-    """Append bounded coding-run facts without exposing persistence details."""
-
-    context = _project_coding_run_context(task.get("coding_run_context"))
-    if context is None:
-        return summary
-    status = str(context["status"])
-    fragments = [f"代码任务状态为 {status}"]
-    actions = context.get("allowed_next_actions")
-    if isinstance(actions, list) and actions:
-        fragments.append(f"后续可用动作：{'、'.join(str(item) for item in actions)}")
-    blocker = context.get("active_blocker")
-    fragments.append(
-        "当前阻塞：无" if blocker is None else "当前存在已记录阻塞"
-    )
-    return f"{summary}；{'；'.join(fragments)}"
-
-
-def _project_coding_run_context(value: object) -> dict[str, object] | None:
-    """Project only bounded coding lifecycle facts for later cognition."""
-
-    if not isinstance(value, Mapping):
-        return None
-    status = value.get("status")
-    if not isinstance(status, str) or not status.strip():
-        return None
-    context: dict[str, object] = {"status": status.strip()[:80]}
-    raw_actions = value.get("allowed_next_actions")
-    if isinstance(raw_actions, list):
-        actions = [
-            item.strip()[:80]
-            for item in raw_actions
-            if isinstance(item, str) and item.strip()
-        ]
-        if actions:
-            context["allowed_next_actions"] = list(dict.fromkeys(actions[:8]))
-    blocker = value.get("active_blocker")
-    if blocker is None:
-        context["active_blocker"] = None
-    elif isinstance(blocker, Mapping):
-        blocker_kind = blocker.get("blocker_kind")
-        context["active_blocker"] = {
-            "blocker_kind": str(blocker_kind).strip()[:80]
-            if isinstance(blocker_kind, str) and blocker_kind.strip()
-            else "recorded_blocker",
-        }
-    else:
-        context["active_blocker"] = "recorded_blocker"
-    return context
+    return result_summary

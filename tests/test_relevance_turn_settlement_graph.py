@@ -109,18 +109,16 @@ async def test_dsh_fields_cross_top_level_graph_boundary() -> None:
     """Top-level graph preserves pending DSH input and typed output."""
 
     pending = {
-        "schema_version": "dsh_brain_interaction.v1",
+        "schema_version": "dsh_brain_interaction.v2",
         "interaction_id": "interaction-1",
         "kind": "question",
     }
     decision = {
-        "schema_version": "dsh_brain_interaction.v1",
+        "schema_version": "dsh_brain_interaction.v2",
         "interaction_id": "interaction-1",
         "kind": "question",
         "decision": "answer",
         "answer": "The requested answer.",
-        "response_goal": None,
-        "relay_mode": None,
         "reason": "The interaction can be answered.",
     }
     captured: dict[str, object] = {}
@@ -157,7 +155,7 @@ async def test_dsh_fields_cross_top_level_graph_boundary() -> None:
     state = _state()
     state.update({
         "pending_dsh_interaction": pending,
-        "pending_dsh_reply": True,
+        "dsh_interaction_episode": True,
     })
 
     result = await graph.ainvoke(state)
@@ -165,5 +163,6 @@ async def test_dsh_fields_cross_top_level_graph_boundary() -> None:
     persona_state = captured["state"]
     assert isinstance(persona_state, dict)
     assert persona_state["pending_dsh_interaction"] == pending
-    assert persona_state["pending_dsh_reply"] is True
+    assert persona_state["dsh_interaction_episode"] is True
+    assert "pending_dsh_reply" not in persona_state
     assert result["dsh_interaction_decision"] == decision

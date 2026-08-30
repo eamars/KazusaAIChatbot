@@ -5,21 +5,20 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Literal, NotRequired, TypeAlias, TypedDict
 
-from kazusa_ai_chatbot.cognition_shared.contracts import RoleRefV2
+from kazusa_ai_chatbot.action_spec.models import (
+    ACTION_SPEC_VERSION,
+    ALLOWED_SURFACE_ROLES,
+    CONTINUATION_SURFACE_ROLES,
+    ActionContinuationV1,
+    ActionSpecV1,
+    EvidenceRefV1,
+    SurfaceRoleV1,
+)
 from kazusa_ai_chatbot.cognition_episode import (
     GoalContinuationRefV1,
     validate_goal_continuation_ref,
 )
-
-from kazusa_ai_chatbot.action_spec.models import (
-    ACTION_SPEC_VERSION,
-    ALLOWED_SURFACE_ROLES,
-    ActionContinuationV1,
-    ActionSpecV1,
-    CONTINUATION_SURFACE_ROLES,
-    EvidenceRefV1,
-    SurfaceRoleV1,
-)
+from kazusa_ai_chatbot.cognition_shared.contracts import RoleRefV2
 
 ACTION_RESULT_VERSION = "action_result.v1"
 SURFACE_OUTPUT_VERSION = "surface_output.v1"
@@ -66,10 +65,9 @@ class ActionResultV1(TypedDict):
     job_ref: NotRequired[str]
     accepted_task_state: NotRequired[str]
     accepted_task_summary: NotRequired[str]
-    coding_run_context: NotRequired[dict[str, object]]
     wait_guidance: NotRequired[str]
     acknowledgement_constraint: NotRequired[str]
-    semantic_result_v2: NotRequired["SemanticActionResultV2"]
+    semantic_result_v2: NotRequired[SemanticActionResultV2]
 
 
 class SemanticActionResultV2(TypedDict):
@@ -85,6 +83,33 @@ class SemanticActionResultV2(TypedDict):
     ]
     semantic_result: str
     target_roles: list[RoleRefV2]
+
+
+def project_task_action_result(
+    *,
+    control: Mapping[str, object],
+    accepted_task: Mapping[str, object],
+    status: str,
+    result_summary: str,
+) -> dict[str, object]:
+    """Project an accepted-task control into prompt-safe action context."""
+
+    accepted_ref = accepted_task.get("accepted_task_ref")
+    if not isinstance(accepted_ref, str) or not accepted_ref:
+        raise ValueError("accepted task affordance reference is required")
+    control_ref = control.get("accepted_task_ref")
+    if control_ref != accepted_ref:
+        raise ValueError("accepted task control reference is not advertised")
+    return {
+        "status": status,
+        "result_summary": str(result_summary),
+        "task_resolution_context": {
+            "accepted_task_ref": accepted_ref,
+            "task_state": accepted_task.get("task_state", ""),
+            "objective_summary": accepted_task.get("objective_summary", ""),
+            "operation": control.get("operation"),
+        },
+    }
 
 
 def project_semantic_action_result_v2(

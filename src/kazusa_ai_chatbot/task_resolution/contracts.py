@@ -1,76 +1,36 @@
-"""Typed public contracts for bounded task-resolution sessions.
-
-The task-resolution package owns one resumable semantic task session.  The
-contracts in this module keep specialist selection, evidence, and durable
-checkpoint state separate from adapter, worker, database, and coding-agent
-internals.
-"""
+"""Closed contracts for the Plan 3 DSH task-resolution boundary."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Literal, TypedDict, cast
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
 
 from kazusa_ai_chatbot.cognition_episode import (
-    CognitiveEpisodeValidationError,
     GoalContinuationRefV1,
     validate_goal_continuation_ref,
 )
+from kazusa_ai_chatbot.cognition_shared.contracts import (
+    ResolverCapabilityRequestV2,
+    _validate_scene_context,
+)
+from kazusa_ai_chatbot.dsh_tool_gateway.contracts import content_digest
 
 if TYPE_CHECKING:
     from kazusa_ai_chatbot.cognition_shared.contracts import SceneContextV2
 
 
-TASK_RESOLUTION_EXECUTION_CONTEXT_VERSION = "task_resolution_execution_context.v1"
-TASK_RESOLUTION_CHECKPOINT_VERSION = "task_resolution_checkpoint.v1"
-TASK_RESOLUTION_NODE_VERSION = "task_resolution_node.v1"
+TASK_RESOLUTION_EXECUTION_CONTEXT_V2_VERSION = (
+    "task_resolution_execution_context.v2"
+)
+DSH_RESOLUTION_REF_V1_VERSION = "dsh_resolution_ref.v1"
+TASK_RESOLUTION_ADMISSION_V1_VERSION = "task_resolution_admission.v1"
+ACCEPTED_TASK_CONTROL_V1_VERSION = "accepted_task_control.v1"
+DSH_TASK_SOURCE_SCOPE_V1_VERSION = "dsh_task_source_scope.v1"
+DSH_TASK_START_SPEC_V1_VERSION = "dsh_task_start_spec.v1"
 TASK_RESOLUTION_EVIDENCE_VERSION = "task_resolution_evidence.v1"
-TASK_PENDING_DISPATCH_VERSION = "task_pending_dispatch.v1"
-TASK_SPECIALIST_REQUEST_VERSION = "task_specialist_request.v1"
-TASK_SPECIALIST_RESULT_VERSION = "task_specialist_result.v1"
 TASK_RESOLUTION_RESULT_VERSION = "task_resolution_result.v1"
-CODING_RUN_CONTEXT_VERSION = "coding_run_context.v1"
 
-MAX_TASK_RESOLUTION_DISPATCHES = 4
-MAX_TASK_RESOLUTION_ORCHESTRATOR_CALLS = 4
-MAX_TASK_RESOLUTION_ROUTE_CORRECTIONS = 2
-MAX_TASK_RESOLUTION_SPECIALIST_INVOCATIONS = 2
-MAX_TASK_RESOLUTION_NODES = 8
-MAX_TASK_RESOLUTION_EVIDENCE = 8
-MAX_TASK_RESOLUTION_TEXT_ITEMS = 8
-MAX_TASK_RESOLUTION_TRACE_ENTRIES = 4
-MAX_TASK_RESOLUTION_TEXT_CHARS = 1200
-MAX_TASK_RESOLUTION_REASON_CHARS = 600
-
-TASK_SPECIALISTS = frozenset((
-    "local_context",
-    "public_research",
-    "coding",
-    "text_computation",
-))
-TASK_CODING_OBJECTIVE_MODES = frozenset((
-    "none",
-    "read_only",
-    "propose_patch",
-))
-TASK_CODING_SPECIALIST_OBJECTIVE_MODES = frozenset((
-    "read_only",
-    "propose_patch",
-))
-TASK_PENDING_DISPATCH_PHASES = frozenset((
-    "selected",
-    "started",
-))
-TASK_SPECIALIST_STATUSES = frozenset((
-    "resolved",
-    "partial",
-    "incompatible",
-    "temporarily_unavailable",
-    "needs_user_input",
-    "approval_required",
-    "failed",
-))
-TASK_RESOLUTION_STATUSES = frozenset((
+TASK_RESOLUTION_STATUSES = frozenset({
     "resolved",
     "partial",
     "needs_user_input",
@@ -78,38 +38,44 @@ TASK_RESOLUTION_STATUSES = frozenset((
     "unavailable",
     "failed",
     "deferred",
-))
-TASK_RESOLUTION_RESULT_EVIDENCE_STATES = frozenset((
+})
+TASK_RESOLUTION_EVIDENCE_STATES = frozenset({
     "complete",
     "partial",
     "pending",
     "missing",
     "blocked",
-))
-TASK_NODE_STATUSES = frozenset((
-    "pending",
-    "resolving",
-    "resolved",
-    "blocked",
-    "incompatible",
-))
+})
+# Kept as the explicit outward name used by the result-source owner.
+TASK_RESOLUTION_RESULT_EVIDENCE_STATES = TASK_RESOLUTION_EVIDENCE_STATES
+MAX_TASK_RESOLUTION_TEXT_CHARS = 1200
+MAX_TASK_RESOLUTION_REASON_CHARS = 600
+MAX_TASK_RESOLUTION_LIST_ITEMS = 8
+# The cognition projection names this cap in terms of text items.
+MAX_TASK_RESOLUTION_TEXT_ITEMS = MAX_TASK_RESOLUTION_LIST_ITEMS
+MAX_TASK_RESOLUTION_FACTS = 10
 
 
 class TaskResolutionContractError(ValueError):
-    """Raised when a task-resolution payload violates its public contract."""
+    """Raised when a task-resolution carrier is structurally invalid."""
 
 
-class TaskResolutionExecutionContextV1(TypedDict):
-    """Trusted prompt-safe context available to specialist adapters."""
+class TaskResolutionExecutionContextV2(TypedDict):
+    """Trusted prompt-safe context shared by Brain and one DSH session."""
 
-    schema_version: Literal["task_resolution_execution_context.v1"]
+    schema_version: Literal["task_resolution_execution_context.v2"]
     character_name: str
     platform: str
     channel_id: str
     channel_type: str
     requester_global_user_id: str
     requester_platform_user_id: str
+    requester_display_name: str
     source_message_id: str
+    source_platform_bot_id: str
+    source_trigger_source: str
+    source_llm_trace_id: str
+    brain_conversation_ref: str
     scene_context: SceneContextV2
     goal_continuation_ref: GoalContinuationRefV1
     local_time_context: dict[str, object]
@@ -123,123 +89,90 @@ class TaskResolutionExecutionContextV1(TypedDict):
     active_turn_platform_message_ids: list[str]
     active_turn_conversation_row_ids: list[str]
     session_media_refs: list[dict[str, object]]
-    coding_workspace_root: str
     max_output_chars: int
 
 
-class TaskResolutionNodeV1(TypedDict):
-    """One bounded semantic objective inside a task-resolution session."""
+class DshResolutionRefV1(TypedDict):
+    """Opaque durable identity for one DSH thread and segment."""
 
-    schema_version: Literal["task_resolution_node.v1"]
-    node_id: str
-    objective: str
-    status: str
-    depends_on: list[str]
+    schema_version: Literal["dsh_resolution_ref.v1"]
+    resolution_thread_id: str
+    segment_id: str
+    dsh_session_id: str
+    activation_id: str
+    lease_epoch: int
+    document_revision: int
+    last_committed_seq: int
+
+
+class TaskResolutionAdmissionV1(TypedDict):
+    """Transient model-hidden identity for a queued DSH task admission."""
+
+    schema_version: Literal["task_resolution_admission.v1"]
+    accepted_task_id: str
+    background_work_job_id: str
+    task_session_id: str
+
+
+class AcceptedTaskControlV1(TypedDict):
+    """Typed prompt-safe operation selected for one accepted task."""
+
+    schema_version: Literal["accepted_task_control.v1"]
+    accepted_task_ref: str
+    operation: Literal["continue", "summarize", "cancel"]
+    instruction: str | None
+
+
+class DshTaskSourceScopeV1(TypedDict):
+    """Trusted source scope copied from the execution context."""
+
+    schema_version: Literal["dsh_task_source_scope.v1"]
+    platform: str
+    channel_id: str
+    channel_type: str
+    requester_global_user_id: str
+    requester_platform_user_id: str
+    source_message_id: str
+    source_platform_bot_id: str
+
+
+class DshTaskStartSpecV1(TypedDict):
+    """Model-hidden, authority-free DSH opening carrier."""
+
+    schema_version: Literal["dsh_task_start_spec.v1"]
+    resolver_request: ResolverCapabilityRequestV2
+    execution_context: TaskResolutionExecutionContextV2
+    model_facts: list[str]
+    model_facts_digest: str
+    objective_ref: str
 
 
 class TaskResolutionEvidenceV1(TypedDict):
-    """Prompt-safe evidence returned by one registered specialist."""
+    """Prompt-safe DSH evidence receipt projected into the V1 carrier."""
 
     schema_version: Literal["task_resolution_evidence.v1"]
     evidence_id: str
     task_node_id: str
-    specialist: str
+    specialist: Literal["dsh"]
     summary: str
     provenance_refs: list[str]
     limitations: list[str]
 
 
-class TaskSpecialistAttemptV1(TypedDict):
-    """Durable record of one incompatible node/specialist combination."""
-
-    task_node_id: str
-    specialist: str
-
-
-class TaskSpecialistInvocationCountV1(TypedDict):
-    """Persisted invocation count for one node and specialist."""
-
-    task_node_id: str
-    specialist: str
-    count: int
-
-
-class TaskResolutionTraceEntryV1(TypedDict):
-    """Bounded prompt-safe dispatch trace row."""
-
-    dispatch_index: int
-    task_node_id: str
-    specialist: str
-    result_status: str
-    reason: str
-
-
-class TaskPendingDispatchV1(TypedDict):
-    """One durable specialist selection awaiting or undergoing execution."""
-
-    schema_version: Literal["task_pending_dispatch.v1"]
-    task_node_id: str
-    specialist: str
-    subgoal: str
-    coding_objective_mode: str
-    phase: str
-
-
-class TaskResolutionCheckpointV1(TypedDict):
-    """Resumable deterministic state for one semantic task session."""
-
-    schema_version: Literal["task_resolution_checkpoint.v1"]
-    session_id: str
-    semantic_objective: str
-    scene_context: SceneContextV2
-    goal_continuation_ref: GoalContinuationRefV1
-    source_scope: dict[str, str]
-    nodes: list[TaskResolutionNodeV1]
-    active_node_id: str
-    evidence: list[TaskResolutionEvidenceV1]
-    remaining_needs: list[str]
-    attempted_specialists: list[TaskSpecialistAttemptV1]
-    dispatch_count: int
-    orchestrator_call_count: int
-    route_correction_count: int
-    specialist_invocation_counts: list[TaskSpecialistInvocationCountV1]
-    pending_dispatch: TaskPendingDispatchV1 | None
-    terminal_status: str
-    trace_summary: list[TaskResolutionTraceEntryV1]
-
-
-class TaskSpecialistRequestV1(TypedDict):
-    """Canonical request from the orchestrator to one specialist handler."""
-
-    schema_version: Literal["task_specialist_request.v1"]
-    task_node_id: str
-    objective: str
-    available_evidence: list[TaskResolutionEvidenceV1]
-    remaining_needs: list[str]
-    trusted_scope: dict[str, str]
-    coding_objective_mode: str
-
-
-class TaskSpecialistResultV1(TypedDict, total=False):
-    """Typed result returned by exactly one specialist handler."""
-
-    schema_version: Literal["task_specialist_result.v1"]
-    specialist: str
-    status: str
-    evidence: list[TaskResolutionEvidenceV1]
-    completed_subgoals: list[str]
-    remaining_needs: list[str]
-    reason: str
-    retryable: bool
-    coding_run_context: dict[str, object]
-
-
 class TaskResolutionResultV1(TypedDict):
-    """Prompt-safe terminal or deferred session result."""
+    """Stable outward carrier consumed by cognition and background delivery."""
 
     schema_version: Literal["task_resolution_result.v1"]
     semantic_objective: str
-    status: str
+    status: Literal[
+        "resolved",
+        "partial",
+        "needs_user_input",
+        "approval_required",
+        "unavailable",
+        "failed",
+        "deferred",
+    ]
     scene_context: SceneContextV2
     goal_continuation_ref: GoalContinuationRefV1
     evidence_state: Literal[
@@ -261,1302 +194,628 @@ class TaskResolutionResultV1(TypedDict):
 
 def validate_task_resolution_execution_context(
     value: object,
-) -> TaskResolutionExecutionContextV1:
-    """Validate trusted prompt-safe context before a specialist receives it."""
+) -> TaskResolutionExecutionContextV2:
+    """Validate the exact V2 context without interpreting user text."""
 
-    data = _require_mapping(value, "task_resolution_execution_context")
-    _require_exact_keys(
-        data,
-        {
-            "schema_version",
-            "character_name",
-            "platform",
-            "channel_id",
-            "channel_type",
-            "requester_global_user_id",
-            "requester_platform_user_id",
-            "source_message_id",
-            "scene_context",
-            "goal_continuation_ref",
-            "local_time_context",
-            "prompt_message_context",
-            "chat_history_recent",
-            "chat_history_wide",
-            "conversation_progress",
-            "persona_summary",
-            "conversation_summary",
-            "current_timestamp_utc",
-            "active_turn_platform_message_ids",
-            "active_turn_conversation_row_ids",
-            "session_media_refs",
-            "coding_workspace_root",
-            "max_output_chars",
-        },
-        "task_resolution_execution_context",
-    )
-    _require_version(data, TASK_RESOLUTION_EXECUTION_CONTEXT_VERSION)
-    normalized: TaskResolutionExecutionContextV1 = {
-        "schema_version": TASK_RESOLUTION_EXECUTION_CONTEXT_VERSION,
-        "character_name": _require_text(data, "character_name"),
-        "platform": _require_text(data, "platform"),
-        "channel_id": _require_text(data, "channel_id"),
-        "channel_type": _require_text(data, "channel_type"),
-        "requester_global_user_id": _require_text(
-            data,
-            "requester_global_user_id",
-        ),
-        "requester_platform_user_id": _require_text(
-            data,
-            "requester_platform_user_id",
-        ),
-        "source_message_id": _require_text(data, "source_message_id"),
-        "scene_context": _validate_scene_context_value(
-            data["scene_context"],
-            "scene_context",
-        ),
-        "goal_continuation_ref": _validate_goal_continuation_ref_value(
-            data["goal_continuation_ref"],
-            "goal_continuation_ref",
-        ),
-        "local_time_context": _require_dict(data, "local_time_context"),
-        "prompt_message_context": _require_dict(
-            data,
-            "prompt_message_context",
-        ),
-        "chat_history_recent": _require_mapping_list(
-            data,
-            "chat_history_recent",
-        ),
-        "chat_history_wide": _require_mapping_list(data, "chat_history_wide"),
-        "conversation_progress": _require_dict(data, "conversation_progress"),
-        "persona_summary": _require_text(data, "persona_summary", allow_empty=True),
-        "conversation_summary": _require_text(
-            data,
-            "conversation_summary",
-            allow_empty=True,
-        ),
-        "current_timestamp_utc": _require_text(data, "current_timestamp_utc"),
-        "active_turn_platform_message_ids": _require_text_list(
-            data,
-            "active_turn_platform_message_ids",
-        ),
-        "active_turn_conversation_row_ids": _require_text_list(
-            data,
-            "active_turn_conversation_row_ids",
-        ),
-        "session_media_refs": _require_mapping_list(data, "session_media_refs"),
-        "coding_workspace_root": _require_text(
-            data,
-            "coding_workspace_root",
-            allow_empty=True,
-        ),
-        "max_output_chars": _require_positive_int(data, "max_output_chars"),
-    }
-    return normalized
-
-
-def validate_task_resolution_checkpoint(
-    value: object,
-) -> TaskResolutionCheckpointV1:
-    """Validate bounded checkpoint state before inline or queued execution.
-
-    Args:
-        value: Candidate persistent state supplied by the inline service or
-            background-worker resume path.
-
-    Returns:
-        A normalized checkpoint containing only validated semantic state.
-    """
-
-    data = _require_mapping(value, "task_resolution_checkpoint")
-    _require_exact_keys(
-        data,
-        {
-            "schema_version",
-            "session_id",
-            "semantic_objective",
-            "scene_context",
-            "goal_continuation_ref",
-            "source_scope",
-            "nodes",
-            "active_node_id",
-            "evidence",
-            "remaining_needs",
-            "attempted_specialists",
-            "dispatch_count",
-            "orchestrator_call_count",
-            "route_correction_count",
-            "specialist_invocation_counts",
-            "pending_dispatch",
-            "terminal_status",
-            "trace_summary",
-        },
-        "task_resolution_checkpoint",
-    )
-    _require_version(data, TASK_RESOLUTION_CHECKPOINT_VERSION)
-    nodes = _validate_nodes(data)
-    active_node_id = _require_text(data, "active_node_id")
-    node_ids = {node["node_id"] for node in nodes}
-    if active_node_id not in node_ids:
-        raise TaskResolutionContractError(
-            "active_node_id: expected an existing task node"
-        )
-    evidence = _validate_evidence_list(data, "evidence")
-    attempted_specialists = _validate_attempted_specialists(data)
-    invocation_counts = _validate_invocation_counts(data)
-    dispatch_count = _require_nonnegative_int(data, "dispatch_count")
-    if dispatch_count > MAX_TASK_RESOLUTION_DISPATCHES:
-        raise TaskResolutionContractError(
-            "dispatch_count: exceeds task-resolution dispatch cap"
-        )
-    orchestrator_call_count = _require_nonnegative_int(
-        data,
-        "orchestrator_call_count",
-    )
-    if orchestrator_call_count > MAX_TASK_RESOLUTION_ORCHESTRATOR_CALLS:
-        raise TaskResolutionContractError(
-            "orchestrator_call_count: exceeds task-resolution call cap"
-        )
-    route_correction_count = _require_nonnegative_int(
-        data,
-        "route_correction_count",
-    )
-    if route_correction_count > MAX_TASK_RESOLUTION_ROUTE_CORRECTIONS:
-        raise TaskResolutionContractError(
-            "route_correction_count: exceeds task-resolution correction cap"
-    )
-    trace_summary = _validate_trace_entries(data)
-    pending_dispatch = _validate_pending_dispatch(data)
-    _validate_checkpoint_node_references(
-        node_ids=node_ids,
-        evidence=evidence,
-        attempted_specialists=attempted_specialists,
-        invocation_counts=invocation_counts,
-        trace_summary=trace_summary,
-        pending_dispatch=pending_dispatch,
-    )
-    _validate_checkpoint_counters(
-        dispatch_count=dispatch_count,
-        route_correction_count=route_correction_count,
-        attempted_specialists=attempted_specialists,
-        invocation_counts=invocation_counts,
-        trace_summary=trace_summary,
-        pending_dispatch=pending_dispatch,
-    )
-    terminal_status = _require_text(data, "terminal_status", allow_empty=True)
-    if terminal_status and terminal_status not in TASK_RESOLUTION_STATUSES - {
-        "deferred"
-    }:
-        raise TaskResolutionContractError("terminal_status: unsupported value")
-    if terminal_status and pending_dispatch is not None:
-        raise TaskResolutionContractError(
-            "pending_dispatch: terminal checkpoints cannot retain a dispatch"
-        )
-    normalized: TaskResolutionCheckpointV1 = {
-        "schema_version": TASK_RESOLUTION_CHECKPOINT_VERSION,
-        "session_id": _require_text(data, "session_id"),
-        "semantic_objective": _require_text(data, "semantic_objective"),
-        "scene_context": _validate_scene_context_value(
-            data["scene_context"],
-            "scene_context",
-        ),
-        "goal_continuation_ref": _validate_goal_continuation_ref_value(
-            data["goal_continuation_ref"],
-            "goal_continuation_ref",
-        ),
-        "source_scope": _validate_source_scope(data, "source_scope"),
-        "nodes": nodes,
-        "active_node_id": active_node_id,
-        "evidence": evidence,
-        "remaining_needs": _require_bounded_text_list(
-            data,
-            "remaining_needs",
-        ),
-        "attempted_specialists": attempted_specialists,
-        "dispatch_count": dispatch_count,
-        "orchestrator_call_count": orchestrator_call_count,
-        "route_correction_count": route_correction_count,
-        "specialist_invocation_counts": invocation_counts,
-        "pending_dispatch": pending_dispatch,
-        "terminal_status": terminal_status,
-        "trace_summary": trace_summary,
-    }
-    return normalized
-
-
-def validate_task_specialist_request(value: object) -> TaskSpecialistRequestV1:
-    """Validate one canonical specialist request before adapter mapping."""
-
-    data = _require_mapping(value, "task_specialist_request")
-    _require_exact_keys(
-        data,
-        {
-            "schema_version",
-            "task_node_id",
-            "objective",
-            "available_evidence",
-            "remaining_needs",
-            "trusted_scope",
-            "coding_objective_mode",
-        },
-        "task_specialist_request",
-    )
-    _require_version(data, TASK_SPECIALIST_REQUEST_VERSION)
-    normalized: TaskSpecialistRequestV1 = {
-        "schema_version": TASK_SPECIALIST_REQUEST_VERSION,
-        "task_node_id": _require_text(data, "task_node_id"),
-        "objective": _require_text(data, "objective"),
-        "available_evidence": _validate_evidence_list(
-            data,
-            "available_evidence",
-        ),
-        "remaining_needs": _require_bounded_text_list(
-            data,
-            "remaining_needs",
-        ),
-        "trusted_scope": _validate_source_scope(data, "trusted_scope"),
-        "coding_objective_mode": _require_enum(
-            data,
-            "coding_objective_mode",
-            TASK_CODING_OBJECTIVE_MODES,
-        ),
-    }
-    return normalized
-
-
-def validate_task_specialist_result(value: object) -> TaskSpecialistResultV1:
-    """Validate one specialist outcome before it changes session state."""
-
-    data = _require_mapping(value, "task_specialist_result")
-    allowed_keys = {
+    data = _mapping(value, "task_resolution_execution_context")
+    _exact_keys(data, {
         "schema_version",
-        "specialist",
-        "status",
-        "evidence",
-        "completed_subgoals",
-        "remaining_needs",
-        "reason",
-        "retryable",
-        "coding_run_context",
-    }
-    _require_allowed_keys(data, allowed_keys, "task_specialist_result")
-    _require_required_keys(
-        data,
-        allowed_keys - {"coding_run_context"},
-        "task_specialist_result",
+        "character_name",
+        "platform",
+        "channel_id",
+        "channel_type",
+        "requester_global_user_id",
+        "requester_platform_user_id",
+        "requester_display_name",
+        "source_message_id",
+        "source_platform_bot_id",
+        "source_trigger_source",
+        "source_llm_trace_id",
+        "brain_conversation_ref",
+        "scene_context",
+        "goal_continuation_ref",
+        "local_time_context",
+        "prompt_message_context",
+        "chat_history_recent",
+        "chat_history_wide",
+        "conversation_progress",
+        "persona_summary",
+        "conversation_summary",
+        "current_timestamp_utc",
+        "active_turn_platform_message_ids",
+        "active_turn_conversation_row_ids",
+        "session_media_refs",
+        "max_output_chars",
+    }, "task_resolution_execution_context")
+    _version(data, TASK_RESOLUTION_EXECUTION_CONTEXT_V2_VERSION, "context")
+    for field in (
+        "character_name",
+        "platform",
+        "channel_id",
+        "channel_type",
+        "requester_global_user_id",
+        "requester_platform_user_id",
+        "requester_display_name",
+        "source_message_id",
+        "source_platform_bot_id",
+        "source_trigger_source",
+        "brain_conversation_ref",
+        "current_timestamp_utc",
+    ):
+        _text(data[field], f"context.{field}")
+    _text(data["source_llm_trace_id"], "context.source_llm_trace_id", empty=True)
+    scene = data["scene_context"]
+    try:
+        _validate_scene_context(scene)
+    except (TypeError, ValueError) as exc:
+        raise TaskResolutionContractError(
+            f"context.scene_context is invalid: {exc}",
+        ) from exc
+    goal = _goal_ref(data["goal_continuation_ref"], "context.goal_continuation_ref")
+    local_time = _dict(data["local_time_context"], "context.local_time_context")
+    message_context = _dict(
+        data["prompt_message_context"],
+        "context.prompt_message_context",
     )
-    _require_version(data, TASK_SPECIALIST_RESULT_VERSION)
-    specialist = _require_enum(data, "specialist", TASK_SPECIALISTS)
-    status = _require_enum(data, "status", TASK_SPECIALIST_STATUSES)
-    evidence = _validate_evidence_list(data, "evidence")
-    if status == "partial" and not evidence:
-        raise TaskResolutionContractError(
-            "partial specialist result requires validated evidence"
-        )
-    retryable = _require_bool(data, "retryable")
-    if status == "temporarily_unavailable" and not retryable:
-        raise TaskResolutionContractError(
-            "retryable: temporarily_unavailable requires a retryable result"
-        )
-    if retryable and status != "temporarily_unavailable":
-        raise TaskResolutionContractError(
-            "retryable: only temporarily_unavailable may be retryable"
-        )
-    coding_run_context = _validate_specialist_coding_context(
-        data,
-        specialist=specialist,
+    progress = _dict(data["conversation_progress"], "context.conversation_progress")
+    recent = _mapping_list(data["chat_history_recent"], "context.chat_history_recent")
+    wide = _mapping_list(data["chat_history_wide"], "context.chat_history_wide")
+    media = _mapping_list(data["session_media_refs"], "context.session_media_refs")
+    platform_ids = _text_list(
+        data["active_turn_platform_message_ids"],
+        "context.active_turn_platform_message_ids",
     )
-    for evidence_row in evidence:
-        if evidence_row["specialist"] != specialist:
-            raise TaskResolutionContractError(
-                "evidence.specialist: expected result specialist"
+    row_ids = _text_list(
+        data["active_turn_conversation_row_ids"],
+        "context.active_turn_conversation_row_ids",
+    )
+    max_output = _integer(data["max_output_chars"], "context.max_output_chars")
+    if max_output <= 0:
+        raise TaskResolutionContractError("context.max_output_chars must be positive")
+    return {
+        "schema_version": TASK_RESOLUTION_EXECUTION_CONTEXT_V2_VERSION,
+        **{
+            field: _text(data[field], f"context.{field}")
+            for field in (
+                "character_name",
+                "platform",
+                "channel_id",
+                "channel_type",
+                "requester_global_user_id",
+                "requester_platform_user_id",
+                "requester_display_name",
+                "source_message_id",
+                "source_platform_bot_id",
+                "source_trigger_source",
+                "brain_conversation_ref",
+                "current_timestamp_utc",
             )
-    normalized: TaskSpecialistResultV1 = {
-        "schema_version": TASK_SPECIALIST_RESULT_VERSION,
-        "specialist": specialist,
-        "status": status,
-        "evidence": evidence,
-        "completed_subgoals": _require_bounded_text_list(
-            data,
-            "completed_subgoals",
+        },
+        "source_llm_trace_id": _text(
+            data["source_llm_trace_id"],
+            "context.source_llm_trace_id",
+            empty=True,
         ),
-        "remaining_needs": _require_bounded_text_list(
-            data,
-            "remaining_needs",
+        "scene_context": cast("SceneContextV2", dict(scene)),
+        "goal_continuation_ref": goal,
+        "local_time_context": local_time,
+        "prompt_message_context": message_context,
+        "chat_history_recent": recent,
+        "chat_history_wide": wide,
+        "conversation_progress": progress,
+        "persona_summary": _bounded_text(
+            data["persona_summary"], "context.persona_summary",
         ),
-        "reason": _require_text(
-            data,
-            "reason",
-            maximum=MAX_TASK_RESOLUTION_REASON_CHARS,
+        "conversation_summary": _bounded_text(
+            data["conversation_summary"], "context.conversation_summary",
         ),
-        "retryable": retryable,
+        "active_turn_platform_message_ids": platform_ids,
+        "active_turn_conversation_row_ids": row_ids,
+        "session_media_refs": media,
+        "max_output_chars": max_output,
+    }  # type: ignore[return-value]
+
+
+def validate_dsh_resolution_ref(value: object) -> DshResolutionRefV1:
+    """Validate one complete DSH thread/segment reference."""
+
+    data = _mapping(value, "dsh_resolution_ref")
+    _exact_keys(data, {
+        "schema_version",
+        "resolution_thread_id",
+        "segment_id",
+        "dsh_session_id",
+        "activation_id",
+        "lease_epoch",
+        "document_revision",
+        "last_committed_seq",
+    }, "dsh_resolution_ref")
+    _version(data, DSH_RESOLUTION_REF_V1_VERSION, "dsh_resolution_ref")
+    for field in (
+        "resolution_thread_id",
+        "segment_id",
+        "dsh_session_id",
+        "activation_id",
+    ):
+        _text(data[field], f"dsh_resolution_ref.{field}")
+    lease_epoch = _integer(data["lease_epoch"], "dsh_resolution_ref.lease_epoch")
+    document_revision = _integer(
+        data["document_revision"],
+        "dsh_resolution_ref.document_revision",
+    )
+    sequence = _integer(
+        data["last_committed_seq"],
+        "dsh_resolution_ref.last_committed_seq",
+    )
+    if lease_epoch < 0 or document_revision < 0 or sequence < 0:
+        raise TaskResolutionContractError(
+            "dsh_resolution_ref counters must be non-negative",
+        )
+    return {
+        "schema_version": DSH_RESOLUTION_REF_V1_VERSION,
+        "resolution_thread_id": str(data["resolution_thread_id"]),
+        "segment_id": str(data["segment_id"]),
+        "dsh_session_id": str(data["dsh_session_id"]),
+        "activation_id": str(data["activation_id"]),
+        "lease_epoch": lease_epoch,
+        "document_revision": document_revision,
+        "last_committed_seq": sequence,
     }
-    if coding_run_context:
-        normalized["coding_run_context"] = coding_run_context
-    return normalized
+
+
+def validate_task_resolution_admission(
+    value: object,
+) -> TaskResolutionAdmissionV1:
+    """Validate the identity returned by background admission."""
+
+    data = _mapping(value, "task_resolution_admission")
+    _exact_keys(data, {
+        "schema_version",
+        "accepted_task_id",
+        "background_work_job_id",
+        "task_session_id",
+    }, "task_resolution_admission")
+    _version(
+        data,
+        TASK_RESOLUTION_ADMISSION_V1_VERSION,
+        "task_resolution_admission",
+    )
+    accepted_task_id = _text(
+        data["accepted_task_id"],
+        "task_resolution_admission.accepted_task_id",
+    )
+    background_work_job_id = _text(
+        data["background_work_job_id"],
+        "task_resolution_admission.background_work_job_id",
+    )
+    task_session_id = _text(
+        data["task_session_id"],
+        "task_resolution_admission.task_session_id",
+    )
+    return {
+        "schema_version": TASK_RESOLUTION_ADMISSION_V1_VERSION,
+        "accepted_task_id": accepted_task_id,
+        "background_work_job_id": background_work_job_id,
+        "task_session_id": task_session_id,
+    }
+
+
+def validate_accepted_task_control(value: object) -> AcceptedTaskControlV1:
+    """Validate one typed accepted-task operation and its instruction rule."""
+
+    data = _mapping(value, "accepted_task_control")
+    _exact_keys(data, {
+        "schema_version", "accepted_task_ref", "operation", "instruction",
+    }, "accepted_task_control")
+    _version(data, ACCEPTED_TASK_CONTROL_V1_VERSION, "accepted_task_control")
+    accepted_ref = _text(
+        data["accepted_task_ref"],
+        "accepted_task_control.accepted_task_ref",
+    )
+    operation = data["operation"]
+    if operation not in {"continue", "summarize", "cancel"}:
+        raise TaskResolutionContractError(
+            "accepted_task_control.operation is unsupported",
+        )
+    instruction = data["instruction"]
+    if operation == "continue":
+        if not isinstance(instruction, str) or not instruction.strip():
+            raise TaskResolutionContractError(
+                "accepted_task_control.instruction is required",
+            )
+        normalized_instruction: str | None = _bounded_text(
+            instruction,
+            "accepted_task_control.instruction",
+        )
+    else:
+        if instruction is not None:
+            raise TaskResolutionContractError(
+                "accepted_task_control.instruction is operation-specific",
+            )
+        normalized_instruction = None
+    return {
+        "schema_version": ACCEPTED_TASK_CONTROL_V1_VERSION,
+        "accepted_task_ref": accepted_ref,
+        "operation": cast(Literal["continue", "summarize", "cancel"], operation),
+        "instruction": normalized_instruction,
+    }
+
+
+def validate_dsh_task_source_scope(value: object) -> DshTaskSourceScopeV1:
+    """Validate the exact trusted scope projection used by a binding."""
+
+    data = _mapping(value, "dsh_task_source_scope")
+    _exact_keys(data, {
+        "schema_version",
+        "platform",
+        "channel_id",
+        "channel_type",
+        "requester_global_user_id",
+        "requester_platform_user_id",
+        "source_message_id",
+        "source_platform_bot_id",
+    }, "dsh_task_source_scope")
+    _version(data, DSH_TASK_SOURCE_SCOPE_V1_VERSION, "dsh_task_source_scope")
+    return {
+        "schema_version": DSH_TASK_SOURCE_SCOPE_V1_VERSION,
+        **{
+            field: _text(data[field], f"dsh_task_source_scope.{field}")
+            for field in (
+                "platform",
+                "channel_id",
+                "channel_type",
+                "requester_global_user_id",
+                "requester_platform_user_id",
+                "source_message_id",
+                "source_platform_bot_id",
+            )
+        },
+    }  # type: ignore[return-value]
+
+
+def validate_dsh_task_start_spec(value: object) -> DshTaskStartSpecV1:
+    """Validate an authority-free DSH start carrier and its digests."""
+
+    data = _mapping(value, "dsh_task_start_spec")
+    _exact_keys(data, {
+        "schema_version",
+        "resolver_request",
+        "execution_context",
+        "model_facts",
+        "model_facts_digest",
+        "objective_ref",
+    }, "dsh_task_start_spec")
+    _version(data, DSH_TASK_START_SPEC_V1_VERSION, "dsh_task_start_spec")
+    request = _resolver_request(data["resolver_request"])
+    context = validate_task_resolution_execution_context(data["execution_context"])
+    facts = _text_list(data["model_facts"], "dsh_task_start_spec.model_facts")
+    if len(facts) != MAX_TASK_RESOLUTION_FACTS:
+        raise TaskResolutionContractError(
+            "dsh_task_start_spec.model_facts must contain exactly ten facts",
+        )
+    expected_digest = content_digest(facts)
+    if data["model_facts_digest"] != expected_digest:
+        raise TaskResolutionContractError(
+            "dsh_task_start_spec.model_facts_digest does not match facts",
+        )
+    objective_ref = content_digest(context["goal_continuation_ref"])
+    if data["objective_ref"] != objective_ref:
+        raise TaskResolutionContractError(
+            "dsh_task_start_spec.objective_ref does not match continuation",
+        )
+    if request["semantic_goal"] != context["prompt_message_context"].get(
+        "semantic_goal",
+        request["semantic_goal"],
+    ):
+        # The prompt context is not required to repeat the objective; this
+        # branch only prevents an explicitly conflicting trusted projection.
+        raise TaskResolutionContractError(
+            "dsh_task_start_spec objective projection conflicts",
+        )
+    if request["goal_continuation_ref"] != context["goal_continuation_ref"]:
+        raise TaskResolutionContractError(
+            "dsh_task_start_spec continuation projection conflicts",
+        )
+    return {
+        "schema_version": DSH_TASK_START_SPEC_V1_VERSION,
+        "resolver_request": request,
+        "execution_context": context,
+        "model_facts": facts,
+        "model_facts_digest": expected_digest,
+        "objective_ref": objective_ref,
+    }
+
+
+def validate_task_resolution_evidence(
+    value: object,
+) -> TaskResolutionEvidenceV1:
+    """Validate one DSH-owned prompt-safe evidence row."""
+
+    data = _mapping(value, "task_resolution_evidence")
+    _exact_keys(data, {
+        "schema_version",
+        "evidence_id",
+        "task_node_id",
+        "specialist",
+        "summary",
+        "provenance_refs",
+        "limitations",
+    }, "task_resolution_evidence")
+    _version(data, TASK_RESOLUTION_EVIDENCE_VERSION, "task_resolution_evidence")
+    specialist = data["specialist"]
+    if specialist != "dsh":
+        raise TaskResolutionContractError(
+            "task_resolution_evidence.specialist must be dsh",
+        )
+    return {
+        "schema_version": TASK_RESOLUTION_EVIDENCE_VERSION,
+        "evidence_id": _text(data["evidence_id"], "evidence.evidence_id"),
+        "task_node_id": _text(data["task_node_id"], "evidence.task_node_id"),
+        "specialist": "dsh",
+        "summary": _bounded_text(data["summary"], "evidence.summary"),
+        "provenance_refs": _text_list(
+            data["provenance_refs"], "evidence.provenance_refs",
+        ),
+        "limitations": _bounded_text_list(
+            data["limitations"], "evidence.limitations",
+        ),
+    }
 
 
 def validate_task_resolution_result(value: object) -> TaskResolutionResultV1:
-    """Validate a terminal or deferred task-resolution result.
+    """Validate the closed result mapping from DSH into Brain."""
 
-    A partial result is successful only when it retains at least one evidence
-    record with provenance.  This prevents completed-subgoal claims from
-    becoming an ungrounded visible outcome.
-    """
-
-    data = _require_mapping(value, "task_resolution_result")
-    _require_exact_keys(
-        data,
-        {
-            "schema_version",
-            "semantic_objective",
-            "status",
-            "scene_context",
-            "goal_continuation_ref",
-            "evidence_state",
-            "evidence_excerpts",
-            "evidence_handles",
-            "prompt_safe_summary",
-            "evidence",
-            "completed_subgoals",
-            "remaining_needs",
-            "checkpoint",
-            "coding_run_context",
-        },
-        "task_resolution_result",
-    )
-    _require_version(data, TASK_RESOLUTION_RESULT_VERSION)
-    semantic_objective = _require_text(data, "semantic_objective")
-    status = _require_enum(data, "status", TASK_RESOLUTION_STATUSES)
-    scene_context = _validate_scene_context_value(
-        data["scene_context"],
+    data = _mapping(value, "task_resolution_result")
+    _exact_keys(data, {
+        "schema_version",
+        "semantic_objective",
+        "status",
         "scene_context",
-    )
-    continuation_ref = _validate_goal_continuation_ref_value(
-        data["goal_continuation_ref"],
         "goal_continuation_ref",
-    )
-    evidence_state = _require_enum(
-        data,
         "evidence_state",
-        TASK_RESOLUTION_RESULT_EVIDENCE_STATES,
-    )
-    evidence = _validate_evidence_list(data, "evidence")
-    evidence_excerpts = _require_bounded_text_list(
-        data,
         "evidence_excerpts",
-    )
-    evidence_handles = _require_text_list(data, "evidence_handles")
-    completed_subgoals = _require_bounded_text_list(
-        data,
+        "evidence_handles",
+        "prompt_safe_summary",
+        "evidence",
         "completed_subgoals",
-    )
-    remaining_needs = _require_bounded_text_list(
-        data,
         "remaining_needs",
+        "checkpoint",
+        "coding_run_context",
+    }, "task_resolution_result")
+    _version(data, TASK_RESOLUTION_RESULT_VERSION, "task_resolution_result")
+    objective = _bounded_text(
+        data["semantic_objective"],
+        "task_resolution_result.semantic_objective",
     )
-    _validate_result_evidence_projection(
-        status=status,
-        evidence_state=evidence_state,
-        evidence=evidence,
-        evidence_excerpts=evidence_excerpts,
-        evidence_handles=evidence_handles,
-    )
-    if status == "resolved":
-        if not evidence:
-            raise TaskResolutionContractError(
-                "resolved task-resolution result requires validated evidence"
-            )
-        if remaining_needs:
-            raise TaskResolutionContractError(
-                "resolved task-resolution result cannot retain remaining needs"
-            )
-    if status == "partial":
-        if not evidence:
-            raise TaskResolutionContractError(
-                "partial task-resolution result requires validated evidence"
-            )
-        if not remaining_needs:
-            raise TaskResolutionContractError(
-                "partial task-resolution result requires remaining needs"
-            )
-    checkpoint = _validate_result_checkpoint(data)
-    if checkpoint:
-        _validate_result_checkpoint_binding(
-            checkpoint,
-            semantic_objective=semantic_objective,
-            scene_context=scene_context,
-            continuation_ref=continuation_ref,
-        )
-    if status == "deferred":
-        if not checkpoint:
-            raise TaskResolutionContractError(
-                "deferred task-resolution result requires a checkpoint"
-            )
-        dispatch_count = checkpoint["dispatch_count"]
-        if dispatch_count >= MAX_TASK_RESOLUTION_DISPATCHES:
-            raise TaskResolutionContractError(
-                "deferred checkpoint has exhausted dispatch budget"
-            )
-        if checkpoint["terminal_status"]:
-            raise TaskResolutionContractError(
-                "deferred checkpoint must remain nonterminal"
-            )
-        if (
-            checkpoint["orchestrator_call_count"]
-            >= MAX_TASK_RESOLUTION_ORCHESTRATOR_CALLS
-            and checkpoint["pending_dispatch"] is None
-        ):
-            raise TaskResolutionContractError(
-                "deferred checkpoint has exhausted orchestrator-call budget"
-            )
-    if status in {
-        "needs_user_input",
-        "approval_required",
-        "unavailable",
-        "failed",
-    } and not remaining_needs:
+    status = data["status"]
+    if status not in TASK_RESOLUTION_STATUSES:
+        raise TaskResolutionContractError("task_resolution_result.status is invalid")
+    evidence_state = data["evidence_state"]
+    if evidence_state not in TASK_RESOLUTION_EVIDENCE_STATES:
         raise TaskResolutionContractError(
-            "objective-scoped task status requires remaining needs"
+            "task_resolution_result.evidence_state is invalid",
         )
-    coding_run_context = _validate_result_coding_context(data)
-    normalized: TaskResolutionResultV1 = {
-        "schema_version": TASK_RESOLUTION_RESULT_VERSION,
-        "semantic_objective": semantic_objective,
-        "status": status,
-        "scene_context": scene_context,
-        "goal_continuation_ref": continuation_ref,
-        "evidence_state": evidence_state,
-        "evidence_excerpts": evidence_excerpts,
-        "evidence_handles": evidence_handles,
-        "prompt_safe_summary": _require_text(
-            data,
-            "prompt_safe_summary",
-            maximum=MAX_TASK_RESOLUTION_TEXT_CHARS,
-        ),
-        "evidence": evidence,
-        "completed_subgoals": completed_subgoals,
-        "remaining_needs": remaining_needs,
-        "checkpoint": checkpoint,
-        "coding_run_context": coding_run_context,
-    }
-    return normalized
-
-
-def validate_task_resolution_evidence(value: object) -> TaskResolutionEvidenceV1:
-    """Validate one provenance-bearing specialist evidence row."""
-
-    data = _require_mapping(value, "task_resolution_evidence")
-    _require_exact_keys(
-        data,
-        {
-            "schema_version",
-            "evidence_id",
-            "task_node_id",
-            "specialist",
-            "summary",
-            "provenance_refs",
-            "limitations",
-        },
-        "task_resolution_evidence",
-    )
-    _require_version(data, TASK_RESOLUTION_EVIDENCE_VERSION)
-    provenance_refs = _require_text_list(data, "provenance_refs")
-    if not provenance_refs:
-        raise TaskResolutionContractError(
-            "provenance_refs: evidence requires at least one provenance ref"
-        )
-    normalized: TaskResolutionEvidenceV1 = {
-        "schema_version": TASK_RESOLUTION_EVIDENCE_VERSION,
-        "evidence_id": _require_text(data, "evidence_id"),
-        "task_node_id": _require_text(data, "task_node_id"),
-        "specialist": _require_enum(data, "specialist", TASK_SPECIALISTS),
-        "summary": _require_text(
-            data,
-            "summary",
-            maximum=MAX_TASK_RESOLUTION_TEXT_CHARS,
-        ),
-        "provenance_refs": provenance_refs,
-        "limitations": _require_bounded_text_list(data, "limitations"),
-    }
-    return normalized
-
-
-def _validate_nodes(data: Mapping[str, object]) -> list[TaskResolutionNodeV1]:
-    """Validate the bounded node set stored in a checkpoint."""
-
-    raw_nodes = _require_list(data, "nodes")
-    if not raw_nodes or len(raw_nodes) > MAX_TASK_RESOLUTION_NODES:
-        raise TaskResolutionContractError("nodes: exceeds task-resolution cap")
-    nodes: list[TaskResolutionNodeV1] = []
-    node_ids: set[str] = set()
-    for raw_node in raw_nodes:
-        node = _validate_node(raw_node)
-        if node["node_id"] in node_ids:
-            raise TaskResolutionContractError("nodes: duplicate node_id")
-        node_ids.add(node["node_id"])
-        nodes.append(node)
-    for node in nodes:
-        for dependency_id in node["depends_on"]:
-            if dependency_id not in node_ids:
-                raise TaskResolutionContractError(
-                    "nodes.depends_on: expected an existing task node"
-                )
-    return nodes
-
-
-def _validate_node(value: object) -> TaskResolutionNodeV1:
-    """Validate one task node without cross-node reference checks."""
-
-    data = _require_mapping(value, "task_resolution_node")
-    _require_exact_keys(
-        data,
-        {"schema_version", "node_id", "objective", "status", "depends_on"},
-        "task_resolution_node",
-    )
-    _require_version(data, TASK_RESOLUTION_NODE_VERSION)
-    normalized: TaskResolutionNodeV1 = {
-        "schema_version": TASK_RESOLUTION_NODE_VERSION,
-        "node_id": _require_text(data, "node_id"),
-        "objective": _require_text(data, "objective"),
-        "status": _require_enum(data, "status", TASK_NODE_STATUSES),
-        "depends_on": _require_text_list(data, "depends_on"),
-    }
-    return normalized
-
-
-def _validate_evidence_list(
-    data: Mapping[str, object],
-    field_name: str,
-) -> list[TaskResolutionEvidenceV1]:
-    """Validate one bounded list of provenance-bearing evidence rows."""
-
-    raw_rows = _require_list(data, field_name)
-    if len(raw_rows) > MAX_TASK_RESOLUTION_EVIDENCE:
-        raise TaskResolutionContractError(
-            f"{field_name}: exceeds task-resolution evidence cap"
-        )
-    evidence: list[TaskResolutionEvidenceV1] = []
-    evidence_ids: set[str] = set()
-    for raw_row in raw_rows:
-        row = validate_task_resolution_evidence(raw_row)
-        if row["evidence_id"] in evidence_ids:
-            raise TaskResolutionContractError(f"{field_name}: duplicate evidence_id")
-        evidence_ids.add(row["evidence_id"])
-        evidence.append(row)
-    return evidence
-
-
-def _validate_pending_dispatch(
-    data: Mapping[str, object],
-) -> TaskPendingDispatchV1 | None:
-    """Validate the one durable selection that may cross a lease boundary."""
-
-    raw_pending_dispatch = data.get("pending_dispatch")
-    if raw_pending_dispatch is None:
-        return None
-    pending_dispatch = _require_mapping(
-        raw_pending_dispatch,
-        "pending_dispatch",
-    )
-    _require_exact_keys(
-        pending_dispatch,
-        {
-            "schema_version",
-            "task_node_id",
-            "specialist",
-            "subgoal",
-            "coding_objective_mode",
-            "phase",
-        },
-        "pending_dispatch",
-    )
-    _require_version(pending_dispatch, TASK_PENDING_DISPATCH_VERSION)
-    specialist = _require_enum(
-        pending_dispatch,
-        "specialist",
-        TASK_SPECIALISTS,
-    )
-    coding_objective_mode = _require_enum(
-        pending_dispatch,
-        "coding_objective_mode",
-        TASK_CODING_OBJECTIVE_MODES,
-    )
-    if specialist == "coding":
-        if coding_objective_mode not in TASK_CODING_SPECIALIST_OBJECTIVE_MODES:
-            raise TaskResolutionContractError(
-                "coding_objective_mode: coding requires read_only or propose_patch"
-            )
-    elif coding_objective_mode != "none":
-        raise TaskResolutionContractError(
-            "coding_objective_mode: non-coding specialists require none"
-        )
-    normalized: TaskPendingDispatchV1 = {
-        "schema_version": TASK_PENDING_DISPATCH_VERSION,
-        "task_node_id": _require_text(pending_dispatch, "task_node_id"),
-        "specialist": specialist,
-        "subgoal": _require_text(pending_dispatch, "subgoal"),
-        "coding_objective_mode": coding_objective_mode,
-        "phase": _require_enum(
-            pending_dispatch,
-            "phase",
-            TASK_PENDING_DISPATCH_PHASES,
-        ),
-    }
-    return normalized
-
-
-def _validate_attempted_specialists(
-    data: Mapping[str, object],
-) -> list[TaskSpecialistAttemptV1]:
-    """Validate the durable non-repeat ledger for incompatible dispatches."""
-
-    raw_rows = _require_list(data, "attempted_specialists")
-    if len(raw_rows) > MAX_TASK_RESOLUTION_DISPATCHES:
-        raise TaskResolutionContractError(
-            "attempted_specialists: exceeds dispatch cap"
-        )
-    attempts: list[TaskSpecialistAttemptV1] = []
-    pairs: set[tuple[str, str]] = set()
-    for raw_row in raw_rows:
-        row = _require_mapping(raw_row, "attempted_specialists")
-        _require_exact_keys(
-            row,
-            {"task_node_id", "specialist"},
-            "attempted_specialists",
-        )
-        task_node_id = _require_text(row, "task_node_id")
-        specialist = _require_enum(row, "specialist", TASK_SPECIALISTS)
-        pair = (task_node_id, specialist)
-        if pair in pairs:
-            raise TaskResolutionContractError(
-                "attempted_specialists: duplicate task node and specialist pair"
-            )
-        pairs.add(pair)
-        attempts.append({
-            "task_node_id": task_node_id,
-            "specialist": specialist,
-        })
-    return attempts
-
-
-def _validate_invocation_counts(
-    data: Mapping[str, object],
-) -> list[TaskSpecialistInvocationCountV1]:
-    """Validate same-specialist invocation counts for every task node."""
-
-    raw_rows = _require_list(data, "specialist_invocation_counts")
-    if len(raw_rows) > MAX_TASK_RESOLUTION_NODES:
-        raise TaskResolutionContractError(
-            "specialist_invocation_counts: exceeds node cap"
-        )
-    counts: list[TaskSpecialistInvocationCountV1] = []
-    pairs: set[tuple[str, str]] = set()
-    for raw_row in raw_rows:
-        row = _require_mapping(raw_row, "specialist_invocation_counts")
-        _require_exact_keys(
-            row,
-            {"task_node_id", "specialist", "count"},
-            "specialist_invocation_counts",
-        )
-        task_node_id = _require_text(row, "task_node_id")
-        specialist = _require_enum(row, "specialist", TASK_SPECIALISTS)
-        count = _require_positive_int(row, "count")
-        if count > MAX_TASK_RESOLUTION_SPECIALIST_INVOCATIONS:
-            raise TaskResolutionContractError(
-                "specialist_invocation_counts.count: exceeds specialist cap"
-            )
-        pair = (task_node_id, specialist)
-        if pair in pairs:
-            raise TaskResolutionContractError(
-                "specialist_invocation_counts: duplicate task node and specialist pair"
-            )
-        pairs.add(pair)
-        counts.append({
-            "task_node_id": task_node_id,
-            "specialist": specialist,
-            "count": count,
-        })
-    return counts
-
-
-def _validate_trace_entries(
-    data: Mapping[str, object],
-) -> list[TaskResolutionTraceEntryV1]:
-    """Validate prompt-safe trace rows without raw worker diagnostics."""
-
-    raw_rows = _require_list(data, "trace_summary")
-    if len(raw_rows) > MAX_TASK_RESOLUTION_TRACE_ENTRIES:
-        raise TaskResolutionContractError("trace_summary: exceeds dispatch cap")
-    traces: list[TaskResolutionTraceEntryV1] = []
-    for index, raw_row in enumerate(raw_rows, start=1):
-        row = _require_mapping(raw_row, "trace_summary")
-        _require_exact_keys(
-            row,
-            {
-                "dispatch_index",
-                "task_node_id",
-                "specialist",
-                "result_status",
-                "reason",
-            },
-            "trace_summary",
-        )
-        dispatch_index = _require_positive_int(row, "dispatch_index")
-        if dispatch_index != index:
-            raise TaskResolutionContractError(
-                "trace_summary.dispatch_index: expected contiguous values"
-            )
-        traces.append({
-            "dispatch_index": dispatch_index,
-            "task_node_id": _require_text(row, "task_node_id"),
-            "specialist": _require_enum(row, "specialist", TASK_SPECIALISTS),
-            "result_status": _require_enum(
-                row,
-                "result_status",
-                TASK_SPECIALIST_STATUSES,
-            ),
-            "reason": _require_text(
-                row,
-                "reason",
-                maximum=MAX_TASK_RESOLUTION_REASON_CHARS,
-            ),
-        })
-    return traces
-
-
-def _validate_checkpoint_node_references(
-    *,
-    node_ids: set[str],
-    evidence: Sequence[TaskResolutionEvidenceV1],
-    attempted_specialists: Sequence[TaskSpecialistAttemptV1],
-    invocation_counts: Sequence[TaskSpecialistInvocationCountV1],
-    trace_summary: Sequence[TaskResolutionTraceEntryV1],
-    pending_dispatch: TaskPendingDispatchV1 | None,
-) -> None:
-    """Require every persisted specialist row to target a declared task node."""
-
-    rows_by_label: tuple[tuple[str, Sequence[Mapping[str, object]]], ...] = (
-        ("evidence", evidence),
-        ("attempted_specialists", attempted_specialists),
-        ("specialist_invocation_counts", invocation_counts),
-        ("trace_summary", trace_summary),
-    )
-    for label, rows in rows_by_label:
-        for row in rows:
-            task_node_id = row["task_node_id"]
-            if task_node_id not in node_ids:
-                raise TaskResolutionContractError(
-                    f"{label}.task_node_id: expected an existing task node"
-                )
-    if (
-        pending_dispatch is not None
-        and pending_dispatch["task_node_id"] not in node_ids
-    ):
-        raise TaskResolutionContractError(
-            "pending_dispatch.task_node_id: expected an existing task node"
-        )
-
-
-def _validate_checkpoint_counters(
-    *,
-    dispatch_count: int,
-    route_correction_count: int,
-    attempted_specialists: Sequence[TaskSpecialistAttemptV1],
-    invocation_counts: Sequence[TaskSpecialistInvocationCountV1],
-    trace_summary: Sequence[TaskResolutionTraceEntryV1],
-    pending_dispatch: TaskPendingDispatchV1 | None,
-) -> None:
-    """Require counters and durable ledgers to represent the same dispatches."""
-
-    started_dispatch = (
-        pending_dispatch
-        if pending_dispatch is not None and pending_dispatch["phase"] == "started"
-        else None
-    )
-    expected_trace_total = len(trace_summary) + (1 if started_dispatch else 0)
-    if dispatch_count != expected_trace_total:
-        raise TaskResolutionContractError(
-            "dispatch_count: expected the completed and started dispatch total"
-        )
-    invocation_total = sum(row["count"] for row in invocation_counts)
-    if dispatch_count != invocation_total:
-        raise TaskResolutionContractError(
-            "dispatch_count: expected the specialist invocation total"
-        )
-    if route_correction_count != len(attempted_specialists):
-        raise TaskResolutionContractError(
-            "route_correction_count: expected attempted_specialists total"
-        )
-    _validate_trace_invocation_pairs(
-        invocation_counts,
-        trace_summary,
-        started_dispatch=started_dispatch,
-    )
-    _validate_attempt_trace_pairs(attempted_specialists, trace_summary)
-
-
-def _validate_trace_invocation_pairs(
-    invocation_counts: Sequence[TaskSpecialistInvocationCountV1],
-    trace_summary: Sequence[TaskResolutionTraceEntryV1],
-    *,
-    started_dispatch: TaskPendingDispatchV1 | None,
-) -> None:
-    """Require persisted invocation rows to equal the trace pair counts."""
-
-    trace_counts: dict[tuple[str, str], int] = {}
-    for trace_row in trace_summary:
-        pair = (trace_row["task_node_id"], trace_row["specialist"])
-        trace_counts[pair] = trace_counts.get(pair, 0) + 1
-    if started_dispatch is not None:
-        started_pair = (
-            started_dispatch["task_node_id"],
-            started_dispatch["specialist"],
-        )
-        trace_counts[started_pair] = trace_counts.get(started_pair, 0) + 1
-    persisted_counts = {
-        (row["task_node_id"], row["specialist"]): row["count"]
-        for row in invocation_counts
-    }
-    if persisted_counts != trace_counts:
-        raise TaskResolutionContractError(
-            "specialist_invocation_counts: expected trace_summary pair counts"
-        )
-
-
-def _validate_attempt_trace_pairs(
-    attempted_specialists: Sequence[TaskSpecialistAttemptV1],
-    trace_summary: Sequence[TaskResolutionTraceEntryV1],
-) -> None:
-    """Require each retained incompatible pair to have an incompatible trace."""
-
-    incompatible_pairs = {
-        (trace_row["task_node_id"], trace_row["specialist"])
-        for trace_row in trace_summary
-        if trace_row["result_status"] == "incompatible"
-    }
-    for attempt in attempted_specialists:
-        pair = (attempt["task_node_id"], attempt["specialist"])
-        if pair not in incompatible_pairs:
-            raise TaskResolutionContractError(
-                "attempted_specialists: expected an incompatible trace"
-            )
-
-
-def _validate_source_scope(
-    data: Mapping[str, object],
-    field_name: str,
-) -> dict[str, str]:
-    """Validate the trusted requester and conversation scope for one task."""
-
-    scope = _require_mapping(data.get(field_name), field_name)
-    _require_exact_keys(
-        scope,
-        {
-            "trigger_source",
-            "platform",
-            "channel_id",
-            "channel_type",
-            "source_message_id",
-            "requester_global_user_id",
-            "requester_platform_user_id",
-        },
-        field_name,
-    )
-    normalized = {
-        "trigger_source": _require_text(scope, "trigger_source"),
-        "platform": _require_text(scope, "platform"),
-        "channel_id": _require_text(scope, "channel_id"),
-        "channel_type": _require_text(scope, "channel_type"),
-        "source_message_id": _require_text(scope, "source_message_id"),
-        "requester_global_user_id": _require_text(
-            scope,
-            "requester_global_user_id",
-        ),
-        "requester_platform_user_id": _require_text(
-            scope,
-            "requester_platform_user_id",
-        ),
-    }
-    return normalized
-
-
-def _validate_specialist_coding_context(
-    data: Mapping[str, object],
-    *,
-    specialist: str,
-) -> dict[str, object]:
-    """Accept coding-run context only from the frozen coding adapter."""
-
-    raw_context = data.get("coding_run_context", {})
-    context = _require_mapping(raw_context, "coding_run_context")
-    if specialist != "coding" and context:
-        raise TaskResolutionContractError(
-            "coding_run_context: only the coding specialist may emit it"
-        )
-    if not context:
-        return {}
-    return _validate_coding_run_context(context)
-
-
-def _validate_result_coding_context(
-    data: Mapping[str, object],
-) -> dict[str, object]:
-    """Validate a prompt-safe coding-run projection in a final result."""
-
-    raw_context = data["coding_run_context"]
-    context = _require_mapping(raw_context, "coding_run_context")
-    if not context:
-        return {}
-    normalized = _validate_coding_run_context(context)
-    return normalized
-
-
-def _validate_result_evidence_projection(
-    *,
-    status: str,
-    evidence_state: str,
-    evidence: list[TaskResolutionEvidenceV1],
-    evidence_excerpts: list[str],
-    evidence_handles: list[str],
-) -> None:
-    """Keep result-visible evidence tied to validated task evidence only."""
-
     expected_state = {
         "resolved": "complete",
         "partial": "partial",
-        "deferred": "pending",
-        "needs_user_input": "blocked",
-        "approval_required": "blocked",
-        "unavailable": "blocked",
+        "needs_user_input": "pending",
+        "approval_required": "pending",
+        "unavailable": "missing",
         "failed": "blocked",
-    }[status]
+        "deferred": "pending",
+    }[str(status)]
     if evidence_state != expected_state:
         raise TaskResolutionContractError(
-            "evidence_state: does not match task-resolution status"
+            "task_resolution_result status/evidence_state mismatch",
         )
-    if evidence_state not in {"complete", "partial"}:
-        if evidence_excerpts or evidence_handles:
-            raise TaskResolutionContractError(
-                "non-factual task state cannot expose evidence excerpts or handles"
-            )
-        return
-    expected_excerpts = [row["summary"] for row in evidence]
-    expected_handles = [row["evidence_id"] for row in evidence]
-    if evidence_excerpts != expected_excerpts:
+    scene = data["scene_context"]
+    try:
+        _validate_scene_context(scene)
+    except (TypeError, ValueError) as exc:
         raise TaskResolutionContractError(
-            "evidence_excerpts: expected validated evidence summaries"
-        )
-    if evidence_handles != expected_handles:
-        raise TaskResolutionContractError(
-            "evidence_handles: expected validated evidence identifiers"
-        )
-
-
-def _validate_result_checkpoint_binding(
-    checkpoint: dict[str, object],
-    *,
-    semantic_objective: str,
-    scene_context: SceneContextV2,
-    continuation_ref: GoalContinuationRefV1,
-) -> None:
-    """Require a result checkpoint to retain the same task context lineage."""
-
-    if checkpoint["semantic_objective"] != semantic_objective:
-        raise TaskResolutionContractError(
-            "checkpoint.semantic_objective: conflicts with result"
-        )
-    if checkpoint["scene_context"] != scene_context:
-        raise TaskResolutionContractError(
-            "checkpoint.scene_context: conflicts with result"
-        )
-    if checkpoint["goal_continuation_ref"] != continuation_ref:
-        raise TaskResolutionContractError(
-            "checkpoint.goal_continuation_ref: conflicts with result"
-        )
-
-
-def _validate_coding_run_context(
-    context: Mapping[str, object],
-) -> dict[str, object]:
-    """Validate the stable public coding-run projection used by this package."""
-
-    _require_exact_keys(
-        context,
-        {
-            "schema_version",
-            "coding_run_ref",
-            "status",
-            "summary",
-            "limitations",
-            "allowed_next_actions",
-            "followup_open",
-        },
-        "coding_run_context",
+            f"task result scene_context is invalid: {exc}",
+        ) from exc
+    goal = _goal_ref(
+        data["goal_continuation_ref"],
+        "task_resolution_result.goal_continuation_ref",
     )
-    _require_version(context, CODING_RUN_CONTEXT_VERSION)
-    allowed_actions = _require_text_list(context, "allowed_next_actions")
-    limitations = _require_bounded_text_list(context, "limitations")
-    normalized = {
-        "schema_version": CODING_RUN_CONTEXT_VERSION,
-        "coding_run_ref": _require_text(context, "coding_run_ref"),
-        "status": _require_text(context, "status"),
-        "summary": _require_text(
-            context,
-            "summary",
-            maximum=MAX_TASK_RESOLUTION_TEXT_CHARS,
-        ),
-        "limitations": limitations,
-        "allowed_next_actions": allowed_actions,
-        "followup_open": _require_bool(context, "followup_open"),
+    excerpts = _bounded_text_list(
+        data["evidence_excerpts"],
+        "task_resolution_result.evidence_excerpts",
+    )
+    handles = _bounded_text_list(
+        data["evidence_handles"],
+        "task_resolution_result.evidence_handles",
+    )
+    if len(set(handles)) != len(handles):
+        raise TaskResolutionContractError("task result evidence handles must be unique")
+    summary = _bounded_text(
+        data["prompt_safe_summary"],
+        "task_resolution_result.prompt_safe_summary",
+    )
+    evidence_value = data["evidence"]
+    if not isinstance(evidence_value, list) or len(evidence_value) > MAX_TASK_RESOLUTION_LIST_ITEMS:
+        raise TaskResolutionContractError("task result evidence is out of bounds")
+    evidence = [validate_task_resolution_evidence(item) for item in evidence_value]
+    completed = _bounded_text_list(
+        data["completed_subgoals"],
+        "task_resolution_result.completed_subgoals",
+    )
+    remaining = _bounded_text_list(
+        data["remaining_needs"],
+        "task_resolution_result.remaining_needs",
+    )
+    checkpoint = _dict(data["checkpoint"], "task_resolution_result.checkpoint")
+    if status == "deferred":
+        validate_dsh_resolution_ref(checkpoint)
+    elif checkpoint:
+        raise TaskResolutionContractError(
+            "task result checkpoint is only valid for deferred results",
+        )
+    coding_context = _dict(
+        data["coding_run_context"],
+        "task_resolution_result.coding_run_context",
+    )
+    if coding_context:
+        raise TaskResolutionContractError(
+            "task result coding_run_context must remain empty",
+        )
+    if status == "partial" and not evidence:
+        raise TaskResolutionContractError(
+            "partial task result requires DSH evidence",
+        )
+    return {
+        "schema_version": TASK_RESOLUTION_RESULT_VERSION,
+        "semantic_objective": objective,
+        "status": cast(Any, status),
+        "scene_context": cast("SceneContextV2", dict(scene)),
+        "goal_continuation_ref": goal,
+        "evidence_state": cast(Any, evidence_state),
+        "evidence_excerpts": excerpts,
+        "evidence_handles": handles,
+        "prompt_safe_summary": summary,
+        "evidence": evidence,
+        "completed_subgoals": completed,
+        "remaining_needs": remaining,
+        "checkpoint": checkpoint,
+        "coding_run_context": {},
     }
-    return normalized
 
 
-def _validate_result_checkpoint(
-    data: Mapping[str, object],
-) -> dict[str, object]:
-    """Validate an optional checkpoint attached to a result envelope."""
+def _resolver_request(value: object) -> ResolverCapabilityRequestV2:
+    """Validate the task-resolution request embedded by the host."""
 
-    raw_checkpoint = data["checkpoint"]
-    checkpoint = _require_mapping(raw_checkpoint, "checkpoint")
-    if not checkpoint:
-        return {}
-    validated = validate_task_resolution_checkpoint(checkpoint)
-    normalized = cast(dict[str, object], dict(validated))
-    return normalized
-
-
-def _validate_scene_context_value(
-    value: object,
-    field_name: str,
-) -> SceneContextV2:
-    """Reuse the canonical bounded scene validator at this public boundary."""
-
-    if not isinstance(value, Mapping):
-        raise TaskResolutionContractError(f"{field_name}: expected object")
-
-    # Local import only: a module-scope import would cycle through
-    # cognition_core_v3.facade -> llm_tracing -> db.background_work_jobs,
-    # which imports this module.
-    from kazusa_ai_chatbot.cognition_shared.contracts import (
-        CognitionContractError,
-        _validate_scene_context,
+    data = _mapping(value, "dsh_task_start_spec.resolver_request")
+    _exact_keys(data, {
+        "capability",
+        "semantic_goal",
+        "reason",
+        "evidence_handles",
+        "start_in_background",
+        "goal_continuation_ref",
+    }, "resolver_request")
+    if data["capability"] != "task_resolution_request":
+        raise TaskResolutionContractError(
+            "resolver_request.capability must be task_resolution_request",
+        )
+    if not isinstance(data["start_in_background"], bool):
+        raise TaskResolutionContractError(
+            "resolver_request.start_in_background must be boolean",
+        )
+    continuation = _goal_ref(
+        data["goal_continuation_ref"],
+        "resolver_request.goal_continuation_ref",
     )
+    return {
+        "capability": "task_resolution_request",
+        "semantic_goal": _bounded_text(
+            data["semantic_goal"], "resolver_request.semantic_goal",
+        ),
+        "reason": _bounded_text(data["reason"], "resolver_request.reason"),
+        "evidence_handles": _bounded_text_list(
+            data["evidence_handles"], "resolver_request.evidence_handles",
+        ),
+        "start_in_background": data["start_in_background"],
+        "goal_continuation_ref": continuation,
+    }
+
+
+def _goal_ref(value: object, field: str) -> GoalContinuationRefV1:
+    """Validate a continuation reference and translate its errors."""
 
     try:
-        _validate_scene_context(value)
-    except CognitionContractError as exc:
-        raise TaskResolutionContractError(
-            f"{field_name}: invalid canonical scene context: {exc}"
-        ) from exc
-    return cast("SceneContextV2", dict(value))
+        return validate_goal_continuation_ref(value)
+    except (TypeError, ValueError) as exc:
+        raise TaskResolutionContractError(f"{field} is invalid: {exc}") from exc
 
 
-def _validate_goal_continuation_ref_value(
-    value: object,
-    field_name: str,
-) -> GoalContinuationRefV1:
-    """Require one exact deterministic continuation reference."""
-
-    try:
-        continuation_ref = validate_goal_continuation_ref(value)
-    except CognitiveEpisodeValidationError as exc:
-        raise TaskResolutionContractError(
-            f"{field_name}: invalid goal continuation reference: {exc}"
-        ) from exc
-    return continuation_ref
-
-
-def _require_mapping(value: object, label: str) -> dict[str, object]:
-    """Return a mutable mapping or raise a precise contract error."""
-
+def _mapping(value: object, field: str) -> dict[str, object]:
     if not isinstance(value, Mapping):
-        raise TaskResolutionContractError(f"{label}: expected object")
-    normalized = dict(value)
-    return normalized
+        raise TaskResolutionContractError(f"{field} must be an object")
+    return dict(value)
 
 
-def _require_list(data: Mapping[str, object], field_name: str) -> list[object]:
-    """Return a list field or raise a precise contract error."""
+def _dict(value: object, field: str) -> dict[str, object]:
+    return _mapping(value, field)
 
-    value = data.get(field_name)
+
+def _exact_keys(
+    data: Mapping[str, object],
+    expected: set[str],
+    field: str,
+) -> None:
+    if set(data) != expected:
+        missing = sorted(expected - set(data))
+        extra = sorted(set(data) - expected)
+        detail = f"missing={missing}" if missing else f"unknown={extra}"
+        raise TaskResolutionContractError(f"{field} fields are not exact: {detail}")
+
+
+def _version(data: Mapping[str, object], expected: str, field: str) -> None:
+    if data.get("schema_version") != expected:
+        raise TaskResolutionContractError(f"{field}.schema_version is invalid")
+
+
+def _text(value: object, field: str, *, empty: bool = False) -> str:
+    if not isinstance(value, str) or (not empty and not value.strip()):
+        raise TaskResolutionContractError(f"{field} must be a non-empty string")
+    return value
+
+
+def _bounded_text(value: object, field: str) -> str:
+    text = _text(value, field)
+    if len(text) > MAX_TASK_RESOLUTION_TEXT_CHARS:
+        raise TaskResolutionContractError(f"{field} exceeds its bound")
+    return text
+
+
+def _integer(value: object, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TaskResolutionContractError(f"{field} must be an integer")
+    return value
+
+
+def _text_list(value: object, field: str) -> list[str]:
     if not isinstance(value, list):
-        raise TaskResolutionContractError(f"{field_name}: expected list")
-    normalized = list(value)
-    return normalized
-
-
-def _require_dict(data: Mapping[str, object], field_name: str) -> dict[str, object]:
-    """Return one required mapping field."""
-
-    value = data.get(field_name)
-    normalized = _require_mapping(value, field_name)
-    return normalized
-
-
-def _require_text(
-    data: Mapping[str, object],
-    field_name: str,
-    *,
-    allow_empty: bool = False,
-    maximum: int = MAX_TASK_RESOLUTION_TEXT_CHARS,
-) -> str:
-    """Return one bounded semantic string from a typed payload."""
-
-    value = data.get(field_name)
-    if not isinstance(value, str):
-        raise TaskResolutionContractError(f"{field_name}: expected string")
-    normalized = value.strip()
-    if (not allow_empty and not normalized) or len(normalized) > maximum:
-        raise TaskResolutionContractError(f"{field_name}: invalid text")
-    return normalized
-
-
-def _require_text_list(
-    data: Mapping[str, object],
-    field_name: str,
-) -> list[str]:
-    """Return one bounded list of non-empty semantic strings."""
-
-    return _normalize_text_list(_require_list(data, field_name), field_name)
-
-
-def _require_bounded_text_list(
-    data: Mapping[str, object],
-    field_name: str,
-) -> list[str]:
-    """Return one bounded list of short prompt-safe semantic strings."""
-
-    return _normalize_text_list(_require_list(data, field_name), field_name)
-
-
-def _normalize_text_list(values: Sequence[object], field_name: str) -> list[str]:
-    """Normalize one short semantic text list with strict structural bounds."""
-
-    if len(values) > MAX_TASK_RESOLUTION_TEXT_ITEMS:
-        raise TaskResolutionContractError(
-            f"{field_name}: exceeds task-resolution text-item cap"
-        )
+        raise TaskResolutionContractError(f"{field} must be a list")
     normalized: list[str] = []
-    for value in values:
-        if not isinstance(value, str):
-            raise TaskResolutionContractError(
-                f"{field_name}: expected strings"
-            )
-        item = value.strip()
-        if not item or len(item) > MAX_TASK_RESOLUTION_TEXT_CHARS:
-            raise TaskResolutionContractError(f"{field_name}: invalid text item")
-        normalized.append(item)
+    for index, item in enumerate(value):
+        normalized.append(_text(item, f"{field}[{index}]"))
     return normalized
 
 
-def _require_mapping_list(
-    data: Mapping[str, object],
-    field_name: str,
-) -> list[dict[str, object]]:
-    """Return one bounded mapping list used by trusted context adapters."""
-
-    values = _require_list(data, field_name)
-    if len(values) > MAX_TASK_RESOLUTION_TEXT_ITEMS:
-        raise TaskResolutionContractError(
-            f"{field_name}: exceeds task-resolution context cap"
-        )
-    normalized: list[dict[str, object]] = []
-    for value in values:
-        row = _require_mapping(value, field_name)
-        normalized.append(row)
-    return normalized
+def _bounded_text_list(value: object, field: str) -> list[str]:
+    normalized = _text_list(value, field)
+    if len(normalized) > MAX_TASK_RESOLUTION_LIST_ITEMS:
+        raise TaskResolutionContractError(f"{field} exceeds its item bound")
+    return [
+        _bounded_text(item, f"{field}[{index}]")
+        for index, item in enumerate(normalized)
+    ]
 
 
-def _require_positive_int(data: Mapping[str, object], field_name: str) -> int:
-    """Return one positive integer field."""
-
-    value = data.get(field_name)
-    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
-        raise TaskResolutionContractError(
-            f"{field_name}: expected positive integer"
-        )
-    return value
+def _mapping_list(value: object, field: str) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        raise TaskResolutionContractError(f"{field} must be a list")
+    return [_mapping(item, f"{field}[{index}]") for index, item in enumerate(value)]
 
 
-def _require_nonnegative_int(data: Mapping[str, object], field_name: str) -> int:
-    """Return one non-negative integer field."""
-
-    value = data.get(field_name)
-    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
-        raise TaskResolutionContractError(
-            f"{field_name}: expected non-negative integer"
-        )
-    return value
-
-
-def _require_bool(data: Mapping[str, object], field_name: str) -> bool:
-    """Return one exact boolean field."""
-
-    value = data.get(field_name)
-    if not isinstance(value, bool):
-        raise TaskResolutionContractError(f"{field_name}: expected boolean")
-    return value
-
-
-def _require_enum(
-    data: Mapping[str, object],
-    field_name: str,
-    allowed_values: frozenset[str],
-) -> str:
-    """Return one closed semantic enum field."""
-
-    value = data.get(field_name)
-    if not isinstance(value, str) or value not in allowed_values:
-        raise TaskResolutionContractError(f"{field_name}: unsupported value")
-    return value
-
-
-def _require_version(data: Mapping[str, object], version: str) -> None:
-    """Require one exact version marker on a typed public envelope."""
-
-    schema_version = data.get("schema_version")
-    if schema_version != version:
-        raise TaskResolutionContractError(
-            f"schema_version: expected {version}"
-        )
-
-
-def _require_exact_keys(
-    data: Mapping[str, object],
-    required_keys: set[str],
-    label: str,
-) -> None:
-    """Require one payload to contain exactly its declared public fields."""
-
-    _require_required_keys(data, required_keys, label)
-    _require_allowed_keys(data, required_keys, label)
-
-
-def _require_required_keys(
-    data: Mapping[str, object],
-    required_keys: set[str],
-    label: str,
-) -> None:
-    """Require every declared mandatory field on one payload."""
-
-    missing = sorted(required_keys - set(data))
-    if missing:
-        raise TaskResolutionContractError(
-            f"{label}: missing required fields: {', '.join(missing)}"
-        )
-
-
-def _require_allowed_keys(
-    data: Mapping[str, object],
-    allowed_keys: set[str],
-    label: str,
-) -> None:
-    """Reject undeclared fields that could leak runtime implementation data."""
-
-    unsupported = sorted(set(data) - allowed_keys)
-    if unsupported:
-        raise TaskResolutionContractError(
-            f"{unsupported[0]}: unsupported {label} field"
-        )
+__all__ = [
+    "AcceptedTaskControlV1",
+    "DshResolutionRefV1",
+    "DshTaskSourceScopeV1",
+    "DshTaskStartSpecV1",
+    "TaskResolutionAdmissionV1",
+    "TaskResolutionContractError",
+    "TaskResolutionEvidenceV1",
+    "TaskResolutionExecutionContextV2",
+    "TaskResolutionResultV1",
+    "validate_accepted_task_control",
+    "validate_dsh_resolution_ref",
+    "validate_dsh_task_source_scope",
+    "validate_dsh_task_start_spec",
+    "validate_task_resolution_admission",
+    "validate_task_resolution_evidence",
+    "validate_task_resolution_execution_context",
+    "validate_task_resolution_result",
+]

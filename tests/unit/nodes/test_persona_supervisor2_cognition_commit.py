@@ -7,12 +7,18 @@ from copy import deepcopy
 
 import pytest
 
+from kazusa_ai_chatbot.cognition_episode import (
+    build_goal_continuation_ref,
+    build_tool_result_episode,
+    validate_cognitive_episode_v1,
+)
 from kazusa_ai_chatbot.cognition_resolver import capabilities
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     SharedMemoryPrewarmOutcomeV1,
 )
 from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionContractError,
+    CognitionExecutionError,
     _validate_evidence_rows,
 )
 from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
@@ -140,6 +146,59 @@ def _global_state(*, cycle_index: int) -> dict[str, object]:
         "character_identity_epistemic_core_included": False,
     }
     return state
+
+
+def test_tool_result_selects_delivery_variant_and_rejects_pending_state() -> None:
+    """A result episode closes resolver-pending lifecycle selection."""
+
+    state = _global_state(cycle_index=0)
+    state["cognitive_episode"] = build_tool_result_episode(
+        result={
+            "schema_version": "tool_result_ready.v1",
+            "task_id": "tool-result-delivery-test",
+            "task_kind": "task_resolution",
+            "semantic_summary": "The bounded task returned its evidence.",
+            "artifact_text": "",
+            "failure_text": "",
+            "completed_at": "2026-07-14T00:00:00Z",
+            "target_scope": state["cognitive_episode"]["target_scope"],
+            "evidence_refs": [],
+            "result_ref": "tool-result-delivery-test",
+            "source_platform_bot_id": "bot-1",
+            "source_character_name": "Test Character",
+            "source_message_id": "tool-result-source-message",
+            "goal_continuation_ref": build_goal_continuation_ref(
+                source_episode_id="tool-result-source-episode",
+                source_message_id="tool-result-source-message",
+                branch_id="ordinary_response",
+                goal_ref={
+                    "scope": "user",
+                    "kind": "goal",
+                    "entity_id": "tool-result-delivery-goal",
+                },
+            ),
+        },
+        evidence_refs=[],
+        local_time_context={
+            "current_local_datetime": "2026-07-14 12:00",
+            "current_local_weekday": "Tuesday",
+        },
+        created_at="2026-07-14T00:00:00Z",
+    )
+
+    validate_cognitive_episode_v1(state["cognitive_episode"])
+    assert cognition_node._response_plan_contract_variant(state) == (
+        "tool_result_delivery"
+    )
+
+    with pytest.raises(
+        CognitionExecutionError,
+        match="tool result delivery cannot carry pending resolver lifecycle state",
+    ):
+        cognition_node._response_plan_contract_variant({
+            **state,
+            "pending_resolver_resume": {},
+        })
 
 
 def _historical_prewarm_state() -> dict[str, object]:

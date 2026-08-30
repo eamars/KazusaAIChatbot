@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from typing import Annotated, Literal, NotRequired, TypedDict
 
 from kazusa_ai_chatbot.action_spec.models import ActionSpecV1
@@ -9,12 +10,13 @@ from kazusa_ai_chatbot.action_spec.results import (
 )
 from kazusa_ai_chatbot.cognition_episode import CognitiveEpisodeV1
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
+    PendingTaskContinuationV1,
     ResolverCapabilityRequestV1,
     ResolverCycleStateV1,
     ResolverCycleTraceV1,
     ResolverGoalProgressV1,
     ResolverPendingResolutionV1,
-    ResolverPendingResumeV1,
+    ResolverPendingResumeV3,
     SharedMemoryPrewarmOutcomeV1,
 )
 from kazusa_ai_chatbot.cognition_shared.contracts import (
@@ -50,7 +52,7 @@ ReferentRole = Literal["subject", "object", "time"]
 class DshPendingInteractionContext(TypedDict, total=False):
     """Bounded untrusted DSH interaction context projected into cognition."""
 
-    schema_version: Literal["dsh_brain_interaction.v1"]
+    schema_version: Literal["dsh_brain_interaction.v2"]
     interaction_id: str
     kind: Literal["approval", "question", "plan_review"]
     resolution_thread_id: str
@@ -84,17 +86,75 @@ class DshPendingInteractionContext(TypedDict, total=False):
 class DshSemanticInteractionDecision(TypedDict, total=False):
     """Brain-owned semantic disposition for one DSH interaction."""
 
-    schema_version: Literal["dsh_brain_interaction.v1"]
+    schema_version: Literal["dsh_brain_interaction.v2"]
     interaction_id: str
     request_digest: str
     kind: Literal["approval", "question", "plan_review"]
     decision: Literal[
-        "answer", "allow_once", "reject", "relay_to_user", "continue_waiting",
+        "answer", "allow_once", "reject",
     ]
     answer: str | None
-    response_goal: str | None
-    relay_mode: Literal["question", "approval", "plan_review"] | None
     reason: str
+
+
+class DshTaskActionSelectionContextV1(TypedDict):
+    """Prompt-safe accepted-task affordances available to this turn."""
+
+    dsh_tasks: list[dict[str, object]]
+
+
+_DSH_TASK_AFFORDANCE_FIELDS = {
+    "schema_version",
+    "accepted_task_ref",
+    "task_state",
+    "objective_summary",
+    "latest_summary",
+    "allowed_next_actions",
+    "followup_open",
+    "updated_at",
+}
+_DSH_TASK_ACTIONS = {"continue", "summarize", "cancel"}
+
+
+def validate_dsh_task_action_selection_context(
+    value: object,
+) -> DshTaskActionSelectionContextV1:
+    """Validate the closed DSH affordance context before prompt projection."""
+
+    if not isinstance(value, Mapping) or set(value) != {"dsh_tasks"}:
+        raise ValueError("dsh task action selection context fields are not exact")
+    raw_tasks = value["dsh_tasks"]
+    if not isinstance(raw_tasks, list) or len(raw_tasks) > 3:
+        raise ValueError("dsh_tasks must be a bounded list")
+    tasks: list[dict[str, object]] = []
+    for raw_task in raw_tasks:
+        if not isinstance(raw_task, Mapping) or set(raw_task) != _DSH_TASK_AFFORDANCE_FIELDS:
+            raise ValueError("DSH task affordance fields are not exact")
+        if raw_task.get("schema_version") != "dsh_accepted_task_affordance.v1":
+            raise ValueError("DSH task affordance schema is invalid")
+        ref = raw_task.get("accepted_task_ref")
+        if not isinstance(ref, str) or not ref.startswith("accepted_task:"):
+            raise ValueError("DSH task affordance reference is invalid")
+        for field_name in (
+            "task_state",
+            "objective_summary",
+            "latest_summary",
+            "updated_at",
+        ):
+            field_value = raw_task.get(field_name)
+            if not isinstance(field_value, str):
+                raise TypeError(f"DSH task affordance {field_name} is invalid")
+        actions = raw_task.get("allowed_next_actions")
+        if (
+            not isinstance(actions, list)
+            or any(action not in _DSH_TASK_ACTIONS for action in actions)
+            or len(actions) != len(set(actions))
+        ):
+            raise TypeError("DSH task affordance actions are invalid")
+        if not isinstance(raw_task.get("followup_open"), bool):
+            raise TypeError("DSH task affordance followup_open is invalid")
+        tasks.append(dict(raw_task))
+    return {"dsh_tasks": tasks}
 
 
 class ReferentResolution(TypedDict, total=False):
@@ -179,8 +239,11 @@ class GlobalPersonaState(TypedDict):
     interaction_style_context: NotRequired[dict]
     settled_relevance_context_consumption: NotRequired[dict]
     pending_dsh_interaction: NotRequired[DshPendingInteractionContext]
-    pending_dsh_reply: NotRequired[bool]
+    dsh_interaction_episode: NotRequired[bool]
     dsh_interaction_decision: NotRequired[DshSemanticInteractionDecision]
+    pending_resolver_resume: NotRequired[ResolverPendingResumeV3]
+    resolver_pending_resolution: NotRequired[ResolverPendingResolutionV1]
+    pending_task_continuation: NotRequired[PendingTaskContinuationV1]
 
     # Debug
     debug_modes: DebugModes
@@ -299,7 +362,7 @@ class CognitionState(TypedDict):
     action_selection_context: NotRequired[dict]
     coding_run_followup: NotRequired[dict]
     pending_dsh_interaction: NotRequired[DshPendingInteractionContext]
-    pending_dsh_reply: NotRequired[bool]
+    dsh_interaction_episode: NotRequired[bool]
     dsh_interaction_decision: NotRequired[DshSemanticInteractionDecision]
     selected_text_surface_intent: NotRequired[str]
     attempt_diagnostics: Annotated[
@@ -317,8 +380,9 @@ class CognitionState(TypedDict):
     resolver_capability_requests: NotRequired[list[ResolverCapabilityRequestV1]]
     resolver_cycle_trace: NotRequired[ResolverCycleTraceV1]
     resolver_goal_progress: NotRequired[ResolverGoalProgressV1]
-    pending_resolver_resume: NotRequired[ResolverPendingResumeV1]
+    pending_resolver_resume: NotRequired[ResolverPendingResumeV3]
     resolver_pending_resolution: NotRequired[ResolverPendingResolutionV1]
+    pending_task_continuation: NotRequired[PendingTaskContinuationV1]
 
     emotional_appraisal: str
     interaction_subtext: str

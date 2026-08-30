@@ -101,6 +101,7 @@ describe("official Standard profile", () => {
       "kazusa_recall_active_context",
       "kazusa_read_calendar_context",
       "kazusa_inspect_attached_media",
+      "kazusa_inspect_public_media",
     ];
     const selected = composition.selectPublishedTools({ nativeNames, semanticNames });
 
@@ -168,5 +169,33 @@ describe("official Standard profile", () => {
         },
       },
     });
+  });
+
+  it("publishes the fourteen-tool semantic catalog", async () => {
+    const composition = await import("../src/composition.js");
+    const semanticNames = [
+      "kazusa_search_conversation_history",
+      "kazusa_read_conversation_entries",
+      "kazusa_summarize_conversation_participants",
+      "kazusa_search_memories",
+      "kazusa_read_memories",
+      "kazusa_remember_information",
+      "kazusa_revise_memory",
+      "kazusa_change_memory_lifecycle",
+      "kazusa_find_people_by_name",
+      "kazusa_read_person_profiles",
+      "kazusa_recall_active_context",
+      "kazusa_read_calendar_context",
+      "kazusa_inspect_attached_media",
+      "kazusa_inspect_public_media",
+    ];
+    const selected = composition.selectPublishedTools({
+      nativeNames: [],
+      semanticNames,
+    });
+
+    expect(selected.semanticNames).toEqual(semanticNames);
+    expect(selected.semanticNames).toHaveLength(14);
+    expect(selected.semanticNames).toContain("kazusa_inspect_public_media");
   });
 });

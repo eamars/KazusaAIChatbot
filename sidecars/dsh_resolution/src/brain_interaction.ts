@@ -18,13 +18,11 @@ interface ApprovalRequestLike {
   toolName: string;
   callId?: string;
   reason?: string;
-  signal?: AbortSignal;
 }
 
 interface QuestionRequestLike {
   agent?: AgentLike;
   questions: Array<Record<string, unknown>>;
-  signal?: AbortSignal;
 }
 
 interface QuestionAnswer {
@@ -46,10 +44,6 @@ interface AgentSessionLike {
 interface AgentLike {
   ctx: Context;
   session: AgentSessionLike;
-  cancel(
-    cause: { kind: "hook"; reason: string },
-    options?: { keepInbox?: boolean },
-  ): void;
 }
 
 interface NormalizedRequest {
@@ -111,7 +105,7 @@ export function deriveInteractionNonce(
 ): string {
   if (!Number.isInteger(leaseEpoch) || leaseEpoch < 1) throw new Error("lease_epoch is invalid");
   const identity = {
-    domain: "dsh_brain_interaction.nonce.v1",
+    domain: "dsh_brain_interaction.nonce.v2",
     activation_id: requiredText(activationId, "activation_id"),
     lease_epoch: leaseEpoch,
     interaction_id: requiredText(interactionId, "interaction_id"),
@@ -128,6 +122,18 @@ export function nativeToolArgumentsDigest(
   argumentsValue: unknown,
 ): string {
   const normalizedToolName = requiredText(toolName, "tool_name");
+  const executableArguments = nativeToolArguments(normalizedToolName, argumentsValue);
+  return digest({
+    tool_name: normalizedToolName,
+    arguments: executableArguments,
+  });
+}
+
+function nativeToolArguments(
+  toolName: string,
+  argumentsValue: unknown,
+): Record<string, unknown> {
+  const normalizedToolName = requiredText(toolName, "tool_name");
   let parsed: unknown = argumentsValue;
   if (typeof argumentsValue === "string") {
     try {
@@ -139,14 +145,18 @@ export function nativeToolArgumentsDigest(
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error("native tool arguments must be an object");
   }
-  const executableArguments = Object.fromEntries(
+  return Object.fromEntries(
     Object.entries(parsed as Record<string, unknown>)
       .filter(([key]) => !PRESENTATION_ARGUMENT_KEYS.has(key)),
   );
-  return digest({
-    tool_name: normalizedToolName,
-    arguments: executableArguments,
-  });
+}
+
+function boundedDetail(value: unknown, name: string): string {
+  const detail = canonical(value);
+  if (detail.length === 0 || detail.length > 8_000) {
+    throw new Error(`${name} exceeds the interaction detail bound`);
+  }
+  return detail;
 }
 
 export function buildBrainInteractionFrame(
@@ -171,7 +181,7 @@ export function buildBrainInteractionFrame(
       leaseEpoch as number,
       normalizedInteractionId,
     ),
-    schema_version: "dsh_brain_interaction.v1",
+    schema_version: "dsh_brain_interaction.v2",
   };
 }
 
@@ -184,13 +194,18 @@ function normalizeKind(value: unknown): NormalizedRequest["kind"] {
 }
 
 function normalizeRequest(value: Record<string, unknown>, now: () => Date): NormalizedRequest {
-  if (value.schema_version !== "dsh_brain_interaction.v1") {
+  if (value.schema_version !== "dsh_brain_interaction.v2") {
     throw new Error("interaction schema is unsupported");
   }
   const leaseEpoch = value.lease_epoch;
   if (!Number.isInteger(leaseEpoch) || (leaseEpoch as number) < 1) throw new Error("lease_epoch is invalid");
   const detailValue = requiredText(value.transient_detail, "transient_detail");
   if (detailValue.length > 8_000) throw new Error("transient_detail is invalid");
+  const normalizedKind = normalizeKind(value.kind);
+  if (normalizedKind === "approval"
+    && (value.tool_name === undefined || value.tool_name === null)) {
+    throw new Error("approval interaction requires tool_name");
+  }
   const issuedAt = requiredText(value.issued_at, "issued_at");
   const expiresAt = requiredText(value.expires_at, "expires_at");
   const issuedMs = Date.parse(issuedAt);
@@ -201,7 +216,7 @@ function normalizeRequest(value: Record<string, unknown>, now: () => Date): Norm
   void now;
   return {
     interaction_id: requiredText(value.interaction_id, "interaction_id"),
-    kind: normalizeKind(value.kind),
+    kind: normalizedKind,
     operation_id: requiredText(value.operation_id, "operation_id"),
     operation_payload_digest: requiredText(value.operation_payload_digest, "operation_payload_digest"),
     resolution_thread_id: requiredText(value.resolution_thread_id, "resolution_thread_id"),
@@ -233,74 +248,61 @@ function normalizeRequest(value: Record<string, unknown>, now: () => Date): Norm
   };
 }
 
-function readDecision(value: unknown, requestDigest: string): Record<string, unknown> & { kind: string } {
+function readDecision(
+  value: unknown,
+  request: NormalizedRequest,
+  requestDigest: string,
+): Record<string, unknown> & { kind: string } {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("Brain interaction response is invalid");
   }
   const outer = value as Record<string, unknown>;
-  if (outer.schema_version !== "dsh_brain_interaction.v1") {
+  if (outer.schema_version !== "dsh_brain_interaction.v2") {
     throw new Error("Brain interaction response schema is unsupported");
   }
   if (outer.request_digest !== requestDigest) {
     throw new Error("Brain interaction response request digest is invalid");
   }
-  const candidate = outer.decision;
-  const decision = candidate !== null && typeof candidate === "object" && !Array.isArray(candidate)
-    ? candidate as Record<string, unknown>
-    : outer;
-  const kind = candidate !== null && typeof candidate === "object" && !Array.isArray(candidate)
-    ? decision.kind ?? decision.decision
-    : typeof candidate === "string" ? candidate : decision.decision;
-  if (typeof kind !== "string") throw new Error("Brain interaction decision kind is required");
-  if (!["answer", "allow_once", "reject", "relay_to_user"].includes(kind)) {
+  if (outer.interaction_id !== request.interaction_id || outer.kind !== request.kind) {
+    throw new Error("Brain interaction response identity is invalid");
+  }
+  const allowedFields = new Set([
+    "schema_version", "interaction_id", "request_digest", "kind",
+    "decision", "answer", "reason", "grant",
+  ]);
+  if (Object.keys(outer).some((key) => !allowedFields.has(key))) {
+    throw new Error("Brain interaction response contains unsupported fields");
+  }
+  if (typeof outer.decision !== "string") {
+    throw new Error("Brain interaction decision is required");
+  }
+  const kind = outer.decision;
+  if (!["answer", "allow_once", "reject"].includes(kind)) {
     throw new Error("Brain interaction decision is unsupported");
   }
-  return { ...decision, kind };
-}
-
-function readCheckpointResponse(
-  value: unknown,
-  request: NormalizedRequest,
-  requestDigest: string,
-  responseGoal: string,
-  relayMode: string,
-): { kind: "checkpoint_required" } {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("Brain checkpoint response is invalid");
+  if (kind === "answer") {
+    const answer = requiredText(outer.answer, "answer");
+    if (answer.length > 2_000) throw new Error("answer is too long");
+  } else if (outer.answer !== null && outer.answer !== undefined) {
+    throw new Error("answer is status-specific");
   }
-  const response = value as Record<string, unknown>;
-  if (response.schema_version !== "dsh_brain_interaction.v1") {
-    throw new Error("Brain checkpoint response schema is unsupported");
+  requiredText(outer.reason, "reason");
+  if (typeof outer.reason === "string" && outer.reason.length > 2_000) {
+    throw new Error("reason is too long");
   }
-  if (response.interaction_id !== request.interaction_id) {
-    throw new Error("Brain checkpoint response interaction identity is invalid");
+  if (kind === "answer" && request.kind === "approval") {
+    throw new Error("answer is incompatible with approval");
   }
-  if (response.request_digest !== requestDigest) {
-    throw new Error("Brain checkpoint response request digest is invalid");
+  if (kind === "allow_once" && request.kind === "question") {
+    throw new Error("allow_once is incompatible with question");
   }
-  if (response.kind !== request.kind) {
-    throw new Error("Brain checkpoint response kind is invalid");
+  if (kind === "allow_once" && (outer.grant === undefined || outer.grant === null)) {
+    throw new Error("allow_once response requires a grant");
   }
-  if (response.decision !== "relay_to_user") {
-    throw new Error("Brain checkpoint response decision is invalid");
+  if (kind !== "allow_once" && outer.grant !== undefined && outer.grant !== null) {
+    throw new Error("grant is status-specific");
   }
-  if (response.response_goal !== responseGoal || response.relay_mode !== relayMode) {
-    throw new Error("Brain checkpoint response relay identity is invalid");
-  }
-  if (response.checkpoint_required !== true) {
-    throw new Error("Brain checkpoint response is not durable");
-  }
-  if (response.pending_interaction_id !== request.interaction_id) {
-    throw new Error("Brain checkpoint response pending identity is invalid");
-  }
-  const messageId = response.delivered_platform_message_id;
-  if (typeof messageId !== "string" || messageId.trim().length === 0) {
-    throw new Error("Brain checkpoint response delivery lineage is invalid");
-  }
-  if (response.delivery_status !== undefined && response.delivery_status !== null) {
-    throw new Error("Brain checkpoint response delivery status is invalid");
-  }
-  return { kind: "checkpoint_required" };
+  return { ...outer, kind };
 }
 
 function validateAllowOnceGrant(
@@ -311,8 +313,11 @@ function validateAllowOnceGrant(
     throw new Error("Brain allow-once grant is invalid");
   }
   const grant = value as Record<string, unknown>;
-  if (grant.schema_version !== "dsh_brain_interaction.v1") {
+  if (grant.schema_version !== "dsh_brain_interaction.v2") {
     throw new Error("Brain allow-once grant schema is unsupported");
+  }
+  if (grant.interaction_id !== request.interaction_id) {
+    throw new Error("Brain allow-once grant interaction_id is invalid");
   }
   requiredText(grant.interaction_id, "grant.interaction_id");
   requiredText(grant.issued_at, "grant.issued_at");
@@ -341,7 +346,6 @@ function validateAllowOnceGrant(
 export function createBrainInteractionProvider(options: {
   secret: string;
   request: (request: Record<string, unknown>) => Promise<unknown>;
-  checkpoint: (pending: Record<string, unknown>) => Promise<Record<string, unknown>>;
   now?: () => Date;
 }): BrainInteractionProvider {
   const secret = requiredText(options.secret, "Brain interaction secret");
@@ -350,7 +354,7 @@ export function createBrainInteractionProvider(options: {
     async handle(input) {
       const request = normalizeRequest(input, now);
       const unsigned = {
-        schema_version: "dsh_brain_interaction.v1",
+        schema_version: "dsh_brain_interaction.v2",
         interaction_id: request.interaction_id,
         kind: request.kind,
         operation_id: request.operation_id,
@@ -386,26 +390,10 @@ export function createBrainInteractionProvider(options: {
         mac: createHmac("sha256", secret).update(canonical(unsigned)).digest("hex"),
       };
       const response = await options.request(signedRequest);
-      const decision = readDecision(response, requestDigest);
+      const decision = readDecision(response, request, requestDigest);
       if (decision.kind === "allow_once") {
         validateAllowOnceGrant(decision.grant, request);
         return { kind: "allow_once" };
-      }
-      if (decision.kind === "relay_to_user") {
-        const responseGoal = requiredText(decision.response_goal, "response_goal");
-        const relayMode = requiredText(decision.relay_mode, "relay_mode");
-        const checkpointResponse = await options.checkpoint({
-          ...signedRequest,
-          response_goal: responseGoal,
-          relay_mode: relayMode,
-        });
-        return readCheckpointResponse(
-          checkpointResponse,
-          request,
-          requestDigest,
-          responseGoal,
-          relayMode,
-        );
       }
       if (decision.kind === "answer") {
         const answer = requiredText(decision.answer, "answer");
@@ -425,8 +413,8 @@ export { canonical as canonicalBrainJson, digest as brainRequestDigest };
  * The service is mounted once on the host context. Individual unpublished
  * agents bind their immutable intake identity through {@link register}; event
  * callbacks then select that binding by the exact agent context. No direct
- * human answerer is installed and no raw question/reply text is forwarded as
- * a continuation command.
+ * human answerer is installed and no raw question text is forwarded as a
+ * continuation command.
  */
 export class BrainInteractionService extends Service {
   static inject = ["approval", "userQuestions"];
@@ -508,18 +496,20 @@ export class BrainInteractionService extends Service {
       if (typeof nativeArguments !== "string") {
         throw new Error("native tool call arguments are unavailable");
       }
+      const executableArguments = nativeToolArguments(request.toolName, nativeArguments);
+      const reason = requiredText(request.reason, "approval reason");
       const frame = this.frameFor(registration, {
         kind: "approval",
         dsh_call_id: callId,
         tool_name: request.toolName,
-        transient_detail: request.reason ?? "DSH approval request",
+        transient_detail: boundedDetail({
+          tool_name: request.toolName,
+          reason,
+          arguments: executableArguments,
+        }, "approval detail"),
         arguments_digest: nativeToolArgumentsDigest(request.toolName, nativeArguments),
       });
       const decision = await registration.provider.handle(frame);
-      if (decision.kind === "checkpoint_required") {
-        request.agent.cancel({ kind: "hook", reason: "checkpoint" }, { keepInbox: true });
-        return "cancelled";
-      }
       if (decision.kind === "allow_once") return "allowed-once";
       if (decision.kind === "reject") return "rejected";
       return "unavailable";
@@ -539,11 +529,25 @@ export class BrainInteractionService extends Service {
     if (request.agent === undefined) throw new Error("Brain interaction requires a live agent identity");
     const registration = this.registrations.get(request.agent.session.id);
     if (registration === undefined) throw new Error("Brain interaction binding is unavailable");
+    if (request.questions.length !== 1) {
+      throw new Error("DSH interaction requires exactly one complete question");
+    }
     const first = request.questions[0];
-    const questionId = typeof first?.id === "string" && first.id.length > 0 ? first.id : "question";
-    const goal = typeof first?.question === "string" && first.question.length > 0
-      ? first.question
-      : "DSH user question";
+    if (first === undefined) throw new Error("DSH interaction question is unavailable");
+    const questionId = requiredText(first.id, "question.id");
+    requiredText(first.question, "question");
+    const options = first.options;
+    if (options !== undefined && !Array.isArray(options)) {
+      throw new Error("DSH interaction question choices are invalid");
+    }
+    if (Array.isArray(options)) {
+      for (const option of options) {
+        if (option === null || typeof option !== "object" || Array.isArray(option)) {
+          throw new Error("DSH interaction question choice is invalid");
+        }
+        requiredText((option as Record<string, unknown>).label, "question choice label");
+      }
+    }
     const intent = first?.intent;
     const kind = intent !== null && typeof intent === "object"
       && (intent as Record<string, unknown>).kind === "plan-review"
@@ -552,15 +556,11 @@ export class BrainInteractionService extends Service {
     const frame = this.frameFor(registration, {
       kind,
       dsh_call_id: `question:${questionId}`,
-      tool_name: "ask_user_question",
-      transient_detail: goal,
+      tool_name: null,
+      transient_detail: boundedDetail({ questions: request.questions }, "question detail"),
       arguments_digest: digest(request.questions),
     });
     const decision = await registration.provider.handle(frame);
-    if (decision.kind === "checkpoint_required") {
-      request.agent.cancel({ kind: "hook", reason: "checkpoint" }, { keepInbox: true });
-      throw new Error("BRAIN_INTERACTION_CHECKPOINT_REQUIRED");
-    }
     if (decision.kind === "answer") {
       const answer = requiredText(decision.answer, "answer");
       return { answers: [{ id: questionId, selected: [], custom: answer }] };

@@ -6,20 +6,20 @@ from typing import Any, Literal, NotRequired, TypedDict
 
 from kazusa_ai_chatbot.cognition_episode import GoalContinuationRefV1
 
-
 BACKGROUND_WORK_JOBS_COLLECTION = "background_work_jobs"
 BACKGROUND_WORK_JOB_SCHEMA_VERSION = "background_work_job.v2"
 BACKGROUND_WORK_JOB_REF_OWNER = "background_work_job"
 BACKGROUND_WORK_REQUESTED_DELIVERY = "send_result_when_done"
 TASK_ORCHESTRATOR_WORKER = "task_orchestrator"
 FUTURE_SPEAK_WORKER = "future_speak"
-TASK_ORCHESTRATOR_WORKER_PAYLOAD_VERSION = "task_orchestrator_worker_payload.v1"
+TASK_ORCHESTRATOR_WORKER_PAYLOAD_VERSION = "task_orchestrator_worker_payload.v2"
 
 BackgroundWorkJobStatus = Literal[
     "queued",
     "in_progress",
     "completed",
     "failed",
+    "canceled",
     "delivery_in_progress",
     "delivered",
     "delivery_failed",
@@ -32,19 +32,20 @@ BackgroundWorkDeliveryState = Literal[
     "failed",
 ]
 TaskOrchestratorOperation = Literal[
-    "resume_task_resolution",
-    "continue_bound_coding_run",
+    "open_dsh_resolution",
+    "continue_dsh_resolution",
 ]
 BackgroundWorkRequestedWorker = Literal["task_orchestrator", "future_speak"]
 
 
-class TaskOrchestratorWorkerPayloadV1(TypedDict):
-    """Reviewed durable payload for the single generic task worker."""
+class TaskOrchestratorWorkerPayloadV2(TypedDict):
+    """Generation-bound DSH worker payload with no queued authority."""
 
-    schema_version: Literal["task_orchestrator_worker_payload.v1"]
-    operation: TaskOrchestratorOperation
-    checkpoint: dict[str, object] | None
-    coding_request: dict[str, object] | None
+    schema_version: Literal["task_orchestrator_worker_payload.v2"]
+    operation: Literal["open_dsh_resolution", "continue_dsh_resolution"]
+    task_session_id: str
+    operation_generation: int
+    control: dict[str, object] | None
 
 
 class FutureSpeakWorkerPayloadV1(TypedDict):
@@ -66,7 +67,7 @@ class BackgroundWorkQueueRequest(TypedDict):
     semantic_objective: str
     goal_continuation_ref: GoalContinuationRefV1 | None
     requested_worker: BackgroundWorkRequestedWorker
-    worker_payload: TaskOrchestratorWorkerPayloadV1 | FutureSpeakWorkerPayloadV1
+    worker_payload: TaskOrchestratorWorkerPayloadV2 | FutureSpeakWorkerPayloadV1
     task_execution_context: NotRequired[dict[str, object]]
     source_platform: str
     source_channel_id: str

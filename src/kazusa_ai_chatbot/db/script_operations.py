@@ -104,6 +104,59 @@ LOGGING_RETENTION_TARGETS = (
 )
 
 
+async def count_dsh_plan3_drain_rows(database: Any) -> dict[str, int]:
+    """Count legacy task, job, and open-interaction rows for Plan 3 drain."""
+
+    accepted_tasks = await database["accepted_tasks"].count_documents({
+        "schema_version": "accepted_task.v2",
+        "task_kind": {"$in": ["task_resolution", "coding_continuation"]},
+        "state": {
+            "$in": [
+                "enqueueing",
+                "pending",
+                "running",
+                "result_ready",
+                "failure_ready",
+                "delivery_in_progress",
+                "delivery_retryable",
+            ]
+        },
+    })
+    executing_jobs = await database["background_work_jobs"].count_documents({
+        "schema_version": "background_work_job.v2",
+        "requested_worker": "task_orchestrator",
+        "worker_payload.schema_version": "task_orchestrator_worker_payload.v1",
+        "status": {"$in": ["queued", "in_progress"]},
+    })
+    undelivered_jobs = await database["background_work_jobs"].count_documents({
+        "schema_version": "background_work_job.v2",
+        "requested_worker": "task_orchestrator",
+        "worker_payload.schema_version": "task_orchestrator_worker_payload.v1",
+        "status": {
+            "$in": [
+                "completed",
+                "failed",
+                "delivery_failed",
+                "delivery_in_progress",
+            ]
+        },
+        "delivery_state": {"$ne": "delivered"},
+    })
+    open_interactions = await database["dsh_interactions"].count_documents({
+        "schema_version": "dsh_interaction_pending.v1",
+        "$or": [
+            {"status": {"$in": ["pending", "delivered", "continuation_pending"]}},
+            {"grant_status": "available"},
+        ],
+    })
+    return {
+        "active_legacy_accepted_tasks": int(accepted_tasks),
+        "executing_legacy_task_jobs": int(executing_jobs),
+        "undelivered_legacy_task_jobs": int(undelivered_jobs),
+        "open_pre_cutover_dsh_interactions": int(open_interactions),
+    }
+
+
 def _logging_row_expiry(
     row: Mapping[str, Any],
     *,

@@ -23,6 +23,7 @@ SEMANTIC_TOOL_NAMES: tuple[str, ...] = (
     "kazusa_recall_active_context",
     "kazusa_read_calendar_context",
     "kazusa_inspect_attached_media",
+    "kazusa_inspect_public_media",
 )
 
 def _nullable_text() -> dict[str, Any]:
@@ -289,6 +290,19 @@ _CATALOG: tuple[dict[str, Any], ...] = (
                 "question": {"type": "string"},
             },
             "required": ["attached_media_ref", "question"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "kazusa_inspect_public_media",
+        "description": "Inspect one public image URL using a bounded visual question.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "public_media_url": {"type": "string"},
+                "question": {"type": "string"},
+            },
+            "required": ["public_media_url", "question"],
             "additionalProperties": False,
         },
     },

@@ -15,7 +15,7 @@ from kazusa_ai_chatbot.action_spec.models import (
     RuntimeCapabilitySnapshotV1,
 )
 from kazusa_ai_chatbot.action_spec.registry import (
-    ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
+    ACCEPTED_TASK_CONTROL_CAPABILITY,
     APPLY_MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
     FUTURE_SPEAK_CAPABILITY,
     SPEAK_CAPABILITY,
@@ -43,6 +43,7 @@ from kazusa_ai_chatbot.character_identity_growth.runtime import (
 from kazusa_ai_chatbot.cognition_core_v3 import run_cognition
 from kazusa_ai_chatbot.cognition_core_v3.contracts import (
     CognitionChainServicesV3,
+    ResponsePlanContractVariant,
 )
 from kazusa_ai_chatbot.cognition_core_v3.diagnostics import (
     bind_protected_chain_records,
@@ -57,8 +58,8 @@ from kazusa_ai_chatbot.cognition_episode import (
     validate_cognitive_episode_v1,
 )
 from kazusa_ai_chatbot.cognition_resolver.capabilities import (
-    _task_resolution_execution_context_from_state,
     build_skipped_shared_memory_prewarm_outcome,
+    execute_resolver_capability_request,
     merge_shared_memory_prewarm_outcome,
     project_resolver_observation_for_cognition,
     run_first_cycle_shared_memory_prewarm,
@@ -68,11 +69,22 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     ALLOWED_RESOLVER_CAPABILITIES,
     RESOLVER_CAPABILITY_REQUEST_VERSION,
     RESOLVER_CAPABILITY_SEMANTICS,
+    RESOLVER_PENDING_RESOLUTION_VERSION,
     ResolverValidationError,
     SharedMemoryPrewarmOutcomeV1,
+    project_pending_resume_for_prompt,
+    validate_pending_task_continuation,
     validate_resolver_capability_request,
+    validate_resolver_pending_disposition,
+    validate_resolver_pending_resolution,
     validate_shared_memory_prewarm_outcome,
 )
+from kazusa_ai_chatbot.cognition_resolver.loop import call_cognition_resolver_loop
+from kazusa_ai_chatbot.cognition_resolver.pending import (
+    apply_pending_resolution,
+    upsert_pending_resume,
+)
+from kazusa_ai_chatbot.cognition_resolver.state import ensure_initial_resolver_inputs
 from kazusa_ai_chatbot.cognition_shared.contracts import (
     EVIDENCE_SOURCE_QUESTION_IDS,
     PAST_DIALOG_COGNITION_CONTEXT_MAX_CHARS,
@@ -84,8 +96,8 @@ from kazusa_ai_chatbot.cognition_shared.contracts import (
     ResolverAffordanceV2,
     SceneContextV2,
     _validate_scene_context,
-    validate_scheduled_authority_proposal,
     validate_pending_dsh_interaction,
+    validate_scheduled_authority_proposal,
 )
 from kazusa_ai_chatbot.cognition_shared.model_attempt_policy import (
     clear_v2_shared_memory_prewarm_checkpoint,
@@ -111,6 +123,8 @@ from kazusa_ai_chatbot.config import (
     CALENDAR_SCHEDULER_ENABLED,
     CHARACTER_SLEEP_LOCAL_PERIOD,
     CHARACTER_TIME_ZONE,
+    COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS,
+    COGNITION_RESOLVER_MAX_CYCLES,
     COGNITION_STAGE_TIMEOUT_SECONDS,
     CognitionRouteSettingV1,
     get_cognition_v3_route_settings,
@@ -213,7 +227,7 @@ def build_scene_context_from_global_state(
     """Build and validate the one prompt-safe scene for a cognition episode.
 
     The returned scene is the canonical bounded representation shared by the
-    canonical cognition input, resolver capabilities, and accepted coding context.
+    canonical cognition input and resolver capabilities.
     It contains semantic roles, current scene text, temporal continuity,
     sleep phase, and the episode-local participant bindings without transport
     or persistent identifiers.
@@ -316,6 +330,39 @@ def build_scene_context_from_global_state(
         ) from exc
     validated_scene_context = cast(SceneContextV2, scene_context)
     return validated_scene_context
+
+
+def _response_plan_contract_variant(
+    state: GlobalPersonaState,
+) -> ResponsePlanContractVariant:
+    """Select the transient P contract from validated resolver lifecycle state."""
+
+    episode = state.get("cognitive_episode")
+    if not isinstance(episode, Mapping):
+        raise CognitionExecutionError(
+            "canonical cognitive episode is required for P contract selection"
+        )
+    pending_resolution = state.get("resolver_pending_resolution")
+    pending_resume = state.get("pending_resolver_resume")
+    if episode.get("trigger_source") == "tool_result":
+        if pending_resolution is not None or pending_resume is not None:
+            raise CognitionExecutionError(
+                "tool result delivery cannot carry pending resolver lifecycle state"
+            )
+        return "tool_result_delivery"
+    if pending_resolution is not None:
+        try:
+            validate_resolver_pending_resolution(pending_resolution)
+        except ResolverValidationError as exc:
+            raise CognitionExecutionError(str(exc)) from exc
+        return "post_pending_resolution"
+    if isinstance(pending_resume, Mapping):
+        pending_continuation = project_pending_resume_for_prompt(
+            dict(pending_resume),
+        )
+        if pending_continuation is not None:
+            return "open_pending_resolution"
+    return "fresh_ordinary"
 
 
 def build_cognition_input_from_global_state(
@@ -465,6 +512,7 @@ def build_cognition_input_from_global_state(
         timestamp,
     ))
     scope = selected_mutable_state["state_scope"]
+    response_plan_contract_variant = _response_plan_contract_variant(state)
     payload: dict[str, Any] = {
         "schema_version": "cognition_input.v3",
         "episode": dict(episode),
@@ -502,6 +550,7 @@ def build_cognition_input_from_global_state(
             )
         ),
         "scene_context": scene_context,
+        "response_plan_contract_variant": response_plan_contract_variant,
     }
     if relationship_operational_context is not None:
         payload["relationship_context"] = relationship_operational_context
@@ -509,13 +558,20 @@ def build_cognition_input_from_global_state(
     if runtime_limits:
         payload["runtime_capability_limits"] = runtime_limits
     pending_resume = state.get("pending_resolver_resume")
-    if isinstance(pending_resume, Mapping):
-        payload["pending_resolver_resume"] = dict(pending_resume)
+    if (
+        response_plan_contract_variant == "open_pending_resolution"
+        and isinstance(pending_resume, Mapping)
+    ):
+        pending_continuation = project_pending_resume_for_prompt(
+            dict(pending_resume),
+        )
+        if pending_continuation is not None:
+            payload["pending_resolver_continuation"] = (
+                pending_continuation
+            )
     pending_dsh = state.get("pending_dsh_interaction")
     if isinstance(pending_dsh, Mapping):
         payload["pending_dsh_interaction"] = dict(pending_dsh)
-        if state.get("pending_dsh_reply") is True:
-            payload["pending_dsh_reply"] = True
     resolver_state = state.get("resolver_state")
     if isinstance(resolver_state, Mapping):
         cycle_index = resolver_state.get("cycle_index")
@@ -538,7 +594,6 @@ async def run_dsh_interaction_cognition(
     state: GlobalPersonaState,
     *,
     pending_interaction: Mapping[str, object],
-    pending_reply: bool = False,
     services: CognitionChainServicesV3 | None = None,
 ) -> dict[str, object]:
     """Run the canonical cognition chain for one DSH interaction.
@@ -555,8 +610,7 @@ async def run_dsh_interaction_cognition(
         raise CognitionExecutionError(str(exc)) from exc
     staged_state: GlobalPersonaState = dict(state)
     staged_state["pending_dsh_interaction"] = dict(pending_interaction)
-    if pending_reply:
-        staged_state["pending_dsh_reply"] = True
+    staged_state["dsh_interaction_episode"] = True
     cognition_input = build_cognition_input_from_global_state(staged_state)
     trace_token = llm_tracing.bind_trace_id(
         str(state.get("llm_trace_id") or ""),
@@ -590,10 +644,47 @@ async def run_dsh_interaction_cognition(
                 llm_trace_id=trace_id,
                 cognition_invocation_id=episode_id,
             )
-        output = await run_cognition(
-            cognition_input,
-            cognition_services,
+        async def cognition_cycle(
+            current_state: GlobalPersonaState,
+        ) -> GlobalPersonaState:
+            return await call_cognition_subgraph(
+                current_state,
+                commit=False,
+                services=cognition_services,
+            )
+
+        initialized = ensure_initial_resolver_inputs(
+            staged_state,
+            max_cycles=COGNITION_RESOLVER_MAX_CYCLES,
         )
+        resolved_state = await call_cognition_resolver_loop(
+            initialized,
+            call_cognition_subgraph_func=cognition_cycle,
+            execute_capability_func=execute_resolver_capability_request,
+            max_cycles=COGNITION_RESOLVER_MAX_CYCLES,
+            capability_timeout_seconds=(
+                COGNITION_RESOLVER_CAPABILITY_TIMEOUT_SECONDS
+            ),
+            upsert_pending_resume_func=upsert_pending_resume,
+            apply_pending_resolution_func=apply_pending_resolution,
+        )
+        output = resolved_state.get("cognition_core_output")
+        if not isinstance(output, Mapping):
+            raise CognitionExecutionError(
+                "canonical DSH cognition output is unavailable"
+            )
+        expected_character_updated_at = resolved_state.get(
+            "character_cognition_base_updated_at"
+        )
+        await commit_cognition_output(
+            output,
+            expected_character_updated_at=(
+                expected_character_updated_at
+                if isinstance(expected_character_updated_at, str)
+                else None
+            ),
+        )
+        resolved_state["cognition_state_committed"] = True
         response_plan = output.get("response_plan")
         if not isinstance(response_plan, Mapping):
             raise CognitionExecutionError(
@@ -616,6 +707,7 @@ async def call_cognition_subgraph(
     state: GlobalPersonaState,
     *,
     commit: bool = True,
+    services: CognitionChainServicesV3 | None = None,
 ) -> GlobalPersonaState:
     """Run one canonical cognition pass and expose its projections."""
 
@@ -861,7 +953,7 @@ async def call_cognition_subgraph(
     )
     diagnostics_token = None
     try:
-        cognition_services = build_cognition_core_services()
+        cognition_services = services or build_cognition_core_services()
         if current_chain_scope() is None:
             invocation_id = ""
             input_episode = cognition_input.get("episode")
@@ -1153,7 +1245,60 @@ def _project_output_to_global_state(
     dsh_decision = plan.get("dsh_interaction_decision")
     if isinstance(dsh_decision, Mapping):
         update["dsh_interaction_decision"] = dict(dsh_decision)
+    pending_task_continuation = plan.get("pending_task_continuation")
+    if pending_task_continuation is not None:
+        try:
+            update["pending_task_continuation"] = (
+                validate_pending_task_continuation(
+                    pending_task_continuation,
+                )
+            )
+        except ResolverValidationError as exc:
+            raise CognitionExecutionError(str(exc)) from exc
+    pending_resolution = plan.get("pending_resolution")
+    if pending_resolution is not None:
+        pending_resume = _pending_resume_for_binding(state)
+        if pending_resume is None:
+            raise CognitionExecutionError(
+                "pending resolution requires one selected pending resume"
+            )
+        resume_id = pending_resume.get("resume_id")
+        if not isinstance(resume_id, str) or not resume_id.strip():
+            raise CognitionExecutionError(
+                "selected pending resume identity is invalid"
+            )
+        try:
+            disposition = validate_resolver_pending_disposition(
+                pending_resolution,
+            )
+            resolution = validate_resolver_pending_resolution({
+                "schema_version": RESOLVER_PENDING_RESOLUTION_VERSION,
+                "resume_id": resume_id,
+                **disposition,
+            })
+        except ResolverValidationError as exc:
+            raise CognitionExecutionError(str(exc)) from exc
+        update["resolver_pending_resolution"] = resolution
     return update
+
+
+def _pending_resume_for_binding(
+    state: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    """Return the caller-held pending row used for deterministic binding."""
+
+    pending_resume = state.get("pending_resolver_resume")
+    if isinstance(pending_resume, Mapping):
+        return_value = pending_resume
+        return return_value
+    resolver_state = state.get("resolver_state")
+    if isinstance(resolver_state, Mapping):
+        pending_resume = resolver_state.get("pending_resume")
+        if isinstance(pending_resume, Mapping):
+            return_value = pending_resume
+            return return_value
+    return_value = None
+    return return_value
 
 
 def _canonical_goal_continuation_ref(
@@ -1290,16 +1435,9 @@ def _materialize_canonical_action_requests(
         affordance = affordances.get(action_kind)
         if affordance is None:
             raise CognitionExecutionError("canonical action capability is unavailable")
-        if (
-            action_kind == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY
-            and continuation_deferred
-        ):
+        if continuation_deferred and action_kind == FUTURE_SPEAK_CAPABILITY:
             continue
-        continuation_ref = (
-            _canonical_goal_continuation_ref(output, state, replacement_state)
-            if action_kind == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY
-            else None
-        )
+        continuation_ref = None
         request: dict[str, Any] = {
             "capability": action_kind,
             "decision": str(row["decision"]),
@@ -1311,14 +1449,8 @@ def _materialize_canonical_action_requests(
             "surface_role": "ordinary",
             "goal_continuation_ref": continuation_ref,
         }
-        if action_kind == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY:
+        if action_kind == ACCEPTED_TASK_CONTROL_CAPABILITY:
             request["surface_role"] = "task_acknowledgement"
-            request["task_execution_context"] = (
-                _task_resolution_execution_context_from_state(
-                    state,
-                    goal_continuation_ref=request["goal_continuation_ref"],
-                )
-            )
         if action_kind == FUTURE_SPEAK_CAPABILITY:
             request["scheduled_authority_proposal"] = (
                 _build_scheduled_authority_proposal(state, request)
@@ -1413,12 +1545,21 @@ def _materialize_canonical_resolver_requests(
             raise CognitionExecutionError("canonical resolver capability is unavailable")
         if capability == "task_resolution_request" and continuation_deferred:
             continue
+        start_in_background = False
+        if capability == "task_resolution_request":
+            start_in_background = row["start_in_background"]
+            if not isinstance(start_in_background, bool):
+                raise CognitionExecutionError(
+                    "task resolution start_in_background is invalid"
+                )
         validated = validate_resolver_capability_request({
             "schema_version": RESOLVER_CAPABILITY_REQUEST_VERSION,
             "capability_kind": capability,
             "objective": str(row["goal"]),
             "reason": str(row["reason"]),
-            "priority": "now",
+            "priority": (
+                "background" if start_in_background else "now"
+            ),
             "goal_continuation_ref": continuation
             if capability == "task_resolution_request"
             else None,
@@ -1566,8 +1707,8 @@ def _available_action_affordances(
             "context_ref": str(prompt_affordance["context_ref"]),
             "target_roles": [current_user],
         }
-        if capability_kind == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY:
-            contextual_affordances = _coding_run_action_affordances(
+        if capability_kind == ACCEPTED_TASK_CONTROL_CAPABILITY:
+            contextual_affordances = _dsh_task_action_affordances(
                 state,
                 base_affordance=affordance,
             )
@@ -1631,23 +1772,7 @@ def build_runtime_capability_limits(
             "未来提醒和主动联系只属于 future_speak；该能力不可用时不能用其他能力代替。"
         )
     worker_status = snapshot["worker_status"]
-    background_worker_unavailable = (
-        worker_status.get("background_work") in unavailable
-    )
-    queue_only_coding = (
-        background_worker_unavailable
-        and snapshot["repository_access"].get(
-            "background_work",
-            "read_write",
-        ) == "read_write"
-        and snapshot["coding_workspace_status"] not in unavailable
-    )
-    if queue_only_coding:
-        limits.append(
-            "当前 coding worker 尚未运行；绑定既有 coding_run_ref 的生命周期动作"
-            "可以记录并排队，结果保持待执行，不能表述为 worker 已执行或已完成。"
-        )
-    elif worker_status.get("background_work") == "degraded":
+    if worker_status.get("background_work") == "degraded":
         limits.append(
             "当前通用任务解析只有 inline 能力；task_resolution_request 必须先在本轮"
             "预算内尝试，不能写成后台已经安排。"
@@ -1723,9 +1848,6 @@ def _build_action_availability_snapshot(
         worker_status=worker_status,
         scheduler_status=scheduler_status,
         adapter_target_status=adapter_target_status,
-        coding_workspace_status=str(
-            runtime_mapping.get("coding_workspace_status", "healthy")
-        ),
         permissions=_bool_mapping(runtime_mapping.get("permissions")),
     )
 
@@ -1782,125 +1904,69 @@ def _available_action_contexts(state: GlobalPersonaState) -> set[str]:
         "scheduled_tick",
     }:
         contexts.add("private_cognition_source")
+    action_selection_context = state.get("action_selection_context")
+    if isinstance(action_selection_context, Mapping):
+        dsh_tasks = action_selection_context.get("dsh_tasks")
+        if isinstance(dsh_tasks, list) and dsh_tasks:
+            contexts.add("delivered_dsh_task_affordance")
     return contexts
 
 
-def _coding_run_action_affordances(
+def _dsh_task_action_affordances(
     state: Mapping[str, Any],
     *,
     base_affordance: ActionAffordanceV2,
 ) -> list[ActionAffordanceV2]:
-    """Project one generic action handle per trusted open coding run."""
+    """Project the current prompt-safe DSH task rows into controls."""
 
     action_context = state.get("action_selection_context")
     if not isinstance(action_context, Mapping):
         return []
-    raw_contexts = action_context.get("coding_runs")
-    if not isinstance(raw_contexts, list):
-        return []
-    runtime_snapshot = _build_action_availability_snapshot(state)
-    unavailable_statuses = {"down", "unavailable", "disabled", "blocked"}
-    coding_worker_unavailable = (
-        runtime_snapshot["worker_status"].get("background_work")
-        in unavailable_statuses
-    )
-    registry_decisions = {
-        "revise_proposal",
-        "summarize",
-        "status",
-        "approve_and_verify",
-        "respond_to_blocker",
-        "cancel",
-    }
-    eligible_contexts: list[Mapping[str, Any]] = []
-    for context in raw_contexts:
-        if not isinstance(context, Mapping):
-            continue
-        context_ref = _text(context.get("coding_run_ref"))[:200]
-        raw_decisions = context.get("allowed_next_actions")
-        if not context_ref or not isinstance(raw_decisions, list):
-            continue
-        allowed_decisions = [
-            decision
-            for decision in raw_decisions
-            if isinstance(decision, str) and decision in registry_decisions
-            and not (
-                decision == "status"
-                and coding_worker_unavailable
-            )
-        ]
-        allowed_decisions = list(dict.fromkeys(allowed_decisions))
-        if not allowed_decisions:
-            continue
-        eligible_contexts.append(context)
-    if len(eligible_contexts) != 1:
+    raw_tasks = action_context.get("dsh_tasks")
+    if not isinstance(raw_tasks, list):
         return []
     affordances: list[ActionAffordanceV2] = []
-    for context in eligible_contexts:
-        context_ref = _text(context.get("coding_run_ref"))[:200]
-        raw_decisions = context.get("allowed_next_actions")
-        if not context_ref or not isinstance(raw_decisions, list):
+    for raw_task in raw_tasks:
+        if not isinstance(raw_task, Mapping):
+            continue
+        context_ref = _text(raw_task.get("accepted_task_ref"))[:200]
+        allowed = raw_task.get("allowed_next_actions")
+        if (
+            not context_ref
+            or not context_ref.startswith("accepted_task:")
+            or not isinstance(allowed, list)
+        ):
             continue
         allowed_decisions = list(dict.fromkeys(
-            decision
-            for decision in raw_decisions
-            if isinstance(decision, str) and decision in registry_decisions
-            and not (
-                decision == "status"
-                and coding_worker_unavailable
-            )
+            action
+            for action in allowed
+            if isinstance(action, str)
+            and action in {"continue", "summarize", "cancel"}
         ))
         if not allowed_decisions:
             continue
-        status = _text(context.get("status"))[:80]
-        objective = _text(context.get("objective_summary"))[:120]
-        blocker_summary = _coding_run_blocker_summary(
-            context.get("active_blocker")
-        )
-        available_decisions = "、".join(allowed_decisions)
-        semantic_context = (
-            " 这是绑定既有 coding run 的生命周期 affordance；当前作用域的既有 coding run "
-            "只提供以下实际可用决定："
-            f"{available_decisions}。"
-            "每次只从这些决定中选择。"
-            f" 当前状态：{status}。目标：{objective}。"
-            f" 当前阻塞：{blocker_summary}。"
-        )
-        default_decision = (
-            "status" if "status" in allowed_decisions else allowed_decisions[0]
-        )
+        objective = _text(raw_task.get("objective_summary"))[:160]
+        latest = _text(raw_task.get("latest_summary"))[:160]
         affordances.append({
             "action_kind": base_affordance["action_kind"],
             "capability": (
-                "代码工作由持久化 coding run 管理。" + semantic_context
+                "Use the advertised accepted DSH task control only. "
+                f"Allowed operations: {', '.join(allowed_decisions)}. "
+                f"Objective: {objective}. Latest result: {latest}."
             )[:500],
             "permission": base_affordance["permission"],
             "decision_mode": "closed",
             "allowed_decisions": allowed_decisions,
-            "default_decision": default_decision,
+            "default_decision": (
+                "continue"
+                if "continue" in allowed_decisions
+                else allowed_decisions[0]
+            ),
             "decision_pattern": base_affordance["decision_pattern"],
             "context_ref": context_ref,
             "target_roles": list(base_affordance["target_roles"]),
         })
     return affordances
-
-
-def _coding_run_blocker_summary(value: object) -> str:
-    """Return bounded prompt-safe blocker details for one coding run."""
-
-    if not isinstance(value, Mapping):
-        return "none"
-    blocker_kind = _text(value.get("blocker_kind"))[:80]
-    question = _text(value.get("question"))[:60]
-    raw_options = value.get("options")
-    options = []
-    if isinstance(raw_options, list):
-        options = [
-            option[:40]
-            for option in raw_options
-            if isinstance(option, str) and option.strip()
-        ][:3]
-    return f"kind={blocker_kind}; question={question}; options={options}"[:100]
 
 
 def _available_resolver_affordances(
@@ -1910,16 +1976,16 @@ def _available_resolver_affordances(
 ) -> list[ResolverAffordanceV2]:
     """Project resolver capabilities as availability, not execution authority.
 
-    Generic task resolution remains exposed during worker degradation because
-    the action planner can select its inline mode. An unavailable worker owns
-    neither inline nor background task resolution for the current turn, so
-    the connector must remove that resolver instead of advertising a
-    contradictory available handle beside the runtime limit.
+    An internal DSH episode cannot solicit the user or recursively admit DSH
+    work. It therefore exposes only the self-goal resolver; ordinary episodes
+    retain the normal clarification and approval affordances.
     """
 
     snapshot = build_action_availability_snapshot(state)
     unavailable_worker_states = {"down", "unavailable", "disabled", "blocked"}
     available_capabilities = set(ALLOWED_RESOLVER_CAPABILITIES)
+    if state.get("dsh_interaction_episode") is True:
+        available_capabilities.intersection_update({"self_goal_resolution"})
     task_resolution_owner_states = (
         snapshot["worker_status"].get("background_work"),
         snapshot["route_health"].get("background_work"),
@@ -2499,48 +2565,7 @@ def _semantic_episode_text(state: Mapping[str, Any]) -> str:
             ]
             if descriptions:
                 scene_text = "; ".join(descriptions)
-    coding_context = _active_coding_run_scene_text(state)
-    if coding_context:
-        scene_text = (
-            f"{scene_text}。{coding_context}"
-            if scene_text
-            else coding_context
-        )
     return scene_text[:1000] if scene_text else "没有有依据的语义事件"
-
-
-def _active_coding_run_scene_text(state: Mapping[str, Any]) -> str:
-    """Project bounded active coding state into the semantic scene."""
-
-    action_context = state.get("action_selection_context")
-    if not isinstance(action_context, Mapping):
-        return ""
-    raw_contexts = action_context.get("coding_runs")
-    if not isinstance(raw_contexts, list):
-        return ""
-    summaries: list[str] = []
-    for context in raw_contexts[:3]:
-        if not isinstance(context, Mapping):
-            continue
-        status = _text(context.get("status"))[:80]
-        objective = _text(context.get("objective_summary"))[:160]
-        if not status or not objective:
-            continue
-        raw_actions = context.get("allowed_next_actions")
-        actions = [
-            action[:60]
-            for action in raw_actions
-            if isinstance(action, str) and action.strip()
-        ] if isinstance(raw_actions, list) else []
-        blocker = _coding_run_blocker_summary(
-            context.get("active_blocker")
-        )
-        summaries.append(
-            f"状态={status}；目标={objective}；后续动作={actions}；阻塞={blocker}"
-        )
-    if not summaries:
-        return ""
-    return "当前作用域已有持久化代码任务状态：" + "；".join(summaries)
 
 
 def _dialog_semantic_projection_text(

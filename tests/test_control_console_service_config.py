@@ -21,6 +21,19 @@ def _brain_service_environment() -> dict[str, str]:
     return environment
 
 
+def test_obsolete_task_route_descriptors_are_absent() -> None:
+    """The console catalog keeps worker controls without retired model routes."""
+
+    from control_console.brain_model_routes import route_descriptors
+
+    route_keys = {route.route_key for route in route_descriptors()}
+    assert route_keys.isdisjoint({
+        "background_work",
+        "coding_pm",
+        "coding_programmer",
+    })
+
+
 def test_snapshot_uses_environment_default_and_ephemeral_override() -> None:
     """A descriptor snapshot separates default, override, and effective values."""
 

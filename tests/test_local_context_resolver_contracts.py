@@ -21,7 +21,7 @@ from kazusa_ai_chatbot.local_context_resolver import (
     validate_local_context_resolver_options,
     validate_local_context_resolver_request,
 )
-from tests.test_task_resolution_orchestrator import _scene_context
+from tests.task_resolution_test_helpers import _scene_context
 
 
 def test_request_context_and_packet_contracts_validate() -> None:

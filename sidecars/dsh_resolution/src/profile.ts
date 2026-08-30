@@ -71,6 +71,7 @@ const KAZUSA_SEMANTIC_TOOL_NAMES = [
   "kazusa_recall_active_context",
   "kazusa_read_calendar_context",
   "kazusa_inspect_attached_media",
+  "kazusa_inspect_public_media",
 ] as const;
 
 interface AdmissionIdentity {

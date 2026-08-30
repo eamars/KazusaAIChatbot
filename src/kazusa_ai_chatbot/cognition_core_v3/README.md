@@ -136,15 +136,26 @@ accepted qualitative axis shifts to native state roots after generation.
 
 ## DSH interaction judgment
 
-For the Plan 2 DSH runtime, Brain sends approval, question, and plan-review
-requests through the canonical A1/A2/G/P chain. P receives a targeted,
-runtime-authored observation plus pending semantic interaction context; that
-observation is not a user utterance and does not establish user permission.
-The P decision remains typed and is returned to deterministic Brain/DSH
-enactment. Brain owns authorization, exact lineage, expiry, persistence, and
-one-shot grant matching; dialog and L3 own visible wording. Transient DSH
-detail stays in the pending interaction path and is not promoted to
-user-authored evidence. See the [Brain–DSH interaction
+The `dsh_brain_interaction.v2` approval, question, and plan-review requests
+use the existing full reusable cognition loop: ordinary character context,
+the A1/A2/G/P stages, resolver recurrence, and the final cognition commit.
+This is a character-owned internal judgment, not a one-pass shortcut or a
+dedicated DSH semantic stage. The P packet carries complete bounded semantic
+context for the DSH task and exact interaction semantics, while model-hidden
+authority remains outside semantic judgment.
+
+The internal `dsh_interaction_episode` advertises only the
+`self_goal_resolution` resolver capability. The exact decision sets are:
+
+- `question`: `answer` or `reject`;
+- `approval`: `allow_once` or `reject`;
+- `plan_review`: `answer`, `allow_once`, or `reject`.
+
+The typed decision returns directly to the waiting DSH hook. Deterministic
+Brain code owns authorization, exact lineage, expiry, persistence,
+audit/replay, nonce checks, bounds, and one-shot grant matching. This episode
+creates no dialog, L3, or adapter surface and no user prompt/reply or
+waiting-state lifecycle. See the [Brain–DSH interaction
 boundary](../dsh_interaction/README.md).
 
 ## State and affect ownership

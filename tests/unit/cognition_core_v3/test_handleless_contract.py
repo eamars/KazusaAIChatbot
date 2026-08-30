@@ -17,6 +17,7 @@ from kazusa_ai_chatbot.cognition_core_v3.contracts import (
     CANONICAL_FAMILY_AXES,
     CanonicalAppraisal,
     CognitionChainServicesV3,
+    validate_response_plan_contract_variant,
 )
 from kazusa_ai_chatbot.cognition_core_v3.facade import (
     CanonicalContractError,
@@ -28,14 +29,20 @@ from kazusa_ai_chatbot.cognition_core_v3.facade import (
     snapshot_protected_chain_records,
 )
 from kazusa_ai_chatbot.cognition_core_v3.prompt import (
-    BACKGROUND_CONTEXT_GOAL_AUTHORITY_GUIDANCE,
-    CURRENT_OBSERVATION_AUTHORITY_GUIDANCE,
     _project_capabilities,
     build_canonical_appraisal_question,
+    build_canonical_plan_question,
     build_canonical_turn_workspace,
     build_turn_workspace_stage_contracts,
 )
 from kazusa_ai_chatbot.cognition_episode import build_user_message_episode
+from kazusa_ai_chatbot.cognition_resolver.contracts import (
+    PENDING_TASK_CONTINUATION_VERSION,
+    RESOLVER_CAPABILITY_SEMANTICS,
+    RESOLVER_PENDING_CONTINUATION_VERSION,
+    RESOLVER_PENDING_RESUME_VERSION,
+    project_pending_resume_for_prompt,
+)
 from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionContractError,
     CognitionExecutionError,
@@ -54,7 +61,6 @@ from kazusa_ai_chatbot.cognition_shared.state_reducers import create_guarded_goa
 from kazusa_ai_chatbot.llm_interface import LLMCallConfig, LLMThinkingConfig
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     _build_scheduled_authority_proposal,
-    _coding_run_action_affordances,
     _project_output_to_global_state,
 )
 
@@ -118,6 +124,7 @@ def _input() -> dict[str, object]:
     character_state = build_character_production_state(updated_at=timestamp)
     return {
         "schema_version": "cognition_input.v3",
+        "response_plan_contract_variant": "fresh_ordinary",
         "episode": episode,
         "state_scope": "user",
         "mutable_state": mutable_state,
@@ -190,19 +197,25 @@ def _services(invoker: object) -> CognitionChainServicesV3:
 
 
 def test_cognition_chain_system_prompts_use_native_chinese() -> None:
-    assert set(facade_module._STAGE_SYSTEM_PROMPTS) == {"A1", "A2", "G", "P"}
-    for prompt in facade_module._STAGE_SYSTEM_PROMPTS.values():
+    prompts = (
+        facade_module._A1_SYSTEM_PROMPT,
+        facade_module._A2_SYSTEM_PROMPT,
+        facade_module._G_SYSTEM_PROMPT,
+        facade_module._P_ORDINARY_SYSTEM_PROMPT,
+        facade_module._P_PENDING_CLARIFICATION_SYSTEM_PROMPT,
+        facade_module._P_DSH_INTERACTION_SYSTEM_PROMPT,
+        facade_module._P_PENDING_AND_DSH_SYSTEM_PROMPT,
+        facade_module._P_SELF_COGNITION_SYSTEM_PROMPT,
+    )
+    for prompt in prompts:
         _assert_native_chinese_instruction(prompt)
-    _assert_native_chinese_instruction(
-        facade_module._EXACT_JSON_SYSTEM_SUFFIX
-    )
-    assert "自由填写的语义文本必须使用简体中文" in (
-        facade_module._EXACT_JSON_SYSTEM_SUFFIX.replace("\n", "")
-    )
+        assert "current_observation" in prompt
+        assert "resolver_goal_progress" in prompt
+        assert "contract_repair" in prompt
 
 
-def test_a1_system_prompt_and_packet_share_current_authority_contract() -> None:
-    """A1 system and packet guidance consume one shared authority contract."""
+def test_a1_packet_projects_state_without_authored_guidance() -> None:
+    """The HumanMessage packet carries state and contracts, not prompt prose."""
 
     payload = _input()
     workspace = build_canonical_turn_workspace(
@@ -215,38 +228,86 @@ def test_a1_system_prompt_and_packet_share_current_authority_contract() -> None:
         available_actions=payload["available_actions"],
         available_resolvers=payload["available_resolver_capabilities"],
         overused_moves=payload["overused_moves"],
+        response_plan_contract_variant="fresh_ordinary",
     )
     packet = build_canonical_appraisal_question(
         workspace=workspace,
         stage_name="A1",
     )
-    authority_contract = CURRENT_OBSERVATION_AUTHORITY_GUIDANCE.strip()
+    assert "guidance" not in packet
+    assert packet["current_observation"]
+    assert "current_observation" in facade_module._A1_SYSTEM_PROMPT
 
-    assert authority_contract in facade_module._STAGE_SYSTEM_PROMPTS["A1"]
-    assert authority_contract in packet["guidance"]
-    assert facade_module._STAGE_SYSTEM_PROMPTS["A1"].count(
-        authority_contract
-    ) == 1
-    assert packet["guidance"].count(authority_contract) == 1
+
+def test_complete_prompt_variants_are_selected_without_prompt_composition() -> None:
+    """Each runtime call selects one literal prompt instead of joining guidance."""
+
+    for stage, packet, expected in (
+        ("A1", {"output_contract": {}}, facade_module._A1_SYSTEM_PROMPT),
+        ("A2", {"output_contract": {}}, facade_module._A2_SYSTEM_PROMPT),
+        ("G", {"output_contract": {}}, facade_module._G_SYSTEM_PROMPT),
+        ("P", {"output_contract": {}}, facade_module._P_ORDINARY_SYSTEM_PROMPT),
+        (
+            "P",
+            {"output_contract": {}, "pending_resolver_continuation": {}},
+            facade_module._P_PENDING_CLARIFICATION_SYSTEM_PROMPT,
+        ),
+        (
+            "P",
+            {"output_contract": {}, "pending_dsh_interaction": {}},
+            facade_module._P_DSH_INTERACTION_SYSTEM_PROMPT,
+        ),
+        (
+            "P",
+            {
+                "output_contract": {},
+                "pending_resolver_continuation": {},
+                "pending_dsh_interaction": {},
+            },
+            facade_module._P_PENDING_AND_DSH_SYSTEM_PROMPT,
+        ),
+        (
+            "P",
+            {"output_contract": {"required_fields": ["self_cognition_response"]}},
+            facade_module._P_SELF_COGNITION_SYSTEM_PROMPT,
+        ),
+    ):
+        assert facade_module._system_prompt_for_stage(
+            stage=stage,
+            packet=packet,
+        ) == expected
+
+
+def test_a1_system_prompt_and_packet_share_current_authority_contract() -> None:
+    """A1 keeps authority in its complete prompt and state in its packet."""
+
+    payload = _input()
+    workspace = build_canonical_turn_workspace(
+        episode=payload["episode"], scene_context=payload["scene_context"],
+        evidence=payload["evidence"], mutable_state=payload["mutable_state"],
+        character_constraints=payload["character_constraints"],
+        identity_context=payload["character_identity_context"],
+        available_actions=payload["available_actions"],
+        available_resolvers=payload["available_resolver_capabilities"],
+        overused_moves=payload["overused_moves"],
+        response_plan_contract_variant="fresh_ordinary",
+    )
+    packet = build_canonical_appraisal_question(workspace=workspace, stage_name="A1")
+    assert "current_observation" in facade_module._A1_SYSTEM_PROMPT
+    assert "guidance" not in packet and packet["current_observation"]
 
 
 def test_all_stage_system_prompts_share_request_agency_authority_contract() -> None:
-    """Every cognition system prompt consumes one current-observation contract."""
-
-    authority_contract = CURRENT_OBSERVATION_AUTHORITY_GUIDANCE.strip()
-    for stage in ("A1", "A2", "G", "P"):
-        assert facade_module._STAGE_SYSTEM_PROMPTS[stage].count(
-            authority_contract
-        ) == 1
+    for prompt in (
+        facade_module._A1_SYSTEM_PROMPT, facade_module._A2_SYSTEM_PROMPT,
+        facade_module._G_SYSTEM_PROMPT, facade_module._P_ORDINARY_SYSTEM_PROMPT,
+    ):
+        assert "current_observation` 是用户当下行动、意图、接受、许可和回应对象的唯一当前依据" in prompt
 
 
 def test_goal_and_plan_system_prompts_share_background_goal_authority_contract() -> None:
-    """G and P system prompts consume one shared background-goal contract."""
-
-    authority_contract = BACKGROUND_CONTEXT_GOAL_AUTHORITY_GUIDANCE.strip()
-    for stage in ("G", "P"):
-        system_prompt = facade_module._STAGE_SYSTEM_PROMPTS[stage]
-        assert system_prompt.count(authority_contract) == 1
+    assert "只有当前观察把它们带入当前请求" in facade_module._G_SYSTEM_PROMPT
+    assert "此前回应模式" in facade_module._P_ORDINARY_SYSTEM_PROMPT
 
 
 def test_canonical_stage_packets_are_handleless_and_disjoint() -> None:
@@ -261,6 +322,7 @@ def test_canonical_stage_packets_are_handleless_and_disjoint() -> None:
         available_actions=payload["available_actions"],
         available_resolvers=payload["available_resolver_capabilities"],
         overused_moves=payload["overused_moves"],
+        response_plan_contract_variant="fresh_ordinary",
     )
     packets = build_turn_workspace_stage_contracts(workspace=workspace)
     assert packets["A1"]["output_contract"]["required_fields"] == list(CANONICAL_A1_FAMILIES)
@@ -273,7 +335,7 @@ def test_canonical_stage_packets_are_handleless_and_disjoint() -> None:
         "resolver_requests", "epistemic_boundary",
     ]
     assert set(packets["P"]) == {
-        "stage", "guidance", "goal", "current_observation",
+        "stage", "goal", "current_observation",
         "direct_facts", "participant_continuity", "continuation_state",
         "capabilities", "output_contract",
     }
@@ -288,6 +350,1168 @@ def test_canonical_stage_packets_are_handleless_and_disjoint() -> None:
         len(set(axes)) == len(axes)
         for axes in CANONICAL_FAMILY_AXES.values()
     )
+
+
+def test_plan_packet_separates_user_prerequisite_from_task_admission() -> None:
+    """Expose the producer contract for prerequisite and task admission."""
+
+    payload = _input()
+    resolver_affordances = [
+        {
+            "capability": capability,
+            "semantic_capability": description,
+            "availability": "available",
+        }
+        for capability, description in RESOLVER_CAPABILITY_SEMANTICS.items()
+    ]
+    workspace = build_canonical_turn_workspace(
+        episode=payload["episode"],
+        scene_context=payload["scene_context"],
+        evidence=payload["evidence"],
+        mutable_state=payload["mutable_state"],
+        character_constraints=payload["character_constraints"],
+        identity_context=payload["character_identity_context"],
+        available_actions=payload["available_actions"],
+        available_resolvers=resolver_affordances,
+        overused_moves=payload["overused_moves"],
+        response_plan_contract_variant="fresh_ordinary",
+    )
+    packet = build_canonical_plan_question(
+        workspace=workspace,
+        goal={
+            "goal_kind": "open_goal",
+            "intent": "understand the current request",
+            "reason": "the current request needs a grounded response",
+            "cause_summary": "the current request",
+        },
+        appraisal_summary=[],
+    )
+    descriptions = {
+        row["capability"]: row["description"]
+        for row in packet["capabilities"]["resolvers"]
+    }
+    clarification = descriptions["human_clarification"]
+    task_resolution = descriptions["task_resolution_request"]
+
+    assert clarification == RESOLVER_CAPABILITY_SEMANTICS[
+        "human_clarification"
+    ]
+    assert task_resolution == RESOLVER_CAPABILITY_SEMANTICS[
+        "task_resolution_request"
+    ]
+    assert "missing user-controlled fact" in clarification
+    assert "task objective itself is not yet bounded" in clarification
+    assert "known prerequisite" in clarification
+    assert "task admission closed" in clarification
+    assert "bounded executable semantic task" in task_resolution
+    assert "current request supplies a bounded executable" in task_resolution
+    assert "required evidence" in task_resolution
+    assert "missing known user-controlled fact" in task_resolution
+    assert "admit the task first" in task_resolution
+    assert clarification != task_resolution
+    assert packet["output_contract"]["resolver_request_item_variants"] == {
+        "non_task": {
+            "required_fields": ["capability", "goal", "reason"],
+            "additionalProperties": False,
+        },
+        "task_resolution_request": {
+            "capability": "task_resolution_request",
+            "required_fields": [
+                "capability", "goal", "reason", "start_in_background",
+            ],
+            "additionalProperties": False,
+            "field_rules": {
+                "start_in_background": {
+                    "type": "boolean",
+                    "semantic_values": [
+                        {
+                            "value": False,
+                            "delivery_timing": (
+                                "required_evidence_before_current_visible_answer"
+                            ),
+                        },
+                        {
+                            "value": True,
+                            "delivery_timing": (
+                                "current_visible_acknowledgement_then_later_delivery"
+                            ),
+                            "selection_sources": [
+                                {
+                                    "source": "current_observation",
+                                    "selection_condition": (
+                                        "explicit_later_delivery"
+                                    ),
+                                },
+                                {
+                                    "source": "pending_resolver_continuation",
+                                    "selection_condition": (
+                                        "explicit_background_or_later_delivery"
+                                    ),
+                                    "required_pending_disposition": "answered",
+                                    "current_observation_condition": (
+                                        "answers_clarification_without_override_or_rejection"
+                                    ),
+                                },
+                            ],
+                        },
+                    ],
+                },
+            },
+        },
+    }
+    assert "task_resolution_start_in_background" not in packet["output_contract"]
+    assert "goal_resolution_meanings" not in packet["output_contract"]
+    assert "guidance" not in packet
+    assert {
+        row["capability"] for row in packet["capabilities"]["resolvers"]
+    } >= {"human_clarification", "task_resolution_request"}
+    assert packet["output_contract"]["pending_task_continuation"] == {
+        "required_when": {
+            "resolver_request_capability": "human_clarification",
+            "exact_count": 1,
+        },
+        "forbidden_when": {
+            "resolver_request_capability": "human_clarification",
+            "exact_count": 0,
+        },
+        "fields": ["schema_version", "on_answered_clarification"],
+        "schema_version": PENDING_TASK_CONTINUATION_VERSION,
+        "on_answered_clarification_values": [
+            "no_task_admission",
+            "foreground_task_admission",
+            "background_task_admission",
+        ],
+        "on_answered_clarification_semantics": {
+            "no_task_admission": "answered_clarification_does_not_admit_task",
+            "foreground_task_admission": "evidence_before_current_visible_answer",
+            "background_task_admission": (
+                "current_visible_acknowledgement_then_later_delivery"
+            ),
+        },
+    }
+
+    pending_workspace = build_canonical_turn_workspace(
+        episode=payload["episode"],
+        scene_context=payload["scene_context"],
+        evidence=payload["evidence"],
+        mutable_state=payload["mutable_state"],
+        character_constraints=payload["character_constraints"],
+        identity_context=payload["character_identity_context"],
+        available_actions=payload["available_actions"],
+        available_resolvers=resolver_affordances,
+        overused_moves=payload["overused_moves"],
+        pending_resolver_continuation={
+            "schema_version": RESOLVER_PENDING_CONTINUATION_VERSION,
+            "capability_kind": "human_clarification",
+            "status": "waiting_for_user",
+            "original_goal": (
+                "Please handle this task in the background after I choose "
+                "the target file."
+            ),
+            "question": "Which file should I summarize?",
+            "pending_task_continuation": {
+                "schema_version": PENDING_TASK_CONTINUATION_VERSION,
+                "on_answered_clarification": "background_task_admission",
+            },
+        },
+        response_plan_contract_variant="open_pending_resolution",
+    )
+    pending_packet = build_canonical_plan_question(
+        workspace=pending_workspace,
+        goal={
+            "goal_kind": "open_goal",
+            "intent": "await the selected target file",
+            "reason": "the user must choose a file before task admission",
+            "cause_summary": "the pending clarification",
+        },
+        appraisal_summary=[],
+    )
+    pending_background_source = pending_packet["output_contract"][
+        "resolver_request_item_variants"
+    ]["task_resolution_request"]["field_rules"]["start_in_background"][
+        "semantic_values"
+    ][1]["selection_sources"][1]
+
+    assert pending_packet["pending_resolver_continuation"]["original_goal"] == (
+        "Please handle this task in the background after I choose the target file."
+    )
+    assert "pending_task_continuation" not in pending_packet["output_contract"]
+    assert all(
+        row["capability"] != "human_clarification"
+        for row in pending_packet["capabilities"]["resolvers"]
+    )
+    assert any(
+        row["capability"] == "task_resolution_request"
+        for row in pending_packet["capabilities"]["resolvers"]
+    )
+    assert set(
+        pending_packet["output_contract"]["resolver_request_item_variants"]
+    ) == {"non_task", "task_resolution_request"}
+    assert pending_background_source == {
+        "source": "pending_resolver_continuation",
+        "selection_condition": "explicit_background_or_later_delivery",
+        "required_pending_disposition": "answered",
+        "current_observation_condition": (
+            "answers_clarification_without_override_or_rejection"
+        ),
+    }
+    assert pending_packet["output_contract"]["pending_resolution_values"] == [
+        "answered", "continue_waiting", "rejected", "superseded",
+    ]
+
+
+def test_plan_packet_variants_follow_the_visible_resolver_roster() -> None:
+    """P advertises only item shapes available in its own resolver roster."""
+
+    payload = _input()
+
+    def packet_for(
+        resolver_capabilities: list[dict[str, str]],
+    ) -> dict[str, object]:
+        workspace = build_canonical_turn_workspace(
+            episode=payload["episode"],
+            scene_context=payload["scene_context"],
+            evidence=payload["evidence"],
+            mutable_state=payload["mutable_state"],
+            character_constraints=payload["character_constraints"],
+            identity_context=payload["character_identity_context"],
+            available_actions=payload["available_actions"],
+            available_resolvers=resolver_capabilities,
+            overused_moves=payload["overused_moves"],
+            response_plan_contract_variant="fresh_ordinary",
+        )
+        return build_canonical_plan_question(
+            workspace=workspace,
+            goal={
+                "goal_kind": "bounded_current_goal",
+                "intent": "respond to the current observation",
+                "reason": "the current request is present",
+                "cause_summary": "the current observation",
+            },
+            appraisal_summary=[],
+        )
+
+    task_only = packet_for([{"capability": "task_resolution_request"}])
+    non_task_only = packet_for([{"capability": "approval_preparation"}])
+    no_resolvers = packet_for([])
+
+    assert set(task_only["output_contract"]["resolver_request_item_variants"]) == {
+        "task_resolution_request",
+    }
+    assert set(
+        non_task_only["output_contract"]["resolver_request_item_variants"]
+    ) == {"non_task"}
+    assert no_resolvers["output_contract"]["resolver_request_item_variants"] == {}
+
+
+def test_post_pending_resolution_variant_forbids_carrier_and_admission() -> None:
+    """A closed pending resolution keeps ordinary P processing carrier-free."""
+
+    payload = _input()
+    workspace = build_canonical_turn_workspace(
+        episode=payload["episode"],
+        scene_context=payload["scene_context"],
+        evidence=payload["evidence"],
+        mutable_state=payload["mutable_state"],
+        character_constraints=payload["character_constraints"],
+        identity_context=payload["character_identity_context"],
+        available_actions=payload["available_actions"],
+        available_resolvers=payload["available_resolver_capabilities"],
+        overused_moves=payload["overused_moves"],
+        response_plan_contract_variant="post_pending_resolution",
+    )
+    packet = build_canonical_plan_question(
+        workspace=workspace,
+        goal={
+            "goal_kind": "bounded_current_goal",
+            "intent": "continue after the resolved clarification",
+            "reason": "the required evidence is now available",
+            "cause_summary": "the resolver observation",
+        },
+        appraisal_summary=[],
+    )
+
+    contract = packet["output_contract"]
+    assert "response_plan_contract_variant" not in contract
+    assert "pending_resolver_continuation" not in packet
+    assert "pending_task_continuation" not in contract
+    assert "pending_resolution_fields" not in contract
+    assert "post_pending_resolution" not in contract
+    assert "response_plan_contract_variant" not in json.dumps(packet)
+    assert all(
+        row["capability"] not in {
+            "human_clarification",
+            "task_resolution_request",
+        }
+        for row in packet["capabilities"]["resolvers"]
+    )
+    assert set(contract["resolver_request_item_variants"]) == {"non_task"}
+
+    ordinary_plan = {
+        "goal_resolution": "answerable_now",
+        "response_goal": "give the grounded result",
+        "action_requests": [],
+        "resolver_requests": [],
+        "epistemic_boundary": "retain source limits",
+    }
+    plan = facade_module._validate_plan(
+        ordinary_plan,
+        self_cognition=False,
+        capabilities={"actions": [], "resolvers": []},
+        response_plan_contract_variant="post_pending_resolution",
+    )
+    assert plan.pending_resolution is None
+    with pytest.raises(
+        CanonicalContractError,
+        match=r"unexpected fields \['pending_task_continuation'\]",
+    ):
+        facade_module._validate_plan(
+            {
+                **ordinary_plan,
+                "pending_task_continuation": {
+                    "schema_version": PENDING_TASK_CONTINUATION_VERSION,
+                    "on_answered_clarification": "background_task_admission",
+                },
+            },
+            self_cognition=False,
+            capabilities={"actions": [], "resolvers": []},
+            response_plan_contract_variant="post_pending_resolution",
+        )
+    with pytest.raises(
+        CanonicalContractError,
+        match="pending continuation cannot create human clarification",
+    ):
+        facade_module._validate_plan(
+            {
+                **ordinary_plan,
+                "goal_resolution": "requires_user_input",
+                "resolver_requests": [{
+                    "capability": "human_clarification",
+                    "goal": "ask for the missing fact",
+                    "reason": "the task remains unbounded",
+                }],
+            },
+            self_cognition=False,
+            capabilities={
+                "actions": [],
+                "resolvers": [{"capability": "human_clarification"}],
+            },
+            response_plan_contract_variant="post_pending_resolution",
+        )
+    with pytest.raises(
+        CanonicalContractError,
+        match="post pending continuation cannot create task resolution",
+    ):
+        facade_module._validate_plan(
+            {
+                **ordinary_plan,
+                "goal_resolution": "requires_required_evidence",
+                "resolver_requests": [{
+                    "capability": "task_resolution_request",
+                    "goal": "repeat the accepted task",
+                    "reason": "the stale admission was echoed",
+                    "start_in_background": True,
+                }],
+            },
+            self_cognition=False,
+            capabilities={
+                "actions": [],
+                "resolvers": [{"capability": "task_resolution_request"}],
+            },
+            response_plan_contract_variant="post_pending_resolution",
+        )
+
+
+def test_tool_result_delivery_variant_closes_recursive_admission() -> None:
+    """A result-delivery P packet preserves only eligible non-task resolvers."""
+
+    payload = _input()
+    workspace = build_canonical_turn_workspace(
+        episode=payload["episode"],
+        scene_context=payload["scene_context"],
+        evidence=payload["evidence"],
+        mutable_state=payload["mutable_state"],
+        character_constraints=payload["character_constraints"],
+        identity_context=payload["character_identity_context"],
+        available_actions=payload["available_actions"],
+        available_resolvers=[
+            {"capability": "approval_preparation"},
+            {"capability": "human_clarification"},
+            {"capability": "task_resolution_request"},
+        ],
+        overused_moves=payload["overused_moves"],
+        response_plan_contract_variant="tool_result_delivery",
+    )
+    assert workspace["response_plan_contract_variant"] == (
+        "tool_result_delivery"
+    )
+    assert validate_response_plan_contract_variant("tool_result_delivery") == (
+        "tool_result_delivery"
+    )
+    packet = build_canonical_plan_question(
+        workspace=workspace,
+        goal={
+            "goal_kind": "bounded_current_goal",
+            "intent": "report the resolved tool result",
+            "reason": "the current episode contains bounded task evidence",
+            "cause_summary": "the task result",
+        },
+        appraisal_summary=[],
+    )
+
+    contract = packet["output_contract"]
+    assert [
+        row["capability"] for row in packet["capabilities"]["resolvers"]
+    ] == ["approval_preparation"]
+    assert set(contract["resolver_request_item_variants"]) == {"non_task"}
+    assert "pending_task_continuation" not in contract
+    assert "pending_resolution_fields" not in contract
+    assert "response_plan_contract_variant" not in contract
+    assert "tool_result_delivery" not in json.dumps(packet)
+
+    canonical_plan = {
+        "goal_resolution": "answerable_now",
+        "response_goal": "report the bounded result",
+        "action_requests": [],
+        "resolver_requests": [],
+        "epistemic_boundary": "the result is limited to returned evidence",
+    }
+    plan = _validate_plan(
+        canonical_plan,
+        self_cognition=False,
+        capabilities=packet["capabilities"],
+        response_plan_contract_variant="tool_result_delivery",
+    )
+    assert plan.resolver_requests == ()
+    invalid_candidates = [
+        {
+            **canonical_plan,
+            "pending_task_continuation": None,
+        },
+        {
+            **canonical_plan,
+            "pending_resolution": {"decision": "answered", "reason": "done"},
+        },
+        {
+            **canonical_plan,
+            "goal_resolution": "requires_user_input",
+            "resolver_requests": [{
+                "capability": "human_clarification",
+                "goal": "ask another user question",
+                "reason": "retry the result",
+            }],
+        },
+        {
+            **canonical_plan,
+            "goal_resolution": "requires_required_evidence",
+            "resolver_requests": [{
+                "capability": "task_resolution_request",
+                "goal": "admit recursive work",
+                "reason": "repeat the completed task",
+                "start_in_background": True,
+            }],
+        },
+    ]
+    for candidate in invalid_candidates:
+        with pytest.raises(CanonicalContractError):
+            _validate_plan(
+                candidate,
+                self_cognition=False,
+                capabilities=packet["capabilities"],
+                response_plan_contract_variant="tool_result_delivery",
+            )
+
+
+def test_pending_continuation_reaches_every_stage_without_durable_identity() -> None:
+    """A pending row is semantic context across A1/A2/G/P, never a row id."""
+
+    payload = _input()
+    pending_continuation = {
+        "schema_version": RESOLVER_PENDING_CONTINUATION_VERSION,
+        "capability_kind": "human_clarification",
+        "status": "waiting_for_user",
+        "original_goal": "完成一个有界的证据任务。",
+        "question": "请补充任务所需的一个用户事实。",
+        "pending_task_continuation": {
+            "schema_version": PENDING_TASK_CONTINUATION_VERSION,
+            "on_answered_clarification": "background_task_admission",
+        },
+    }
+    resolver_goal_progress = {
+        "schema_version": "resolver_goal_progress.v1",
+        "original_goal": "完成一个有界的证据任务。",
+        "current_focus": "等待用户补充地点后取得路线证据。",
+        "deliverables": [{
+            "description": "两小时路线和时间切分",
+            "status": "pending",
+            "note": "等待地点后继续。",
+        }],
+        "missing_user_inputs": ["奥克兰所在区域"],
+        "evidence_dependencies": ["路线距离和营业时间证据"],
+        "attempted_paths": [],
+        "source_backed_facts": [],
+        "assumptions_or_inferences": [],
+        "blockers": [],
+        "final_response_requirements": ["保留精确标记：路线已核验"],
+    }
+    workspace = build_canonical_turn_workspace(
+        episode=payload["episode"],
+        scene_context=payload["scene_context"],
+        evidence=payload["evidence"],
+        mutable_state=payload["mutable_state"],
+        character_constraints=payload["character_constraints"],
+        identity_context=payload["character_identity_context"],
+        available_actions=payload["available_actions"],
+        available_resolvers=payload["available_resolver_capabilities"],
+        overused_moves=payload["overused_moves"],
+        resolver_progress=resolver_goal_progress,
+        pending_resolver_continuation=pending_continuation,
+        response_plan_contract_variant="open_pending_resolution",
+    )
+    packets = build_turn_workspace_stage_contracts(workspace=workspace)
+
+    for stage in ("A1", "A2", "G", "P"):
+        projected = packets[stage]["pending_resolver_continuation"]
+        assert projected["original_goal"] == "完成一个有界的证据任务。"
+        assert projected["question"] == "请补充任务所需的一个用户事实。"
+        progress = packets[stage]["resolver_goal_progress"]
+        assert progress["original_goal"] == "完成一个有界的证据任务。"
+        assert progress["evidence_dependencies"] == [
+            "路线距离和营业时间证据"
+        ]
+        assert progress["final_response_requirements"] == [
+            "保留精确标记：路线已核验"
+        ]
+        assert "guidance" not in packets[stage]
+        rendered = json.dumps(packets[stage], ensure_ascii=False)
+        assert "resume_id" not in rendered
+        assert "resolver_pending:" not in rendered
+    assert packets["P"]["output_contract"]["required_fields"] == [
+        "goal_resolution", "response_goal", "action_requests",
+        "resolver_requests", "epistemic_boundary", "pending_resolution",
+    ]
+    assert packets["P"]["output_contract"]["pending_resolution_fields"] == [
+        "decision", "reason",
+    ]
+    assert "当前观察" in facade_module._P_PENDING_CLARIFICATION_SYSTEM_PROMPT
+    assert "确实已经回答" in facade_module._P_PENDING_CLARIFICATION_SYSTEM_PROMPT
+
+    closed_workspace = build_canonical_turn_workspace(
+        episode=payload["episode"],
+        scene_context=payload["scene_context"],
+        evidence=payload["evidence"],
+        mutable_state=payload["mutable_state"],
+        character_constraints=payload["character_constraints"],
+        identity_context=payload["character_identity_context"],
+        available_actions=payload["available_actions"],
+        available_resolvers=payload["available_resolver_capabilities"],
+        overused_moves=payload["overused_moves"],
+        resolver_progress=resolver_goal_progress,
+        response_plan_contract_variant="post_pending_resolution",
+    )
+    closed_packets = build_turn_workspace_stage_contracts(
+        workspace=closed_workspace,
+    )
+
+    for stage in ("A1", "A2", "G", "P"):
+        assert "pending_resolver_continuation" not in closed_packets[stage]
+        assert closed_packets[stage]["resolver_goal_progress"] == (
+            packets[stage]["resolver_goal_progress"]
+        )
+    assert "pending_resolution" not in closed_packets["P"]["output_contract"][
+        "required_fields"
+    ]
+
+
+def test_pending_resolution_contract_is_exact_and_task_compatible() -> None:
+    """Pending dispositions are semantic and gate retained task admission."""
+
+    pending_continuation = {
+        "schema_version": RESOLVER_PENDING_CONTINUATION_VERSION,
+        "capability_kind": "human_clarification",
+        "status": "waiting_for_user",
+        "original_goal": "完成一个有界的证据任务。",
+        "question": "请补充一个用户事实。",
+        "pending_task_continuation": {
+            "schema_version": PENDING_TASK_CONTINUATION_VERSION,
+            "on_answered_clarification": "foreground_task_admission",
+        },
+    }
+    common = {
+        "goal_resolution": "requires_required_evidence",
+        "response_goal": "继续处理当前有界目标",
+        "action_requests": [],
+        "resolver_requests": [{
+            "capability": "task_resolution_request",
+            "goal": "取得目标所需的证据",
+            "reason": "当前目标需要证据",
+            "start_in_background": False,
+        }],
+        "epistemic_boundary": "证据仍需由来源确认。",
+    }
+    plan = facade_module._validate_plan(
+        {
+            **common,
+            "pending_resolution": {
+                "decision": "answered",
+                "reason": "当前消息回答了原澄清。",
+            },
+        },
+        self_cognition=False,
+        capabilities={
+            "actions": [],
+            "resolvers": [{"capability": "task_resolution_request"}],
+        },
+        pending_resolver_continuation=pending_continuation,
+        response_plan_contract_variant="open_pending_resolution",
+    )
+    assert plan.pending_resolution == {
+        "decision": "answered",
+        "reason": "当前消息回答了原澄清。",
+    }
+
+    with pytest.raises(CanonicalContractError, match="fields are not exact"):
+        facade_module._validate_plan(
+            {
+                **common,
+                "pending_resolution": {
+                    "decision": "answered",
+                    "reason": "当前消息回答了原澄清。",
+                    "resume_id": "hidden-row-id",
+                },
+            },
+            self_cognition=False,
+            capabilities={
+                "actions": [],
+                "resolvers": [{"capability": "task_resolution_request"}],
+            },
+            pending_resolver_continuation=pending_continuation,
+            response_plan_contract_variant="open_pending_resolution",
+        )
+    for decision in ("continue_waiting", "rejected", "superseded"):
+        with pytest.raises(
+            CanonicalContractError,
+            match="pending disposition must be answered",
+        ):
+            facade_module._validate_plan(
+                {
+                    **common,
+                    "pending_resolution": {
+                        "decision": decision,
+                        "reason": "当前消息没有回答原澄清。",
+                    },
+                },
+                self_cognition=False,
+                capabilities={
+                    "actions": [],
+                    "resolvers": [{"capability": "task_resolution_request"}],
+                },
+                pending_resolver_continuation=pending_continuation,
+                response_plan_contract_variant="open_pending_resolution",
+            )
+    with pytest.raises(
+        CanonicalContractError,
+        match="response plan: missing fields \\['pending_resolution'\\]",
+    ):
+        facade_module._validate_plan(
+            common,
+            self_cognition=False,
+            capabilities={
+                "actions": [],
+                "resolvers": [{"capability": "task_resolution_request"}],
+            },
+                pending_resolver_continuation=pending_continuation,
+                response_plan_contract_variant="open_pending_resolution",
+        )
+
+
+def test_pending_task_continuation_gates_answered_task_admission() -> None:
+    """An answer-conditioned carrier fixes admission timing without text inference."""
+
+    common = {
+        "goal_resolution": "requires_required_evidence",
+        "response_goal": "继续处理当前有界目标",
+        "action_requests": [],
+        "resolver_requests": [{
+            "capability": "task_resolution_request",
+            "goal": "取得目标所需的证据",
+            "reason": "当前目标需要证据",
+            "start_in_background": True,
+        }],
+        "epistemic_boundary": "证据仍需由来源确认。",
+        "pending_resolution": {
+            "decision": "answered",
+            "reason": "当前消息回答了原澄清。",
+        },
+    }
+    background_continuation = {
+        "schema_version": RESOLVER_PENDING_CONTINUATION_VERSION,
+        "capability_kind": "human_clarification",
+        "status": "waiting_for_user",
+        "original_goal": "后台完成有界的证据任务。",
+        "question": "请补充一个用户事实。",
+        "pending_task_continuation": {
+            "schema_version": PENDING_TASK_CONTINUATION_VERSION,
+            "on_answered_clarification": "background_task_admission",
+        },
+    }
+    capabilities = {
+        "actions": [],
+        "resolvers": [{"capability": "task_resolution_request"}],
+    }
+
+    plan = facade_module._validate_plan(
+        common,
+        self_cognition=False,
+        capabilities=capabilities,
+        pending_resolver_continuation=background_continuation,
+        response_plan_contract_variant="open_pending_resolution",
+    )
+
+    assert plan.resolver_requests[0]["start_in_background"] is True
+    assert plan.pending_task_continuation is None
+    mismatched_background = {
+        **common,
+        "resolver_requests": [{
+            **common["resolver_requests"][0],
+            "start_in_background": False,
+        }],
+    }
+    with pytest.raises(
+        CanonicalContractError,
+        match="mismatches pending continuation",
+    ):
+        facade_module._validate_plan(
+            mismatched_background,
+            self_cognition=False,
+            capabilities=capabilities,
+            pending_resolver_continuation=background_continuation,
+            response_plan_contract_variant="open_pending_resolution",
+        )
+
+    foreground_continuation = {
+        **background_continuation,
+        "pending_task_continuation": {
+            "schema_version": PENDING_TASK_CONTINUATION_VERSION,
+            "on_answered_clarification": "foreground_task_admission",
+        },
+    }
+    with pytest.raises(
+        CanonicalContractError,
+        match="mismatches pending continuation",
+    ):
+        facade_module._validate_plan(
+            common,
+            self_cognition=False,
+            capabilities=capabilities,
+            pending_resolver_continuation=foreground_continuation,
+            response_plan_contract_variant="open_pending_resolution",
+        )
+
+    no_task_continuation = {
+        **background_continuation,
+        "pending_task_continuation": {
+            "schema_version": PENDING_TASK_CONTINUATION_VERSION,
+            "on_answered_clarification": "no_task_admission",
+        },
+    }
+    with pytest.raises(CanonicalContractError, match="forbids task admission"):
+        facade_module._validate_plan(
+            mismatched_background,
+            self_cognition=False,
+            capabilities=capabilities,
+            pending_resolver_continuation=no_task_continuation,
+            response_plan_contract_variant="open_pending_resolution",
+        )
+
+    clarification_plan = {
+        "goal_resolution": "requires_user_input",
+        "response_goal": "询问一个缺失事实。",
+        "action_requests": [],
+        "resolver_requests": [{
+            "capability": "human_clarification",
+            "goal": "询问一个缺失事实。",
+            "reason": "当前任务尚未有界。",
+        }],
+        "epistemic_boundary": "缺失事实仍未知。",
+    }
+    clarification_capabilities = {
+        "actions": [],
+        "resolvers": [{"capability": "human_clarification"}],
+    }
+    with pytest.raises(CanonicalContractError, match="continuation is required"):
+        facade_module._validate_plan(
+            clarification_plan,
+            self_cognition=False,
+            capabilities=clarification_capabilities,
+            response_plan_contract_variant="fresh_ordinary",
+        )
+    validated_clarification = facade_module._validate_plan(
+        {
+            **clarification_plan,
+            "pending_task_continuation": {
+                "schema_version": PENDING_TASK_CONTINUATION_VERSION,
+                "on_answered_clarification": "background_task_admission",
+            },
+        },
+        self_cognition=False,
+        capabilities=clarification_capabilities,
+        response_plan_contract_variant="fresh_ordinary",
+    )
+    assert validated_clarification.pending_task_continuation == {
+        "schema_version": PENDING_TASK_CONTINUATION_VERSION,
+        "on_answered_clarification": "background_task_admission",
+    }
+
+    with pytest.raises(
+        CanonicalContractError,
+        match=r"unexpected fields \['pending_task_continuation'\]",
+    ):
+        facade_module._validate_plan(
+            {
+                **common,
+                "pending_task_continuation": {
+                    "schema_version": PENDING_TASK_CONTINUATION_VERSION,
+                    "on_answered_clarification": "background_task_admission",
+                },
+            },
+            self_cognition=False,
+            capabilities=capabilities,
+            pending_resolver_continuation=background_continuation,
+            response_plan_contract_variant="open_pending_resolution",
+        )
+
+    with pytest.raises(
+        CanonicalContractError,
+        match="pending continuation cannot create human clarification",
+    ):
+        facade_module._validate_plan(
+            {
+                **clarification_plan,
+                "pending_resolution": {
+                    "decision": "continue_waiting",
+                    "reason": "The current observation remains incomplete.",
+                },
+            },
+            self_cognition=False,
+            capabilities=clarification_capabilities,
+            pending_resolver_continuation=background_continuation,
+            response_plan_contract_variant="open_pending_resolution",
+        )
+
+    with pytest.raises(
+        CanonicalContractError,
+        match="human clarification cannot co-occur with task admission",
+    ):
+            facade_module._validate_plan(
+                {
+                    **clarification_plan,
+                    "goal_resolution": "requires_required_evidence",
+                    "pending_task_continuation": {
+                        "schema_version": PENDING_TASK_CONTINUATION_VERSION,
+                        "on_answered_clarification": "background_task_admission",
+                    },
+                    "resolver_requests": [
+                    *clarification_plan["resolver_requests"],
+                    common["resolver_requests"][0],
+                ],
+            },
+            self_cognition=False,
+            capabilities={
+                "actions": [],
+                "resolvers": [
+                    {"capability": "human_clarification"},
+                    {"capability": "task_resolution_request"},
+                ],
+            },
+            response_plan_contract_variant="fresh_ordinary",
+        )
+
+    with pytest.raises(
+        CanonicalContractError,
+        match="pending_task_continuation is limited to human clarification",
+    ):
+        facade_module._validate_plan(
+            {
+                "goal_resolution": "answerable_now",
+                "response_goal": "Respond to the current observation.",
+                "action_requests": [],
+                "resolver_requests": [],
+                "epistemic_boundary": "No external evidence is required.",
+                "pending_task_continuation": {
+                    "schema_version": PENDING_TASK_CONTINUATION_VERSION,
+                    "on_answered_clarification": "no_task_admission",
+                },
+            },
+            self_cognition=False,
+            capabilities={"actions": [], "resolvers": []},
+            response_plan_contract_variant="fresh_ordinary",
+        )
+
+
+def test_approval_pending_row_stays_outside_clarification_continuity() -> None:
+    """Approval rows retain their ledger flow without P clarification binding."""
+
+    projection = project_pending_resume_for_prompt({
+        "schema_version": RESOLVER_PENDING_RESUME_VERSION,
+        "resume_id": "approval-row-id",
+        "capability_kind": "approval_preparation",
+        "status": "waiting_for_approval",
+        "platform": "debug",
+        "platform_channel_id": "deterministic-channel",
+        "global_user_id": "user-1",
+        "source_message_id": "previous-message",
+        "prompt_safe_original_goal": "安排一个提醒。",
+        "prompt_safe_question": "",
+        "prompt_safe_approval_summary": "等待用户确认提醒。",
+        "created_at_utc": "2026-07-13T00:00:00Z",
+        "expires_at_utc": "2026-07-15T00:00:00Z",
+    })
+
+    assert projection is None
+
+
+def test_pending_disposition_binds_only_the_hidden_selected_resume_id() -> None:
+    """Caller state supplies the row id while the model output stays handleless."""
+
+    payload = _input()
+    caller_state = dict(payload)
+    caller_state.update({
+        "global_user_id": payload["mutable_state"]["owner_user_id"],
+        "cognitive_episode": payload["episode"],
+        "pending_resolver_resume": {
+            "schema_version": RESOLVER_PENDING_RESUME_VERSION,
+            "resume_id": "secret-selected-row-id",
+            "capability_kind": "human_clarification",
+            "status": "waiting_for_user",
+            "platform": "debug",
+            "platform_channel_id": "deterministic-channel",
+            "global_user_id": "user-1",
+            "source_message_id": "previous-message",
+            "prompt_safe_original_goal": "完成一个有界的证据任务。",
+            "prompt_safe_question": "请补充一个用户事实。",
+            "prompt_safe_approval_summary": "",
+            "pending_task_continuation": {
+                "schema_version": PENDING_TASK_CONTINUATION_VERSION,
+                "on_answered_clarification": "background_task_admission",
+            },
+            "created_at_utc": "2026-07-13T00:00:00Z",
+            "expires_at_utc": "2026-07-15T00:00:00Z",
+        },
+    })
+    output = {
+        "schema_version": "cognition_output.v3",
+        "active_character_goal": {
+            "goal_kind": "continue",
+            "intent": "继续当前目标",
+            "reason": "当前消息回答了原澄清。",
+            "cause_summary": "当前观察",
+        },
+        "private_monologue": "我会沿着已回答的目标继续。",
+        "response_plan": {
+            "goal_resolution": "answerable_now",
+            "response_goal": "继续当前目标",
+            "action_requests": [],
+            "resolver_requests": [],
+            "epistemic_boundary": "后续事实仍需来源确认。",
+            "pending_resolution": {
+                "decision": "answered",
+                "reason": "当前消息回答了原澄清。",
+            },
+        },
+        "state_projection": {"replacement_state": payload["mutable_state"]},
+        "affect_projection": [],
+        "relationship_projection": {},
+        "relational_willingness": {},
+        "cause_provenance": [],
+    }
+
+    projected = _project_output_to_global_state(
+        output,
+        caller_state,
+        available_actions=payload["available_actions"],
+        available_resolver_capabilities=(
+            payload["available_resolver_capabilities"]
+        ),
+    )
+
+    assert projected["resolver_pending_resolution"] == {
+        "schema_version": "resolver_pending_resolution.v1",
+        "resume_id": "secret-selected-row-id",
+        "decision": "answered",
+        "reason": "当前消息回答了原澄清。",
+    }
+    assert "resume_id" not in output["response_plan"]["pending_resolution"]
+
+
+def test_task_resolution_request_requires_required_evidence_resolution() -> None:
+    """The P-stage keeps background intent in the typed task request."""
+
+    plan = facade_module._validate_plan(
+        {
+            "goal_resolution": "requires_required_evidence",
+            "response_goal": "obtain the required evidence",
+            "action_requests": [],
+            "resolver_requests": [{
+                "capability": "task_resolution_request",
+                "goal": "complete the bounded task",
+                 "reason": "the bounded task requires evidence",
+                "start_in_background": True,
+            }],
+            "epistemic_boundary": "The task parameter remains unknown.",
+        },
+        self_cognition=False,
+        capabilities={
+            "actions": [],
+            "resolvers": [{"capability": "task_resolution_request"}],
+        },
+        response_plan_contract_variant="fresh_ordinary",
+    )
+
+    assert plan.resolver_requests == ({
+        "capability": "task_resolution_request",
+        "goal": "complete the bounded task",
+        "reason": "the bounded task requires evidence",
+        "start_in_background": True,
+    },)
+
+
+def test_task_resolution_background_flag_requires_nested_canonical_shape() -> None:
+    """P rejects the observed top-level task flag without moving it into a request."""
+
+    invalid_plan = {
+        "goal_resolution": "requires_required_evidence",
+        "response_goal": "obtain the required evidence",
+        "action_requests": [],
+        "resolver_requests": [{
+            "capability": "task_resolution_request",
+            "goal": "complete the bounded task",
+            "reason": "the bounded task requires evidence",
+        }],
+        "epistemic_boundary": "The task parameter remains unknown.",
+        "task_resolution_start_in_background": False,
+    }
+    capabilities = {
+        "actions": [],
+        "resolvers": [{"capability": "task_resolution_request"}],
+    }
+
+    with pytest.raises(
+        CanonicalContractError,
+        match=(
+            "response plan: unexpected fields "
+            "\\['task_resolution_start_in_background'\\]"
+        ),
+    ):
+        facade_module._validate_plan(
+            invalid_plan,
+            self_cognition=False,
+            capabilities=capabilities,
+            response_plan_contract_variant="fresh_ordinary",
+        )
+
+    invalid_nested_plan = dict(invalid_plan)
+    invalid_nested_plan.pop("task_resolution_start_in_background")
+    with pytest.raises(
+        CanonicalContractError,
+        match="resolver_requests\\[0\\]: missing fields \\['start_in_background'\\]",
+    ):
+        facade_module._validate_plan(
+            invalid_nested_plan,
+            self_cognition=False,
+            capabilities=capabilities,
+            response_plan_contract_variant="fresh_ordinary",
+        )
+
+
+@pytest.mark.parametrize(
+    "goal_resolution",
+    ("answerable_now", "requires_user_input", "blocked"),
+)
+def test_task_resolution_request_rejects_incompatible_goal_resolution(
+    goal_resolution: str,
+) -> None:
+    """The P contract rejects task admission outside required evidence."""
+
+    with pytest.raises(CanonicalContractError, match="requires goal_resolution"):
+        facade_module._validate_plan(
+            {
+                "goal_resolution": goal_resolution,
+                "response_goal": "describe the bounded task",
+                "action_requests": [],
+                "resolver_requests": [{
+                    "capability": "task_resolution_request",
+                    "goal": "complete the bounded task",
+                    "reason": "the task needs required evidence",
+                    "start_in_background": False,
+                }],
+                "epistemic_boundary": "The required evidence is not complete.",
+            },
+            self_cognition=False,
+            capabilities={
+                "actions": [],
+                "resolvers": [{"capability": "task_resolution_request"}],
+            },
+            response_plan_contract_variant="fresh_ordinary",
+        )
+
+
+def test_task_resolution_projection_maps_background_choice_to_priority() -> None:
+    """The caller projects the typed P-stage choice into the V1 request."""
+
+    payload = _input()
+    caller_state = {
+        **payload,
+        "global_user_id": payload["mutable_state"]["owner_user_id"],
+        "cognitive_episode": payload["episode"],
+    }
+    output = {
+        "schema_version": "cognition_output.v3",
+        "active_character_goal": {
+            "goal_kind": "ordinary_response",
+            "intent": "admit the bounded task",
+            "reason": "the current observation supplies the task objective",
+            "cause_summary": "the current observation",
+        },
+        "private_monologue": "I can admit this bounded task and preserve its question.",
+        "response_plan": {
+            "goal_resolution": "requires_required_evidence",
+            "response_goal": "obtain the required evidence",
+            "action_requests": [],
+            "resolver_requests": [{
+                "capability": "task_resolution_request",
+                "goal": "complete the bounded task",
+                "reason": "the bounded task requires evidence",
+                "start_in_background": True,
+            }],
+            "epistemic_boundary": "The task parameter remains unknown.",
+        },
+        "state_projection": {
+            "replacement_state": payload["mutable_state"],
+            "continuation_goal_ref": {
+                "scope": "user",
+                "kind": "goal",
+                "entity_id": "goal:ordinary_response:user:current",
+            },
+        },
+        "affect_projection": [],
+        "relationship_projection": {},
+        "relational_willingness": {},
+        "cause_provenance": [],
+    }
+
+    projected = _project_output_to_global_state(
+        output,
+        caller_state,
+        available_actions=payload["available_actions"],
+        available_resolver_capabilities=(
+            payload["available_resolver_capabilities"]
+        ),
+    )
+
+    request = projected["resolver_capability_requests"][0]
+    assert request["capability_kind"] == "task_resolution_request"
+    assert request["priority"] == "background"
 
 
 def test_terminal_text_seed_requires_authored_text_after_http_url_removal() -> None:
@@ -344,6 +1568,30 @@ def test_canonical_input_requires_bounded_overused_moves_without_exposing_handle
     oversized["overused_moves"] = ["x" * 121]
     with pytest.raises(CanonicalContractError):
         _validate_canonical_input(oversized)
+
+
+def test_canonical_input_requires_response_plan_contract_variant() -> None:
+    """The P lifecycle selector is required internal turn data."""
+
+    payload = _input()
+    missing = dict(payload)
+    missing.pop("response_plan_contract_variant")
+
+    with pytest.raises(
+        CanonicalContractError,
+        match="canonical cognition input missing.*response_plan_contract_variant",
+    ):
+        _validate_canonical_input(missing)
+
+
+@pytest.mark.parametrize("value", [None, [], {}, "unknown"])
+def test_response_plan_contract_variant_rejects_invalid_values_as_value_error(
+    value: object,
+) -> None:
+    """Malformed selector values retain the typed contract error boundary."""
+
+    with pytest.raises(ValueError, match="response plan contract variant is invalid"):
+        validate_response_plan_contract_variant(value)
 
 
 def test_model_capabilities_are_semantic_and_reserve_speak_capacity() -> None:
@@ -421,34 +1669,8 @@ def test_model_capabilities_are_semantic_and_reserve_speak_capacity() -> None:
             },
             self_cognition=False,
             capabilities=three_action_capabilities,
+            response_plan_contract_variant="fresh_ordinary",
         )
-
-
-def test_ambiguous_coding_context_does_not_advertise_a_selector() -> None:
-    base_affordance = {
-        "action_kind": "accepted_coding_task_request",
-        "capability": "continue one accepted coding task",
-        "permission": "allowed",
-        "decision_mode": "closed",
-        "allowed_decisions": ["status"],
-        "default_decision": "status",
-        "decision_pattern": "",
-        "context_ref": "",
-        "target_roles": [],
-    }
-    state = {
-        "action_selection_context": {
-            "coding_runs": [
-                {"coding_run_ref": "run-a", "allowed_next_actions": ["status"]},
-                {"coding_run_ref": "run-b", "allowed_next_actions": ["status"]},
-            ],
-        },
-        "action_availability_runtime": {},
-    }
-    assert _coding_run_action_affordances(
-        state,
-        base_affordance=base_affordance,
-    ) == []
 
 
 def test_future_speak_authority_uses_trusted_episode_not_model_detail() -> None:
@@ -746,6 +1968,10 @@ def test_caller_materializes_typed_speak_and_resolver_envelopes() -> None:
                 "goal": "clarify the missing detail",
                 "reason": "the current evidence is insufficient",
             }],
+            "pending_task_continuation": {
+                "schema_version": PENDING_TASK_CONTINUATION_VERSION,
+                "on_answered_clarification": "no_task_admission",
+            },
             "epistemic_boundary": (
                 "The missing detail remains unknown and must be asked."
             ),
@@ -765,6 +1991,10 @@ def test_caller_materializes_typed_speak_and_resolver_envelopes() -> None:
         ],
     )
     assert [row["kind"] for row in projected["action_specs"]] == ["speak"]
+    assert projected["pending_task_continuation"] == {
+        "schema_version": PENDING_TASK_CONTINUATION_VERSION,
+        "on_answered_clarification": "no_task_admission",
+    }
     resolver = projected["resolver_capability_requests"]
     assert resolver[0]["schema_version"] == "resolver_capability_request.v1"
     assert resolver[0]["capability_kind"] == "human_clarification"
@@ -845,6 +2075,7 @@ def test_goal_capacity_deferral_preserves_response_and_unrelated_resolver() -> N
                     "capability": "task_resolution_request",
                     "goal": "continue the task",
                     "reason": "durable task lineage is required",
+                    "start_in_background": False,
                 },
                 {
                     "capability": "human_clarification",
@@ -989,7 +2220,9 @@ async def test_canonical_cognition_calls_a1_a2_g_p_once_with_subjective_outputs(
     assert [row["status"] for row in trace_rows] == ["succeeded"] * 4
     assert [row["attempt_index"] for row in trace_rows] == [1] * 4
     assert all(row["parsed_output"] for row in trace_rows)
-    assert [config.output_mode for config in invoker.configs] == ["text"] * 4
+    assert [config.output_mode for config in invoker.configs] == [
+        "json_object"
+    ] * 4
     assert set(invoker.packets[0]) >= {
         "stage", "current_observation", "direct_facts",
         "continuation_state", "output_contract",
@@ -1010,10 +2243,11 @@ async def test_canonical_cognition_calls_a1_a2_g_p_once_with_subjective_outputs(
     assert "output_contract" in invoker.packets[3]
     assert "appraisal_summary" not in invoker.packets[3]
     assert "缺少证据" in invoker.system_prompts[3]
-    assert "必须明确表达不确定性" in invoker.system_prompts[3]
-    assert "不得把任何输入权威通道名称写入输出对象" in (
+    assert "只能作为不确定的解释" in invoker.system_prompts[3]
+    assert "当前观察已经给出有界、可执行的语义目标" in (
         invoker.system_prompts[3]
     )
+    assert all("guidance" not in packet for packet in invoker.packets)
     def walk(value: object) -> None:
         if isinstance(value, dict):
             for key, child in value.items():

@@ -6,12 +6,9 @@ from collections.abc import Mapping
 from typing import TypedDict
 
 from kazusa_ai_chatbot.background_work.models import BackgroundWorkJobDoc
-from kazusa_ai_chatbot.coding_agent.coding_run.ledger import (
-    sanitize_coding_run_context,
-)
 from kazusa_ai_chatbot.cognition_episode import (
-    CognitiveEpisodeValidationError,
     CognitiveEpisodeV1,
+    CognitiveEpisodeValidationError,
     EvidenceRefV1,
     GoalContinuationRefV1,
     TargetScopeV1,
@@ -74,11 +71,6 @@ def build_result_ready_episode_from_job(
     task_result = _stored_task_result(job)
     continuation_ref = task_result["goal_continuation_ref"]
 
-    worker_metadata = job.get("worker_metadata")
-    coding_run_context = None
-    if isinstance(worker_metadata, Mapping):
-        metadata_context = worker_metadata.get("coding_run_context")
-        coding_run_context = sanitize_coding_run_context(metadata_context)
     outcome_summary = _result_semantic_summary(task_result)
     evidence_refs = _tool_result_evidence_refs(
         task_result=task_result,
@@ -113,8 +105,15 @@ def build_result_ready_episode_from_job(
         "source_message_id": job.get("source_message_id", ""),
         "goal_continuation_ref": continuation_ref,
     }
-    if coding_run_context is not None:
-        result["coding_run_context"] = dict(coding_run_context)
+    task_context = job.get("task_resolution_context")
+    if not isinstance(task_context, Mapping):
+        task_context = {
+            "schema_version": "task_resolution_context.v1",
+            "accepted_task_ref": f"accepted_task:{accepted_task_id}",
+            "task_status": task_result["status"],
+            "operation_generation": 0,
+        }
+    result["task_resolution_context"] = dict(task_context)
     episode = build_tool_result_episode(
         result=result,
         evidence_refs=evidence_refs,
@@ -142,8 +141,9 @@ def validate_tool_result_cognition_source(
 ) -> ToolResultCognitionSourceV1:
     """Validate one typed tool-result source attached to an episode percept.
 
-    The projection is result-owned: factual states carry only validated
-    evidence excerpts, and every non-factual state carries no evidence at all.
+    The projection is result-owned: the validated semantic summary carries the
+    result meaning, factual states retain their validated evidence separately,
+    and non-factual states carry no evidence at all.
     """
 
     if not isinstance(value, Mapping):
@@ -236,23 +236,22 @@ def _stored_task_result(
 
 
 def _result_semantic_summary(result: TaskResolutionResultV1) -> str:
-    """Project validated task evidence into the prompt-safe result summary.
+    """Project the validated semantic result with its declared limitations.
 
-    Factual states expose only validated evidence excerpts, with explicit
-    remaining limitations retained for partial results. Every other state
-    exposes only objective-scoped status or clarification text.
+    Evidence excerpts and handles remain independently projected provenance.
+    The validated prompt-safe summary remains the semantic authority for every
+    task status, including factual successful and partial results.
     """
 
-    if result["status"] in {"resolved", "partial"}:
-        summary_rows = list(result["evidence_excerpts"])
-        if result["status"] == "partial" and result["remaining_needs"]:
-            remaining_text = "; ".join(result["remaining_needs"])
-            summary_rows.append(f"Remaining limitations: {remaining_text}")
-    else:
-        summary_rows = [result["prompt_safe_summary"]]
-        if result["remaining_needs"]:
-            remaining_text = "; ".join(result["remaining_needs"])
-            summary_rows.append(f"Remaining needs: {remaining_text}")
+    summary_rows = [result["prompt_safe_summary"]]
+    if result["status"] == "partial" and result["remaining_needs"]:
+        remaining_text = "; ".join(result["remaining_needs"])
+        summary_rows.append(f"Remaining limitations: {remaining_text}")
+    elif result["status"] not in {"resolved", "partial"} and result[
+        "remaining_needs"
+    ]:
+        remaining_text = "; ".join(result["remaining_needs"])
+        summary_rows.append(f"Remaining needs: {remaining_text}")
     summary = "; ".join(summary_rows)
     bounded_summary = summary[:MAX_TOOL_RESULT_SEMANTIC_SUMMARY_CHARS]
     return bounded_summary
@@ -296,20 +295,28 @@ def _tool_result_evidence_refs(
     task_result: TaskResolutionResultV1,
     completed_at: str,
 ) -> list[EvidenceRefV1]:
-    """Project typed task evidence handles into prompt-safe evidence refs."""
+    """Project result-owned evidence receipts into prompt-safe references."""
 
     refs: list[EvidenceRefV1] = []
-    for handle, excerpt in zip(
-        task_result["evidence_handles"],
-        task_result["evidence_excerpts"],
-        strict=True,
-    ):
+    evidence_handles = task_result["evidence_handles"]
+    evidence_excerpts = task_result["evidence_excerpts"]
+    for evidence_index, evidence in enumerate(task_result["evidence"]):
+        evidence_handle = evidence["summary"]
+        if evidence_handle not in evidence_handles:
+            raise ValueError(
+                "task result evidence handle is missing its semantic reference"
+            )
+        evidence_excerpt = (
+            evidence_excerpts[evidence_index]
+            if evidence_index < len(evidence_excerpts)
+            else evidence_handle
+        )
         refs.append({
             "schema_version": "evidence_ref.v1",
             "evidence_kind": "tool_result",
-            "evidence_id": handle,
-            "owner": "background_work",
-            "excerpt": excerpt,
+            "evidence_id": evidence_handle,
+            "owner": evidence["specialist"],
+            "excerpt": evidence_excerpt,
             "observed_at": completed_at,
         })
     return refs
@@ -330,12 +337,10 @@ def _validate_result_state_projection(
                 "tool_result cognition source factual task state requires "
                 "complete or partial evidence"
             )
-        if not evidence_excerpts or len(evidence_handles) != len(
-            evidence_excerpts
-        ):
+        if not evidence_excerpts:
             raise ValueError(
                 "tool_result cognition source factual state requires "
-                "parallel validated evidence excerpts and handles"
+                "validated evidence excerpts"
             )
         return
     if evidence_state not in {"pending", "missing", "blocked"}:

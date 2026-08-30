@@ -39,6 +39,7 @@ from kazusa_ai_chatbot.db.background_work_jobs import (
     mark_background_work_delivered,
     mark_background_work_delivery_failed,
     mark_background_work_delivery_in_progress,
+    requeue_background_work_job,
 )
 from kazusa_ai_chatbot.db.character_identity_growth import (
     CANDIDATES_COLLECTION,
@@ -215,6 +216,18 @@ from kazusa_ai_chatbot.db.self_cognition import (
     list_self_cognition_action_attempts,
     upsert_self_cognition_action_attempt,
     upsert_self_cognition_group_review_window,
+)
+from kazusa_ai_chatbot.db.task_resolution_sessions import (
+    attach_accepted_task,
+    attach_background_job,
+    attach_resolution_ref,
+    create_task_binding,
+    find_binding_by_accepted_task,
+    find_binding_by_background_job,
+    find_binding_by_session,
+    find_binding_by_thread,
+    reconcile_task_resolution_result,
+    transition_task_binding,
 )
 from kazusa_ai_chatbot.db.user_memory_units import (
     build_user_memory_unit_doc,
@@ -470,6 +483,17 @@ __all__ = [
     "mark_background_work_delivered",
     "mark_background_work_delivery_failed",
     "mark_background_work_delivery_in_progress",
+    "requeue_background_work_job",
+    "attach_resolution_ref",
+    "attach_accepted_task",
+    "attach_background_job",
+    "create_task_binding",
+    "find_binding_by_accepted_task",
+    "find_binding_by_background_job",
+    "find_binding_by_session",
+    "find_binding_by_thread",
+    "reconcile_task_resolution_result",
+    "transition_task_binding",
     # Persistent Cache2
     "build_initializer_version_key", "build_media_descriptor_version_key",
     "load_initializer_entries", "load_media_descriptor_entries",

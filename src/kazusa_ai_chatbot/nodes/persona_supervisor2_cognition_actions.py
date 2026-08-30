@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, TypedDict
+from typing import TypedDict
 
 from kazusa_ai_chatbot.action_spec.models import (
     ActionSourceRefV1,
@@ -14,7 +14,7 @@ from kazusa_ai_chatbot.action_spec.models import (
     validate_action_spec,
 )
 from kazusa_ai_chatbot.action_spec.registry import (
-    ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
+    ACCEPTED_TASK_CONTROL_CAPABILITY,
     ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
     FUTURE_SPEAK_CAPABILITY,
     MEMORY_LIFECYCLE_UPDATE_CAPABILITY,
@@ -28,11 +28,6 @@ from kazusa_ai_chatbot.config import (
 )
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import CognitionState
 
-if TYPE_CHECKING:
-    from kazusa_ai_chatbot.task_resolution.contracts import (
-        TaskResolutionExecutionContextV1,
-    )
-
 logger = logging.getLogger(__name__)
 
 ACTION_SPEC_CAP = 3
@@ -42,8 +37,8 @@ ALLOWED_ACTION_CAPABILITIES = frozenset((
     SPEAK_CAPABILITY,
     TRIGGER_FUTURE_COGNITION_CAPABILITY,
     FUTURE_SPEAK_CAPABILITY,
-    ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
     ACCEPTED_TASK_STATUS_CHECK_CAPABILITY,
+    ACCEPTED_TASK_CONTROL_CAPABILITY,
 ))
 
 
@@ -60,7 +55,6 @@ class ActionRequestV1(TypedDict, total=False):
     evidence_handles: list[str]
     surface_role: SurfaceRoleV1
     goal_continuation_ref: GoalContinuationRefV1 | None
-    task_execution_context: TaskResolutionExecutionContextV1
     scheduled_authority_proposal: dict[str, object]
 
 
@@ -150,16 +144,8 @@ def _materialize_action_request(
             )
             return None
         action_spec = _build_future_speak_action_spec(request, state)
-    elif capability == ACCEPTED_CODING_TASK_REQUEST_CAPABILITY:
-        if not _can_create_delayed_task_from_source(
-            state,
-            capability=ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
-        ):
-            logger.warning(
-                "L2d dropped accepted coding-task request from non-user source"
-            )
-            return None
-        action_spec = _build_accepted_coding_task_action_spec(request, state)
+    elif capability == ACCEPTED_TASK_CONTROL_CAPABILITY:
+        action_spec = _build_accepted_task_control_action_spec(request, state)
     elif capability == ACCEPTED_TASK_STATUS_CHECK_CAPABILITY:
         action_spec = _build_accepted_task_status_check_action_spec(
             request,
@@ -179,6 +165,11 @@ def _materialize_action_request(
     action_spec["goal_continuation_ref"] = (
         _required_semantic_goal_continuation_ref(request)
     )
+    if (
+        capability == ACCEPTED_TASK_CONTROL_CAPABILITY
+        and action_spec["goal_continuation_ref"] is None
+    ):
+        action_spec["surface_role"] = "ordinary"
     validated_spec = validate_action_spec(action_spec)
     return validated_spec
 
@@ -338,25 +329,6 @@ def _build_future_cognition_action_spec(
     return action_spec
 
 
-def _deterministic_work_seed(
-    request: ActionRequestV1,
-    state: CognitionState,
-) -> str:
-    """Build a task brief from the source input, not route free text.
-
-    The coding worker should receive the user's task as the work seed. The
-    action-router detail is used for routing and acknowledgement semantics, not
-    as an executable task rewrite.
-    """
-
-    decontextualized = state.get("decontextualized_input")
-    if isinstance(decontextualized, str) and decontextualized.strip():
-        work_seed = decontextualized.strip()[:2000]
-    else:
-        work_seed = request.get("reason", "")
-    return work_seed
-
-
 def _build_future_speak_action_spec(
     request: ActionRequestV1,
     state: CognitionState,
@@ -402,225 +374,6 @@ def _build_future_speak_action_spec(
     return action_spec
 
 
-def _build_accepted_coding_task_action_spec(
-    request: ActionRequestV1,
-    state: CognitionState,
-) -> dict[str, object] | None:
-    """Build the accepted-task handoff for one durable coding run action."""
-
-    coding_action = _coding_action_for_request(request)
-    if not coding_action:
-        return None
-    task_brief = _deterministic_work_seed(request, state)
-    params: dict[str, object] = {
-        "task_brief": task_brief,
-        "coding_action": coding_action,
-        "requested_delivery": "send_result_when_done",
-        "max_output_chars": BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
-    }
-    params["task_execution_context"] = _required_task_execution_context(
-        request
-    )
-    coding_run_ref = _coding_run_ref_for_request(request, state, coding_action)
-    if not coding_run_ref:
-        logger.warning(
-            "L2d dropped coding continuation outside current run affordances"
-        )
-        return None
-    params["coding_run_ref"] = coding_run_ref
-    if coding_action == "revise_proposal":
-        revision_instruction = _semantic_text(request, "detail")
-        if not revision_instruction:
-            logger.warning(
-                "L2d dropped coding revision without revision instruction"
-            )
-            return None
-        params["revision_instruction"] = revision_instruction
-    elif coding_action == "respond_to_blocker":
-        execution_request = _semantic_text(request, "execution_request")
-        if not execution_request:
-            execution_request = _semantic_text(request, "detail")
-        if execution_request:
-            params["execution_request"] = execution_request
-    if coding_action == "approve_and_verify":
-        approval_evidence = _approval_evidence_from_state(state)
-        if approval_evidence is None:
-            logger.warning(
-                "L2d dropped coding approval without current message evidence"
-            )
-            return None
-        params["approval_evidence"] = approval_evidence
-        execution_request = _semantic_text(request, "execution_request")
-        if not execution_request:
-            execution_request = _semantic_text(request, "detail")
-        if execution_request:
-            params["execution_request"] = execution_request
-    action_spec = _build_action_spec(
-        kind=ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
-        source_refs=[_current_episode_source_ref()],
-        target={
-            "schema_version": "action_target.v1",
-            "target_kind": "current_user",
-            "target_id": None,
-            "owner": "background_work",
-            "scope": _background_work_target_scope(state),
-        },
-        params=params,
-        urgency="background",
-        visibility="private",
-        deadline=None,
-        reason=request["reason"],
-    )
-    return action_spec
-
-
-def _required_task_execution_context(
-    request: ActionRequestV1,
-) -> dict[str, object]:
-    """Require the execution context for one coding continuation."""
-
-    if "task_execution_context" not in request:
-        raise ActionValidationError(
-            "task_execution_context: required for accepted coding continuation"
-        )
-    task_execution_context = request["task_execution_context"]
-    if not isinstance(task_execution_context, Mapping):
-        raise ActionValidationError(
-            "task_execution_context: expected typed execution context"
-        )
-    return dict(task_execution_context)
-
-
-def _approval_evidence_from_state(
-    state: CognitionState,
-) -> dict[str, str] | None:
-    """Extract current-user approval provenance without interpreting its text."""
-
-    episode = state.get("cognitive_episode")
-    if not isinstance(episode, Mapping):
-        return None
-    if _mapping_text(episode, "trigger_source") != "user_message":
-        return None
-    percepts = episode.get("percepts")
-    if not isinstance(percepts, list):
-        return None
-    quote = ""
-    for percept in percepts:
-        if not isinstance(percept, Mapping):
-            continue
-        if _mapping_text(percept, "source_kind") != "dialog":
-            continue
-        content = percept.get("content")
-        if not isinstance(content, Mapping):
-            continue
-        quote = _mapping_text(content, "semantic_text")[:500]
-        break
-    if not quote:
-        return None
-    target_scope = episode.get("target_scope")
-    origin_metadata = episode.get("origin_metadata")
-    if not isinstance(target_scope, Mapping) or not isinstance(
-        origin_metadata,
-        Mapping,
-    ):
-        return None
-    requester_global_user_id = _mapping_text(
-        target_scope,
-        "current_global_user_id",
-    )
-    source_message_id = _mapping_text(origin_metadata, "platform_message_id")
-    storage_timestamp_utc = _mapping_text(episode, "created_at")
-    if not requester_global_user_id or not source_message_id:
-        return None
-    if not storage_timestamp_utc:
-        return None
-    evidence = {
-        "source_message_id": source_message_id,
-        "source_trigger_source": "user_message",
-        "requester_global_user_id": requester_global_user_id,
-        "quote": quote,
-        "storage_timestamp_utc": storage_timestamp_utc,
-    }
-    return evidence
-
-
-def _coding_run_ref_for_request(
-    request: ActionRequestV1,
-    state: CognitionState,
-    coding_action: str,
-) -> str:
-    """Return a prompt-safe coding run ref for follow-up coding actions."""
-
-    if coding_action not in (
-        "revise_proposal",
-        "summarize",
-        "status",
-        "approve_and_verify",
-        "respond_to_blocker",
-        "cancel",
-    ):
-        return ""
-    contexts = _coding_run_contexts(state)
-    direct_ref = _semantic_text(request, "context_ref")
-    eligible_refs = [
-        context["coding_run_ref"]
-        for context in contexts
-        if coding_action in context["allowed_next_actions"]
-    ]
-    if direct_ref:
-        if direct_ref in eligible_refs:
-            return direct_ref
-        return ""
-    if len(eligible_refs) == 1:
-        return eligible_refs[0]
-    return ""
-
-
-def _coding_run_contexts(
-    state: CognitionState,
-) -> list[dict[str, object]]:
-    """Return trusted run contexts with valid continuation affordances."""
-
-    action_selection_context = state["action_selection_context"]
-    raw_contexts = action_selection_context.get("coding_runs")
-    if not isinstance(raw_contexts, list):
-        return []
-    contexts: list[dict[str, object]] = []
-    for raw_context in raw_contexts:
-        if not isinstance(raw_context, Mapping):
-            continue
-        coding_run_ref = _mapping_text(raw_context, "coding_run_ref")
-        allowed_actions = raw_context.get("allowed_next_actions")
-        if not coding_run_ref or not isinstance(allowed_actions, list):
-            continue
-        actions = [
-            action
-            for action in allowed_actions
-            if isinstance(action, str)
-        ]
-        contexts.append({
-            "coding_run_ref": coding_run_ref,
-            "allowed_next_actions": actions,
-        })
-    return contexts
-
-
-def _coding_action_for_request(request: ActionRequestV1) -> str:
-    """Return the closed coding action selected by L2d."""
-
-    decision = _semantic_text(request, "decision")
-    if decision in (
-        "revise_proposal",
-        "summarize",
-        "status",
-        "approve_and_verify",
-        "respond_to_blocker",
-        "cancel",
-    ):
-        return decision
-    return ""
-
-
 def _build_accepted_task_status_check_action_spec(
     request: ActionRequestV1,
     state: CognitionState,
@@ -644,6 +397,69 @@ def _build_accepted_task_status_check_action_spec(
         reason=request["reason"],
     )
     return action_spec
+
+
+def _build_accepted_task_control_action_spec(
+    request: ActionRequestV1,
+    state: CognitionState,
+) -> dict[str, object] | None:
+    """Build one typed control for the exact advertised DSH task affordance."""
+
+    context_ref = _semantic_text(request, "context_ref")
+    decision = _semantic_text(request, "decision")
+    affordance = _dsh_task_affordance_for_ref(state, context_ref)
+    if affordance is None:
+        logger.warning("L2d dropped control for an unadvertised DSH task")
+        return None
+    allowed = affordance.get("allowed_next_actions")
+    if not isinstance(allowed, list) or decision not in allowed:
+        logger.warning("L2d dropped unavailable DSH task control")
+        return None
+    instruction = _semantic_text(request, "detail") if decision == "continue" else None
+    if decision == "continue" and not instruction:
+        raise ActionValidationError(
+            "detail: required for a continue accepted-task control"
+        )
+    control = {
+        "schema_version": "accepted_task_control.v1",
+        "accepted_task_ref": context_ref,
+        "operation": decision,
+        "instruction": instruction,
+    }
+    return _build_action_spec(
+        kind=ACCEPTED_TASK_CONTROL_CAPABILITY,
+        source_refs=[_current_episode_source_ref()],
+        target={
+            "schema_version": "action_target.v1",
+            "target_kind": "current_user",
+            "target_id": None,
+            "owner": "accepted_task",
+            "scope": _background_work_target_scope(state),
+        },
+        params={"control": control},
+        urgency="background",
+        visibility="private",
+        deadline=None,
+        reason=request["reason"],
+    )
+
+
+def _dsh_task_affordance_for_ref(
+    state: CognitionState,
+    context_ref: str,
+) -> Mapping[str, object] | None:
+    """Find one exact prompt-advertised task affordance by opaque ref."""
+
+    action_context = state.get("action_selection_context")
+    if not isinstance(action_context, Mapping):
+        return None
+    rows = action_context.get("dsh_tasks")
+    if not isinstance(rows, list):
+        return None
+    for row in rows:
+        if isinstance(row, Mapping) and row.get("accepted_task_ref") == context_ref:
+            return row
+    return None
 
 
 def _background_work_target_scope(

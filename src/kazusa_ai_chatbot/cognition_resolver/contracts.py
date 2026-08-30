@@ -24,7 +24,9 @@ RESOLVER_CYCLE_STATE_VERSION = "resolver_cycle_state.v1"
 RESOLVER_CAPABILITY_REQUEST_VERSION = "resolver_capability_request.v1"
 RESOLVER_OBSERVATION_VERSION = "resolver_observation.v1"
 RESOLVER_CYCLE_TRACE_VERSION = "resolver_cycle_trace.v1"
-RESOLVER_PENDING_RESUME_VERSION = "resolver_pending_resume.v1"
+RESOLVER_PENDING_RESUME_VERSION = "resolver_pending_resume.v3"
+RESOLVER_PENDING_CONTINUATION_VERSION = "resolver_pending_continuation.v3"
+PENDING_TASK_CONTINUATION_VERSION = "pending_task_continuation.v1"
 RESOLVER_PENDING_RESOLUTION_VERSION = "resolver_pending_resolution.v1"
 RESOLVER_GOAL_PROGRESS_VERSION = "resolver_goal_progress.v1"
 RESOLVER_EVIDENCE_STATE_VERSION = "resolver_evidence_state.v1"
@@ -104,12 +106,17 @@ RESOLVER_CAPABILITY_SEMANTICS = {
         "Prepare one minimal approval question before an allowed side effect."
     ),
     "human_clarification": (
-        "Ask the user for one missing piece of information they control."
+        "Ask for one missing user-controlled fact only when the task objective "
+        "itself is not yet bounded and cognition cannot formulate or authorize "
+        "it. A known prerequisite keeps task admission closed until the user "
+        "supplies it."
     ),
     "task_resolution_request": (
-        "Resolve one bounded semantic task when current evidence is "
-        "insufficient. The task-resolution session selects and coordinates "
-        "its own specialist evidence work."
+        "Select this only when the current request supplies a bounded executable "
+        "semantic task objective and the character judges that required evidence "
+        "must be obtained. A missing known user-controlled fact or choice belongs "
+        "to human_clarification and blocks admission; do not admit the task first "
+        "or use this capability to solicit that prerequisite."
     ),
     "self_goal_resolution": (
         "Resolve or prioritize one internal self-cognition goal for an "
@@ -144,6 +151,17 @@ ALLOWED_PENDING_DECISIONS = frozenset((
     "approved",
     "rejected",
     "superseded",
+))
+ALLOWED_PENDING_DISPOSITIONS = frozenset((
+    "continue_waiting",
+    "answered",
+    "rejected",
+    "superseded",
+))
+ALLOWED_PENDING_TASK_CONTINUATIONS = frozenset((
+    "no_task_admission",
+    "foreground_task_admission",
+    "background_task_admission",
 ))
 ALLOWED_GOAL_DELIVERABLE_STATUSES = frozenset((
     "pending",
@@ -281,10 +299,21 @@ class ResolverCycleTraceV1(TypedDict):
     created_at_utc: str
 
 
-class ResolverPendingResumeV1(TypedDict):
+class PendingTaskContinuationV1(TypedDict):
+    """P-authored answer-conditioned admission state for a clarification."""
+
+    schema_version: Literal["pending_task_continuation.v1"]
+    on_answered_clarification: Literal[
+        "no_task_admission",
+        "foreground_task_admission",
+        "background_task_admission",
+    ]
+
+
+class ResolverPendingResumeV3(TypedDict):
     """Durable pending HIL or approval row projected into later cognition."""
 
-    schema_version: Literal["resolver_pending_resume.v1"]
+    schema_version: Literal["resolver_pending_resume.v3"]
     resume_id: str
     capability_kind: Literal["human_clarification", "approval_preparation"]
     status: Literal[
@@ -301,9 +330,33 @@ class ResolverPendingResumeV1(TypedDict):
     prompt_safe_original_goal: str
     prompt_safe_question: str
     prompt_safe_approval_summary: str
+    pending_task_continuation: NotRequired[PendingTaskContinuationV1]
     prompt_safe_goal_progress: NotRequired[ResolverGoalProgressV1]
     created_at_utc: str
     expires_at_utc: str
+
+
+class ResolverPendingContinuationV3(TypedDict):
+    """Prompt-safe human-clarification context without durable row identity."""
+
+    schema_version: Literal["resolver_pending_continuation.v3"]
+    capability_kind: Literal["human_clarification"]
+    status: Literal["waiting_for_user"]
+    original_goal: str
+    question: str
+    pending_task_continuation: PendingTaskContinuationV1
+
+
+class ResolverPendingDispositionV1(TypedDict):
+    """Semantic P-stage disposition for one selected pending continuation."""
+
+    decision: Literal[
+        "continue_waiting",
+        "answered",
+        "rejected",
+        "superseded",
+    ]
+    reason: str
 
 
 class ResolverPendingResolutionV1(TypedDict):
@@ -356,7 +409,7 @@ class ResolverCycleStateV1(TypedDict):
     observations: list[ResolverObservationV1]
     cycle_traces: list[ResolverCycleTraceV1]
     held_action_specs: list[ActionSpecV1]
-    pending_resume: NotRequired[ResolverPendingResumeV1]
+    pending_resume: NotRequired[ResolverPendingResumeV3]
     goal_progress: NotRequired[ResolverGoalProgressV1]
     required_resolver_evidence_dependency: NotRequired[
         RequiredResolverEvidenceDependencyV1
@@ -958,7 +1011,32 @@ def validate_resolver_cycle_trace(value: object) -> ResolverCycleTraceV1:
     return return_value
 
 
-def validate_resolver_pending_resume(value: object) -> ResolverPendingResumeV1:
+def validate_pending_task_continuation(
+    value: object,
+) -> PendingTaskContinuationV1:
+    """Validate P's closed answer-conditioned task-admission decision."""
+
+    data = _require_mapping(value, "pending_task_continuation")
+    _require_exact_keys(
+        data,
+        {"schema_version", "on_answered_clarification"},
+        "pending_task_continuation",
+    )
+    _require_version(data, PENDING_TASK_CONTINUATION_VERSION)
+    continuation_value = _require_enum(
+        data,
+        "on_answered_clarification",
+        ALLOWED_PENDING_TASK_CONTINUATIONS,
+    )
+    normalized: PendingTaskContinuationV1 = {
+        "schema_version": PENDING_TASK_CONTINUATION_VERSION,
+        "on_answered_clarification": continuation_value,
+    }
+    return_value = normalized
+    return return_value
+
+
+def validate_resolver_pending_resume(value: object) -> ResolverPendingResumeV3:
     """Validate one durable pending HIL or approval row."""
 
     data = _require_mapping(value, "resolver_pending_resume")
@@ -983,7 +1061,7 @@ def validate_resolver_pending_resume(value: object) -> ResolverPendingResumeV1:
     approval_summary = _require_string(data, "prompt_safe_approval_summary")
     created_at_utc = _require_non_empty_string(data, "created_at_utc")
     expires_at_utc = _require_non_empty_string(data, "expires_at_utc")
-    normalized: ResolverPendingResumeV1 = {
+    normalized: ResolverPendingResumeV3 = {
         "schema_version": RESOLVER_PENDING_RESUME_VERSION,
         "resume_id": resume_id,
         "capability_kind": capability_kind,
@@ -1012,6 +1090,91 @@ def validate_resolver_pending_resume(value: object) -> ResolverPendingResumeV1:
         normalized["prompt_safe_goal_progress"] = validate_resolver_goal_progress(
             raw_goal_progress,
         )
+    raw_pending_task_continuation = data.get("pending_task_continuation")
+    if capability_kind == "human_clarification":
+        if raw_pending_task_continuation is None:
+            raise ResolverValidationError(
+                "pending_task_continuation is required for human clarification"
+            )
+        normalized["pending_task_continuation"] = (
+            validate_pending_task_continuation(
+                raw_pending_task_continuation,
+            )
+        )
+    elif raw_pending_task_continuation is not None:
+        raise ResolverValidationError(
+            "pending_task_continuation is limited to human clarification"
+        )
+    return_value = normalized
+    return return_value
+
+
+def validate_resolver_pending_continuation(
+    value: object,
+) -> ResolverPendingContinuationV3:
+    """Validate the model-facing human-clarification projection."""
+
+    data = _require_mapping(value, "pending_resolver_continuation")
+    expected_keys = {
+        "schema_version",
+        "capability_kind",
+        "status",
+        "original_goal",
+        "question",
+        "pending_task_continuation",
+    }
+    if set(data) != expected_keys:
+        raise ResolverValidationError(
+            "pending_resolver_continuation: fields are not exact"
+        )
+    capability_kind = _require_enum(
+        data,
+        "capability_kind",
+        {"human_clarification"},
+    )
+    _require_version(data, RESOLVER_PENDING_CONTINUATION_VERSION)
+    status = _require_enum(
+        data,
+        "status",
+        {"waiting_for_user"},
+    )
+    original_goal = _require_non_empty_string(data, "original_goal")
+    question = _require_string(data, "question")
+    pending_task_continuation = validate_pending_task_continuation(
+        data["pending_task_continuation"],
+    )
+    normalized: ResolverPendingContinuationV3 = {
+        "schema_version": RESOLVER_PENDING_CONTINUATION_VERSION,
+        "capability_kind": capability_kind,
+        "status": status,
+        "original_goal": _clip_text(
+            original_goal,
+            MAX_RESOLVER_SUMMARY_CHARS,
+        ),
+        "question": _clip_text(question, MAX_RESOLVER_SUMMARY_CHARS),
+        "pending_task_continuation": pending_task_continuation,
+    }
+    return_value = normalized
+    return return_value
+
+
+def validate_resolver_pending_disposition(
+    value: object,
+) -> ResolverPendingDispositionV1:
+    """Validate the model-facing pending disposition without a row id."""
+
+    data = _require_mapping(value, "pending_resolution")
+    _require_exact_keys(data, {"decision", "reason"}, "pending_resolution")
+    decision = _require_enum(
+        data,
+        "decision",
+        ALLOWED_PENDING_DISPOSITIONS,
+    )
+    reason = _require_non_empty_string(data, "reason")
+    normalized: ResolverPendingDispositionV1 = {
+        "decision": decision,
+        "reason": _clip_text(reason, MAX_RESOLVER_REASON_CHARS),
+    }
     return_value = normalized
     return return_value
 
@@ -1388,27 +1551,62 @@ def project_goal_progress_for_cognition(
 
 
 def project_pending_resume_for_cognition(
-    pending: ResolverPendingResumeV1 | None,
+    pending: ResolverPendingResumeV3 | None,
 ) -> str:
-    """Project pending HIL or approval state without durable identifiers."""
+    """Project legacy resolver pending context without durable identifiers."""
 
     if pending is None:
         return_value = ""
         return return_value
 
     validated = validate_resolver_pending_resume(pending)
-    capability_kind = validated["capability_kind"]
-    status = validated["status"]
-    original_goal = validated["prompt_safe_original_goal"]
-    question = validated["prompt_safe_question"]
-    approval_summary = validated["prompt_safe_approval_summary"]
-    projection = (
+    if validated["status"] not in {
+        "waiting_for_user",
+        "waiting_for_approval",
+    }:
+        return_value = ""
+        return return_value
+    pending_context = (
         "pending_resolver_resume: "
-        f"capability={capability_kind}; status={status}; "
-        f"original_goal={original_goal}; question={question}; "
-        f"approval_summary={approval_summary}"
+        f"capability={validated['capability_kind']}; "
+        f"status={validated['status']}; "
+        "original_goal="
+        f"{validated['prompt_safe_original_goal']}; "
+        "question="
+        f"{validated['prompt_safe_question']}; "
+        "approval_summary="
+        f"{validated['prompt_safe_approval_summary']}"
     )
+    lines = [pending_context]
+    projection = "\n".join(lines)
     return_value = projection
+    return return_value
+
+
+def project_pending_resume_for_prompt(
+    pending: ResolverPendingResumeV3 | None,
+) -> ResolverPendingContinuationV3 | None:
+    """Project one open human clarification without durable identifiers."""
+
+    if pending is None:
+        return_value = None
+        return return_value
+    validated = validate_resolver_pending_resume(pending)
+    if (
+        validated["capability_kind"] != "human_clarification"
+        or validated["status"] != "waiting_for_user"
+    ):
+        return_value = None
+        return return_value
+    projected: ResolverPendingContinuationV3 = {
+        "schema_version": RESOLVER_PENDING_CONTINUATION_VERSION,
+        "capability_kind": validated["capability_kind"],
+        "status": validated["status"],
+        "original_goal": validated["prompt_safe_original_goal"],
+        "question": validated["prompt_safe_question"],
+        "pending_task_continuation": validated["pending_task_continuation"],
+    }
+    return_value = validate_resolver_pending_continuation(projected)
     return return_value
 
 

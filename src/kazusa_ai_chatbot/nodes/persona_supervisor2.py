@@ -7,12 +7,11 @@ from typing import Literal
 from langgraph.graph import END, START, StateGraph
 
 from kazusa_ai_chatbot.accepted_task import (
-    load_open_coding_run_contexts_for_scope,
+    load_open_dsh_task_affordances_for_scope,
 )
 from kazusa_ai_chatbot.action_spec.evaluator import ActionSpecEvaluator
 from kazusa_ai_chatbot.action_spec.execution import execute_action_specs_for_trace
 from kazusa_ai_chatbot.action_spec.registry import (
-    ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
     FUTURE_SPEAK_CAPABILITY,
     SPEAK_CAPABILITY,
 )
@@ -450,7 +449,6 @@ async def _action_results_for_state(
         spec
         for spec in _selected_action_specs(state)
         if spec.get("kind") not in (
-            ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
             FUTURE_SPEAK_CAPABILITY,
         )
         and _action_attempt_id_for_spec(spec) not in pre_surface_attempt_ids
@@ -478,7 +476,6 @@ async def _execute_pre_surface_action_results(
         for spec in _selected_action_specs(state)
         if spec.get("kind") not in (
             SPEAK_CAPABILITY,
-            ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
             FUTURE_SPEAK_CAPABILITY,
         )
     ]
@@ -509,10 +506,7 @@ async def stage_2a_background_work_enqueue(
     background_specs = [
         spec
         for spec in _selected_action_specs(state)
-        if spec.get("kind") in (
-            ACCEPTED_CODING_TASK_REQUEST_CAPABILITY,
-            FUTURE_SPEAK_CAPABILITY,
-        )
+        if spec.get("kind") == FUTURE_SPEAK_CAPABILITY
     ]
     if not background_specs:
         return_value: dict[str, object] = {}
@@ -797,23 +791,23 @@ async def stage_1_goal_resolver(state: GlobalPersonaState) -> dict:
 async def _load_live_action_selection_context(
     state: GlobalPersonaState,
 ) -> GlobalPersonaState:
-    """Load trusted prompt-safe coding-run contexts for one live user turn."""
+    """Load trusted prompt-safe DSH task controls for one live user turn."""
 
     updated_state = dict(state)
-    updated_state["action_selection_context"] = {"coding_runs": []}
+    updated_state["action_selection_context"] = {"dsh_tasks": []}
     episode = state.get("cognitive_episode")
     if not isinstance(episode, Mapping):
         return updated_state  # type: ignore[return-value]
     if episode.get("trigger_source") != "user_message":
         return updated_state  # type: ignore[return-value]
-    contexts = await load_open_coding_run_contexts_for_scope(
-        source_platform=state["platform"],
+    contexts = await load_open_dsh_task_affordances_for_scope(
+        platform=state["platform"],
         source_channel_id=state["platform_channel_id"],
         requester_global_user_id=state["global_user_id"],
         limit=3,
     )
     updated_state["action_selection_context"] = {
-        "coding_runs": [dict(context) for context in contexts],
+        "dsh_tasks": [dict(context) for context in contexts],
     }
     return updated_state  # type: ignore[return-value]
 
@@ -1058,8 +1052,7 @@ async def persona_supervisor2(state: IMProcessState) -> dict:
         initial_persona_state["pending_dsh_interaction"] = dict(
             pending_dsh_interaction
         )
-        if state.get("pending_dsh_reply") is True:
-            initial_persona_state["pending_dsh_reply"] = True
+        initial_persona_state["dsh_interaction_episode"] = True
     
     results = await persona_graph.ainvoke(initial_persona_state)
     

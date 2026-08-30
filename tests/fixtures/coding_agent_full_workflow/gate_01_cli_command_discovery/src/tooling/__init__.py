@@ -1,1 +1,0 @@
-"""Tiny command discovery fixture."""

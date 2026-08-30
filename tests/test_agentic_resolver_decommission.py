@@ -26,19 +26,30 @@ def test_old_resolver_contracts_facades_and_aliases_are_absent() -> None:
     assert not legacy_exports.intersection(package.__dict__)
 
 
-def test_brain_task_resolution_rag_and_coding_paths_do_not_import_or_spawn_resolver() -> None:
+def test_brain_task_resolution_rag_and_coding_paths_use_only_canonical_dsh_bridge() -> None:
+    """Retained paths have no deleted executor or compatibility imports."""
+
     roots = (
-        PROJECT_ROOT / "src" / "kazusa_ai_chatbot" / "brain_service.py",
+        PROJECT_ROOT / "src" / "kazusa_ai_chatbot" / "brain_service",
         PROJECT_ROOT / "src" / "kazusa_ai_chatbot" / "task_resolution",
         PROJECT_ROOT / "src" / "kazusa_ai_chatbot" / "rag",
         PROJECT_ROOT / "src" / "kazusa_ai_chatbot" / "coding_agent",
     )
+    forbidden = (
+        "task_resolution.orchestrator",
+        "task_resolution.specialists",
+        "complex_task_resolver",
+        "coding_agent",
+        "sidecars/dsh_resolution",
+    )
     for root in roots:
+        if not root.exists():
+            continue
         paths = [root] if root.is_file() else list(root.rglob("*.py"))
         for path in paths:
             text = path.read_text(encoding="utf-8")
-            assert "agentic_resolver" not in text
-            assert "sidecars/dsh_resolution" not in text
+            for marker in forbidden:
+                assert marker not in text
 
 
 def test_old_native_tool_stream_surface_is_absent() -> None:

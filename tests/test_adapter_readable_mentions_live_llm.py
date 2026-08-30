@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
 import logging
-from time import perf_counter
 
 import httpx
 import pytest
@@ -13,16 +11,14 @@ from kazusa_ai_chatbot.config import (
     MSG_DECONTEXTUALIZER_LLM_BASE_URL,
     RAG_PLANNER_LLM_BASE_URL,
 )
-from kazusa_ai_chatbot.nodes import persona_supervisor2_msg_decontextualizer as decontext
-from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_initializer as rag_initializer
-from kazusa_ai_chatbot.nodes import persona_supervisor2_rag_supervisor2 as rag_supervisor
-from kazusa_ai_chatbot.rag.cache2_runtime import get_rag_cache2_runtime
 from kazusa_ai_chatbot.time_boundary import build_turn_clock_from_storage_utc
-from tests.llm_trace import write_llm_trace
-
 
 logger = logging.getLogger(__name__)
-pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
+pytestmark = [
+    pytest.mark.asyncio,
+    pytest.mark.live_llm,
+    pytest.mark.skip(reason="retired RAG2 initializer owner; replacement is P3-P3"),
+]
 
 _TRACE_SUITE = 'adapter_readable_mentions_live_llm'
 _CHARACTER_NAME = '杏山千纱'
@@ -207,62 +203,7 @@ async def test_live_adapter_readable_mentions_drive_person_context(
     ensure_live_llm,
     monkeypatch,
 ) -> None:
-    """Readable mention text should survive decontextualization and route RAG."""
+    """Retired RAG2 initializer coverage remains a documented live skeleton."""
 
-    del ensure_live_llm
-    decontext_llm = _CapturingLiveLLM(decontext._msg_decontextualizer_llm)
-    initializer_llm = _CapturingLiveLLM(rag_initializer._initializer_llm)
-    monkeypatch.setattr(decontext, '_msg_decontextualizer_llm', decontext_llm)
-    monkeypatch.setattr(rag_initializer, '_initializer_llm', initializer_llm)
-    monkeypatch.setattr(rag_supervisor, 'upsert_initializer_entry', _noop_async)
-    monkeypatch.setattr(rag_supervisor, 'record_initializer_hit', _noop_async)
-    await get_rag_cache2_runtime().clear()
-
-    started_at = perf_counter()
-    decontext_result = await decontext.call_msg_decontextualizer(_decontext_state())
-    decontext_duration_seconds = perf_counter() - started_at
-    decontextualized_input = str(decontext_result['decontextualized_input'])
-
-    started_at = perf_counter()
-    initializer_result = await rag_supervisor.rag_initializer(
-        _initializer_state(decontextualized_input)
-    )
-    initializer_duration_seconds = perf_counter() - started_at
-    unknown_slots = initializer_result['unknown_slots']
-    person_context_slots = [
-        slot
-        for slot in unknown_slots
-        if slot.startswith('Person-context:')
-    ]
-    target_person_slots = [
-        slot
-        for slot in person_context_slots
-        if _MENTIONED_DISPLAY_NAME in slot
-    ]
-
-    trace_payload = {
-        'adapter_shaped_body_text': _ADAPTER_SHAPED_TEXT,
-        'decontextualized_input': decontextualized_input,
-        'decontext_raw_model_output': decontext_llm.raw_content,
-        'decontext_human_payload': json.loads(decontext_llm.messages[1].content),
-        'decontext_result': decontext_result,
-        'decontext_duration_seconds': decontext_duration_seconds,
-        'initializer_raw_model_output': initializer_llm.raw_content,
-        'initializer_human_payload': json.loads(initializer_llm.messages[1].content),
-        'initializer_result': initializer_result,
-        'initializer_duration_seconds': initializer_duration_seconds,
-        'person_context_slots': person_context_slots,
-        'target_person_slots': target_person_slots,
-        'judgment': 'manual_review_required_for_readable_mention_rag_contract',
-    }
-    trace_path = write_llm_trace(_TRACE_SUITE, 'qq_named_user_person_context', trace_payload)
-    logger.info(
-        f"adapter readable mention live trace={trace_path} "
-        f"decontextualized_input={decontextualized_input!r} "
-        f"unknown_slots={unknown_slots!r}"
-    )
-
-    assert '@蚝爹油' in _ADAPTER_SHAPED_TEXT
-    assert _MENTIONED_DISPLAY_NAME in decontextualized_input, trace_payload
-    assert person_context_slots, trace_payload
-    assert target_person_slots, trace_payload
+    del ensure_live_llm, monkeypatch
+    pytest.skip("retired RAG2 initializer owner; replacement is P3-P3")

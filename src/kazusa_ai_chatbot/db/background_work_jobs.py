@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import timedelta
 from typing import Any
 
@@ -16,10 +17,7 @@ from kazusa_ai_chatbot.background_work.models import (
 from kazusa_ai_chatbot.config import BACKGROUND_WORK_DELIVERY_MAX_ATTEMPTS
 from kazusa_ai_chatbot.db._client import get_db
 from kazusa_ai_chatbot.db.errors import DatabaseOperationError
-from kazusa_ai_chatbot.task_resolution.contracts import (
-    validate_task_resolution_checkpoint,
-    validate_task_resolution_result,
-)
+from kazusa_ai_chatbot.task_resolution.contracts import validate_task_resolution_result
 from kazusa_ai_chatbot.time_boundary import parse_storage_utc_datetime
 
 
@@ -141,6 +139,7 @@ async def claim_background_work_job(
     collection = db[BACKGROUND_WORK_JOBS_COLLECTION]
     claim_filter = {
         "schema_version": BACKGROUND_WORK_JOB_SCHEMA_VERSION,
+        "status": {"$in": ["queued", "in_progress"]},
         "$or": [
             {"status": "queued"},
             {
@@ -174,56 +173,6 @@ async def claim_background_work_job(
     if document is None:
         return None
     return dict(document)
-
-
-async def checkpoint_background_work_job(
-    *,
-    job_id: str,
-    lease_owner: str,
-    checkpoint: dict[str, object],
-    updated_at: str,
-    task_resolution_result: dict[str, object] | None = None,
-    release_for_resume: bool = False,
-) -> BackgroundWorkJobDoc | None:
-    """Persist a completed dispatch checkpoint under the current worker lease.
-
-    Args:
-        job_id: Durable job whose task checkpoint changed.
-        lease_owner: Worker that still owns the job lease.
-        checkpoint: Validated state after one completed specialist dispatch.
-        updated_at: Durable timestamp for the checkpoint write.
-        task_resolution_result: Prompt-safe result snapshot paired atomically
-            with the checkpoint, when task resolution has started.
-        release_for_resume: Releases the lease only when the caller has ended
-            the current execution slice.
-
-    Returns:
-        The updated job when the active lease still belongs to the caller.
-    """
-
-    validated_checkpoint = validate_task_resolution_checkpoint(checkpoint)
-    update_fields: dict[str, object] = {
-        "worker_payload.checkpoint": dict(validated_checkpoint),
-        "updated_at": updated_at,
-    }
-    if task_resolution_result is not None:
-        validated_result = validate_task_resolution_result(
-            task_resolution_result,
-        )
-        update_fields["task_resolution_result"] = dict(validated_result)
-    if release_for_resume:
-        update_fields.update({
-            "status": "queued",
-            "delivery_state": "queued",
-            "lease_owner": None,
-            "lease_expires_at": None,
-        })
-    update = {"$set": update_fields}
-    return await _update_leased_job(
-        job_id=job_id,
-        lease_owner=lease_owner,
-        update=update,
-    )
 
 
 async def complete_background_work_job(
@@ -263,10 +212,24 @@ async def complete_background_work_job(
             "lease_expires_at": None,
         }
     }
-    return await _update_leased_job(
+    updated = await _update_leased_job(
         job_id=job_id,
         lease_owner=lease_owner,
         update=update,
+    )
+    if updated is not None:
+        return updated
+    existing = await _find_terminal_job(job_id)
+    if existing is None:
+        return None
+    if (
+        existing.get("task_resolution_result") == result_projection
+        and existing.get("artifact_text") == artifact_text
+        and existing.get("result_summary") == result_summary
+    ):
+        return existing
+    raise DatabaseOperationError(
+        "background work completion replay conflicts with the stored result"
     )
 
 
@@ -468,6 +431,37 @@ async def mark_background_work_delivery_failed(
     )
 
 
+async def requeue_background_work_job(
+    *,
+    job_id: str,
+    lease_owner: str,
+    updated_at: str,
+    worker_payload: Mapping[str, object],
+    status: str = "queued",
+) -> BackgroundWorkJobDoc | None:
+    """Release a claimed DSH job for cooperative checkpoint continuation."""
+
+    if status != "queued":
+        raise ValueError("background work requeue status is invalid")
+    if not isinstance(worker_payload, Mapping):
+        raise TypeError("worker_payload is required")
+    update = {
+        "$set": {
+            "status": status,
+            "delivery_state": "queued",
+            "worker_payload": dict(worker_payload),
+            "updated_at": updated_at,
+            "lease_owner": None,
+            "lease_expires_at": None,
+        },
+    }
+    return await _update_leased_job(
+        job_id=job_id,
+        lease_owner=lease_owner,
+        update=update,
+    )
+
+
 async def _update_delivery_claimed_job(
     *,
     job_id: str,
@@ -576,7 +570,7 @@ async def _update_leased_job(
             {
                 "schema_version": BACKGROUND_WORK_JOB_SCHEMA_VERSION,
                 "job_id": job_id,
-                "status": "in_progress",
+                "status": {"$in": ["in_progress", "running"]},
                 "lease_owner": lease_owner,
             },
             update,
@@ -586,6 +580,29 @@ async def _update_leased_job(
     except PyMongoError as exc:
         raise DatabaseOperationError(
             f"failed to update background work job: {exc}"
+        ) from exc
+    if document is None:
+        return None
+    return dict(document)
+
+
+async def _find_terminal_job(job_id: str) -> BackgroundWorkJobDoc | None:
+    """Read one completed job for an idempotent terminal replay."""
+
+    db = await get_db()
+    collection = db[BACKGROUND_WORK_JOBS_COLLECTION]
+    try:
+        document = await collection.find_one(
+            {
+                "schema_version": BACKGROUND_WORK_JOB_SCHEMA_VERSION,
+                "job_id": job_id,
+                "status": "completed",
+            },
+            {"_id": 0},
+        )
+    except PyMongoError as exc:
+        raise DatabaseOperationError(
+            f"failed to find completed background work job: {exc}"
         ) from exc
     if document is None:
         return None

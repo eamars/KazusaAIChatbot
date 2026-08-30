@@ -26,9 +26,12 @@ from agentic_resolver.fingerprints import (
 )
 from agentic_resolver.persistence import ResolutionThreadRepository
 from kazusa_ai_chatbot.dsh_tool_gateway.authority import (
+    SemanticActivationAuthorityV1,
     activation_id_for,
+    issue_activation_token,
     verify_activation_token,
 )
+from kazusa_ai_chatbot.dsh_tool_gateway.contracts import content_digest
 
 
 class ResolutionRpc(Protocol):
@@ -108,6 +111,45 @@ class ResolutionController:
         self._rpc = rpc
         self._owner_id = owner_id
         self._semantic_authority_secret = semantic_authority_secret
+        self._observed_states: dict[str, str] = {}
+
+    @staticmethod
+    async def recover_after_runtime_fault(
+        fault: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Return the durable identity needed to replay a DSH fault safely."""
+
+        if not isinstance(fault, Mapping):
+            raise TypeError("runtime fault must be an object")
+        if fault.get("schema_version") != "dsh_runtime_fault.v1":
+            raise ValueError("runtime fault schema is unsupported")
+        required = (
+            "resolution_thread_id",
+            "segment_id",
+            "dsh_session_id",
+            "document_revision",
+            "last_committed_seq",
+            "fault_code",
+        )
+        if any(field not in fault for field in required):
+            raise ValueError("runtime fault identity is incomplete")
+        for field in required[:3] + ("fault_code",):
+            value = fault[field]
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"runtime fault {field} is invalid")
+        for field in ("document_revision", "last_committed_seq"):
+            value = fault[field]
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"runtime fault {field} is invalid")
+        return {
+            "disposition": "recovery_required",
+            "resolution_thread_id": fault["resolution_thread_id"],
+            "segment_id": fault["segment_id"],
+            "dsh_session_id": fault["dsh_session_id"],
+            "document_revision": fault["document_revision"],
+            "last_committed_seq": fault["last_committed_seq"],
+            "fault_code": fault["fault_code"],
+        }
 
     async def resolve(self, value: Mapping[str, Any]) -> dict[str, Any]:
         intake = DSHResolutionIntakeV2.from_mapping(value)
@@ -280,6 +322,210 @@ class ResolutionController:
             activation_id,
             lease_epoch,
         )
+
+    async def continue_after_terminal(
+        self,
+        *,
+        resolution_thread_id: str,
+        segment_id: str,
+        activation_id: str,
+        lease_epoch: int,
+        continuation_delta: Mapping[str, Any],
+        execution_context: Mapping[str, Any] | None = None,
+        start_spec: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Open one fresh-fenced continuation on the existing segment."""
+
+        if not isinstance(continuation_delta, Mapping):
+            raise TypeError("continuation_delta must be an object")
+        del activation_id, lease_epoch
+        record = await self._repository_call(
+            "get_thread", resolution_thread_id
+        )
+        if record is None:
+            raise RuntimeError("V2 resolution thread is not admitted")
+        if record.current_segment_id != segment_id:
+            raise RuntimeError("SEGMENT_ID_MISMATCH")
+        context = self._continuation_context(execution_context, start_spec)
+        intake = await self._fresh_continuation_intake(
+            record=record,
+            resolution_thread_id=resolution_thread_id,
+            segment_id=segment_id,
+            continuation_delta=continuation_delta,
+            execution_context=context,
+        )
+        result = await self.continue_resolution(intake)
+        return {**result, "fresh_authority": True}
+
+    async def continue_after_checkpoint(
+        self,
+        *,
+        resolution_thread_id: str,
+        segment_id: str,
+        activation_id: str,
+        lease_epoch: int,
+        continuation_delta: Mapping[str, Any],
+        execution_context: Mapping[str, Any] | None = None,
+        start_spec: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Continue one checkpoint with a fresh lease on the same segment."""
+
+        return await self.continue_after_terminal(
+            resolution_thread_id=resolution_thread_id,
+            segment_id=segment_id,
+            activation_id=activation_id,
+            lease_epoch=lease_epoch,
+            continuation_delta=continuation_delta,
+            execution_context=execution_context,
+            start_spec=start_spec,
+        )
+
+    @staticmethod
+    def _continuation_context(
+        execution_context: Mapping[str, Any] | None,
+        start_spec: Mapping[str, Any] | None,
+    ) -> Mapping[str, Any]:
+        """Select the trusted scope carrier for a fresh continuation token."""
+
+        if execution_context is not None:
+            if not isinstance(execution_context, Mapping):
+                raise TypeError("execution_context must be an object")
+            return execution_context
+        if isinstance(start_spec, Mapping):
+            candidate = start_spec.get("execution_context")
+            if isinstance(candidate, Mapping):
+                return candidate
+        raise ValueError("continuation execution context is required")
+
+    async def _fresh_continuation_intake(
+        self,
+        *,
+        record: Any,
+        resolution_thread_id: str,
+        segment_id: str,
+        continuation_delta: Mapping[str, Any],
+        execution_context: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Build a same-thread V2 intake with a newly issued lease authority."""
+
+        health = await self._health_identity()
+        scope_values = {
+            "platform": execution_context.get("platform"),
+            "platform_channel_id": execution_context.get("channel_id"),
+            "global_user_id": execution_context.get("requester_global_user_id"),
+        }
+        if any(
+            not isinstance(value, str) or not value.strip()
+            for value in scope_values.values()
+        ):
+            raise ValueError("continuation execution scope is incomplete")
+        service_scope = {
+            key: str(value).strip()
+            for key, value in scope_values.items()
+        }
+        if content_digest(service_scope) != record.scope_fingerprint:
+            raise RuntimeError("SCOPE_FINGERPRINT_MISMATCH")
+
+        workspace_root = str(record.workspace_root)
+        workspace_digest = workspace_fingerprint(workspace_root)
+        if workspace_digest != record.workspace_fingerprint:
+            raise RuntimeError("WORKSPACE_FINGERPRINT_MISMATCH")
+        next_lease_epoch = int(record.lease_epoch) + 1
+        next_activation_id = activation_id_for(
+            resolution_thread_id,
+            segment_id,
+            next_lease_epoch,
+        )
+        operation_id = f"op_{uuid4().hex}"
+        payload_digest = operation_payload_digest({
+            "method": "resolution.continue",
+            "params": {
+                "resolution_thread_id": resolution_thread_id,
+                "segment_id": segment_id,
+                "continuation": dict(continuation_delta),
+            },
+        })
+        objective = next(
+            (
+                value.strip()
+                for field in (
+                    "answer",
+                    "response_goal",
+                    "objective",
+                    "instruction",
+                )
+                if isinstance(value := continuation_delta.get(field), str)
+                and value.strip()
+            ),
+            str(record.root_goal_ref),
+        )
+        interaction_issuer = "brain.task_resolution"
+        audience_fingerprint = str(record.audience_fingerprint)
+        issued_reference_digest = content_digest({
+            "resolution_thread_id": resolution_thread_id,
+            "segment_id": segment_id,
+            "brain_conversation_ref": record.brain_conversation_ref,
+            "service_scope": service_scope,
+            "audience_fingerprint": audience_fingerprint,
+        })
+        now = datetime.now(UTC)
+        issued_at = now.isoformat().replace("+00:00", "Z")
+        expires_at = (now + timedelta(minutes=5)).isoformat().replace(
+            "+00:00", "Z"
+        )
+        authority = SemanticActivationAuthorityV1(
+            activation_id=next_activation_id,
+            lease_epoch=next_lease_epoch,
+            resolution_thread_id=resolution_thread_id,
+            segment_id=segment_id,
+            brain_conversation_ref=str(record.brain_conversation_ref),
+            service_scope=service_scope,
+            scope_fingerprint=str(record.scope_fingerprint),
+            audience_fingerprint=audience_fingerprint,
+            workspace_root=workspace_root,
+            route_digest=health["route_digest"],
+            catalog_digest=health["semantic_catalog_digest"],
+            profile_version=health["profile_version"],
+            model_route_digest=health["route_digest"],
+            workspace_fingerprint=workspace_digest,
+            issued_reference_digest=issued_reference_digest,
+            policy_epoch=health["policy_epoch"],
+            interaction_issuer=interaction_issuer,
+            issued_at=issued_at,
+            expires_at=expires_at,
+            token_id=f"tok_{uuid4().hex}",
+            nonce=f"nonce_{uuid4().hex}",
+        )
+        token = issue_activation_token(
+            authority,
+            secret=self._semantic_authority_secret,
+            now=issued_at,
+        )
+        return DSHResolutionIntakeV2.from_mapping({
+            "schema_version": "dsh_resolution_intake.v2",
+            "mode": "continue",
+            "request_id": str(record.interaction_id),
+            "operation_id": operation_id,
+            "operation_payload_digest": payload_digest,
+            "resolution_thread_id": resolution_thread_id,
+            "segment_id": segment_id,
+            "brain_conversation_ref": str(record.brain_conversation_ref),
+            "workspace_root": workspace_root,
+            "route_digest": health["route_digest"],
+            "model_input": {
+                "objective": objective,
+                "facts": _continuation_model_facts(continuation_delta),
+            },
+            "semantic_tool_authority": {
+                "catalog_digest": health["semantic_catalog_digest"],
+                "token": token,
+            },
+            "interaction_authority": {
+                "issuer": interaction_issuer,
+                "scope_fingerprint": str(record.scope_fingerprint),
+                "audience_fingerprint": audience_fingerprint,
+            },
+        }).to_dict()
 
     async def interaction_checkpoint(
         self,
@@ -503,7 +749,10 @@ class ResolutionController:
         return {
             "resolution_thread_id": resolution_thread_id,
             "segment_id": record.current_segment_id,
-            "state": record.state,
+            "state": self._observed_states.get(
+                resolution_thread_id,
+                record.state,
+            ),
             "lease_epoch": record.lease_epoch,
             "document_revision": record.document_revision,
         }
@@ -1039,6 +1288,7 @@ class ResolutionController:
                 activation_id,
                 lease_epoch,
             )
+            self._observed_states[resolution_thread_id] = state
         return result
 
     async def _fence(
