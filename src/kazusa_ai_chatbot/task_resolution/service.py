@@ -627,7 +627,7 @@ def _inline_exhaust_kind(exhaust: object) -> str | None:
 
 
 def _inline_transition_allowed(current: str, next_state: str) -> bool:
-    """Keep foreground binding state inside the Plan 3 transition graph."""
+    """Keep foreground binding state inside the DSH transition graph."""
 
     allowed = {
         "queued": {"opening", "canceled", "faulted"},

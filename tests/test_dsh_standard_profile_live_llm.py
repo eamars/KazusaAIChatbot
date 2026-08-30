@@ -187,8 +187,8 @@ async def test_qwen27b_memory_write_revision_lifecycle_and_readback(tmp_path: Pa
 
     suffix = uuid4().hex
     global_user_id = f"dsh-memory-user-{suffix}"
-    information = f"The Plan 2 live marker is cobalt-{suffix}."
-    revised = f"The Plan 2 live marker is indigo-{suffix}."
+    information = f"The DSH live marker is cobalt-{suffix}."
+    revised = f"The DSH live marker is indigo-{suffix}."
     database = await get_db()
     try:
         result = await _resolve_live(

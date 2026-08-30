@@ -88,6 +88,7 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
+| [dsh_integration_scope_and_test_minimality_quickfix_plan_2026-08-31.md](archive/completed/bugfix/dsh_integration_scope_and_test_minimality_quickfix_plan_2026-08-31.md) | Consolidated DSH scope audit, documentation restoration, repository hygiene, and process-test pruning | completed; deterministic, sidecar, impact, and full non-live gates passed on 2026-08-31 |
 | [live_response_recovery_ladder_and_no_fail_dialog_bugfix_plan_2026-08-27.md](archive/completed/bugfix/live_response_recovery_ladder_and_no_fail_dialog_bugfix_plan_2026-08-27.md) | Uniform live-response recovery ladder and no-fail dialog | completed; parent plan-scope sign-off passed with unrelated baseline repository failures recorded on 2026-08-27 |
 | [qwen_alias_thinking_disable_enforcement_bugfix_plan_2026-08-25.md](archive/completed/bugfix/qwen_alias_thinking_disable_enforcement_bugfix_plan_2026-08-25.md) | Qwen-family alias provider-side thinking-disable enforcement | completed; deterministic and real-LLM gates passed on 2026-08-25 |
 | [asuna_semantic_authority_and_memory_feedback_consolidated_bugfix_plan_2026-08-24.md](archive/completed/bugfix/asuna_semantic_authority_and_memory_feedback_consolidated_bugfix_plan_2026-08-24.md) | Consolidated semantic progression, proposal ownership, commitment admission, cross-user learned-memory authority, audit, and real-LLM execution record | closed with residual failures on 2026-08-25; execution complete, functional sign-off RED |

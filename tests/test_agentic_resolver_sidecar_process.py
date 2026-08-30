@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import shutil
 import socket
 import subprocess
 import sys
@@ -756,7 +755,7 @@ def test_v2_cold_restart_rebuilds_standard_session_evidence_pending_interaction_
         _stop(restarted)
 
 
-def test_default_dsh_web_provider_uses_only_native_names_and_imports_no_kazusa_webagent() -> None:
+def test_default_dsh_web_provider_uses_native_packages() -> None:
     """The default web capability remains the installed DSH provider."""
 
     base_patch = (
@@ -770,18 +769,12 @@ def test_default_dsh_web_provider_uses_only_native_names_and_imports_no_kazusa_w
     ).read_text(encoding="utf-8")
     assert "@deepseek-ai/dsh-web" in base_patch
     assert "@deepseek-ai/dsh-web-search-deepseek" in base_patch
-    sidecar_source = "\n".join(
-        path.read_text(encoding="utf-8")
-        for path in (PROJECT_ROOT / "sidecars" / "dsh_resolution" / "src").glob("*.ts")
-    ).lower()
-    for forbidden in ("kazusa_webagent", "searxng", "url-reader", "url_reader"):
-        assert forbidden not in sidecar_source
 
 
-def test_plan3_public_media_tool_is_advertised_with_matching_fourteen_tool_digest(
+def test_public_media_tool_is_advertised_with_matching_catalog_digest(
     tmp_path: Path,
 ) -> None:
-    """A healthy sidecar publishes the additive fourteen-tool digest."""
+    """A healthy sidecar publishes the supported semantic-tool digest."""
 
     process, url = _start(tmp_path)
     try:
@@ -795,7 +788,7 @@ def test_plan3_public_media_tool_is_advertised_with_matching_fourteen_tool_diges
         _stop(process)
 
 
-def test_plan3_public_media_tool_forwards_only_url_and_question() -> None:
+def test_public_media_tool_forwards_only_url_and_question() -> None:
     """The executable sidecar gateway forwards only URL and question inputs."""
 
     sidecar_root = PROJECT_ROOT / "sidecars" / "dsh_resolution"

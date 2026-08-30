@@ -5,24 +5,24 @@
 
 <p><strong>A self-evolving character cognition runtime for persistent digital presence.</strong></p>
 
-<h2>Plan 2 DSH Standard semantic runtime</h2>
+<h2>DSH Standard task runtime</h2>
 
-<p>The accepted Plan 2 runtime combines the Python Brain interaction bridge
-with a separately built Node DSH Standard sidecar. The processes have
-independent lifecycles, while sidecar readiness depends on the Brain's durable
-DSH interaction store and cognition judge. Build the sidecar with
+<p>DSH is Kazusa's sole production route for bounded multi-step task
+resolution. The Python Brain owns character judgment, durable task binding,
+cognition recurrence, dialog, and delivery; the separately built Node sidecar
+owns DSH Standard execution. Build the sidecar with
 <code>corepack pnpm@11.7.0 --dir sidecars/dsh_resolution install --frozen-lockfile</code>
 and <code>corepack pnpm@11.7.0 --dir sidecars/dsh_resolution build</code>,
 then start <code>node sidecars/dsh_resolution/dist/src/main.js</code> after
 the Brain is ready.</p>
 
-<p>Plan 2 uses the V2 RPC/intake contracts, profile
-<code>kazusa-resolver-standard-v2</code>, and the pinned DSH release
-<code>0.1.1-rc.2</code>. Operators configure the sidecar URL, authenticated
-RPC/Brain/gateway secrets, absolute data/workspace/Python paths, and the six
-<code>AGENTIC_RESOLVER_LLM_*</code> route fields in <a
-href="docs/HOWTO.md#run-the-plan-2-dsh-standard-sidecar">the HOWTO</a>;
-secrets are never committed.</p>
+<p>The runtime uses <code>kazusa.dsh-resolution-rpc.v2</code>,
+<code>dsh_resolution_intake.v2</code>, profile
+<code>kazusa-resolver-standard-v2</code>, and pinned DSH release
+<code>0.1.1-rc.2</code>. Configure the authenticated sidecar, Brain, gateway,
+data/workspace/Python paths, and six <code>AGENTIC_RESOLVER_LLM_*</code>
+route fields in the <a href="docs/HOWTO.md#dsh-standard-sidecar">HOWTO</a>;
+secrets remain local.</p>
 
 <p>
     <a href="README_CN.md">简体中文</a>
@@ -58,43 +58,34 @@ For local setup, jump to [Quick Start](#quick-start) and the
 [HOWTO](docs/HOWTO.md). For subsystem ownership, use
 [Runtime Layers](#runtime-layers).
 
-## Plan 2 DSH runtime
+## DSH Task Runtime
 
-Plan 2 is capability-ready standalone infrastructure; it does not change the
-production `task_resolution_request` or its accepted/background routing. The
-wire contracts are `kazusa.dsh-resolution-rpc.v2` and
-`dsh_resolution_intake.v2`. DSH session data is stored at
-`<KAZUSA_DSH_DATA_ROOT>/dsh/0.1.1-rc.2/sessions.sqlite`; replayable semantic
-outcomes use the adjacent `semantic-outcomes.sqlite`. The profile/store
-identity is `kazusa-resolver-standard-v2` /
+`task_resolution_request` enters one shared `AgenticResolverRuntime`; there is
+no parallel production task executor. The Brain creates a durable
+`dsh_task_binding.v1`, issues fresh fenced authority, and opens or continues the
+DSH sidecar session. Checkpoints and terminal outcomes return as typed
+`TaskResolutionResultV1` observations and re-enter normal cognition, dialog,
+dispatcher, and adapter delivery.
+
+The wire contracts are `kazusa.dsh-resolution-rpc.v2` and
+`dsh_resolution_intake.v2`. Session state lives under
+`<KAZUSA_DSH_DATA_ROOT>/dsh/0.1.1-rc.2/`; the profile/store identity is
+`kazusa-resolver-standard-v2` /
 `dsh-sqlite-0.1.1-rc.2-standard-v2`.
 
-The official DSH base and Standard preset are mounted by reference. Standard
-native filesystem, shell, coding, jobs, tests, web, approval, and sandbox
-tools take name precedence. Kazusa adds exactly these thirteen
-storage-independent semantic tools:
+DSH Standard retains its native filesystem, shell, coding, jobs, tests, web,
+approval, and sandbox tools. Kazusa adds fourteen storage-independent semantic
+tools for conversation, memory, people, active context, calendar, attached
+media, and public media. The controller-owned `submit_resolution` is the sole
+model-owned terminal operation. Semantic results expose bounded entities,
+opaque references, and evidence receipts; they never become persona or final
+wording by themselves.
 
-`kazusa_search_conversation_history`, `kazusa_read_conversation_entries`,
-`kazusa_summarize_conversation_participants`, `kazusa_search_memories`,
-`kazusa_read_memories`, `kazusa_remember_information`,
-`kazusa_revise_memory`, `kazusa_change_memory_lifecycle`,
-`kazusa_find_people_by_name`, `kazusa_read_person_profiles`,
-`kazusa_recall_active_context`, `kazusa_read_calendar_context`, and
-`kazusa_inspect_attached_media`. The controller-owned `submit_resolution` is
-the sole model-owned terminal operation. Results expose semantic entities,
-opaque references, and evidence receipts; the framed Python worker owns
-service calls, idempotent mutations, and outcome replay.
-
-For approval, question, or plan-review requests, the authenticated Brain
-judge receives a targeted runtime-authored observation and pending semantic
-context. It returns an immediate answer/rejection/one-shot decision or a
-`relay_to_user` checkpoint. Normal dialog and adapter delivery handle visible
-wording; an exact reply resumes the same thread and segment, and deterministic
-code atomically matches and consumes a one-shot grant for the same tool,
-arguments, workspace, scope, and policy. Transient DSH detail remains pending
-runtime context rather than user-authored evidence. A multi-tool turn ends
-only after a structurally valid, evidence-bound `submit_resolution` receipt is
-committed.
+Questions, approval decisions, and plan review are internal character-cognition
+episodes. The Brain produces a typed answer, rejection, or one-shot grant for
+the same fenced thread and segment; these internal decisions are not relayed as
+user prompts. Durable accepted-task controls support `continue`, `summarize`,
+and `cancel` on the same opaque task/session binding.
 
 See the [DSH integration architecture](docs/architecture/dsh_integration_architecture.md),
 [Agentic Resolver architecture](docs/architecture/agentic_resolver_architecture.md),
@@ -126,10 +117,10 @@ At a high level, Kazusa provides:
 | Bounded live response path       | Typed intake, frontline relevance, turn settlement, settled relevance, the cognition resolver, selected evidence capabilities, action routing, and L3 surfaces are explicit stages with caps and inspectable payloads. |
 | Multi-horizon memory             | Recent chat, short-term conversation flow, retrieved evidence, durable memory, and scheduled commitments remain separate.          |
 | Internal monologue residue       | A short private residue lane carries the exact bounded G-stage first-person monologue from completed episodes into the next goal-cognition pass. |
-| Task resolution                  | One resolver capability runs a bounded inline session over local context, public research, coding, and text/computation specialists, then returns evidence or promotes the same checkpoint. |
+| Task resolution                  | One DSH runtime executes bounded foreground or accepted background work with fenced authority, typed checkpoints, and cognition re-entry. |
 | Layered cognition                | Cognition decides stance, boundaries, judgment, style, action needs, and response goals before selected L3 surfaces render output. |
 | Background consolidation         | Completed episodes update durable memory, relationship state, Cache2 invalidation, images, and progress from text plus action/surface traces. |
-| Accepted delayed work            | Accepted reminders, text tasks, and coding tasks are persisted, routed to internal background workers, and returned through cognition rather than sent directly. |
+| Accepted delayed work            | Accepted reminders and DSH tasks are persisted, resumed by bounded workers, and returned through cognition rather than sent directly. |
 | Reflection outside chat          | Hourly, daily, and promoted reflection runs are stored as audit records and only promoted context can enter normal cognition.      |
 | Idle self-cognition              | Background source cases can enter the same resolver-backed persona path, with source-bound delivery and normal consolidation rules. |
 | Calendar follow-through          | Accepted future promises and due commitments can become durable calendar triggers that run fresh cognition later.                  |
@@ -142,7 +133,7 @@ At a high level, Kazusa provides:
 | Persistent character companion       | The runtime keeps relationship memory, short-term flow, character state, and reflection separate but connected.                  |
 | Group-chat character bot             | Frontline relevance and turn settlement handle noisy channels.                                                                 |
 | Local model character lab            | Route-specific OpenAI-compatible model settings let weaker local models handle narrower, staged prompts.                         |
-| Memory and RAG experiments           | RAG3, Cache2, retired RAG2 helper coverage, scoped user memory, shared memory evolution, and conversation search are modular enough to inspect independently. |
+| Memory and RAG experiments           | RAG3, Cache2, scoped user memory, shared memory evolution, and conversation search are modular enough to inspect independently. |
 | Cross-platform adapter experiments   | New adapters only need to normalize platform events into the service contract and render returned messages.                      |
 | Idle cognition and reflection labs   | Self-cognition and reflection use bounded source packets and shared cognition boundaries without turning adapters into agents.   |
 | Promise and follow-through workflows | Accepted future commitments can be validated, persisted, deduplicated, and revisited later through durable calendar triggers.    |
@@ -172,9 +163,7 @@ HOWTO. One working-style configuration looks like this:
 | `COGNITION_LLM_CHARACTER_CARRYOVER` | `local-model`                     | `http://localhost:1234/v1` |
 | `COGNITION_V3_CHAIN_LLM`   | `local-model`                            | `http://localhost:1234/v1` |
 | `COGNITION_V3_SIDECAR_LLM` | `sidecar-model`                          | `http://localhost:1234/v1` |
-| `BACKGROUND_WORK_LLM`      | `local-model`                            | `http://localhost:1234/v1` |
-| `CODING_AGENT_PM_LLM`      | `local-model`                            | `http://localhost:1234/v1` |
-| `CODING_AGENT_PROGRAMMER_LLM` | `local-model`                          | `http://localhost:1234/v1` |
+| `AGENTIC_RESOLVER_LLM`     | `local-model`                            | `http://localhost:1234/v1` |
 | `DIALOG_GENERATOR_LLM`     | `deepseek-v4-flash`                      | `https://api.deepseek.com` |
 | `CONSOLIDATION_LLM`        | `local-model`                            | `http://localhost:1234/v1` |
 | `JSON_REPAIR_LLM`          | `local-model`                            | `http://localhost:1234/v1` |
@@ -199,11 +188,6 @@ fixed as `fixed_a1_a2`; the caller configures
 50,000 tokens normally and conditionally 65,000 when the declared serving
 window supports it. Timing evidence is non-streaming elapsed milliseconds;
 the runtime makes no TTFT claim.
-
-Code-reading uses separate required routes for PM decisions and programmer
-workers. Final synthesis intentionally reuses `CODING_AGENT_PM_LLM`; there is
-no independent synthesizer route. Each code-reading route must define its base
-URL, API key, and model.
 
 Chat LLM calls are routed through `LLInterface`. Each module owns its route,
 model, generation budget, and thinking toggle via `LLMCallConfig`; the
@@ -261,193 +245,25 @@ media is explicit so settled relevance can fail closed before cognition.
 
 ```mermaid
 flowchart TD
-    A["Adapters<br/>Discord, NapCat QQ, debug UI, future adapters"]
-    B["FastAPI brain service<br/>/chat, health, ops snapshots, delivery receipts, runtime adapter registry"]
-    C["Process-local chat queue<br/>private adjacency coalescing, inbound persistence"]
-    D["Typed fragment intake and turn settlement<br/>MessageEnvelope, frontline relevance, deadlines, version claim"]
-    E{"Service graph"}
-    F["Media descriptor<br/>accepted media, max four unique images"]
-    G["Settled relevance gate<br/>ignore/proceed/wait"]
-    H["Prompt-safe context lanes<br/>conversation_progress<br/>internal_monologue_residue<br/>past_dialog_cognition<br/>promoted reflection and growth context"]
-    N["No persona turn<br/>empty ChatResponse"]
-    J["Adapter delivery boundary<br/>ChatResponse messages, mentions, delivery receipts"]
-    K["Post-turn state work<br/>conversation progress, residue, consolidation, Cache2 invalidation"]
-    DB[("MongoDB through DB facade<br/>conversation, profiles, user memory, shared memory, calendar, reflection, traces, event logs")]
-    SUP["Shared support<br/>LLM interface and route configs<br/>Cache2 and embeddings<br/>web/MCP runtimes<br/>sanitized event logging and protected LLM tracing"]
+    A["Adapters<br/>Discord, NapCat QQ, debug UI"]
+    B["Brain service<br/>typed intake, queue, relevance"]
+    R["RAG3 / local context<br/>bounded evidence"]
+    C["Cognition<br/>stance, boundaries, response goals"]
+    D["DSH task edge<br/>fenced sidecar session and semantic tools"]
+    L["L3 and dialog<br/>visible rendering"]
+    P["Persistence and consolidation<br/>memory, progress, traces"]
+    S["Scheduler, reflection, self-cognition<br/>outside live wording"]
+    O["Dispatcher and adapter delivery"]
 
-    A -->|ChatRequest + MessageEnvelope| B
-    B --> C
-    C --> D
-    D --> E
-    E -->|attachments| F
-    F --> G
-    E -->|text-only or described media| G
-    G -->|should respond| H
-    G -->|should not respond| N
-    H --> P0
-    P3 -->|visible text surfaces| J
-    P4 -->|private action or no visible surface| K
-    J --> K
-    K --> CONS
-    K --> DB
-    SUP -.-> B
-
-    subgraph Persona["Persona turn"]
-        P0["Stage 0<br/>message decontextualizer"]
-        P1["Stage 1<br/>bounded cognition resolver"]
-        P2["Stage 2<br/>memory lifecycle specialist"]
-        P2A["Stage 2a<br/>accepted-task and background-work enqueue"]
-        P3["Stage 3<br/>L3 text surface and dialog"]
-        P4["Private finalization<br/>no-response/action trace"]
-        PT["EpisodeTrace<br/>action results and surface outputs"]
-        P0 --> P1
-        P1 --> P2
-        P2 --> P2A
-        P2A -->|speak selected| P3
-        P2A -->|no visible text surface| P4
-        P3 --> PT
-        P4 --> PT
-    end
-
-    subgraph Resolver["Cognition resolver recurrence"]
-        R0["Resolver state<br/>goal progress, observations, pending resume"]
-        R1["L1<br/>affect and interaction subtext"]
-        R2["L2a<br/>consciousness"]
-        R3["L2b<br/>boundary appraisal"]
-        R4["L2c1 + L2c2<br/>judgment and social context"]
-        R5["L2d [LLM]<br/>action and capability selection"]
-        R0 --> R1
-        R1 --> R2
-        R2 --> R3
-        R3 --> R4
-        R4 --> R5
-    end
-
-    subgraph ResolverCaps["Cognition-selected resolver capabilities"]
-        RC0["Deterministic capability executor [deterministic]<br/>one immediate request per cycle"]
-        RC1["task_resolution_request<br/>bounded inline or durable evidence session"]
-        RC2["human_clarification<br/>pending HIL row"]
-        RC3["approval_preparation<br/>pending approval row"]
-        RC4["self_goal_resolution<br/>private internal-source handling"]
-        RC5["Resolver observation<br/>prompt-safe result for next cycle"]
-        RC0 --> RC1
-        RC0 --> RC2
-        RC0 --> RC3
-        RC0 --> RC4
-        RC1 --> RC5
-        RC2 --> RC5
-        RC3 --> RC5
-        RC4 --> RC5
-    end
-
-    subgraph RAG3["RAG3 local context resolver"]
-        LC0["resolve_local_context<br/>stable public IO"]
-        LC1["graph planner<br/>bounded semantic tasks"]
-        LC2["active node resolver<br/>one dependency-ready node"]
-        LC3["collapse review<br/>optional duplicate node merge"]
-        LC4["bottom-up synthesis<br/>known/lacking/boundary packet"]
-        LC5["rag_result projection<br/>retained prompt-facing evidence"]
-        LC0 --> LC1
-        LC1 --> LC2
-        LC2 --> LC3
-        LC3 --> LC2
-        LC2 --> LC4
-        LC4 --> LC5
-    end
-
-    subgraph Web3["web_agent3 source subagents"]
-        W0["router/generator -> executor -> evaluator -> finalizer"]
-        W1["web_read<br/>direct HTTP(S) URL read"]
-        W2["web_search<br/>SearXNG search when configured"]
-        W3["nhentai<br/>metadata/search when token enabled"]
-        W4["bilibili<br/>public read/search when SDK available"]
-        W0 --> W1
-        W0 --> W2
-        W0 --> W3
-        W0 --> W4
-    end
-
-    subgraph Complex["Complex task resolver"]
-        X0["Public IO<br/>resolve_complex_task request/context/options"]
-        X1["graph planner"]
-        X2["active node resolver"]
-        X3["collapse review"]
-        X4["bottom-up synthesis<br/>knowledge packet"]
-        X5["evidence subagent<br/>collect_evidence"]
-        X6["algorithmic subagent<br/>evaluate_expression / missing_expression"]
-        X0 --> X1
-        X1 --> X2
-        X2 --> X5
-        X2 --> X6
-        X2 --> X3
-        X3 --> X2
-        X2 --> X4
-    end
-
-    subgraph Actions["Action spec, accepted tasks, and background workers"]
-        A0["ActionSpec materialization and evaluator [deterministic]"]
-        A1["Visible/private capabilities<br/>speak<br/>memory_lifecycle_update<br/>accepted_coding_task_request<br/>accepted_task_status_check<br/>future_speak<br/>trigger_future_cognition"]
-        A2["Internal executable actions<br/>apply_memory_lifecycle_update"]
-        AT["accepted_task lifecycle<br/>identity, duplicate rejection, result-ready state"]
-        BW0["background_work runtime [deterministic dispatch]"]
-        BW1["task_orchestrator worker<br/>resumes checkpoints and bound coding runs"]
-        BW2["future_speak worker [deterministic worker]<br/>schedules future cognition"]
-        A0 --> A1
-        A1 --> A2
-        A2 --> AT
-        AT --> BW0
-        BW0 --> BW1
-        BW0 --> BW2
-    end
-
-    subgraph Maintenance["Background and durable subsystems"]
-        CAL["calendar_scheduler<br/>future_cognition, commitment_due_cognition, reflection_phase_slot, recurring_self_check"]
-        SC["self_cognition worker<br/>active commitment, recent dialog, topic follow-up, group review cases"]
-        REF["reflection_cycle worker<br/>hourly slot, daily channel, global promotion, affect settling"]
-        ME["memory_evolution<br/>shared memory insert, supersede, merge, seed reset"]
-        IG["character_identity_growth<br/>reviewed immutable identity revisions"]
-        CONS["consolidation<br/>target plan -> source views -> lane router -> lane review -> write-intent validation -> persistence"]
-        DISP["dispatcher [deterministic]<br/>registered adapter callback delivery for trusted sends"]
-        TR["EpisodeTraceV2 + post-turn lifecycle<br/>immutable terminal evidence and idempotent audit"]
-        CAL --> SC
-        CAL --> REF
-        REF --> ME
-        REF --> IG
-        REF --> SC
-        SC --> DISP
-        SC --> CONS
-        CONS --> IG
-        CONS --> ME
-        IG --> H
-        ME --> H
-    end
-
-    P1 --> R0
-    R5 -->|capability requested| RC0
-    RC6 -->|observation or pending resume| R0
-    R5 -->|terminal semantic action requests| A0
-    A0 --> P2
-    P2A --> AT
-    BW1 -->|tool_result| P1
-    BW3 -->|tool_result| P1
-    BW2 --> CAL
-    CAL -->|future or due source case| SC
-    SC -->|shared cognition path| P0
-    RC1 --> LC0
-    LC5 --> RC6
-    RC2 --> X0
-    X4 --> RC6
-    X5 --> W0
-    CONS --> DB
-    AT --> DB
-    BW0 --> DB
-    CAL --> DB
-    REF --> DB
-    ME --> DB
-    GG --> DB
-    SUP -.-> R1
-    SUP -.-> LC0
-    SUP -.-> K
+    A --> B --> R --> C
+    C -->|ordinary response| L
+    C -->|task_resolution_request| D
+    D -->|typed checkpoint or result| C
+    L --> O
+    C --> P
+    L --> P
+    P --> S
+    S -->|typed source episode| B
 ```
 
 Kazusa's live response path is a cognition core, not a chatbot shell or a
@@ -473,30 +289,19 @@ raw messages, evidence references, prompts, or private facts. The Control
 Console renders that payload directly alongside persisted and elapsed-effective
 character posture.
 
-The named specialist boxes are family-local subagents and workers, not one
-universal runtime abstraction. RAG3 resolves local context through
-resolver-local stage agents and projects retained `rag_result` evidence;
-retired RAG2 helper modules remain source-level evidence tooling and tests.
-`web_agent3` owns its
-source subagents; the complex-task resolver owns resolver-local evidence and
-algorithmic subagents; task resolution owns the bounded cross-domain session;
-and background work owns durable resumption. The coding specialist consumes
-only the frozen public coding-run boundary documented in the
-[Coding Agent ICD](src/kazusa_ai_chatbot/coding_agent/README.md).
+RAG3 resolves ordinary local/private context and projects bounded evidence.
+`web_agent3` owns approved source retrieval. DSH owns multi-step task execution
+through its native and semantic tool catalogs. Background work owns durable DSH
+continuation and `future_speak`; none of these evidence or execution owners
+decides persona stance or final wording.
 
 The resolver preserves the same L1 -> L2 -> L2d cognition stack on every
-cycle. L2d may finish with selected action specs, or it may request one bounded
-capability observation through `task_resolution_request`,
-`human_clarification`, `approval_preparation`, or `self_goal_resolution`. The
-task-resolution service owns local/public/coding/text-computation specialist
-selection and returns one prompt-safe observation to the next cognition cycle;
-evidence never speaks as persona by itself.
-
-The task-resolution local-context specialist invokes the RAG3 local resolver
-when its bounded orchestrator selects that domain. The separate first-cycle
-shared-memory prewarm may project confirmed shared-memory rows into L2a before
-the first cognition pass; it is not a resolver capability observation and it
-does not let retrieved evidence become persona.
+cycle. L2d may finish with selected action specs or request a bounded capability
+observation. A `task_resolution_request` opens or continues the fenced DSH
+session and returns one prompt-safe observation to cognition. The separate
+first-cycle shared-memory prewarm may project confirmed shared-memory rows into
+L2a; it is not a task result and does not let retrieved evidence become
+persona.
 
 Selected visible text surfaces go back to adapters through `ChatResponse` and
 delivery receipts. Private action results, no-visible-output decisions, and
@@ -515,22 +320,19 @@ boundary for dialog, while the private monologue remains outside the dialog
 payload. Dialog may describe a physical or external effect as completed only
 when an `executed` permitted-action result supplies that fact.
 
-Generic evidence work is selected through the resolver and begins inline as a
-task-resolution session. Deterministic budget exhaustion promotes the same
-checkpoint to an accepted task and a task-orchestrator job. `future_speak` and
-bound coding continuations are retained action lifecycles; status checks read
-existing accepted-task state without creating work. The task orchestrator
-chooses one specialist per dispatch and resumes its persisted counters after a
-lease retry. Completed accepted tasks return as the canonical `tool_result`
-cognition source rather than being sent directly by workers.
+Generic task work starts through `task_resolution_request`. Foreground work
+uses a bounded DSH budget; a committed checkpoint can promote the same session
+to an accepted task and task-orchestrator job. `future_speak` remains a separate
+scheduled action lifecycle. Completed accepted tasks return as canonical
+`tool_result` cognition sources, and status checks read current task state
+without creating work.
 
 ## Real Debug Example Flows
 
 The first three examples below were captured through the real debug `/chat`
-interface, a local/debug path that sends the same typed chat request shape into
-the brain service as runtime adapters. Example 4 was captured through the
-complex-task resolver entry point, which returns a research packet rather than
-visible chat text. The examples were captured on July 2, 2026, then translated
+interface, which sends the same typed chat request shape into the brain service
+as runtime adapters. Example 4 illustrates a bounded DSH research result that
+returns through cognition rather than bypassing the character brain. The examples were captured on July 2, 2026, then translated
 to English and condensed for a README audience. They are not full trace dumps.
 Internal ids, cache keys, raw database rows, and implementation field names are
 intentionally omitted. The diagrams render typed payloads as readable prose.
@@ -538,14 +340,13 @@ intentionally omitted. The diagrams render typed payloads as readable prose.
 Read each diagram from left to right. Every example uses the same five
 checkpoints:
 
-1. **Message / Request** is what the chat platform, debug client, or resolver
-   entry point receives.
+1. **Message / Request** is what the chat platform or debug client receives.
 2. **Extract** is a human-readable summary of the typed, platform-neutral
    message envelope and hydrated context the brain receives.
 3. **Context / Evidence** is retrieved conversation evidence, reply context, or
    structured task state used for the decision.
 4. **Decision** is the character-level judgment for chat turns, or the
-   resolver-level synthesis rule for non-chat task packets.
+   task-level synthesis rule for bounded DSH results.
 5. **Output** is what the user sees, the durable handoff created for later
    work, or the semantic packet returned to the next stage.
 
@@ -628,10 +429,9 @@ does not write final chat text directly.
 
 ### Example 4: Complex Public Research Packet
 
-This non-chat resolver case shows how a broad benchmark request is decomposed
-into source-bound evidence and a comparison packet. It does not produce visible
-dialog; it returns the packet for later cognition, inspection, or answer
-synthesis. The benchmark numbers are captured trace content from July 2, 2026,
+This DSH case shows how a broad benchmark request is decomposed into
+source-bound evidence and a comparison packet. The typed result returns to
+cognition before any visible answer is rendered. The benchmark numbers are captured trace content from July 2, 2026,
 not current hardware guidance.
 
 ```mermaid
@@ -645,7 +445,7 @@ flowchart TD
     A --> B --> C --> D --> E
 ```
 
-The captured resolver tree shows how the task is broken down. The planner first
+The captured DSH work tree shows how the task is broken down. The planner first
 separates evidence collection from comparison. Evidence branches collect facts
 for each GPU, model-availability checks reuse already-collected evidence, and
 the final packet keeps unsupported comparisons explicit.
@@ -727,22 +527,20 @@ cognition, and calendar scheduling remain in the platform-neutral core.
 | Adapters                 | Discord, NapCat QQ, debug UI transport and platform rendering                           | [Adapter ICD](src/adapters/README.md), [HOWTO](docs/HOWTO.md#adapters)                |
 | Control console          | Local operator auth, service lifecycle, process logs, audit, static UI, debug-chat handoff | [Control Console ICD](src/control_console/README.md)                                  |
 | Brain service            | HTTP API, queue, graph startup, health, delivery receipts, runtime adapter registration | [Brain Service ICD](src/kazusa_ai_chatbot/brain_service/README.md)                     |
-| DSH interaction          | Brain-owned approval/question/plan-review judgment, lineage, checkpoints, and one-shot grants | [DSH interaction](src/kazusa_ai_chatbot/dsh_interaction/README.md) |
+| DSH interaction          | Brain-owned internal approval/question/plan-review judgment and one-shot grants | [DSH interaction](src/kazusa_ai_chatbot/dsh_interaction/README.md) |
 | DSH semantic gateway     | Typed storage-independent semantic tools, opaque references, evidence, and replay-safe worker | [DSH tool gateway](src/kazusa_ai_chatbot/dsh_tool_gateway/README.md) |
 | DSH Standard sidecar     | Mounted official DSH runtime, native tools, sessions, checkpoints, and terminal receipts | [Sidecar README](sidecars/dsh_resolution/README.md) |
 | Message envelope         | Typed inbound content, mentions, replies, attachments, addressees, broadcast state      | [Message Envelope ICD](src/kazusa_ai_chatbot/message_envelope/README.md)               |
 | LLM interface            | Backend-compatible chat LLM invocation, provider sessions, diagnostics, and reload retry | [LLM Interface ICD](src/kazusa_ai_chatbot/llm_interface/README.md)                    |
 | Conversation progress    | Short-term episode state used by cognition to avoid loops and stale reopenings          | [Conversation Progress](src/kazusa_ai_chatbot/conversation_progress/README.md)         |
 | Internal monologue residue | Short-lived private first-person residue loaded only into L2a cognition               | [Internal Monologue Residue ICD](src/kazusa_ai_chatbot/internal_monologue_residue/README.md) |
-| Cognition resolver       | Bounded recurrence state, capability observations, HIL/pending resume, and cycle traces | [Cognition Resolver ICD](src/kazusa_ai_chatbot/cognition_resolver/README.md)            |
-| Task resolution          | Inline-first generic evidence session and durable checkpoint promotion                   | [Task Resolution ICD](src/kazusa_ai_chatbot/task_resolution/README.md)                 |
-| Local context resolver   | RAG3 local/private evidence graph and task-resolution specialist public IO               | [Local Context Resolver ICD](src/kazusa_ai_chatbot/local_context_resolver/README.md)   |
-| Retired RAG 2 helpers    | Historical slot-driven helper-agent retrieval and Cache2 evidence projection           | [Retired RAG 2](src/kazusa_ai_chatbot/rag/README.md)                                  |
+| Cognition resolver       | Bounded recurrence state, capability observations, pending user prerequisites, and cycle traces | [Cognition Resolver ICD](src/kazusa_ai_chatbot/cognition_resolver/README.md)            |
+| Task resolution          | DSH admission, durable task binding, checkpoint recurrence, and terminal result projection | [Task Resolution ICD](src/kazusa_ai_chatbot/task_resolution/README.md)                 |
+| Local context resolver   | RAG3 local/private evidence graph and prompt-safe evidence projection                    | [Local Context Resolver ICD](src/kazusa_ai_chatbot/local_context_resolver/README.md)   |
 | Cognition and dialog     | Character stance, boundaries, judgment, style, visual directives, and final wording     | [Cognition Nodes](src/kazusa_ai_chatbot/nodes/README.md)                              |
 | Action spec              | L2d action residues, capability registry, evaluator, results, surfaces, and traces      | [Action Spec](src/kazusa_ai_chatbot/action_spec/README.md)                            |
 | Accepted task            | User-facing lifecycle for delayed work accepted by the character                        | [Accepted Task ICD](src/kazusa_ai_chatbot/accepted_task/README.md)                    |
 | Background work          | Internal task-orchestrator/future-speak execution and result handoff                    | [Background Work ICD](src/kazusa_ai_chatbot/background_work/README.md)                |
-| Coding agent             | Standalone coding-task supervisor, source fetching, read-only answers, and new-artifact proposals | [Coding Agent ICD](src/kazusa_ai_chatbot/coding_agent/README.md)            |
 | Consolidation            | Durable target planning, lane routing/review, write-intent validation, and target-specific persistence | [Consolidation ICD](src/kazusa_ai_chatbot/consolidation/README.md)                    |
 | Database                 | MongoDB collection ownership, embeddings, indexes, public persistence helpers           | [Database ICD](src/kazusa_ai_chatbot/db/README.md)                                     |
 | Event logging            | Sanitized operational telemetry, status snapshots, statistics, and export contracts     | [Event Logging ICD](src/kazusa_ai_chatbot/event_logging/README.md)                     |
@@ -837,7 +635,7 @@ Build/start `sidecars/dsh_resolution` as a separate process, then require
 authenticated `system.health` to report `route`, `standard`,
 `semantic_worker`, `web`, and `brain` readiness. The sidecar and Brain may be
 restarted independently; readiness still follows that dependency. Required
-DSH and route settings are in the [HOWTO DSH runbook](docs/HOWTO.md#run-the-plan-2-dsh-standard-sidecar).
+DSH and route settings are in the [HOWTO DSH runbook](docs/HOWTO.md#dsh-standard-sidecar).
 
 Run the browser debug adapter:
 
@@ -855,20 +653,19 @@ src/
   adapters/                    Platform adapters and debug UI
   kazusa_ai_chatbot/
     brain_service/             Service API, graph, intake, health, post-turn glue
-    dsh_interaction/           Brain-owned DSH judgment, checkpoint, reply, and grant lineage
+    dsh_interaction/           Brain-owned internal DSH judgment and grant lineage
     dsh_tool_gateway/          Typed semantic catalog and framed worker boundary
     message_envelope/          Typed adapter-to-brain message contract
     llm_interface/             Chat LLM invocation compatibility layer and ICD
-    cognition_resolver/        Bounded resolver loop, capability observations, HIL state
+    cognition_resolver/        Bounded resolver loop and capability observations
     nodes/                     Persona, cognition, and dialog stages
     action_spec/               Modality-neutral action contracts, registry, results
     accepted_task/             User-facing accepted delayed-work lifecycle
     background_work/           Internal task-orchestrator and future-speak execution
-    task_resolution/           Inline-first semantic evidence orchestration
-    coding_agent/              Standalone coding-task supervisor and subagents
+    task_resolution/           DSH task admission, binding, continuation, and result projection
     consolidation/             Durable consolidation helpers, lane routing, and ICD
     local_context_resolver/    RAG3 local/private evidence graph and retained projection
-    rag/                       Retired RAG2 helper agents, hybrid retrieval, Cache2
+    rag/                       RAG3 evidence leaves, retrieval utilities, and Cache2 policy
     conversation_progress/     Short-term episode memory
     internal_monologue_residue/ Short-lived private residue lane for L2a
     db/                        MongoDB facade, schemas, collection owners

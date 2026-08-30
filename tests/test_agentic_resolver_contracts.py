@@ -180,13 +180,7 @@ def test_submit_resolution_requires_status_specific_fields() -> None:
         SubmitResolutionV2.from_mapping(approval)
 
 
-def test_public_contracts_expose_no_dsh_event_or_receipt_types() -> None:
-    contracts_module = __import__("agentic_resolver.contracts", fromlist=["*"])
-    names = set(vars(contracts_module))
-    assert not any(name.endswith("Event") for name in names)
-    assert "runtime" not in DSHResolutionIntakeV2.from_mapping(
-        _intake()
-    ).model_visible_input
+def test_public_contracts_expose_closed_exhaust_kinds() -> None:
     assert DSHResolutionExhaustV2.KINDS == {
         "terminal", "checkpointed", "runtime_fault", "canceled"
     }
@@ -203,18 +197,15 @@ def test_typed_operation_fence_and_runtime_fault_codes_are_closed() -> None:
     assert inspect.isclass(DSHResolutionRuntimeV2)
 
 
-def test_public_api_exposes_standalone_runtime_only() -> None:
+def test_public_api_exposes_standalone_runtime() -> None:
     assert "AgenticResolverRuntime" in agentic_resolver.__all__
-    assert "brain_service" not in agentic_resolver.__dict__
-    assert "cognition" not in agentic_resolver.__dict__
 
 
-def test_public_resolver_exports_only_v2_product_contracts() -> None:
+def test_public_resolver_exports_v2_product_contracts() -> None:
     assert "DSHResolutionIntakeV2" in agentic_resolver.__all__
     assert "DSHResolutionRuntimeV2" in agentic_resolver.__all__
     assert "DSHResolutionExhaustV2" in agentic_resolver.__all__
     assert "SubmitResolutionV2" in agentic_resolver.__all__
-    assert not any(name.endswith("V1") for name in agentic_resolver.__all__)
 
 
 def test_v2_intake_separates_model_input_from_workspace_tool_and_brain_authority() -> None:

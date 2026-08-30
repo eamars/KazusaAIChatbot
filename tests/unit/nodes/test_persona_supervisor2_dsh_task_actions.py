@@ -89,7 +89,6 @@ async def test_persona_graph_loads_only_scoped_active_or_open_followup_affordanc
             "updated_at": "2026-08-30T00:00:00Z",
         }],
     }
-    assert "coding_runs" not in context
 
 
 def test_action_selection_context_has_closed_accepted_task_shape() -> None:
@@ -113,35 +112,6 @@ def test_action_selection_context_has_closed_accepted_task_shape() -> None:
     assert validator(context) == context
     with pytest.raises((TypeError, ValueError)):
         validator({"dsh_tasks": [{**task, "session_id": "hidden"}]})
-
-
-def test_cognition_prompt_projects_opaque_task_ref_and_allowed_controls_only() -> None:
-    """Cognition receives opaque DSH refs and state-derived controls only."""
-
-    from kazusa_ai_chatbot.nodes import persona_supervisor2_cognition as owner
-
-    affordances = owner._available_action_affordances(_state())
-    task_rows = [
-        row for row in affordances
-        if row.get("action_kind") in {"accepted_task_control", "accepted_task"}
-    ]
-    assert task_rows
-    for row in task_rows:
-        assert set(row) <= {
-            "action_kind",
-            "capability",
-            "permission",
-            "decision_mode",
-            "allowed_decisions",
-            "default_decision",
-            "decision_pattern",
-            "context_ref",
-            "target_roles",
-        }
-        assert row["allowed_decisions"] == ["continue", "summarize", "cancel"]
-        assert "coding_run" not in repr(row)
-        assert "session_id" not in row
-        assert "activation_id" not in row
 
 
 def test_model_selected_control_binds_only_trusted_advertised_task_ref() -> None:

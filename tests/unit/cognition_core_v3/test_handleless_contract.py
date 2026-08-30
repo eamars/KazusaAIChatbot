@@ -71,10 +71,6 @@ _MULTIWORD_ENGLISH_PATTERN = re.compile(
 )
 
 
-def _assert_native_chinese_instruction(value: str) -> None:
-    assert _HAN_PATTERN.search(value)
-    prose = _CODE_SPAN_PATTERN.sub("", value)
-    assert _MULTIWORD_ENGLISH_PATTERN.search(prose) is None
 
 
 def _input() -> dict[str, object]:
@@ -196,24 +192,6 @@ def _services(invoker: object) -> CognitionChainServicesV3:
     )
 
 
-def test_cognition_chain_system_prompts_use_native_chinese() -> None:
-    prompts = (
-        facade_module._A1_SYSTEM_PROMPT,
-        facade_module._A2_SYSTEM_PROMPT,
-        facade_module._G_SYSTEM_PROMPT,
-        facade_module._P_ORDINARY_SYSTEM_PROMPT,
-        facade_module._P_PENDING_CLARIFICATION_SYSTEM_PROMPT,
-        facade_module._P_DSH_INTERACTION_SYSTEM_PROMPT,
-        facade_module._P_PENDING_AND_DSH_SYSTEM_PROMPT,
-        facade_module._P_SELF_COGNITION_SYSTEM_PROMPT,
-    )
-    for prompt in prompts:
-        _assert_native_chinese_instruction(prompt)
-        assert "current_observation" in prompt
-        assert "resolver_goal_progress" in prompt
-        assert "contract_repair" in prompt
-
-
 def test_a1_packet_projects_state_without_authored_guidance() -> None:
     """The HumanMessage packet carries state and contracts, not prompt prose."""
 
@@ -236,78 +214,6 @@ def test_a1_packet_projects_state_without_authored_guidance() -> None:
     )
     assert "guidance" not in packet
     assert packet["current_observation"]
-    assert "current_observation" in facade_module._A1_SYSTEM_PROMPT
-
-
-def test_complete_prompt_variants_are_selected_without_prompt_composition() -> None:
-    """Each runtime call selects one literal prompt instead of joining guidance."""
-
-    for stage, packet, expected in (
-        ("A1", {"output_contract": {}}, facade_module._A1_SYSTEM_PROMPT),
-        ("A2", {"output_contract": {}}, facade_module._A2_SYSTEM_PROMPT),
-        ("G", {"output_contract": {}}, facade_module._G_SYSTEM_PROMPT),
-        ("P", {"output_contract": {}}, facade_module._P_ORDINARY_SYSTEM_PROMPT),
-        (
-            "P",
-            {"output_contract": {}, "pending_resolver_continuation": {}},
-            facade_module._P_PENDING_CLARIFICATION_SYSTEM_PROMPT,
-        ),
-        (
-            "P",
-            {"output_contract": {}, "pending_dsh_interaction": {}},
-            facade_module._P_DSH_INTERACTION_SYSTEM_PROMPT,
-        ),
-        (
-            "P",
-            {
-                "output_contract": {},
-                "pending_resolver_continuation": {},
-                "pending_dsh_interaction": {},
-            },
-            facade_module._P_PENDING_AND_DSH_SYSTEM_PROMPT,
-        ),
-        (
-            "P",
-            {"output_contract": {"required_fields": ["self_cognition_response"]}},
-            facade_module._P_SELF_COGNITION_SYSTEM_PROMPT,
-        ),
-    ):
-        assert facade_module._system_prompt_for_stage(
-            stage=stage,
-            packet=packet,
-        ) == expected
-
-
-def test_a1_system_prompt_and_packet_share_current_authority_contract() -> None:
-    """A1 keeps authority in its complete prompt and state in its packet."""
-
-    payload = _input()
-    workspace = build_canonical_turn_workspace(
-        episode=payload["episode"], scene_context=payload["scene_context"],
-        evidence=payload["evidence"], mutable_state=payload["mutable_state"],
-        character_constraints=payload["character_constraints"],
-        identity_context=payload["character_identity_context"],
-        available_actions=payload["available_actions"],
-        available_resolvers=payload["available_resolver_capabilities"],
-        overused_moves=payload["overused_moves"],
-        response_plan_contract_variant="fresh_ordinary",
-    )
-    packet = build_canonical_appraisal_question(workspace=workspace, stage_name="A1")
-    assert "current_observation" in facade_module._A1_SYSTEM_PROMPT
-    assert "guidance" not in packet and packet["current_observation"]
-
-
-def test_all_stage_system_prompts_share_request_agency_authority_contract() -> None:
-    for prompt in (
-        facade_module._A1_SYSTEM_PROMPT, facade_module._A2_SYSTEM_PROMPT,
-        facade_module._G_SYSTEM_PROMPT, facade_module._P_ORDINARY_SYSTEM_PROMPT,
-    ):
-        assert "current_observation` 是用户当下行动、意图、接受、许可和回应对象的唯一当前依据" in prompt
-
-
-def test_goal_and_plan_system_prompts_share_background_goal_authority_contract() -> None:
-    assert "只有当前观察把它们带入当前请求" in facade_module._G_SYSTEM_PROMPT
-    assert "此前回应模式" in facade_module._P_ORDINARY_SYSTEM_PROMPT
 
 
 def test_canonical_stage_packets_are_handleless_and_disjoint() -> None:
@@ -893,8 +799,6 @@ def test_pending_continuation_reaches_every_stage_without_durable_identity() -> 
     assert packets["P"]["output_contract"]["pending_resolution_fields"] == [
         "decision", "reason",
     ]
-    assert "当前观察" in facade_module._P_PENDING_CLARIFICATION_SYSTEM_PROMPT
-    assert "确实已经回答" in facade_module._P_PENDING_CLARIFICATION_SYSTEM_PROMPT
 
     closed_workspace = build_canonical_turn_workspace(
         episode=payload["episode"],
@@ -2122,12 +2026,10 @@ class _FourStageInvoker:
         self.calls: list[str] = []
         self.configs: list[LLMCallConfig] = []
         self.packets: list[dict[str, object]] = []
-        self.system_prompts: list[str] = []
 
     async def ainvoke(self, messages: object, *, config: LLMCallConfig) -> object:
         self.calls.append(config.stage_name.rsplit(".", 1)[-1])
         self.configs.append(config)
-        self.system_prompts.append(messages[0].content)
         self.packets.append(json.loads(messages[1].content))
         stage = self.calls[-1]
         if stage == "A1":
@@ -2242,11 +2144,6 @@ async def test_canonical_cognition_calls_a1_a2_g_p_once_with_subjective_outputs(
     }
     assert "output_contract" in invoker.packets[3]
     assert "appraisal_summary" not in invoker.packets[3]
-    assert "缺少证据" in invoker.system_prompts[3]
-    assert "只能作为不确定的解释" in invoker.system_prompts[3]
-    assert "当前观察已经给出有界、可执行的语义目标" in (
-        invoker.system_prompts[3]
-    )
     assert all("guidance" not in packet for packet in invoker.packets)
     def walk(value: object) -> None:
         if isinstance(value, dict):

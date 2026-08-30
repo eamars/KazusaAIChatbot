@@ -132,7 +132,7 @@ async def test_worker_checkpoints_waits_and_terminalizes_current_generation_thro
 
 
 @pytest.mark.asyncio
-async def test_internal_dsh_interaction_never_requeues_for_user_wait(
+async def test_cooperative_checkpoint_requeues_as_continuation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A cooperative checkpoint is requeued only as queued continuation."""

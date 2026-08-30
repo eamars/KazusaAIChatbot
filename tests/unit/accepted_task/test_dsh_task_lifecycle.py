@@ -115,8 +115,8 @@ def test_future_speak_active_identity_retains_semantic_objective() -> None:
     )
 
 
-def test_dsh_task_states_have_no_user_interaction_wait() -> None:
-    """The accepted-task state contract contains no user-interaction pause."""
+def test_dsh_task_states_match_current_lifecycle() -> None:
+    """The accepted-task state contract matches the current lifecycle."""
 
     models = _module("kazusa_ai_chatbot.accepted_task.models")
     assert set(get_args(models.AcceptedTaskState)) == {

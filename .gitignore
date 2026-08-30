@@ -82,6 +82,7 @@ logs/
 # Database
 *.db
 *.sqlite3
+.dsh-debug/
 
 # Jupyter Notebook
 .ipynb_checkpoints

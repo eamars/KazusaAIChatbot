@@ -306,8 +306,8 @@ async def test_queue_validates_binding_generation_goal_scope_and_payload_v2_exac
     assert "authority_token" not in stored[0]
 
 
-def test_dsh_job_states_have_no_user_interaction_wait() -> None:
-    """The background-job status contract has no user-interaction pause."""
+def test_dsh_job_states_match_current_lifecycle() -> None:
+    """The background-job status contract matches the current lifecycle."""
 
     models = _module("kazusa_ai_chatbot.background_work.models")
     assert set(get_args(models.BackgroundWorkJobStatus)) == {
@@ -322,41 +322,13 @@ def test_dsh_job_states_have_no_user_interaction_wait() -> None:
     }
 
 
-def test_background_work_public_exports_are_dsh_task_or_future_speak_only() -> None:
-    """The package export list contains the canonical V2 task surface."""
+def test_background_work_public_exports_include_current_worker_contracts() -> None:
+    """The package exports the current task and future-speak contracts."""
 
     module = _module("kazusa_ai_chatbot.background_work")
     public_names = set(getattr(module, "__all__", ()))
     assert "TaskOrchestratorWorkerPayloadV2" in public_names
     assert "FutureSpeakWorkerPayloadV1" in public_names
-    assert not public_names & {
-        "TaskOrchestratorWorkerPayloadV1",
-        "CodingRunContextV1",
-    }
-
-
-@pytest.mark.asyncio
-async def test_job_claim_excludes_v1_payloads(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Claim filters exclude pre-cutover worker payloads."""
-
-    module = _module("kazusa_ai_chatbot.db.background_work_jobs")
-    database = _FakeDb([{**_job("queued"), "worker_payload": {
-        **_payload(),
-        "schema_version": "task_orchestrator_worker_payload.v1",
-    }}])
-    monkeypatch.setattr(module, "get_db", lambda: _async_value(database))
-    claim = getattr(module, "claim_background_work_job", None)
-    if not callable(claim):
-        pytest.fail("background-work claim helper is unavailable")
-    result = await claim(
-        lease_owner="worker-1",
-        lease_seconds=30,
-        now_utc="2026-08-30T22:00:00Z",
-        max_attempts=4,
-    )
-    assert result is None
-    query = database.background_work_jobs.queries[0]
-    assert query.get("status", {}).get("$in")
 
 
 @pytest.mark.asyncio

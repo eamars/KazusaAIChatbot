@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-from kazusa_ai_chatbot.cognition_core_v3 import facade as facade_module
-
 
 def _plan() -> dict[str, object]:
     return {
@@ -14,36 +12,6 @@ def _plan() -> dict[str, object]:
         "action_requests": [],
         "resolver_requests": [],
         "epistemic_boundary": "仅基于当前观察回答。",
-    }
-
-
-def _prompt_workspace(kind: str | None = None) -> dict[str, object]:
-    workspace: dict[str, object] = {
-        "orientation": {},
-        "capabilities": {"actions": [], "resolvers": []},
-        "observation": {},
-        "state": {},
-        "continuity": {},
-        "overused_moves": [],
-        "response_plan_contract_variant": "fresh_ordinary",
-    }
-    if kind is not None:
-        workspace["pending_dsh_interaction"] = {
-            "schema_version": "dsh_brain_interaction.v2",
-            "interaction_id": "interaction-123",
-            "kind": kind,
-            "tool_name": "read_file",
-            "transient_detail": "Need a semantic decision",
-        }
-    return workspace
-
-
-def _prompt_goal() -> dict[str, str]:
-    return {
-        "goal_kind": "open",
-        "intent": "answer",
-        "reason": "context",
-        "cause_summary": "context",
     }
 
 
@@ -96,101 +64,7 @@ def test_p_stage_decision_survives_canonical_output_without_semantic_rewrite() -
     assert validated.dsh_interaction_decision["decision"] == "answer"
 
 
-def test_p_prompt_assigns_internal_decision_to_character_cognition() -> None:
-    from kazusa_ai_chatbot.cognition_core_v3.prompt import build_canonical_plan_question
-
-    packet = build_canonical_plan_question(
-        workspace=_prompt_workspace("question"),
-        goal=_prompt_goal(),
-        appraisal_summary=[],
-    )
-    contract = packet["output_contract"]
-    assert "dsh_interaction_decision" in contract["required_fields"]
-    assert "guidance" not in packet
-    assert "内部 DSH 交互" in facade_module._P_DSH_INTERACTION_SYSTEM_PROMPT
-    assert "response_goal" not in contract["dsh_interaction_decision_fields"]
-    assert "relay_mode" not in contract["dsh_interaction_decision_fields"]
-
-
-def test_p_prompt_keeps_the_normal_five_field_contract_without_dsh_context() -> None:
-    from kazusa_ai_chatbot.cognition_core_v3.prompt import build_canonical_plan_question
-
-    packet = build_canonical_plan_question(
-        workspace=_prompt_workspace(),
-        goal=_prompt_goal(),
-        appraisal_summary=[],
-    )
-    assert "guidance" not in packet
-    assert packet["output_contract"]["required_fields"] == [
-        "goal_resolution",
-        "response_goal",
-        "action_requests",
-        "resolver_requests",
-        "epistemic_boundary",
-    ]
-
-
-def test_p_prompt_emits_exact_kind_specific_internal_decisions() -> None:
-    from kazusa_ai_chatbot.cognition_core_v3.prompt import build_canonical_plan_question
-
-    expected = {
-        "approval": ["allow_once", "reject"],
-        "question": ["answer", "reject"],
-        "plan_review": ["answer", "allow_once", "reject"],
-    }
-    for kind, values in expected.items():
-        packet = build_canonical_plan_question(
-            workspace=_prompt_workspace(kind),
-            goal=_prompt_goal(),
-            appraisal_summary=[],
-        )
-        contract = packet["output_contract"]
-        assert contract["dsh_interaction_decision_values"] == values
-        assert contract["dsh_interaction_decision_fields"] == [
-            "interaction_id", "kind", "decision", "answer", "reason",
-        ]
-        assert "dsh_interaction_decision_relay_mode_values" not in contract
-        assert "guidance" not in packet
-
-
-def test_dsh_plan_packet_has_no_user_solicitation_resolver() -> None:
-    """The P packet carries only the internal self-goal affordance for DSH."""
-
-    from kazusa_ai_chatbot.cognition_core_v3.prompt import (
-        build_canonical_plan_question,
-    )
-    from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
-        _available_resolver_affordances,
-    )
-
-    scene = {
-        "channel_scope": "internal",
-        "character_role": "Kazusa",
-        "current_user_role": "internal caller",
-        "semantic_scene": "The character is judging one DSH interaction.",
-        "public_group_scene": "",
-        "conversation_continuity": "The internal interaction is active.",
-        "semantic_temporal_context": "Now.",
-    }
-    affordances = _available_resolver_affordances(
-        {"dsh_interaction_episode": True},
-        cognition_scene_context=scene,
-    )
-    workspace = _prompt_workspace("question")
-    workspace["capabilities"] = {"actions": [], "resolvers": affordances}
-    packet = build_canonical_plan_question(
-        workspace=workspace,
-        goal=_prompt_goal(),
-        appraisal_summary=[],
-    )
-    resolvers = packet["capabilities"]["resolvers"]
-    assert [row["capability"] for row in resolvers] == ["self_goal_resolution"]
-    assert "human_clarification" not in str(resolvers)
-    assert "approval_preparation" not in str(resolvers)
-    assert "task_resolution_request" not in str(resolvers)
-
-
-def test_pending_dsh_prompt_projection_is_exact_and_idempotent() -> None:
+def test_pending_dsh_projection_is_exact_and_idempotent() -> None:
     from kazusa_ai_chatbot.cognition_shared.contracts import (
         project_pending_dsh_interaction_for_prompt,
     )

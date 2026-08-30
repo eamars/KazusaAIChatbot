@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 from copy import deepcopy
 from typing import Any
 
@@ -107,19 +106,6 @@ def _module() -> Any:
     except ModuleNotFoundError as exc:
         pytest.fail(f"accepted-task DB owner is unavailable: {exc}")
     return accepted_tasks
-
-
-@pytest.mark.asyncio
-async def test_dsh_task_updates_have_no_interaction_wait_state() -> None:
-    """Accepted-task persistence exposes no user-interaction wait writer."""
-
-    module = _module()
-    source = inspect.getsource(module)
-    assert "waiting_for_" + "interaction" not in source
-    assert not hasattr(
-        module,
-        "mark_accepted_task_waiting_for_" + "interaction",
-    )
 
 
 @pytest.mark.asyncio

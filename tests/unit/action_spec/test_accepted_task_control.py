@@ -135,8 +135,8 @@ async def test_control_claims_advertised_followup_or_cancels_without_interpretin
     lifecycle.assert_awaited_once()
 
 
-def test_action_result_projects_task_context_without_coding_context() -> None:
-    """Result materialization keeps prompt-safe task context only."""
+def test_action_result_projects_typed_task_context() -> None:
+    """Result materialization keeps the prompt-safe typed task context."""
 
     results = _module("kazusa_ai_chatbot.action_spec.results")
     project = getattr(results, "project_task_action_result", None)
@@ -149,7 +149,6 @@ def test_action_result_projects_task_context_without_coding_context() -> None:
         result_summary="The control was accepted.",
     )
     assert "task_resolution_context" in projected
-    assert "coding_run_context" not in projected
     assert projected["task_resolution_context"]["accepted_task_ref"] == (
         "accepted_task:task-1"
     )

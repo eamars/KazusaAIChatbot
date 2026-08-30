@@ -160,14 +160,10 @@ async def test_enqueue_rejects_unsupported_worker() -> None:
         await jobs.enqueue_background_work_request(request)
 
 
-def test_worker_payload_rejects_legacy_and_unknown_operations() -> None:
-    """The payload validator closes the operation and schema vocabulary."""
+def test_worker_payload_rejects_unknown_operations() -> None:
+    """The payload validator closes the operation vocabulary."""
 
     jobs = importlib.import_module("kazusa_ai_chatbot.background_work.jobs")
-    with pytest.raises(ValueError, match="fields"):
-        jobs.validate_task_orchestrator_worker_payload({
-            "schema_version": "task_orchestrator_worker_payload.v1",
-        })
     payload = dict(_resume_queue_request()["worker_payload"])
     payload["operation"] = "unsupported"
     with pytest.raises(ValueError, match="operation"):

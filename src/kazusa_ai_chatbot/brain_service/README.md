@@ -1,4 +1,4 @@
-# Brain Service Interface Control Document — Plan 3 DSH
+# Brain Service Interface Control Document
 
 The canonical operator observation carrier is
 cognition_run_observation.v1. The Brain service publishes this bounded

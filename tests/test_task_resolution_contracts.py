@@ -1,10 +1,9 @@
-"""Executable tests for the closed Plan 3 task-resolution boundary."""
+"""Executable tests for the closed DSH task-resolution boundary."""
 
 from __future__ import annotations
 
 import importlib
 import inspect
-from importlib.util import find_spec
 
 import pytest
 
@@ -79,7 +78,7 @@ def _resolution_ref() -> dict[str, object]:
     }
 
 
-def test_task_resolution_public_boundary_uses_closed_plan3_names() -> None:
+def test_task_resolution_public_boundary_exposes_current_contracts() -> None:
     """The package exposes only the canonical V2 context and DSH carriers."""
 
     module = importlib.import_module("kazusa_ai_chatbot.task_resolution")
@@ -99,15 +98,6 @@ def test_task_resolution_public_boundary_uses_closed_plan3_names() -> None:
     ):
         assert hasattr(module, name), name
 
-    for retired_name in (
-        "TaskResolutionCheckpointV1",
-        "TaskResolutionExecutionContextV1",
-        "TaskSpecialistRequestV1",
-        "TaskSpecialistResultV1",
-        "validate_task_specialist_request",
-        "validate_task_specialist_result",
-    ):
-        assert not hasattr(module, retired_name), retired_name
 
 
 def test_task_resolution_entrypoints_accept_typed_runtime_injection() -> None:
@@ -134,12 +124,6 @@ def test_task_resolution_entrypoints_accept_typed_runtime_injection() -> None:
     )
     assert inline.parameters["runtime"].kind is inspect.Parameter.KEYWORD_ONLY
     assert resume.parameters["runtime"].kind is inspect.Parameter.KEYWORD_ONLY
-
-
-def test_removed_background_provider_module_is_absent() -> None:
-    """The deleted provider dispatcher has no importable compatibility path."""
-
-    assert find_spec("kazusa_ai_chatbot.background_work.providers") is None
 
 
 def test_execution_context_and_resolution_ref_validate_as_exact_carriers() -> None:

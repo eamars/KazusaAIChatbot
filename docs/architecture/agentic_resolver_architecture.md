@@ -1,6 +1,6 @@
-# Agentic Resolver Architecture — Plan 3 DSH
+# Agentic Resolver Architecture
 
-Status: current implementation contract for the Plan 3 cutover.
+Status: current implementation contract.
 
 ## System boundary
 
@@ -51,8 +51,8 @@ state rather than invoked twice.
 
 ## Catalog and segment epochs
 
-The model-visible semantic catalog contains exactly fourteen rows. Plan 2
-rows 1 through 13 are preserved byte-identically:
+The model-visible semantic catalog contains exactly fourteen rows in canonical
+order:
 
 1. kazusa_search_conversation_history
 2. kazusa_read_conversation_entries
@@ -68,7 +68,7 @@ rows 1 through 13 are preserved byte-identically:
 12. kazusa_read_calendar_context
 13. kazusa_inspect_attached_media
 
-Plan 3 adds only kazusa_inspect_public_media. It accepts one HTTP(S) image
+The fourteenth row, kazusa_inspect_public_media, accepts one HTTP(S) image
 URL and a question. URL credentials/fragments are rejected; DNS results in
 private, loopback, link-local, multicast, reserved, and unspecified ranges
 are rejected; redirects are rechecked with a maximum of 3. The timeout is
@@ -76,10 +76,10 @@ are rejected; redirects are rechecked with a maximum of 3. The timeout is
 PNG, JPEG, GIF, or WebP, Pillow must decode, and dimensions must be 1..8192.
 Evidence source is dsh_public_media; raw bytes and base64 are excluded.
 
-The additive row changes the semantic catalog digest. Terminal or
+Any catalog schema change produces a new semantic catalog digest. Terminal or
 checkpointed V2 threads with no open interaction rotate to a fresh segment
-and receive the new digest. Old authority and grants fail closed. Open
-pre-cutover interactions and grants drain before the Brain/sidecar switch.
+and receive the current digest. Authority and grants bound to an earlier
+digest fail closed.
 
 ## Readiness and accepted-task controls
 
@@ -103,10 +103,8 @@ reflection, and future_speak remain outside the live task session.
 The read-only drain command is:
 
 ~~~powershell
-venv\Scripts\python scripts/check_dsh_plan3_drain.py --legacy-coding-workspace-root <abs-root> --format json
+venv\Scripts\python scripts/check_dsh_legacy_drain.py --legacy-coding-workspace-root <abs-root> --format json
 ~~~
 
-It reports five governed categories and performs no writes. The old
-background/coding model-route families, workspace, preflight, and repair
-settings are removed configuration; the active Plan 3 contract is the exact
-field inventory.
+It reports five governed categories and performs no writes. Runtime
+configuration is governed by the exact current field inventory.

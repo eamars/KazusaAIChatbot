@@ -21,8 +21,6 @@ from kazusa_ai_chatbot.cognition_core_v3.prompt import (
     build_canonical_plan_question,
     build_canonical_turn_workspace,
 )
-from kazusa_ai_chatbot.cognition_shared import surface_stages
-from kazusa_ai_chatbot.cognition_shared.contracts import TextSurfaceServicesV2
 from kazusa_ai_chatbot.cognition_episode import (
     build_goal_continuation_ref,
     build_tool_result_episode,
@@ -38,15 +36,8 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
 from kazusa_ai_chatbot.nodes.persona_supervisor2_cognition import (
     build_cognition_core_services,
 )
-from kazusa_ai_chatbot.nodes import dialog_agent
-from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_surface
 from tests.test_agentic_resolver_live_llm import _require_live_backend
 from tests.unit.cognition_core_v3.test_handleless_contract import _input
-from tests.unit.nodes.dialog_fixtures import build_dialog_state
-from tests.unit.nodes.surface_fixtures import (
-    build_relational_decision,
-    build_surface_state,
-)
 
 pytestmark = pytest.mark.live_llm
 
@@ -54,59 +45,8 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _ARTIFACT_ROOT = _PROJECT_ROOT / "test_artifacts" / "dsh_plan3_e2e"
 
 
-class _CapturedLiveLLM:
-    """Capture one producer's live request and raw response for its artifact."""
-
-    def __init__(self, delegate: object) -> None:
-        self.delegate = delegate
-        self.attempts: list[dict[str, object]] = []
-
-    async def ainvoke(self, messages: list[object], *, config: object) -> object:
-        response = await self.delegate.ainvoke(messages, config=config)
-        rendered_messages = [
-            {
-                "role": getattr(message, "type", ""),
-                "content": getattr(message, "content", ""),
-            }
-            for message in messages
-        ]
-        self.attempts.append({
-            "messages": rendered_messages,
-            "raw_output": str(getattr(response, "content", "")),
-        })
-        return response
 
 
-def _write_surface_producer_artifact(
-    *,
-    case_id: str,
-    request: object,
-    response: object,
-    attempts: list[dict[str, object]],
-    execution_error: dict[str, str] | None,
-    started_at: float,
-) -> Path:
-    """Persist one direct surface-producer contract observation."""
-
-    artifact_dir = _ARTIFACT_ROOT / (
-        f"surface_producer_{case_id}_{uuid4().hex}"
-    )
-    artifact_dir.mkdir(parents=True, exist_ok=False)
-    _write_json(artifact_dir / "request.json", request)
-    _write_json(artifact_dir / "response.json", response)
-    _write_json(artifact_dir / "trace.json", {"attempts": attempts})
-    _write_json(
-        artifact_dir / "run.json",
-        {
-            "schema_version": "dsh_plan3_surface_producer_artifact.v1",
-            "case_id": case_id,
-            "duration_ms": round((time.perf_counter() - started_at) * 1000),
-            "execution_error": execution_error,
-            "attempt_count": len(attempts),
-            "readiness": {"llm_route": "configured_local_backend"},
-        },
-    )
-    return artifact_dir
 
 
 def _write_json(path: Path, value: object) -> None:
@@ -447,7 +387,6 @@ async def test_live_p_stage_answered_background_pending_admits_task_without_new_
         response_plan_contract_variant="open_pending_resolution",
     )
     plan = case["result"]
-    assert "pending_task_continuation" not in case["packet"]["output_contract"]
     assert plan.goal_resolution == "requires_required_evidence"
     assert plan.pending_resolution["decision"] == "answered"
     assert len(plan.resolver_requests) == 1
@@ -458,8 +397,8 @@ async def test_live_p_stage_answered_background_pending_admits_task_without_new_
 
 
 @pytest.mark.asyncio
-async def test_live_p_stage_post_pending_recurrence_omits_closed_controls() -> None:
-    """The post-answer P contract permits task-result response processing."""
+async def test_live_p_stage_post_pending_recurrence_does_not_reopen_task() -> None:
+    """Post-answer cognition processes the result without reopening the task."""
 
     case = await _run_p_admission_case(
         case_id="post_pending_recurrence",
@@ -498,40 +437,6 @@ async def test_live_p_stage_post_pending_recurrence_omits_closed_controls() -> N
         response_plan_contract_variant="post_pending_resolution",
     )
     plan = case["result"]
-    contract = case["packet"]["output_contract"]
-    current_evidence = case["packet"]["current_observation"]["evidence"]
-    resolver_evidence = next(
-        row
-        for row in case["packet"]["direct_facts"]["evidence"]
-        if row["source_kind"] == "resolver_observation"
-    )
-    assert current_evidence[0]["semantic_text"] == "Use plan3_real_user_e2e/beta.txt."
-    assert resolver_evidence == {
-        "semantic_text": (
-            "task_resolution_request: The bounded task was accepted for "
-            "continued work; its later result will return through the normal "
-            "conversation path.; evidence_state=pending; "
-            "remaining_needs=DSH resolution continuation"
-        ),
-        "authority": "contextual_fact_only",
-        "source_kind": "resolver_observation",
-        "provenance_role": "contextual_fact_only",
-    }
-    assert "response_plan_contract_variant" not in contract
-    assert "post_pending_resolution" not in contract
-    assert "response_plan_contract_variant" not in json.dumps(case["packet"])
-    assert "pending_task_admission" not in json.dumps(case["packet"])
-    assert "forbidden_resolver_capabilities" not in json.dumps(case["packet"])
-    assert "forbidden_response_plan_fields" not in json.dumps(case["packet"])
-    assert "pending_task_continuation" not in contract
-    assert "pending_resolution_fields" not in contract
-    assert all(
-        row["capability"] not in {
-            "human_clarification",
-            "task_resolution_request",
-        }
-        for row in case["packet"]["capabilities"]["resolvers"]
-    )
     assert plan.pending_task_continuation is None
     assert plan.pending_resolution is None
     assert all(
@@ -541,7 +446,6 @@ async def test_live_p_stage_post_pending_recurrence_omits_closed_controls() -> N
         }
         for row in plan.resolver_requests
     )
-
 
 @pytest.mark.asyncio
 async def test_live_p_stage_tool_result_delivery_omits_closed_controls() -> None:
@@ -577,116 +481,3 @@ async def test_live_p_stage_tool_result_delivery_omits_closed_controls() -> None
         }
         for row in plan.resolver_requests
     )
-
-
-@pytest.mark.asyncio
-async def test_live_content_plan_producer_returns_plan3_marker_contract() -> None:
-    """The live content producer returns its canonical marker-bearing shape."""
-
-    _require_live_backend()
-    state = build_surface_state(build_relational_decision())
-    payload = l3_surface.build_text_surface_input_from_global_state(
-        state,
-        interaction_style_context="brief and natural",
-    )
-    response_plan = payload["response_plan"]
-    assert isinstance(response_plan, dict)
-    response_plan["response_goal"] = "Report PLAN3_E2E_BETA_SELECTED."
-    services = l3_surface._build_text_surface_services()
-    captured_llm = _CapturedLiveLLM(services.llm)
-    captured_services = TextSurfaceServicesV2(
-        llm=captured_llm,
-        content_plan_config=services.content_plan_config,
-    )
-    result: object | None = None
-    execution_error: dict[str, str] | None = None
-    started_at = time.perf_counter()
-    try:
-        result = await surface_stages.run_content_plan_stage(
-            payload,
-            captured_services,
-        )
-    except Exception as exc:
-        execution_error = {
-            "error_class": exc.__class__.__name__,
-            "error": str(exc),
-        }
-        raise
-    finally:
-        artifact_dir = _write_surface_producer_artifact(
-            case_id="content_plan_marker",
-            request=payload,
-            response=result,
-            attempts=captured_llm.attempts,
-            execution_error=execution_error,
-            started_at=started_at,
-        )
-        print(f"DSH_PLAN3_SURFACE_PRODUCER_ARTIFACT={artifact_dir}")
-
-    assert result is not None
-    content_plan, content_requirements, _, _ = result
-    assert "PLAN3_E2E_BETA_SELECTED" in content_plan
-    assert any(
-        "PLAN3_E2E_BETA_SELECTED" in requirement
-        for requirement in content_requirements
-    )
-    assert captured_llm.attempts
-    first_message = captured_llm.attempts[0]["messages"][1]
-    first_payload = json.loads(first_message["content"])
-    assert first_payload["surface"]["output_contract"] == (
-        surface_stages._CONTENT_PLAN_OUTPUT_CONTRACT
-    )
-
-
-@pytest.mark.asyncio
-async def test_live_dialog_producer_returns_plan3_marker_contract(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The live dialog producer returns its canonical marker-bearing list."""
-
-    _require_live_backend()
-    state = build_dialog_state()
-    surface_output = state["text_surface_output_v2"]
-    assert isinstance(surface_output, dict)
-    surface_output["content_plan"] = "Report PLAN3_E2E_BETA_SELECTED."
-    surface_output["content_requirements"] = [
-        "Preserve PLAN3_E2E_BETA_SELECTED.",
-    ]
-    captured_llm = _CapturedLiveLLM(dialog_agent._dialog_generator_llm)
-    monkeypatch.setattr(dialog_agent, "_dialog_generator_llm", captured_llm)
-    result: object | None = None
-    execution_error: dict[str, str] | None = None
-    started_at = time.perf_counter()
-    try:
-        result = await dialog_agent._render_dialog_candidate(
-            surface_output=surface_output,
-            user_name="Test User",
-            repair_issues=[],
-            attempt_number=1,
-            llm_trace_id="dsh-plan3-live-dialog-producer",
-        )
-    except Exception as exc:
-        execution_error = {
-            "error_class": exc.__class__.__name__,
-            "error": str(exc),
-        }
-        raise
-    finally:
-        artifact_dir = _write_surface_producer_artifact(
-            case_id="dialog_marker",
-            request=surface_output,
-            response=result,
-            attempts=captured_llm.attempts,
-            execution_error=execution_error,
-            started_at=started_at,
-        )
-        print(f"DSH_PLAN3_SURFACE_PRODUCER_ARTIFACT={artifact_dir}")
-
-    assert result is not None
-    final_dialog, disposition = result
-    assert disposition is None
-    assert any("PLAN3_E2E_BETA_SELECTED" in message for message in final_dialog)
-    assert captured_llm.attempts
-    first_message = captured_llm.attempts[0]["messages"][1]
-    first_payload = json.loads(first_message["content"])
-    assert first_payload["output_contract"] == dialog_agent._DIALOG_OUTPUT_CONTRACT

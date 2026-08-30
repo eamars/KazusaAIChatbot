@@ -6,7 +6,7 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_v2_audit_and_one_shot_grant_are_idempotent_without_reply_lookup() -> None:
+async def test_v2_audit_and_one_shot_grant_are_idempotent() -> None:
     from kazusa_ai_chatbot.db.dsh_interactions import (
         DSH_INTERACTION_SCHEMA_VERSION,
         INTERACTION_INDEXES,
@@ -14,11 +14,6 @@ async def test_v2_audit_and_one_shot_grant_are_idempotent_without_reply_lookup()
     )
 
     assert DSH_INTERACTION_SCHEMA_VERSION == "dsh_brain_interaction.v2"
-    assert len(INTERACTION_INDEXES) == 3
-    assert all(
-        index["name"] != "dsh_interaction_reply_lookup"
-        for index in INTERACTION_INDEXES
-    )
     grant_index = next(
         index
         for index in INTERACTION_INDEXES

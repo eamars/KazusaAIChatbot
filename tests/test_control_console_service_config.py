@@ -21,15 +21,6 @@ def _brain_service_environment() -> dict[str, str]:
     return environment
 
 
-def test_obsolete_background_route_descriptor_is_absent() -> None:
-    """The console catalog keeps worker controls without the retired route."""
-
-    from control_console.brain_model_routes import route_descriptors
-
-    route_keys = {route.route_key for route in route_descriptors()}
-    assert "background_work" not in route_keys
-
-
 def test_snapshot_uses_environment_default_and_ephemeral_override() -> None:
     """A descriptor snapshot separates default, override, and effective values."""
 

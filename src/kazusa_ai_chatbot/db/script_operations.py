@@ -104,8 +104,8 @@ LOGGING_RETENTION_TARGETS = (
 )
 
 
-async def count_dsh_plan3_drain_rows(database: Any) -> dict[str, int]:
-    """Count legacy task, job, and open-interaction rows for Plan 3 drain."""
+async def count_dsh_legacy_drain_rows(database: Any) -> dict[str, int]:
+    """Count active legacy task, job, and open-interaction rows."""
 
     accepted_tasks = await database["accepted_tasks"].count_documents({
         "schema_version": "accepted_task.v2",

@@ -22,7 +22,7 @@ meaning remains owned by the selected response plan and current observation;
 rewriting an unselected relationship interpretation as a content requirement or
 delivery effect does not turn it into delivery-only context.
 
-## Plan 3 DSH task edge
+## DSH task edge
 
 The node graph emits task_resolution_request only from the validated cognition
 result. One shared DSH runtime handles foreground and direct-background work.

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import json
 from copy import deepcopy
 from dataclasses import replace
@@ -59,109 +58,6 @@ def _tool_result_surface_state(
         "goal_continuation_ref": continuation_ref,
     })
     return state, task_result
-
-
-def test_surface_prompts_are_complete_literals_with_owned_authority() -> None:
-    """Keep surface prompt authority local to each complete literal."""
-
-    source = inspect.getsource(surface_stages)
-    prompt = surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
-
-    assert "VISIBLE_CONTENT_AUTHORITY_GUIDANCE" not in source
-    assert "_CONTENT_PLAN_SYSTEM_PROMPT_TEMPLATE" not in source
-    assert "SURFACE_REPAIR_INSTRUCTION" not in source
-    assert ".format(" not in source
-    assert prompt.count("可见语义的选择权属于") == 1
-    assert "dialog 必须服从已选 content_plan" in prompt
-    assert "# 输出格式" not in prompt
-    assert "字段恰好是" not in prompt
-    assert "# 输出格式" not in surface_stages.VISUAL_SYSTEM_PROMPT
-    assert "visual_directives 只描述终端图像表面的可见角色特征" in (
-        surface_stages.VISUAL_SYSTEM_PROMPT
-    )
-
-
-def test_content_plan_keeps_goal_reason_outside_visible_semantic_authority() -> None:
-    """Interpretation fields cannot become an independent visible semantic source."""
-
-    prompt = surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
-    for field in (
-        "active_character_goal.reason",
-        "active_character_goal.cause_summary",
-        "intention.reason",
-        "relational_willingness",
-        "private_monologue",
-    ):
-        assert field in prompt
-    assert prompt.count("可见语义的选择权属于") == 1
-    assert "intention.reason 为语义锚点" not in (
-        surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
-    )
-
-
-def test_visible_content_authority_keeps_epistemic_examples_outside_content_selection() -> None:
-    """Epistemic interpretations remain bounded context, not content sources."""
-
-    prompt = surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
-    required_invariants = (
-        "epistemic_boundary",
-        "已选语义的断言强度",
-        "解释或未知的内容不是可见内容候选",
-        "不能独立进入 content_plan 或 dialog",
-    )
-
-    assert all(invariant in prompt for invariant in required_invariants)
-    assert prompt.count("可见语义的选择权属于") == 1
-
-
-def test_visible_content_authority_blocks_relationship_meaning_laundering_as_delivery() -> None:
-    """Delivery fields cannot smuggle unselected relationship semantics."""
-
-    prompt = surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
-    required_invariants = (
-        "未选中的关系解释",
-        "改写成感受、姿态、理由",
-        "content_requirements",
-        "delivery_profile",
-        "不能绕过",
-    )
-
-    assert all(invariant in prompt for invariant in required_invariants)
-    assert prompt.count("可见语义的选择权属于") == 1
-
-
-def test_surface_repair_packet_projects_runtime_diagnostics_only() -> None:
-    """Keep repair data separate from the unchanged complete prompt."""
-
-    prompt_text, fitted_payload = surface_stages._surface_prompt_packet(
-        {"observation": "current"},
-        stage_name="content_plan",
-        safe_checkpoint="pre_state_commit",
-        system_prompt_chars=len(surface_stages.CONTENT_PLAN_SYSTEM_PROMPT),
-    )
-    messages = surface_stages._surface_repair_messages(
-        payload=fitted_payload,
-        system_prompt=surface_stages.CONTENT_PLAN_SYSTEM_PROMPT,
-        invalid_candidate='{"unexpected": "field"}',
-        reason="contract_error",
-        contract_error="content-plan stage fields are not exact",
-        stage_name="content_plan",
-        safe_checkpoint="pre_state_commit",
-        attempt_count=1,
-    )
-    first_payload = json.loads(prompt_text)
-    payload = json.loads(messages[1].content)
-
-    assert messages[0].content == surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
-    assert payload["surface"] == first_payload["surface"]
-    assert "output_contract" not in payload["surface"]
-    assert set(payload["contract_repair"]) == {
-        "reason",
-        "contract_error",
-        "invalid_candidate",
-    }
-    assert payload["contract_repair"]["reason"] == "contract_error"
-    assert "repair_instruction" not in json.dumps(payload)
 
 
 def test_degraded_tool_result_surface_preserves_semantic_result() -> None:
@@ -727,43 +623,6 @@ async def test_text_surface_uses_one_content_call_and_deterministic_preference_p
     assert [row["trace_id"] for row in trace_rows] == ["surface-trace"]
     assert all(row["status"] == "succeeded" for row in trace_rows)
     assert all(row["parsed_output"] for row in trace_rows)
-    assert "content_requirements" in (
-        surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
-    )
-    assert "epistemic_boundary" in (
-        surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
-    )
-    assert "Preserve every caller-owned addressee_plan row exactly" not in (
-        surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
-    )
-    assert "direction and forms of address" not in (
-        surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
-    )
-    assert "动作舞台提示、拟声、感官反馈和结果反问" in (
-        surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
-    )
-    assert "没有 executed 行时" in surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
-    assert "空列表或没有 executed 行时" in (
-        surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
-    )
-    assert "action_kind=speak 只授权说出或发送文字" in (
-        surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
-    )
-    assert "同一类型、同一效果的 executed 行精确支持" in (
-        surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
-    )
-    assert "# 语义审计" in (
-        surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
-    )
-    assert "已表达的回应模式只属于背景连续性" in (
-        surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
-    )
-    assert "对未来外部效果的具体承诺也属于行动主张" in (
-        surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
-    )
-    assert "pending、scheduled 或 executed 行" in (
-        surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
-    )
     assert output["epistemic_boundary"] == (
         payload["subjective_expression_context"]["epistemic_boundary"]
     )
@@ -822,19 +681,6 @@ def test_text_surface_services_have_one_semantic_stage() -> None:
         "llm",
         "content_plan_config",
     }
-
-
-def test_text_surface_progression_contract_keeps_one_semantic_call() -> None:
-    """Progression context stays inside the existing one-call surface stage."""
-
-    assert set(TextSurfaceServicesV2.__dataclass_fields__) == {
-        "llm",
-        "content_plan_config",
-    }
-    assert "overused_moves" in surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
-    assert "已表达的回应模式只属于背景连续性" in (
-        surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
-    )
 
 
 @pytest.mark.asyncio

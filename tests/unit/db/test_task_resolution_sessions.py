@@ -175,8 +175,8 @@ def _binding() -> dict[str, Any]:
     }
 
 
-def test_binding_followup_schemas_are_closed_without_interaction_waiting() -> None:
-    """The durable task binding has no DSH user-interaction wait carrier."""
+def test_binding_followup_schemas_are_closed() -> None:
+    """The durable task binding exposes its exact current fields."""
 
     from kazusa_ai_chatbot.accepted_task import models as accepted_models
     from kazusa_ai_chatbot.background_work import models as background_models
@@ -204,9 +204,6 @@ def test_binding_followup_schemas_are_closed_without_interaction_waiting() -> No
         "created_at",
         "updated_at",
     }
-    assert "pending_dsh_interaction" not in get_type_hints(binding)
-    assert "waiting_for_" + "interaction" not in get_type_hints(binding)
-
     accepted_fields = set(get_type_hints(accepted_models.AcceptedTaskDoc))
     assert accepted_fields >= {
         "dsh_task_session_id",
@@ -496,14 +493,3 @@ async def test_bootstrap_creates_binding_and_dsh_followup_indexes(
         "dsh_task_binding_state_updated",
     }
     assert not any("ttl" in name.lower() for name in names)
-
-
-def test_dsh_interaction_store_has_no_user_wait_lookup() -> None:
-    """The V2 interaction store exposes audit/grant persistence only."""
-
-    try:
-        module = importlib.import_module("kazusa_ai_chatbot.db.dsh_interactions")
-    except ModuleNotFoundError as exc:
-        pytest.fail(f"DSH interaction owner is unavailable: {exc}")
-    assert not callable(getattr(module, "find_pending_interaction", None))
-    assert not callable(getattr(module, "find_pending_reply", None))

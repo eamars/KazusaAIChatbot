@@ -145,51 +145,19 @@
     "src/kazusa_ai_chatbot/action_spec/results.py",
     "src/kazusa_ai_chatbot/action_spec/__init__.py",
     "src/kazusa_ai_chatbot/media_inspection/contracts.py",
-    "src/kazusa_ai_chatbot/rag/__init__.py",
     "scripts/validate_test_impact.py"
   ],
-  "removed_sources": {
-    "scripts/run_rag2_e2e_case.py": ["tests/unit/task_resolution/test_decommission.py::test_legacy_task_complex_and_rag2_executor_sources_are_absent","tests/unit/task_resolution/test_decommission.py::test_runtime_import_graph_contains_no_legacy_executor_imports"],
-    "src/kazusa_ai_chatbot/complex_task_resolver/__init__.py": ["tests/unit/task_resolution/test_decommission.py::test_legacy_task_complex_and_rag2_executor_sources_are_absent","tests/unit/task_resolution/test_decommission.py::test_runtime_import_graph_contains_no_legacy_executor_imports"],
-    "src/kazusa_ai_chatbot/complex_task_resolver/algorithmic.py": ["tests/unit/task_resolution/test_decommission.py::test_legacy_task_complex_and_rag2_executor_sources_are_absent","tests/unit/task_resolution/test_decommission.py::test_runtime_import_graph_contains_no_legacy_executor_imports"],
-    "src/kazusa_ai_chatbot/complex_task_resolver/constants.py": ["tests/unit/task_resolution/test_decommission.py::test_legacy_task_complex_and_rag2_executor_sources_are_absent","tests/unit/task_resolution/test_decommission.py::test_runtime_import_graph_contains_no_legacy_executor_imports"],
-    "src/kazusa_ai_chatbot/complex_task_resolver/contracts.py": ["tests/unit/task_resolution/test_decommission.py::test_legacy_task_complex_and_rag2_executor_sources_are_absent","tests/unit/task_resolution/test_decommission.py::test_runtime_import_graph_contains_no_legacy_executor_imports"],
-    "src/kazusa_ai_chatbot/complex_task_resolver/graph.py": ["tests/unit/task_resolution/test_decommission.py::test_legacy_task_complex_and_rag2_executor_sources_are_absent","tests/unit/task_resolution/test_decommission.py::test_runtime_import_graph_contains_no_legacy_executor_imports"],
-    "src/kazusa_ai_chatbot/complex_task_resolver/service.py": ["tests/unit/task_resolution/test_decommission.py::test_legacy_task_complex_and_rag2_executor_sources_are_absent","tests/unit/task_resolution/test_decommission.py::test_runtime_import_graph_contains_no_legacy_executor_imports"],
-    "src/kazusa_ai_chatbot/complex_task_resolver/stages.py": ["tests/unit/task_resolution/test_decommission.py::test_legacy_task_complex_and_rag2_executor_sources_are_absent","tests/unit/task_resolution/test_decommission.py::test_runtime_import_graph_contains_no_legacy_executor_imports"],
-    "src/kazusa_ai_chatbot/complex_task_resolver/subagent/__init__.py": ["tests/unit/task_resolution/test_decommission.py::test_legacy_task_complex_and_rag2_executor_sources_are_absent","tests/unit/task_resolution/test_decommission.py::test_runtime_import_graph_contains_no_legacy_executor_imports"],
-    "src/kazusa_ai_chatbot/complex_task_resolver/subagent/algorithmic.py": ["tests/unit/task_resolution/test_decommission.py::test_legacy_task_complex_and_rag2_executor_sources_are_absent","tests/unit/task_resolution/test_decommission.py::test_runtime_import_graph_contains_no_legacy_executor_imports"],
-    "src/kazusa_ai_chatbot/complex_task_resolver/subagent/evidence.py": ["tests/unit/task_resolution/test_decommission.py::test_legacy_task_complex_and_rag2_executor_sources_are_absent","tests/unit/task_resolution/test_decommission.py::test_runtime_import_graph_contains_no_legacy_executor_imports"],
-    "src/kazusa_ai_chatbot/complex_task_resolver/subagent/media.py": ["tests/unit/task_resolution/test_decommission.py::test_legacy_task_complex_and_rag2_executor_sources_are_absent","tests/unit/task_resolution/test_decommission.py::test_runtime_import_graph_contains_no_legacy_executor_imports","tests/test_dsh_tool_gateway_media.py::test_public_media_inspection_preserves_bounded_safe_fetch_and_visual_result","tests/test_dsh_tool_gateway_media.py::test_public_media_rejects_private_redirect_oversize_or_invalid_image_before_inspection"],
-    "src/kazusa_ai_chatbot/complex_task_resolver/subagents.py": ["tests/unit/task_resolution/test_decommission.py::test_legacy_task_complex_and_rag2_executor_sources_are_absent","tests/unit/task_resolution/test_decommission.py::test_runtime_import_graph_contains_no_legacy_executor_imports"],
-    "src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_dispatch.py": ["tests/unit/task_resolution/test_decommission.py::test_legacy_task_complex_and_rag2_executor_sources_are_absent","tests/unit/task_resolution/test_decommission.py::test_runtime_import_graph_contains_no_legacy_executor_imports"],
-    "src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_evaluator.py": ["tests/unit/task_resolution/test_decommission.py::test_legacy_task_complex_and_rag2_executor_sources_are_absent","tests/unit/task_resolution/test_decommission.py::test_runtime_import_graph_contains_no_legacy_executor_imports"],
-    "src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_initializer.py": ["tests/unit/task_resolution/test_decommission.py::test_legacy_task_complex_and_rag2_executor_sources_are_absent","tests/unit/task_resolution/test_decommission.py::test_runtime_import_graph_contains_no_legacy_executor_imports"],
-    "src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_prompt_views.py": ["tests/unit/task_resolution/test_decommission.py::test_legacy_task_complex_and_rag2_executor_sources_are_absent","tests/unit/task_resolution/test_decommission.py::test_runtime_import_graph_contains_no_legacy_executor_imports"],
-    "src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_supervisor2.py": ["tests/unit/task_resolution/test_decommission.py::test_legacy_task_complex_and_rag2_executor_sources_are_absent","tests/unit/task_resolution/test_decommission.py::test_runtime_import_graph_contains_no_legacy_executor_imports"],
-    "src/kazusa_ai_chatbot/nodes/persona_supervisor2_rag_types.py": ["tests/unit/task_resolution/test_decommission.py::test_legacy_task_complex_and_rag2_executor_sources_are_absent","tests/unit/task_resolution/test_decommission.py::test_runtime_import_graph_contains_no_legacy_executor_imports"],
-    "src/kazusa_ai_chatbot/rag/quote_aware_sequence.py": ["tests/unit/task_resolution/test_decommission.py::test_legacy_task_complex_and_rag2_executor_sources_are_absent","tests/unit/task_resolution/test_decommission.py::test_runtime_import_graph_contains_no_legacy_executor_imports"],
-    "src/kazusa_ai_chatbot/task_resolution/orchestrator.py": ["tests/unit/task_resolution/test_decommission.py::test_legacy_task_complex_and_rag2_executor_sources_are_absent","tests/unit/task_resolution/test_decommission.py::test_runtime_import_graph_contains_no_legacy_executor_imports"],
-    "src/kazusa_ai_chatbot/task_resolution/specialists/__init__.py": ["tests/unit/task_resolution/test_decommission.py::test_legacy_task_complex_and_rag2_executor_sources_are_absent","tests/unit/task_resolution/test_decommission.py::test_runtime_import_graph_contains_no_legacy_executor_imports"],
-    "src/kazusa_ai_chatbot/task_resolution/specialists/local_context.py": ["tests/unit/task_resolution/test_decommission.py::test_legacy_task_complex_and_rag2_executor_sources_are_absent","tests/unit/task_resolution/test_decommission.py::test_runtime_import_graph_contains_no_legacy_executor_imports"],
-    "src/kazusa_ai_chatbot/task_resolution/specialists/public_research.py": ["tests/unit/task_resolution/test_decommission.py::test_legacy_task_complex_and_rag2_executor_sources_are_absent","tests/unit/task_resolution/test_decommission.py::test_runtime_import_graph_contains_no_legacy_executor_imports"],
-    "src/kazusa_ai_chatbot/task_resolution/specialists/text_computation.py": ["tests/unit/task_resolution/test_decommission.py::test_legacy_task_complex_and_rag2_executor_sources_are_absent","tests/unit/task_resolution/test_decommission.py::test_runtime_import_graph_contains_no_legacy_executor_imports"],
-    "src/kazusa_ai_chatbot/task_resolution/state.py": ["tests/unit/task_resolution/test_decommission.py::test_legacy_task_complex_and_rag2_executor_sources_are_absent","tests/unit/task_resolution/test_decommission.py::test_runtime_import_graph_contains_no_legacy_executor_imports"],
-    "src/kazusa_ai_chatbot/dsh_interaction/pending.py": ["tests/test_dsh_brain_interaction_contracts.py::test_v2_contract_has_no_relay_reply_or_pending_vocabulary","tests/test_dsh_plan3_task_resolution.py::test_dsh_interaction_relay_owners_are_deleted"],
-    "src/kazusa_ai_chatbot/dsh_interaction/resume.py": ["tests/test_dsh_brain_interaction_contracts.py::test_v2_contract_has_no_relay_reply_or_pending_vocabulary","tests/test_dsh_plan3_task_resolution.py::test_dsh_interaction_relay_owners_are_deleted"]
-  },
   "entries": [
     {
       "source": "src/kazusa_ai_chatbot/db/accepted_tasks.py",
       "owner": "Accepted-task DB owner",
-      "contract": "scoped active/open-follow-up query, one-open index, compare-and-set claim/recovery, waiting/cancel/result transitions, coding index removal",
+      "contract": "scoped active/open-follow-up query, one-open index, compare-and-set claim/recovery, and waiting/cancel/result transitions",
       "required_unit_tests": [
         "tests/test_accepted_task_lifecycle.py::test_future_speak_duplicate_authority_mismatch_fails_before_related_source_mutation",
         "tests/test_accepted_task_lifecycle.py::test_repository_duplicate_ref_mismatch_preserves_provenance",
         "tests/test_accepted_task_lifecycle.py::test_repository_rejects_v1_task_document",
-        "tests/unit/db/test_accepted_tasks.py::test_one_open_dsh_followup_is_scoped_indexed_and_excludes_legacy_coding_context",
-        "tests/unit/db/test_accepted_tasks.py::test_followup_claim_recovery_and_terminal_updates_are_revision_guarded",
-        "tests/unit/db/test_accepted_tasks.py::test_dsh_task_updates_have_no_interaction_wait_state"
+        "tests/unit/db/test_accepted_tasks.py::test_one_open_dsh_followup_is_scoped_and_indexed",
+        "tests/unit/db/test_accepted_tasks.py::test_followup_claim_recovery_and_terminal_updates_are_revision_guarded"
       ],
       "supplemental_tests": [
         "tests/test_accepted_task_lifecycle.py::test_terminal_transitions_require_running_and_delivery_claims"
@@ -320,8 +288,7 @@
       "owner": "control-console operator route owner",
       "contract": "semantic route slugs without private provider metadata",
       "required_unit_tests": [
-        "tests/test_control_console_web_surface.py::test_model_routes_use_semantic_slugs_without_private_route_metadata",
-        "tests/test_control_console_service_config.py::test_obsolete_task_route_descriptors_are_absent"
+        "tests/test_control_console_web_surface.py::test_model_routes_use_semantic_slugs_without_private_route_metadata"
       ],
       "supplemental_tests": []
     },
@@ -362,8 +329,7 @@
         "tests/test_event_logging_interface.py::test_continuity_boundary_recorder_is_keyword_only_and_exported"
       ],
       "supplemental_tests": [
-        "tests/test_event_logging_interface.py::test_public_module_does_not_export_generic_record_event",
-        "tests/test_event_logging_interface.py::test_continuity_boundary_event_documentation_matches_contract"
+        "tests/test_event_logging_interface.py::test_public_module_does_not_export_generic_record_event"
       ]
     },
     {
@@ -508,12 +474,7 @@
         "tests/test_conversation_progress_recorder.py::test_scene_prompt_defines_paraphrased_visible_move_repetition_without_future_planning",
         "tests/test_conversation_progress_recorder.py::test_recorder_prompts_keep_unanswered_character_proposal_out_of_user_owned_decision_state"
       ],
-      "supplemental_tests": [
-        "tests/test_semantic_response_progression_live_llm.py::test_live_recorder_recognizes_semantic_paraphrase_without_planning",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_recorder_positive_control_keeps_new_moves_empty",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_unanswered_character_proposal_stays_non_decision_continuity",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_explicit_user_response_can_reopen_character_proposal"
-      ]
+      "supplemental_tests": []
     },
     {
       "source": "src/kazusa_ai_chatbot/local_context_resolver/service.py",
@@ -549,27 +510,24 @@
     {
       "source": "src/kazusa_ai_chatbot/config.py",
       "owner": "Configuration owner",
-      "contract": "obsolete route removal and retained DSH/RAG/background mechanics",
+      "contract": "current DSH, RAG, cognition, and background runtime configuration",
       "required_unit_tests": [
         "tests/test_internal_monologue_residue_database.py::test_residue_retention_config_is_bounded_and_documented",
         "tests/test_config.py::test_cognition_core_engine_default_matches_cutover_state",
         "tests/test_config.py::test_cognition_v3_route_settings_are_loaded_once",
         "tests/test_config.py::test_v3_service_import_succeeds_with_shared_routes_and_without_legacy_stage_bundles",
         "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_text_surface_services_have_one_semantic_stage",
-        "tests/test_config.py::test_agentic_resolver_route_settings_are_strict_and_load_initial_qwen_route",
-        "tests/unit/test_config_dsh_cutover.py::test_legacy_background_and_coding_routes_are_absent_while_dsh_rag_and_worker_settings_remain"
+        "tests/test_config.py::test_agentic_resolver_route_settings_are_strict_and_load_initial_qwen_route"
       ],
       "supplemental_tests": [
-        "tests/test_config.py::test_v3_route_settings_reject_invalid_selected_bundle",
-        "tests/test_cognition_llm_producer_matrix.py::test_producer_matrix_matches_current_source_owners"
+        "tests/test_config.py::test_v3_route_settings_reject_invalid_selected_bundle"
       ]
     },
     {
       "source": "src/kazusa_ai_chatbot/llm_interface/contracts.py",
       "owner": "LLM invocation contract owner",
-      "contract": "ordinary invocation contracts without resolver-only native-tool stream DTOs",
+      "contract": "ordinary invocation contracts and bounded response metadata",
       "required_unit_tests": [
-        "tests/test_agentic_resolver_decommission.py::test_old_native_tool_stream_surface_is_absent",
         "tests/test_llm_interface_contracts.py::test_call_config_declares_context_window_without_transporting_it"
       ],
       "supplemental_tests": [
@@ -579,10 +537,10 @@
     {
       "source": "src/kazusa_ai_chatbot/llm_interface/route_report.py",
       "owner": "LLM route diagnostics",
-      "contract": "route-report decommission",
+      "contract": "configured route diagnostics and secret-free rendering",
       "required_unit_tests": [
-        "tests/test_llm_interface_route_report.py::test_route_report_includes_only_v3_cognition_routes_and_shared_generic_cognition_route",
-        "tests/unit/llm_interface/test_route_report.py::test_route_report_omits_decommissioned_routes_and_keeps_live_routes"
+        "tests/test_llm_interface_route_report.py::test_llm_route_inventory_uses_configured_models_and_sources",
+        "tests/test_llm_interface_route_report.py::test_llm_route_table_omits_api_keys"
       ],
       "supplemental_tests": []
     },
@@ -633,9 +591,7 @@
         "tests/test_conversation_progress_group_scene.py::test_group_scene_final_fit_keeps_protected_anchors_within_render_cap",
         "tests/test_conversation_progress_cognition_evidence.py::test_overused_move_projection_preserves_first_four_model_authored_rows_exactly"
       ],
-      "supplemental_tests": [
-        "tests/test_semantic_response_progression_live_llm.py::test_live_l2_private_memory_enabled_theme_release"
-      ]
+      "supplemental_tests": []
     },
     {
       "source": "src/kazusa_ai_chatbot/conversation_progress/runtime.py",
@@ -664,7 +620,7 @@
     {
       "source": "src/kazusa_ai_chatbot/db/_client.py",
       "owner": "MongoDB test-isolation guard owner",
-      "contract": "exact reserved ephemeral database guard for isolated Plan 3 live cases",
+      "contract": "reserved ephemeral database guard for isolated live-test cases",
       "required_unit_tests": [
         "tests/test_live_llm_mongo_isolation.py::test_guard_allows_exact_reserved_ephemeral_database",
         "tests/test_live_llm_mongo_isolation.py::test_guard_rejects_ephemeral_database_name_mismatch",
@@ -675,11 +631,10 @@
     {
       "source": "src/kazusa_ai_chatbot/db/bootstrap.py",
       "owner": "Database bootstrap",
-      "contract": "binding and DSH follow-up indexes plus exact obsolete coding-context index drop",
+      "contract": "current task-binding and DSH follow-up indexes",
       "required_unit_tests": [
         "tests/test_db.py::test_db_bootstrap_delegates_event_log_indexes",
-        "tests/unit/db/test_task_resolution_sessions.py::test_bootstrap_creates_binding_and_dsh_followup_indexes_and_drops_only_obsolete_coding_index",
-        "tests/test_stage3_fresh_database_bootstrap.py::test_v2_dsh_interaction_indexes_have_no_open_reply_lookup"
+        "tests/unit/db/test_task_resolution_sessions.py::test_bootstrap_creates_binding_and_dsh_followup_indexes"
       ],
       "supplemental_tests": []
     },
@@ -696,12 +651,10 @@
     {
       "source": "src/kazusa_ai_chatbot/db/script_operations.py",
       "owner": "Maintenance DB owner",
-      "contract": "read-only Plan 3 drain counts, including open pre-cutover DSH interactions/grants",
+      "contract": "guarded maintenance reads and compare-and-set migration operations",
       "required_unit_tests": [
         "tests/unit/db/test_script_operations.py::test_relationship_maintenance_migration_helpers_use_expected_digest",
-        "tests/unit/db/test_script_operations.py::test_relationship_maintenance_migration_helpers_report_drift",
-        "tests/unit/scripts/test_check_dsh_plan3_drain.py::test_drain_helpers_count_only_exact_legacy_active_undelivered_and_open_old_catalog_rows",
-        "tests/unit/scripts/test_check_dsh_plan3_drain.py::test_drain_owner_is_the_only_v1_payload_exception_and_uses_exact_filters"
+        "tests/unit/db/test_script_operations.py::test_relationship_maintenance_migration_helpers_report_drift"
       ],
       "supplemental_tests": [
         "tests/test_cognition_relationship_maintenance_migration.py::test_migration_uses_named_db_maintenance_boundary"
@@ -719,7 +672,8 @@
         "tests/test_cognition_relationship_maintenance_migration.py::test_migration_fails_closed_on_drifted_already_valid_row",
         "tests/test_cognition_relationship_maintenance_migration.py::test_migration_fails_closed_on_missing_already_valid_row",
         "tests/test_cognition_relationship_maintenance_migration.py::test_migration_uses_named_db_maintenance_boundary"
-      ]
+      ],
+      "supplemental_tests": []
     },
     {
       "source": "src/kazusa_ai_chatbot/db/internal_monologue_residue.py",
@@ -737,8 +691,7 @@
       "contract": "typed binding generation, accepted-task DSH lineage/follow-up, and job waiting/canceled schema",
       "required_unit_tests": [
         "tests/test_internal_monologue_residue_database.py::test_v2_residue_schema_requires_disposition_operation_and_retention",
-        "tests/test_internal_monologue_residue_loader.py::test_noncanonical_rows_are_excluded_from_the_residue_window",
-        "tests/unit/db/test_task_resolution_sessions.py::test_binding_followup_schemas_are_closed_without_interaction_waiting"
+        "tests/test_internal_monologue_residue_loader.py::test_noncanonical_rows_are_excluded_from_the_residue_window"
       ],
       "supplemental_tests": []
     },
@@ -821,8 +774,6 @@
         "tests/test_shared_memory_prewarm.py::test_napcat_character_mention_recalls_and_merges_corresponding_shared_memory[active_kazusa]",
         "tests/test_shared_memory_prewarm.py::test_prewarm_model_projection_excludes_active_turn_history_rows[active_asuna]",
         "tests/test_shared_memory_prewarm.py::test_prewarm_model_projection_excludes_active_turn_history_rows[active_kazusa]",
-        "tests/unit/cognition_resolver/test_capabilities.py::test_task_resolution_preserves_recurrence_and_maps_dsh_deferred_result",
-        "tests/unit/cognition_resolver/test_capabilities.py::test_task_resolution_v2_context_projects_trusted_source_and_original_episode_ref",
         "tests/unit/cognition_resolver/test_capabilities.py::test_task_capability_uses_runtime_readiness_without_legacy_fallback",
         "tests/unit/cognition_core_v3/test_handleless_contract.py::test_plan_packet_separates_user_prerequisite_from_task_admission",
         "tests/test_cognition_resolver_loop.py::test_answerable_now_terminates_without_executing_optional_resolver",
@@ -832,8 +783,7 @@
         "tests/test_cognition_resolver_loop.py::test_task_resolution_uses_objective_and_preserves_context"
       ],
       "supplemental_tests": [
-        "tests/test_local_context_resolver_integration.py::test_first_cycle_prewarm_uses_memory_worker_without_full_resolver",
-        "tests/test_shared_memory_prewarm_live_llm.py::test_production_napcat_command_recalls_seeded_shared_memory"
+        "tests/test_local_context_resolver_integration.py::test_first_cycle_prewarm_uses_memory_worker_without_full_resolver"
       ]
     },
     {
@@ -959,15 +909,11 @@
         "tests/unit/nodes/test_persona_supervisor2_cognition_commit.py::test_cognition_cancellation_publishes_no_prewarm_outcome_or_observation",
         "tests/test_conversation_progress_cognition_evidence.py::test_cognition_input_receives_exact_current_participant_overused_moves",
         "tests/test_dsh_brain_interaction_decision.py::test_dsh_interaction_runs_full_reusable_cognition_loop_and_returns_internal_decision",
-        "tests/unit/nodes/test_persona_supervisor2_dsh_task_actions.py::test_cognition_prompt_projects_opaque_task_ref_and_allowed_controls_only",
         "tests/test_dsh_brain_interaction_decision.py::test_dsh_interaction_full_loop_advertises_only_internal_resolvers",
-        "tests/unit/cognition_core_v3/test_dsh_interaction_contract.py::test_dsh_plan_packet_has_no_user_solicitation_resolver",
         "tests/unit/cognition_core_v3/test_handleless_contract.py::test_pending_disposition_binds_only_the_hidden_selected_resume_id"
       ],
       "supplemental_tests": [
-        "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_l3_surface_preserves_relational_willingness",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_l2_private_memory_enabled_theme_release",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_final_service_gates_preserve_exact_output_and_trace"
+        "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_l3_surface_preserves_relational_willingness"
       ]
     },
     {
@@ -1002,15 +948,7 @@
         "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_text_surface_services_have_one_semantic_stage",
         "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_l3_surface_receives_exact_current_participant_overused_moves"
       ],
-      "supplemental_tests": [
-        "tests/test_semantic_response_progression_live_llm.py::test_live_l3_does_not_reintroduce_unselected_semantic_payoff",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_bounded_causal_explanation_preserves_authority_boundary",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_explicit_scoped_delegation_proves_permission_without_motive",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_bounded_rule_comparison_request_stays_reply_local",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_explicit_export_format_delegation_stays_bounded",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_post_provider_reply_content_request_stays_bounded",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_post_provider_scoped_delegation_stays_bounded"
-      ]
+      "supplemental_tests": []
     },
     {
       "source": "src/kazusa_ai_chatbot/nodes/persona_supervisor2_memory_lifecycle.py",
@@ -1030,24 +968,11 @@
       "contract": "final dialog generator over the validated V2 surface with canonical JSON, structural, and required-source-URL checks",
       "required_unit_tests": [
         "tests/unit/nodes/test_dialog_agent.py::test_dialog_agent_exposes_owned_contract",
-        "tests/unit/nodes/test_dialog_agent.py::test_dialog_prompt_is_a_complete_literal_with_owned_authority",
-        "tests/unit/nodes/test_dialog_agent.py::test_dialog_prompt_prioritizes_epistemic_boundary",
         "tests/unit/nodes/test_dialog_agent.py::test_validated_dialog_messages_collapses_blank_line_runs",
-        "tests/unit/nodes/test_dialog_agent.py::test_dialog_creative_expansion_cannot_add_unselected_stance_or_relationship_payoff",
-        "tests/unit/nodes/test_dialog_agent.py::test_dialog_retry_prompt_carries_rejected_candidate_and_contract_error"
+        "tests/unit/nodes/test_dialog_agent.py::test_dialog_retry_carries_rejected_candidate_and_contract_error"
       ],
       "supplemental_tests": [
-        "tests/test_dialog_mention_target_user.py::test_dialog_agent_returns_no_mention_flag",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_bounded_thermal_conduction_explanation_keeps_relational_carriers_grounded",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_scoped_fan_cord_permission_keeps_relational_carriers_grounded",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_scoped_keychain_permission_keeps_user_relationship_meaning_uninvented",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_explicit_trust_fact_remains_available_with_scoped_permission",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_bounded_reply_choice_request_does_not_transfer_external_agency",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_explicit_bounded_delegation_preserves_character_initiative",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_bounded_rule_comparison_request_stays_reply_local",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_explicit_export_format_delegation_stays_bounded",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_post_provider_reply_content_request_stays_bounded",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_post_provider_scoped_delegation_stays_bounded"
+        "tests/test_dialog_mention_target_user.py::test_dialog_agent_returns_no_mention_flag"
       ]
     },
     {
@@ -1062,10 +987,7 @@
         "tests/test_msg_decontextualizer.py::test_decontextualizer_recovers_on_third_contract_attempt",
         "tests/test_msg_decontextualizer.py::test_decontextualizer_prompt_names_response_content_provider_role"
       ],
-      "supplemental_tests": [
-        "tests/test_decontextualizer_live_llm.py::test_live_decontextualizer_reward_offer_preserves_user_actor_character_target",
-        "tests/test_decontextualizer_live_llm.py::test_live_decontextualizer_emits_response_content_provider_contract"
-      ]
+      "supplemental_tests": []
     },
     {
       "source": "src/kazusa_ai_chatbot/relevance/contracts.py",
@@ -1164,7 +1086,7 @@
         "tests/test_relevance_turn_settlement.py::test_discarded_turn_keeps_protected_trace_without_episode_diagnostics",
         "tests/test_service_background_consolidation.py::test_chat_response_tracks_deliverable_assistant_row",
         "tests/unit/service/test_dsh_task_composition.py::test_lifespan_injects_one_shared_runtime_into_interaction_and_task_owners",
-        "tests/unit/service/test_dsh_task_composition.py::test_v2_interaction_route_has_no_checkpoint_delivery_or_reply_sink"
+        "tests/unit/service/test_dsh_task_composition.py::test_v2_interaction_route_exposes_one_internal_endpoint"
       ],
       "supplemental_tests": [
         "tests/test_self_cognition_integration.py::test_prepared_commitment_state_contains_public_group_scene",
@@ -1295,7 +1217,7 @@
       "required_unit_tests": [
         "tests/test_scheduled_future_speech_contract.py::test_accepted_task_carrier_keeps_authority_immutable",
         "tests/unit/accepted_task/test_dsh_task_lifecycle.py::test_dsh_task_affordance_uses_opaque_ref_for_active_and_open_followup",
-        "tests/unit/accepted_task/test_dsh_task_lifecycle.py::test_dsh_task_states_have_no_user_interaction_wait",
+        "tests/unit/accepted_task/test_dsh_task_lifecycle.py::test_dsh_task_states_match_current_lifecycle",
         "tests/unit/accepted_task/test_dsh_task_lifecycle.py::test_task_resolution_active_identity_uses_continuation_not_model_wording",
         "tests/unit/accepted_task/test_dsh_task_lifecycle.py::test_future_speak_active_identity_retains_semantic_objective"
       ],
@@ -1320,7 +1242,7 @@
       "required_unit_tests": [
         "tests/test_background_work_jobs.py::test_future_speak_job_preserves_authority_identity",
         "tests/unit/background_work/test_dsh_jobs.py::test_task_worker_payload_v2_accepts_only_generation_bound_open_or_continue",
-        "tests/unit/background_work/test_dsh_jobs.py::test_dsh_job_states_have_no_user_interaction_wait"
+        "tests/unit/background_work/test_dsh_jobs.py::test_dsh_job_states_match_current_lifecycle"
       ],
       "supplemental_tests": []
     },
@@ -1399,10 +1321,7 @@
         "tests/test_user_memory_units_rag_flow.py::test_extractor_prompt_requires_character_owned_acceptance_and_rejects_silence",
         "tests/test_consolidation_prompt_language_contract.py::test_consolidation_prompt_language_contract_is_complete"
       ],
-      "supplemental_tests": [
-        "tests/test_user_memory_units_live_llm.py::test_live_extractor_does_not_invent_commitment_from_unanswered_character_proposal",
-        "tests/test_user_memory_units_live_llm.py::test_live_extractor_preserves_explicit_character_owned_commitment"
-      ]
+      "supplemental_tests": []
     },
     {
       "source": "src/kazusa_ai_chatbot/consolidation/lane_router.py",
@@ -1416,14 +1335,7 @@
         "tests/test_consolidation_lane_router_contract.py::test_router_rejects_write_lane_token_outside_offered_roster",
         "tests/test_consolidation_prompt_language_contract.py::test_consolidation_prompt_language_contract_is_complete"
       ],
-      "supplemental_tests": [
-        "tests/test_consolidation_memory_write_use_cases_live_llm.py::test_live_case_07_user_specific_address_rule_routes_commitment",
-        "tests/test_consolidation_memory_write_use_cases_live_llm.py::test_live_case_11_accepted_repetition_rule_routes_character_self_guidance",
-        "tests/test_consolidation_memory_write_use_cases_live_llm.py::test_live_case_12_unaccepted_repetition_rule_writes_nothing",
-        "tests/test_consolidation_memory_write_use_cases_live_llm.py::test_live_case_15_group_specific_norm_routes_group_style",
-        "tests/test_consolidation_memory_write_use_cases_live_llm.py::test_live_case_16_one_turn_roleplay_instruction_writes_nothing",
-        "tests/test_consolidation_memory_write_use_cases_live_llm.py::test_live_case_25_scheduled_tick_reflection_style_does_not_leak"
-      ]
+      "supplemental_tests": []
     },
     {
       "source": "src/kazusa_ai_chatbot/consolidation/character_self_guidance.py",
@@ -1437,9 +1349,7 @@
         "tests/test_consolidation_character_self_guidance_scope.py::test_malformed_reviewer_certificate_fails_closed_without_persistence",
         "tests/test_consolidation_prompt_language_contract.py::test_consolidation_prompt_language_contract_is_complete"
       ],
-      "supplemental_tests": [
-        "tests/test_consolidation_memory_write_use_cases_live_llm.py::test_live_case_13_global_character_response_rule_routes_self_guidance"
-      ]
+      "supplemental_tests": []
     },
     {
       "source": "src/kazusa_ai_chatbot/reflection_cycle/promotion.py",
@@ -1463,10 +1373,7 @@
         "tests/test_consolidation_prompt_language_contract.py::test_consolidation_prompt_language_contract_is_complete",
         "tests/test_reflection_cycle_stage1c_promotion.py::test_global_promotion_records_failed_write_phase_without_worker_crash"
       ],
-      "supplemental_tests": [
-        "tests/test_reflection_cycle_stage1c_promotion_live_llm.py::test_global_promotion_live_rejects_target_specific_behavior_after_target_removal",
-        "tests/test_reflection_cycle_stage1c_promotion_live_llm.py::test_global_promotion_live_normal_case"
-      ]
+      "supplemental_tests": []
     },
     {
       "source": "src/kazusa_ai_chatbot/reflection_cycle/context.py",
@@ -1511,8 +1418,7 @@
       "contract": "state-only A1/A2/G/P HumanMessage packets, bounded V3 pending continuity, typed output contracts, and no authored prompt guidance in dynamic packets",
       "required_unit_tests": [
         "tests/unit/cognition_core_v3/test_prompt_context.py::test_packets_project_only_state_and_typed_output_contracts",
-        "tests/unit/cognition_core_v3/test_prompt_context.py::test_cognition_prompt_owners_do_not_compose_authored_prompt_fragments",
-        "tests/unit/cognition_core_v3/test_prompt_context.py::test_plan_variant_selection_matches_projected_pending_lanes",
+        "tests/unit/cognition_core_v3/test_prompt_context.py::test_plan_variant_packets_match_projected_pending_lanes",
         "tests/unit/cognition_core_v3/test_prompt_context.py::test_resolver_goal_progress_survives_without_pending_clarification",
         "tests/unit/cognition_core_v3/test_handleless_contract.py::test_a1_packet_projects_state_without_authored_guidance",
         "tests/unit/cognition_core_v3/test_handleless_contract.py::test_plan_packet_separates_user_prerequisite_from_task_admission",
@@ -1522,75 +1428,25 @@
         "tests/unit/cognition_core_v3/test_prompt_context.py::test_current_resolver_and_action_evidence_precedes_supporting_rag",
         "tests/unit/cognition_core_v3/test_prompt_context.py::test_stage_authority_lanes_partition_fact_continuity_and_character_context",
         "tests/unit/cognition_core_v3/test_prompt_context.py::test_a1_excludes_conditional_character_context",
-        "tests/unit/cognition_core_v3/test_prompt_context.py::test_a1_guidance_separates_current_observation_from_stable_direct_facts",
+        "tests/unit/cognition_core_v3/test_prompt_context.py::test_a1_packet_separates_current_observation_from_stable_direct_facts",
         "tests/unit/cognition_core_v3/test_prompt_context.py::test_overused_moves_reach_participant_continuity_after_a1_only",
-        "tests/unit/cognition_core_v3/test_prompt_context.py::test_user_owned_semantic_correction_guides_a1_goal_and_plan_without_hidden_intent_assertion",
-        "tests/unit/cognition_core_v3/test_prompt_context.py::test_goal_guidance_progresses_current_delta_and_preserves_deliberate_reopening",
         "tests/unit/cognition_core_v3/test_prompt_context.py::test_semantic_progression_context_preserves_all_existing_multi_affect_rows_and_causes",
-        "tests/unit/cognition_core_v3/test_prompt_context.py::test_recipient_scoped_permission_rule_reaches_a2_goal_and_plan",
-        "tests/unit/cognition_core_v3/test_handleless_contract.py::test_a1_system_prompt_and_packet_share_current_authority_contract",
-        "tests/unit/cognition_core_v3/test_handleless_contract.py::test_all_stage_system_prompts_share_request_agency_authority_contract",
-        "tests/unit/cognition_core_v3/test_handleless_contract.py::test_goal_and_plan_system_prompts_share_background_goal_authority_contract",
-        "tests/unit/cognition_core_v3/test_prompt_context.py::test_goal_and_plan_packets_share_background_goal_authority_contract",
-        "tests/unit/cognition_core_v3/test_prompt_context.py::test_request_agency_authority_contract_reaches_all_cognition_stage_packets",
-        "tests/unit/cognition_core_v3/test_prompt_context.py::test_request_agency_contract_rejects_circular_restated_evidence",
-        "tests/unit/cognition_core_v3/test_prompt_context.py::test_request_agency_contract_separates_authorization_from_motivation",
-        "tests/unit/cognition_core_v3/test_prompt_context.py::test_response_content_provider_is_reply_content_fact_across_all_stages",
-        "tests/unit/cognition_core_v3/test_prompt_context.py::test_a2_existential_drive_keeps_character_experience_distinct_from_user_state",
-        "tests/unit/cognition_core_v3/test_prompt_context.py::test_g_relational_carriers_separate_character_motive_from_user_relationship_fact",
-        "tests/unit/cognition_core_v3/test_prompt_context.py::test_response_content_provider_is_reply_content_source_not_external_agency_transfer",
-        "tests/unit/cognition_core_v3/test_prompt_context.py::test_a2_system_and_packet_share_relationship_state_evidence_contract",
-        "tests/unit/cognition_core_v3/test_prompt_context.py::test_g_system_and_packet_share_relational_carrier_evidence_contract",
-        "tests/unit/cognition_core_v3/test_prompt_context.py::test_g_relational_carrier_does_not_turn_unsupported_user_meaning_into_first_person_feeling",
-        "tests/unit/cognition_core_v3/test_dsh_interaction_contract.py::test_p_prompt_assigns_internal_decision_to_character_cognition",
         "tests/unit/cognition_core_v3/test_handleless_contract.py::test_pending_continuation_reaches_every_stage_without_durable_identity",
         "tests/unit/cognition_core_v3/test_handleless_contract.py::test_pending_task_continuation_gates_answered_task_admission",
         "tests/unit/cognition_core_v3/test_stage_recovery.py::test_pending_plan_carrier_echo_regenerates_to_pending_variant"
       ],
-      "supplemental_tests": [
-        "tests/test_cognition_v3_capacity_live_llm.py::test_live_captured_full_state_greeting_completes_first_pass",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_multi_emotion_context_preserves_original_design",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_l2_private_memory_enabled_theme_release",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_l3_explicit_current_user_correction",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_l4_deliberate_continuation_positive_control",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_l6_legitimate_memory_pressure_topic_pivot",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_bounded_language_analysis_does_not_create_relationship_evidence",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_bounded_causal_explanation_preserves_authority_boundary",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_explicit_scoped_delegation_proves_permission_without_motive",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_bounded_surface_area_explanation_keeps_relationship_axes_stable",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_scoped_label_permission_keeps_relationship_axes_stable",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_bounded_thermal_conduction_explanation_keeps_relational_carriers_grounded",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_scoped_fan_cord_permission_keeps_relational_carriers_grounded",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_scoped_keychain_permission_keeps_user_relationship_meaning_uninvented",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_explicit_trust_fact_remains_available_with_scoped_permission",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_bounded_reply_choice_request_does_not_transfer_external_agency",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_explicit_bounded_delegation_preserves_character_initiative",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_bounded_rule_comparison_request_stays_reply_local",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_explicit_export_format_delegation_stays_bounded",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_final_service_gates_preserve_exact_output_and_trace"
-      ]
+      "supplemental_tests": []
     },
     {
       "source": "src/kazusa_ai_chatbot/cognition_core_v3/facade.py",
       "owner": "V3 cognition facade owner",
       "contract": "single-pass A1/A2/G/P cognition chain with complete literal system-prompt variants, json-object transport, data-only repair evidence, typed validation, and caller-bound route configuration",
       "required_unit_tests": [
-        "tests/unit/cognition_core_v3/test_handleless_contract.py::test_cognition_chain_system_prompts_use_native_chinese",
         "tests/unit/cognition_core_v3/test_state_transaction.py::test_character_state_transaction_advances_timestamp_and_validates_final_affect",
         "tests/unit/cognition_core_v3/test_state_transaction.py::test_cognition_turn_deadline_bounds_full_chain",
         "tests/unit/cognition_core_v3/test_state_transaction.py::test_stale_response_goal_cutover_preserves_active_causes_and_other_goals",
         "tests/unit/cognition_core_v3/test_handleless_contract.py::test_canonical_cognition_calls_a1_a2_g_p_once_with_subjective_outputs",
         "tests/unit/cognition_core_v3/test_handleless_contract.py::test_canonical_input_requires_bounded_overused_moves_without_exposing_handles",
-        "tests/unit/cognition_core_v3/test_handleless_contract.py::test_a1_system_prompt_and_packet_share_current_authority_contract",
-        "tests/unit/cognition_core_v3/test_handleless_contract.py::test_all_stage_system_prompts_share_request_agency_authority_contract",
-        "tests/unit/cognition_core_v3/test_handleless_contract.py::test_goal_and_plan_system_prompts_share_background_goal_authority_contract",
-        "tests/unit/cognition_core_v3/test_prompt_context.py::test_response_content_provider_is_reply_content_fact_across_all_stages",
-        "tests/unit/cognition_core_v3/test_prompt_context.py::test_a2_existential_drive_keeps_character_experience_distinct_from_user_state",
-        "tests/unit/cognition_core_v3/test_prompt_context.py::test_g_relational_carriers_separate_character_motive_from_user_relationship_fact",
-        "tests/unit/cognition_core_v3/test_prompt_context.py::test_a2_system_and_packet_share_relationship_state_evidence_contract",
-        "tests/unit/cognition_core_v3/test_prompt_context.py::test_g_system_and_packet_share_relational_carrier_evidence_contract",
-        "tests/unit/cognition_core_v3/test_handleless_contract.py::test_complete_prompt_variants_are_selected_without_prompt_composition",
-        "tests/unit/cognition_core_v3/test_prompt_context.py::test_all_complete_prompts_own_current_authority_and_repair_semantics",
         "tests/unit/cognition_core_v3/test_dsh_interaction_contract.py::test_p_stage_decision_survives_canonical_output_without_semantic_rewrite",
         "tests/unit/cognition_core_v3/test_handleless_contract.py::test_task_resolution_request_requires_required_evidence_resolution",
         "tests/unit/cognition_core_v3/test_handleless_contract.py::test_pending_resolution_contract_is_exact_and_task_compatible",
@@ -1599,24 +1455,7 @@
         "tests/unit/cognition_core_v3/test_stage_recovery.py::test_tool_result_delivery_carrier_echo_regenerates_to_result_plan",
         "tests/unit/cognition_core_v3/test_stage_recovery.py::test_pending_plan_carrier_echo_regenerates_to_pending_variant"
       ],
-      "supplemental_tests": [
-        "tests/test_cognition_v3_capacity_live_llm.py::test_live_captured_full_state_greeting_completes_first_pass",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_multi_emotion_context_preserves_original_design",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_stable_memory_does_not_become_current_event_or_response_goal",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_bounded_language_analysis_does_not_create_relationship_evidence",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_bounded_causal_explanation_preserves_authority_boundary",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_explicit_scoped_delegation_proves_permission_without_motive",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_bounded_surface_area_explanation_keeps_relationship_axes_stable",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_scoped_label_permission_keeps_relationship_axes_stable",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_bounded_thermal_conduction_explanation_keeps_relational_carriers_grounded",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_scoped_fan_cord_permission_keeps_relational_carriers_grounded",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_scoped_keychain_permission_keeps_user_relationship_meaning_uninvented",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_explicit_trust_fact_remains_available_with_scoped_permission",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_bounded_reply_choice_request_does_not_transfer_external_agency",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_explicit_bounded_delegation_preserves_character_initiative",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_bounded_rule_comparison_request_stays_reply_local",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_explicit_export_format_delegation_stays_bounded"
-      ]
+      "supplemental_tests": []
     },
     {
       "source": "src/kazusa_ai_chatbot/cognition_core_v3/appraisal.py",
@@ -1627,7 +1466,7 @@
         "tests/unit/cognition_core_v3/test_state_transaction.py::test_repeated_answerable_turns_do_not_accumulate_transient_events_or_goals",
         "tests/unit/cognition_core_v3/test_state_transaction.py::test_unresolved_continuation_replaces_prior_response_goal_exactly",
         "tests/unit/nodes/test_persona_supervisor2_cognition_commit.py::test_current_continuation_uses_exact_private_goal_ref",
-        "tests/unit/cognition_core_v3/test_dsh_task_handoff.py::test_task_control_preserves_continuation_goal_without_coding_special_case"
+        "tests/unit/cognition_core_v3/test_dsh_task_handoff.py::test_task_control_preserves_continuation_goal"
       ],
       "supplemental_tests": []
     },
@@ -1749,45 +1588,29 @@
       "owner": "shared text and visual surface owner",
       "contract": "surface planning and bounded dialog handoff",
       "required_unit_tests": [
-        "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_surface_prompts_are_complete_literals_with_owned_authority",
         "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_text_surface_uses_one_content_call_and_deterministic_preference_projection",
         "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_successful_content_plan_is_not_discarded_by_deterministic_projection",
         "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_surface_payload_projects_exact_overused_moves",
         "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_degraded_tool_result_surface_preserves_semantic_result",
         "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_terminal_dialog_preserves_degraded_tool_result_semantic_result"
       ],
-      "supplemental_tests": [
-        "tests/test_semantic_response_progression_live_llm.py::test_live_l3_does_not_reintroduce_unselected_semantic_payoff"
-      ]
+      "supplemental_tests": []
     },
     {
       "source": "src/kazusa_ai_chatbot/cognition_shared/surface_stages.py",
       "owner": "shared surface stage owner",
       "contract": "stage-specific surface projections and handoff contracts",
       "required_unit_tests": [
-        "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_text_surface_uses_one_content_call_and_deterministic_preference_projection",
-        "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_text_surface_progression_contract_keeps_one_semantic_call",
-        "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_content_plan_keeps_goal_reason_outside_visible_semantic_authority",
-        "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_visible_content_authority_keeps_epistemic_examples_outside_content_selection",
-        "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_visible_content_authority_blocks_relationship_meaning_laundering_as_delivery"
+        "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_text_surface_uses_one_content_call_and_deterministic_preference_projection"
       ],
-      "supplemental_tests": [
-        "tests/test_semantic_response_progression_live_llm.py::test_live_l3_does_not_reintroduce_unselected_semantic_payoff",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_bounded_thermal_conduction_explanation_keeps_relational_carriers_grounded",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_scoped_fan_cord_permission_keeps_relational_carriers_grounded",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_scoped_keychain_permission_keeps_user_relationship_meaning_uninvented",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_explicit_trust_fact_remains_available_with_scoped_permission",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_bounded_reply_choice_request_does_not_transfer_external_agency",
-        "tests/test_semantic_response_progression_live_llm.py::test_live_explicit_bounded_delegation_preserves_character_initiative"
-      ]
+      "supplemental_tests": []
     },
     {
       "source": "src/agentic_resolver/__init__.py",
       "owner": "standalone DSH resolver package owner",
-      "contract": "canonical standalone runtime facade without compatibility exports",
+      "contract": "canonical standalone runtime facade and V2 product contracts",
       "required_unit_tests": [
-        "tests/test_agentic_resolver_decommission.py::test_old_resolver_contracts_facades_and_aliases_are_absent",
-        "tests/test_agentic_resolver_contracts.py::test_public_resolver_exports_only_v2_product_contracts"
+        "tests/test_agentic_resolver_contracts.py::test_public_resolver_exports_v2_product_contracts"
       ],
       "supplemental_tests": []
     },
@@ -1797,7 +1620,7 @@
       "contract": "strict versioned intake exhaust thread segment operation and fence DTOs",
       "required_unit_tests": [
         "tests/test_agentic_resolver_contracts.py::test_intake_v2_rejects_unknown_fields_and_keeps_authority_out_of_model_input",
-        "tests/test_agentic_resolver_contracts.py::test_public_contracts_expose_no_dsh_event_or_receipt_types",
+        "tests/test_agentic_resolver_contracts.py::test_public_contracts_expose_closed_exhaust_kinds",
         "tests/test_agentic_resolver_contracts.py::test_v2_intake_separates_model_input_from_workspace_tool_and_brain_authority"
       ],
       "supplemental_tests": []
@@ -1845,12 +1668,12 @@
     {
       "source": "src/agentic_resolver/controller.py",
       "owner": "Resolution controller",
-      "contract": "idempotent generic checkpoint/terminal continuation, complete inspect projection, and canonical thirteen-to-fourteen catalog rotation",
+      "contract": "idempotent checkpoint and terminal continuation, complete inspect projection, and semantic-catalog digest rotation",
       "required_unit_tests": [
         "tests/test_agentic_resolver_controller.py::test_stale_activation_or_lease_epoch_rejects_every_live_control",
         "tests/test_agentic_resolver_controller.py::test_interaction_checkpoint_and_resume_preserve_exact_thread_segment_and_fence",
         "tests/unit/agentic_resolver/test_runtime_task_lifecycle.py::test_controller_checkpoint_terminal_control_and_replay_are_fenced_and_idempotent",
-        "tests/unit/agentic_resolver/test_runtime_task_lifecycle.py::test_thirteen_to_fourteen_semantic_catalog_change_rotates_segment_and_rejects_old_authority"
+        "tests/unit/agentic_resolver/test_runtime_task_lifecycle.py::test_semantic_catalog_digest_change_rotates_segment_and_rejects_old_authority"
       ],
       "supplemental_tests": [
         "tests/test_agentic_resolver_sidecar_process.py::test_sidecar_restart_preserves_checkpoint_and_cold_resumes"
@@ -1865,29 +1688,26 @@
         "tests/unit/agentic_resolver/test_runtime_task_lifecycle.py::test_checkpoint_and_terminal_continuation_issue_fresh_authority_and_preserve_thread_segment"
       ],
       "supplemental_tests": [
-        "tests/test_agentic_resolver_live_llm.py::test_live_standalone_sidecar_resolution_reaches_submit_resolution",
         "tests/test_agentic_resolver_runtime.py::test_runtime_builds_v2_authority_from_canonical_project_route_and_workspace"
       ]
     },
     {
       "source": "src/kazusa_ai_chatbot/llm_interface/__init__.py",
       "owner": "ordinary LLM interface public facade owner",
-      "contract": "ordinary invocation contracts without resolver-only stream exports",
+      "contract": "ordinary typed invocation configuration and redacted provider diagnostics",
       "required_unit_tests": [
-        "tests/test_agentic_resolver_decommission.py::test_old_native_tool_stream_surface_is_absent"
+        "tests/test_llm_interface_contracts.py::test_call_config_uses_explicit_completion_budget_and_redacts_key"
       ],
       "supplemental_tests": []
     },
     {
       "source": "src/kazusa_ai_chatbot/llm_interface/interface.py",
       "owner": "ordinary LLM interface dispatch owner",
-      "contract": "ordinary explicit-config invocation without resolver-only streaming",
+      "contract": "ordinary explicit-config invocation with per-interface backend caching",
       "required_unit_tests": [
-        "tests/test_agentic_resolver_decommission.py::test_old_native_tool_stream_surface_is_absent"
-      ],
-      "supplemental_tests": [
         "tests/test_llm_interface_contracts.py::test_backend_descriptor_cache_is_per_interface_and_invalidated"
-      ]
+      ],
+      "supplemental_tests": []
     },
     {
       "source": "src/kazusa_ai_chatbot/llm_interface/providers/openai_compatible.py",
@@ -1916,9 +1736,7 @@
         "tests/test_agentic_resolver_persistence.py::test_thread_segment_operation_lease_epoch_and_store_epoch_round_trip",
         "tests/test_agentic_resolver_persistence.py::test_v2_thread_persists_brain_workspace_route_and_interaction_identity"
       ],
-      "supplemental_tests": [
-        "tests/test_agentic_resolver_live_db.py::test_resolution_thread_store_enforces_operation_idempotency_lease_fencing_rotation_and_cold_resume"
-      ]
+      "supplemental_tests": []
     },
     {
       "source": "sidecars/dsh_resolution/src/main.ts",
@@ -1935,11 +1753,9 @@
       "contract": "exact additive `kazusa_inspect_public_media` input schema in the description-free fourteen-tool projection",
       "required_unit_tests": [
         "tests/test_agentic_resolver_sidecar_process.py::test_missing_or_invalid_terminal_receipt_never_returns_terminal_exhaust",
-        "tests/test_dsh_tool_gateway_contracts.py::test_plan3_public_media_tool_is_byte_identical_across_python_and_sidecar_catalogs"
+        "tests/test_dsh_tool_gateway_contracts.py::test_public_media_tool_matches_python_and_sidecar_catalogs"
       ],
-      "supplemental_tests": [
-        "tests/test_dsh_plan3_e2e_live_llm.py::test_e2e_public_research_and_media_use_native_web_and_kazusa_semantic_evidence"
-      ]
+      "supplemental_tests": []
     },
     {
       "source": "sidecars/dsh_resolution/src/rpc.ts",
@@ -1974,11 +1790,9 @@
       "contract": "fourteen-name semantic catalog admission and new digest publication",
       "required_unit_tests": [
         "tests/test_agentic_resolver_sidecar_process.py::test_sidecar_profile_factory_and_dependency_graph_fail_closed",
-        "tests/test_agentic_resolver_sidecar_process.py::test_plan3_public_media_tool_is_advertised_with_matching_fourteen_tool_digest"
+        "tests/test_agentic_resolver_sidecar_process.py::test_public_media_tool_is_advertised_with_matching_catalog_digest"
       ],
-      "supplemental_tests": [
-        "tests/test_dsh_plan3_e2e_live_llm.py::test_e2e_public_research_and_media_use_native_web_and_kazusa_semantic_evidence"
-      ]
+      "supplemental_tests": []
     },
     {
       "source": "sidecars/dsh_resolution/src/evidence.ts",
@@ -2040,11 +1854,9 @@
       "contract": "exact public-media argument forwarding",
       "required_unit_tests": [
         "tests/test_agentic_resolver_sidecar_process.py::test_real_sidecar_worker_accepts_python_semantic_call_contract",
-        "tests/test_agentic_resolver_sidecar_process.py::test_plan3_public_media_tool_forwards_only_url_and_question"
+        "tests/test_agentic_resolver_sidecar_process.py::test_public_media_tool_forwards_only_url_and_question"
       ],
-      "supplemental_tests": [
-        "tests/test_dsh_plan3_e2e_live_llm.py::test_e2e_public_research_and_media_use_native_web_and_kazusa_semantic_evidence"
-      ]
+      "supplemental_tests": []
     },
     {
       "source": "sidecars/dsh_resolution/src/terminal_policy.ts",
@@ -2098,9 +1910,9 @@
     {
       "source": "src/kazusa_ai_chatbot/db/dsh_interactions.py",
       "owner": "DSH interaction DB owner",
-      "contract": "idempotent V2 interaction audit and exact one-shot grant persistence without pending-user lookup",
+      "contract": "idempotent V2 interaction audit and exact one-shot grant persistence",
       "required_unit_tests": [
-        "tests/test_dsh_brain_interaction_persistence.py::test_v2_audit_and_one_shot_grant_are_idempotent_without_reply_lookup"
+        "tests/test_dsh_brain_interaction_persistence.py::test_v2_audit_and_one_shot_grant_are_idempotent"
       ],
       "supplemental_tests": []
     },
@@ -2120,7 +1932,7 @@
       "required_unit_tests": [
         "tests/test_dsh_tool_gateway_contracts.py::test_semantic_result_uses_entities_opaque_page_refs_and_idempotent_mutation_outcomes",
         "tests/test_dsh_tool_gateway_contracts.py::test_opaque_reference_is_sealed_complete_authority_bound_and_restart_resolvable",
-        "tests/test_dsh_tool_gateway_contracts.py::test_catalog_declares_exact_fourteen_storage_independent_semantic_tools"
+        "tests/test_dsh_tool_gateway_contracts.py::test_description_stripped_catalog_has_closed_storage_independent_schemas"
       ],
       "supplemental_tests": []
     },
@@ -2141,12 +1953,9 @@
       "contract": "preserve thirteen rows byte-identically and add exact `kazusa_inspect_public_media` schema as row fourteen",
       "required_unit_tests": [
         "tests/test_dsh_tool_gateway_contracts.py::test_description_stripped_catalog_is_self_explanatory_storage_independent_and_excludes_standard_capabilities",
-        "tests/test_dsh_tool_gateway_contracts.py::test_catalog_preserves_plan2_thirteen_and_adds_exact_public_media_tool"
+        "tests/test_dsh_tool_gateway_contracts.py::test_catalog_exposes_exact_supported_semantic_tools"
       ],
       "supplemental_tests": [
-        "tests/test_dsh_plan3_e2e_live_llm.py::test_e2e_public_research_and_media_use_native_web_and_kazusa_semantic_evidence",
-        "tests/test_dsh_plan3_documentation.py::test_plan3_docs_name_exact_fourteen_tool_catalog_and_public_media_boundary",
-        "tests/test_test_impact_manifest.py::test_manifest_contains_dsh_plan3_owner_rows",
         "tests/test_test_impact_manifest.py::test_stale_required_node_fails_closed"
       ]
     },
@@ -2202,12 +2011,9 @@
       "required_unit_tests": [
         "tests/test_dsh_tool_gateway_media.py::test_attached_media_inspection_accepts_only_brain_issued_semantic_refs",
         "tests/test_dsh_tool_gateway_media.py::test_public_media_inspection_preserves_bounded_safe_fetch_and_visual_result",
-        "tests/test_dsh_tool_gateway_media.py::test_public_media_rejects_private_redirect_oversize_or_invalid_image_before_inspection",
-        "tests/test_dsh_tool_gateway_media.py::test_public_media_e2e_fixture_identity_is_pinned"
+        "tests/test_dsh_tool_gateway_media.py::test_public_media_rejects_private_redirect_oversize_or_invalid_image_before_inspection"
       ],
-      "supplemental_tests": [
-        "tests/test_dsh_plan3_e2e_live_llm.py::test_e2e_public_research_and_media_use_native_web_and_kazusa_semantic_evidence"
-      ]
+      "supplemental_tests": []
     },
     {
       "source": "src/kazusa_ai_chatbot/dsh_tool_gateway/dispatch.py",
@@ -2217,9 +2023,7 @@
         "tests/test_dsh_tool_gateway_worker.py::test_dispatch_exposes_only_approved_semantic_services_and_routes_no_standard_or_graph_capability",
         "tests/test_dsh_tool_gateway_media.py::test_public_media_dispatch_accepts_only_url_and_question"
       ],
-      "supplemental_tests": [
-        "tests/test_dsh_plan3_e2e_live_llm.py::test_e2e_public_research_and_media_use_native_web_and_kazusa_semantic_evidence"
-      ]
+      "supplemental_tests": []
     },
     {
       "source": "src/kazusa_ai_chatbot/dsh_tool_gateway/worker.py",
@@ -2235,10 +2039,9 @@
     {
       "source": "src/kazusa_ai_chatbot/dsh_interaction/__init__.py",
       "owner": "Brain interaction public facade owner",
-      "contract": "versioned internal interaction bridge exports without adapter or DSH implementation types",
+      "contract": "versioned internal interaction bridge exports",
       "required_unit_tests": [
-        "tests/test_dsh_brain_interaction_contracts.py::test_public_interaction_exports_exclude_adapter_and_dsh_internal_types",
-        "tests/test_dsh_brain_interaction_contracts.py::test_v2_public_contract_exports_have_no_v1_alias"
+        "tests/test_dsh_brain_interaction_contracts.py::test_public_contract_exports_v2_dtos"
       ],
       "supplemental_tests": []
     },
@@ -2248,8 +2051,7 @@
       "contract": "strict signed V2 request, internal decision, and activation/lease-bound one-shot grant DTOs",
       "required_unit_tests": [
         "tests/test_dsh_brain_interaction_contracts.py::test_request_decision_and_grant_contracts_are_exact_and_kind_specific",
-        "tests/test_dsh_brain_interaction_contracts.py::test_v2_contract_has_no_relay_reply_or_pending_vocabulary",
-        "tests/test_dsh_brain_interaction_contracts.py::test_v2_public_contract_exports_have_no_v1_alias"
+        "tests/test_dsh_brain_interaction_contracts.py::test_public_contract_exports_v2_dtos"
       ],
       "supplemental_tests": []
     },
@@ -2260,9 +2062,7 @@
       "required_unit_tests": [
         "tests/test_dsh_brain_interaction_auth.py::test_mac_timestamp_nonce_digest_and_constant_time_validation_fail_closed"
       ],
-      "supplemental_tests": [
-        "tests/test_dsh_plan3_documentation.py::test_character_owned_dsh_icds_exclude_user_relay_contract"
-      ]
+      "supplemental_tests": []
     },
     {
       "source": "src/kazusa_ai_chatbot/dsh_interaction/decision.py",
@@ -2287,7 +2087,7 @@
         "tests/test_dsh_brain_interaction_service.py::test_dsh_cognition_state_contains_canonical_empty_rag_projection",
         "tests/test_dsh_brain_interaction_service.py::test_production_dsh_judge_passes_complete_internal_context",
         "tests/test_dsh_brain_interaction_service.py::test_brain_service_exposes_only_the_v2_interaction_route",
-        "tests/test_dsh_brain_interaction_contracts.py::test_v2_public_contract_exports_have_no_v1_alias"
+        "tests/test_dsh_brain_interaction_contracts.py::test_public_contract_exports_v2_dtos"
       ]
     },
     {
@@ -2297,10 +2097,7 @@
       "required_unit_tests": [
         "tests/unit/task_resolution/test_contracts.py::test_dsh_start_binding_reference_and_v1_result_contracts_are_exact"
       ],
-      "supplemental_tests": [
-        "tests/test_dsh_plan3_documentation.py::test_plan3_architecture_names_exact_v2_epochs_and_binding_flow",
-        "tests/test_dsh_plan3_documentation.py::test_plan3_docs_contain_no_legacy_executor_interfaces"
-      ]
+      "supplemental_tests": []
     },
     {
       "source": "src/kazusa_ai_chatbot/task_resolution/projection.py",
@@ -2319,34 +2116,25 @@
         "tests/unit/task_resolution/test_service.py::test_inline_checkpoint_promotes_same_bound_dsh_session_without_canceling_reasoning",
         "tests/unit/task_resolution/test_service.py::test_background_start_mints_authority_only_when_claimed",
         "tests/unit/task_resolution/test_service.py::test_interaction_terminal_before_promotion_reconciles_exactly_once",
-        "tests/unit/task_resolution/test_service.py::test_internal_dsh_interaction_never_creates_user_wait_state",
         "tests/unit/task_resolution/test_service.py::test_delivered_followup_continues_same_thread_under_next_generation",
         "tests/unit/task_resolution/test_service.py::test_task_session_identity_is_stable_across_objective_paraphrases"
       ],
       "supplemental_tests": [
-        "tests/test_dsh_plan3_task_resolution.py::test_delivered_accepted_task_controls_continue_summarize_status_and_cancel_same_session",
-        "tests/test_dsh_plan3_task_resolution.py::test_direct_background_claim_opens_dsh_and_terminal_result_uses_normal_delivery",
-        "tests/test_dsh_plan3_task_resolution.py::test_inline_budget_checkpoints_without_cancelling_and_promotes_same_session",
-        "tests/test_dsh_plan3_task_resolution.py::test_inline_resolved_partial_and_terminal_blockers_recur_through_cognition",
-        "tests/test_dsh_plan3_task_resolution.py::test_internal_dsh_interaction_continues_without_user_wait_state",
-        "tests/test_dsh_plan3_task_resolution.py::test_sidecar_fault_and_restart_recover_without_legacy_fallback",
-        "tests/test_dsh_plan3_e2e_live_llm.py::test_e2e_inline_grounded_resolution_reenters_full_cognition",
-        "tests/test_dsh_plan3_e2e_live_llm.py::test_e2e_real_debug_user_prerequisite_is_resolved_before_dsh_admission",
-        "tests/test_stage3_fresh_database_bootstrap.py::test_fresh_database_fixture_uses_current_required_routes"
+        "tests/test_dsh_task_resolution.py::test_delivered_accepted_task_controls_continue_summarize_status_and_cancel_same_session",
+        "tests/test_dsh_task_resolution.py::test_direct_background_claim_opens_dsh_and_terminal_result_uses_normal_delivery",
+        "tests/test_dsh_task_resolution.py::test_inline_budget_checkpoints_without_cancelling_and_promotes_same_session",
+        "tests/test_dsh_task_resolution.py::test_inline_resolved_partial_and_terminal_blockers_recur_through_cognition",
+        "tests/test_dsh_task_resolution.py::test_sidecar_fault_and_restart_recover_bound_session"
       ]
     },
     {
       "source": "src/kazusa_ai_chatbot/task_resolution/__init__.py",
       "owner": "Task-resolution public boundary",
-      "contract": "DSH-only public exports",
+      "contract": "canonical task-resolution public exports",
       "required_unit_tests": [
         "tests/unit/task_resolution/test_contracts.py::test_task_resolution_public_exports_are_dsh_only"
       ],
-      "supplemental_tests": [
-        "tests/unit/task_resolution/test_decommission.py::test_legacy_task_complex_and_rag2_executor_sources_are_absent",
-        "tests/unit/task_resolution/test_decommission.py::test_legacy_test_and_fixture_artifacts_are_absent",
-        "tests/unit/task_resolution/test_decommission.py::test_runtime_import_graph_contains_no_legacy_executor_imports"
-      ]
+      "supplemental_tests": []
     },
     {
       "source": "src/kazusa_ai_chatbot/db/task_resolution_sessions.py",
@@ -2355,18 +2143,14 @@
       "required_unit_tests": [
         "tests/unit/db/test_task_resolution_sessions.py::test_binding_generation_attach_checkpoint_terminal_and_followup_reconcile_is_revision_guarded"
       ],
-      "supplemental_tests": [
-        "tests/test_dsh_plan3_task_resolution_live_db.py::test_live_binding_promotion_followup_interaction_terminal_and_delivery_are_exactly_once",
-        "tests/test_dsh_plan3_task_resolution_live_db.py::test_live_one_open_followup_index_and_generation_cas_reject_duplicates",
-        "tests/test_dsh_plan3_task_resolution_live_db.py::test_live_worker_lease_loss_cannot_overwrite_newer_dsh_binding_revision"
-      ]
+      "supplemental_tests": []
     },
     {
       "source": "src/kazusa_ai_chatbot/accepted_task/__init__.py",
       "owner": "Accepted-task public boundary",
       "contract": "DSH task affordance/control public exports",
       "required_unit_tests": [
-        "tests/unit/accepted_task/test_dsh_task_lifecycle.py::test_dsh_task_states_have_no_user_interaction_wait"
+        "tests/unit/accepted_task/test_dsh_task_lifecycle.py::test_dsh_task_states_match_current_lifecycle"
       ],
       "supplemental_tests": []
     },
@@ -2376,7 +2160,7 @@
       "contract": "generation-fenced DSH worker result/wait/retry/canceled transitions and typed delivery semantic projection",
       "required_unit_tests": [
         "tests/unit/background_work/test_dsh_worker.py::test_worker_checkpoints_waits_and_terminalizes_current_generation_through_binding",
-        "tests/unit/background_work/test_dsh_worker.py::test_internal_dsh_interaction_never_requeues_for_user_wait",
+        "tests/unit/background_work/test_dsh_worker.py::test_cooperative_checkpoint_requeues_as_continuation",
         "tests/unit/background_work/test_dsh_worker.py::test_worker_retry_reuses_idempotent_task_session",
         "tests/unit/background_work/test_dsh_worker.py::test_worker_rejects_stale_or_canceled_generation",
         "tests/test_background_work_delivery.py::test_successful_delivery_summary_uses_validated_semantic_result",
@@ -2410,7 +2194,7 @@
       "owner": "Background-work public boundary",
       "contract": "payload V2 public exports",
       "required_unit_tests": [
-        "tests/unit/background_work/test_dsh_jobs.py::test_background_work_public_exports_are_dsh_task_or_future_speak_only"
+        "tests/unit/background_work/test_dsh_jobs.py::test_background_work_public_exports_include_current_worker_contracts"
       ],
       "supplemental_tests": []
     },
@@ -2419,8 +2203,7 @@
       "owner": "Background-work DB owner",
       "contract": "waiting/queue/result transitions and payload V2 claim filters",
       "required_unit_tests": [
-        "tests/unit/background_work/test_dsh_jobs.py::test_job_claim_excludes_v1_payloads",
-        "tests/unit/background_work/test_dsh_jobs.py::test_dsh_job_states_have_no_user_interaction_wait",
+        "tests/unit/background_work/test_dsh_jobs.py::test_dsh_job_states_match_current_lifecycle",
         "tests/unit/background_work/test_dsh_jobs.py::test_terminal_sink_is_idempotent_under_delivery_state_guards"
       ],
       "supplemental_tests": []
@@ -2428,9 +2211,9 @@
     {
       "source": "src/kazusa_ai_chatbot/action_spec/registry.py",
       "owner": "Action registry",
-      "contract": "`accepted_task_control` registry/projection and legacy capability removal",
+      "contract": "`accepted_task_control` registry and projection",
       "required_unit_tests": [
-        "tests/unit/action_spec/test_accepted_task_control.py::test_registry_exposes_closed_dsh_task_controls_without_legacy_coding_capability"
+        "tests/unit/action_spec/test_accepted_task_control.py::test_registry_exposes_closed_dsh_task_controls"
       ],
       "supplemental_tests": []
     },
@@ -2448,7 +2231,7 @@
       "owner": "Action result contract",
       "contract": "task-resolution context result fields",
       "required_unit_tests": [
-        "tests/unit/action_spec/test_accepted_task_control.py::test_action_result_projects_task_context_without_coding_context"
+        "tests/unit/action_spec/test_accepted_task_control.py::test_action_result_projects_typed_task_context"
       ],
       "supplemental_tests": []
     },
@@ -2464,29 +2247,17 @@
     {
       "source": "src/kazusa_ai_chatbot/media_inspection/contracts.py",
       "owner": "Shared media-inspection contract owner",
-      "contract": "replace retired `complex_external_media` source with `dsh_public_media`",
+      "contract": "typed DSH public-media inspection provenance",
       "required_unit_tests": [
-        "tests/test_dsh_tool_gateway_media.py::test_media_inspection_source_contract_accepts_dsh_public_media_and_rejects_legacy_source"
+        "tests/test_dsh_tool_gateway_media.py::test_media_inspection_source_contract_accepts_dsh_public_media"
       ],
       "supplemental_tests": []
     },
     {
-      "source": "src/kazusa_ai_chatbot/rag/__init__.py",
-      "owner": "RAG package boundary",
-      "contract": "retained RAG3/evidence package identity",
-      "required_unit_tests": [
-        "tests/unit/task_resolution/test_decommission.py::test_retained_rag_package_has_no_rag2_runtime_claim"
-      ],
-      "supplemental_tests": [
-        "tests/test_dsh_plan3_documentation.py::test_plan3_docs_describe_dsh_only_task_execution_and_retained_rag3"
-      ]
-    },
-    {
       "source": "scripts/validate_test_impact.py",
       "owner": "Test-impact ownership verifier",
-      "contract": "strict active-source and explicit removed-source mappings fail closed before exact-node execution",
+      "contract": "strict active-source mappings fail closed before exact-node execution",
       "required_unit_tests": [
-        "tests/test_test_impact_manifest.py::test_removed_source_manifest_maps_deleted_sources_to_surviving_nodes",
         "tests/test_test_impact_manifest.py::test_unmapped_changed_source_fails_closed"
       ],
       "supplemental_tests": []

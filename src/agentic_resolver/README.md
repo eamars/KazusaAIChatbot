@@ -1,6 +1,6 @@
 # DSH V2 Resolution Control Plane
 
-agentic_resolver is the Plan 3 DSH control plane. It is the only
+agentic_resolver is the DSH control plane. It is the only
 task-resolution execution route: the Brain admits a semantic task, the
 resolver binds it to a DSH resolution session, the authenticated sidecar
 executes the pinned Standard profile and semantic catalog, and the Brain
@@ -33,9 +33,8 @@ retired executor.
 
 ## Model-visible catalog
 
-The description-free semantic catalog contains exactly fourteen rows. The
-first thirteen rows are the Plan 2 contract, byte-identical and in this
-order; kazusa_inspect_public_media is the sole additive Plan 3 row.
+The description-free semantic catalog contains exactly fourteen rows in this
+canonical order:
 
 1. kazusa_search_conversation_history
 2. kazusa_read_conversation_entries
@@ -61,11 +60,9 @@ decoding and dimensions from 1 through 8192 are required. The result is
 vision evidence with source dsh_public_media; raw bytes and base64 never
 enter the model contract.
 
-The catalog digest changes only because of that fourteenth row. A terminal or
-checkpointed V2 thread without an open interaction rotates to a fresh segment
-with the new fourteen-row digest. Old authority and grants fail closed.
-Open pre-cutover interactions and grants drain before the Brain/sidecar
-switch.
+Any catalog schema change produces a new digest. A terminal or checkpointed
+V2 thread without an open interaction rotates to a fresh segment with the
+current digest. Authority and grants bound to an earlier digest fail closed.
 
 ## Readiness, controls, and operations
 
@@ -85,7 +82,7 @@ dispatcher delivery.
 The read-only drain audit is:
 
 ~~~powershell
-venv\Scripts\python scripts/check_dsh_plan3_drain.py --legacy-coding-workspace-root <abs-root> --format json
+venv\Scripts\python scripts/check_dsh_legacy_drain.py --legacy-coding-workspace-root <abs-root> --format json
 ~~~
 
 It counts the five governed legacy categories and performs no writes. RAG3
@@ -96,9 +93,7 @@ live owners. Only the task edge changes to DSH.
 ## Configuration and testing
 
 The task route uses the six AGENTIC_RESOLVER_LLM_* settings plus the
-KAZUSA_DSH_* sidecar, store, gateway, and Python-executable settings.
-The removed background-worker and coding model-route families, including the
-old workspace and repair settings, are not valid configuration. The live
+KAZUSA_DSH_* sidecar, store, gateway, and Python-executable settings. The live
 RAG3 route retains its planner, subagent, and web-provider settings.
 
 Use venv\Scripts\python for deterministic tests. Exercise contract,

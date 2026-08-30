@@ -1,10 +1,8 @@
-"""Executable cross-boundary tests for the Plan 3 DSH task cutover."""
+"""Executable cross-boundary tests for DSH task resolution."""
 
 from __future__ import annotations
 
 import asyncio
-import inspect
-from pathlib import Path
 
 import pytest
 
@@ -90,25 +88,6 @@ def _admission() -> dict[str, object]:
         "background_work_job_id": "job-1",
         "task_session_id": "session-1",
     }
-
-
-def test_internal_dsh_interaction_continues_without_user_wait_state() -> None:
-    """An internal interaction remains inside the active DSH call boundary."""
-
-    from kazusa_ai_chatbot.task_resolution import service
-
-    assert "waiting_for_" + "interaction" not in inspect.getsource(service)
-    assert service._inline_transition_allowed("active", "checkpointed") is True
-    assert service._inline_transition_allowed("active", "checkpointed") is True
-
-
-def test_dsh_interaction_relay_owners_are_deleted() -> None:
-    """Superseded user-relay modules are absent from the V2 cutover."""
-
-    package_root = Path(__file__).resolve().parents[1]
-    interaction_root = package_root / "src" / "kazusa_ai_chatbot" / "dsh_interaction"
-    assert not (interaction_root / "pending.py").exists()
-    assert not (interaction_root / "resume.py").exists()
 
 
 @pytest.mark.asyncio
@@ -394,8 +373,8 @@ async def test_delivered_accepted_task_controls_continue_summarize_status_and_ca
 
 
 @pytest.mark.asyncio
-async def test_sidecar_fault_and_restart_recover_without_legacy_fallback() -> None:
-    """Restart recovery resumes only the durable DSH binding and its fence."""
+async def test_sidecar_fault_and_restart_recover_bound_session() -> None:
+    """Restart recovery resumes the durable DSH binding and its fence."""
 
     from agentic_resolver import controller
 

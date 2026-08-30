@@ -258,14 +258,14 @@ def test_opaque_reference_is_sealed_complete_authority_bound_and_restart_resolva
         )
 
 
-def test_catalog_preserves_plan2_thirteen_and_adds_exact_public_media_tool() -> None:
-    """The Plan 3 catalog is additive and keeps every Plan 2 tool unchanged."""
+def test_catalog_exposes_exact_supported_semantic_tools() -> None:
+    """The catalog exposes the supported tools with exact closed schemas."""
 
     from kazusa_ai_chatbot.dsh_tool_gateway.catalog import semantic_catalog
 
     catalog = semantic_catalog()
     by_name = {item["name"]: item for item in catalog}
-    expected_plan2 = {
+    expected_semantic_tools = {
         "kazusa_search_conversation_history",
         "kazusa_read_conversation_entries",
         "kazusa_summarize_conversation_participants",
@@ -281,7 +281,8 @@ def test_catalog_preserves_plan2_thirteen_and_adds_exact_public_media_tool() -> 
         "kazusa_inspect_attached_media",
     }
 
-    assert set(by_name) == expected_plan2 | {"kazusa_inspect_public_media"}
+    expected_semantic_tools.add("kazusa_inspect_public_media")
+    assert set(by_name) == expected_semantic_tools
     assert by_name["kazusa_inspect_public_media"]["input_schema"] == {
         "type": "object",
         "additionalProperties": False,
@@ -293,18 +294,18 @@ def test_catalog_preserves_plan2_thirteen_and_adds_exact_public_media_tool() -> 
     }
 
 
-def test_catalog_declares_exact_fourteen_storage_independent_semantic_tools() -> None:
-    """Description stripping must leave fourteen closed semantic schemas."""
+def test_description_stripped_catalog_has_closed_storage_independent_schemas() -> None:
+    """Description stripping preserves the supported closed tool schemas."""
 
     from kazusa_ai_chatbot.dsh_tool_gateway.catalog import (
         description_stripped_catalog,
+        semantic_catalog,
     )
 
     catalog = description_stripped_catalog(set())
     names = {item["name"] for item in catalog}
 
-    assert len(catalog) == 14
-    assert len(names) == 14
+    assert names == {item["name"] for item in semantic_catalog()}
     assert all("description" not in item for item in catalog)
     assert all(
         item["input_schema"]["additionalProperties"] is False
@@ -312,7 +313,7 @@ def test_catalog_declares_exact_fourteen_storage_independent_semantic_tools() ->
     )
 
 
-def test_plan3_public_media_tool_is_byte_identical_across_python_and_sidecar_catalogs() -> None:
+def test_public_media_tool_matches_python_and_sidecar_catalogs() -> None:
     """The executable Python and built sidecar catalogs have one exact shape."""
 
     from kazusa_ai_chatbot.dsh_tool_gateway.catalog import semantic_catalog

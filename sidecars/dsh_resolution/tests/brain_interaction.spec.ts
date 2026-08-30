@@ -1,6 +1,3 @@
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
-
 import { describe, expect, it, vi } from "vitest";
 
 function requestFields(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -78,17 +75,6 @@ function responseFor(
 }
 
 describe("Brain interaction", () => {
-  it("binds native approval handling to the owning agent scope", async () => {
-    const source = await readFile(
-      resolve(process.cwd(), "src", "brain_interaction.ts"),
-      "utf8",
-    );
-    expect(source).toContain("request.agent.session.id");
-    expect(source).toContain("{ global: true }");
-    expect(source).not.toContain("checkpoint");
-    expect(source).not.toContain("relay_to_user");
-  });
-
   it("derives stable per-interaction nonces and emits the V2 frame", async () => {
     const interaction = await import("../src/brain_interaction.js");
     const context: Record<string, unknown> = {
@@ -137,7 +123,7 @@ describe("Brain interaction", () => {
     expect(first.nonce).not.toBe(context.nonce);
   });
 
-  it("sends exact V2 question and approval decisions without a checkpoint", async () => {
+  it("sends exact V2 question and approval decisions", async () => {
     const interaction = await import("../src/brain_interaction.js");
     const requests: Record<string, unknown>[] = [];
     const provider = interaction.createBrainInteractionProvider({
@@ -172,8 +158,6 @@ describe("Brain interaction", () => {
     });
     expect(requests).toHaveLength(2);
     expect(requests[0]?.schema_version).toBe("dsh_brain_interaction.v2");
-    expect(requests[0]).not.toHaveProperty("response_goal");
-    expect(requests[0]).not.toHaveProperty("relay_mode");
   });
 
   it("rejects stale grants and preserves a complete single question", async () => {

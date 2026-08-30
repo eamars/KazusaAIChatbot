@@ -266,30 +266,16 @@ async def test_controller_checkpoint_terminal_control_and_replay_are_fenced_and_
 
 
 @pytest.mark.asyncio
-async def test_thirteen_to_fourteen_semantic_catalog_change_rotates_segment_and_rejects_old_authority(
+async def test_semantic_catalog_digest_change_rotates_segment_and_rejects_old_authority(
     monkeypatch,
 ) -> None:
     """A catalog digest change rotates a compatible thread through the controller."""
 
     from agentic_resolver.controller import ResolutionController
     from agentic_resolver.fingerprints import workspace_fingerprint
-    from kazusa_ai_chatbot.dsh_tool_gateway.catalog import (
-        SEMANTIC_TOOL_NAMES,
-        semantic_catalog_digest,
-        semantic_catalog_projection,
-    )
 
-    catalog = semantic_catalog_projection()
-    assert len(catalog) == 14
-    assert "kazusa_inspect_public_media" in SEMANTIC_TOOL_NAMES
-    old_catalog = tuple(
-        item
-        for item in catalog
-        if item["name"] != "kazusa_inspect_public_media"
-    )
-    old_digest = semantic_catalog_digest(old_catalog)
-    current_digest = semantic_catalog_digest(catalog)
-    assert old_digest != current_digest
+    previous_digest = "sha256:previous-semantic-catalog"
+    current_digest = "sha256:current-semantic-catalog"
 
     class Repository:
         def __init__(self) -> None:
@@ -309,7 +295,7 @@ async def test_thirteen_to_fourteen_semantic_catalog_change_rotates_segment_and_
                     "dsh_release": "0.1.1-rc.2",
                     "session_store_epoch": "dsh-sqlite-0.1.1-rc.2-standard-v2",
                     "standard_catalog_digest": "sha256:native",
-                    "semantic_catalog_digest": old_digest,
+                    "semantic_catalog_digest": previous_digest,
                     "policy_epoch": "dsh-standard-policy-v2",
                     "scope_fingerprint": "sha256:scope",
                     "audience_fingerprint": "sha256:audience",

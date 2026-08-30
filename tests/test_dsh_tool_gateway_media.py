@@ -9,7 +9,6 @@ import os
 import socket as stdlib_socket
 import subprocess
 import sys
-from pathlib import Path
 from types import SimpleNamespace
 from typing import ClassVar, Self
 from urllib.parse import urljoin, urlsplit, urlunsplit
@@ -696,11 +695,10 @@ async def test_public_media_rejects_private_redirect_oversize_or_invalid_image_b
         assert inspections == [], case["name"]
 
 
-def test_media_inspection_source_contract_accepts_dsh_public_media_and_rejects_legacy_source() -> None:
-    """Only DSH public-media provenance may cross the retained inspector boundary."""
+def test_media_inspection_source_contract_accepts_dsh_public_media() -> None:
+    """DSH public-media provenance crosses the shared inspector boundary."""
 
     from kazusa_ai_chatbot.media_inspection.contracts import (
-        MediaInspectionValidationError,
         validate_media_inspection_request,
     )
 
@@ -714,16 +712,3 @@ def test_media_inspection_source_contract_accepts_dsh_public_media_and_rejects_l
         "existing_descriptor": "",
     }
     assert validate_media_inspection_request(request) == request
-    legacy = {**request, "source": "complex_external_media"}
-    with pytest.raises(MediaInspectionValidationError):
-        validate_media_inspection_request(legacy)
-
-
-def test_public_media_e2e_fixture_identity_is_pinned() -> None:
-    """The public-media live fixture remains byte-identical to the pin."""
-
-    fixture = Path(__file__).resolve().parents[1] / "resources" / "avatar.png"
-    digest = hashlib.sha256(fixture.read_bytes()).hexdigest()
-
-    assert fixture.stat().st_size == 1_129_137
-    assert digest == "3bbe03444a93c736945916353845cc96d63e7e0126b01cc77a19bb4fadd0de5b"

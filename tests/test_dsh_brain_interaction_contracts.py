@@ -59,20 +59,8 @@ def _request_mapping(**overrides: object) -> dict[str, object]:
     return value
 
 
-def test_public_interaction_exports_exclude_adapter_and_dsh_internal_types() -> None:
-    from kazusa_ai_chatbot.dsh_interaction import DshBrainInteractionRequestV2
-
-    assert DshBrainInteractionRequestV2
-    exports = __import__(
-        "kazusa_ai_chatbot.dsh_interaction",
-        fromlist=["__all__"],
-    ).__all__
-    assert "MongoInteractionStore" not in exports
-    assert "DshInteractionPendingV1" not in exports
-
-
-def test_v2_public_contract_exports_have_no_v1_alias() -> None:
-    """The public interaction package exposes only canonical V2 DTO names."""
+def test_public_contract_exports_v2_dtos() -> None:
+    """The public interaction package exposes the canonical V2 DTO names."""
 
     module = __import__(
         "kazusa_ai_chatbot.dsh_interaction",
@@ -84,22 +72,6 @@ def test_v2_public_contract_exports_have_no_v1_alias() -> None:
         "DshBrainInteractionDecisionV2",
         "DshOneShotGrantV2",
     } <= exports
-    for prefix in (
-        "DshBrainInteractionRequest",
-        "DshBrainInteractionDecision",
-        "DshBrainInteractionResponse",
-        "DshOneShotGrant",
-    ):
-        assert not hasattr(module, f"{prefix}V1")
-
-
-def test_v2_contract_has_no_relay_reply_or_pending_vocabulary() -> None:
-    from kazusa_ai_chatbot.dsh_interaction import contracts
-
-    assert contracts.INTERACTION_SCHEMA_VERSION == "dsh_brain_interaction.v2"
-    assert not hasattr(contracts, "DshInteractionPendingV1")
-    assert not hasattr(contracts, "DshBrainReplyDecisionV1")
-    assert not hasattr(contracts, "PENDING_SCHEMA_VERSION")
 
 
 def test_request_decision_and_grant_contracts_are_exact_and_kind_specific() -> None:

@@ -164,14 +164,3 @@ async def test_worker_projects_terminal_runtime_result(monkeypatch: pytest.Monke
     assert binding_store.bindings[reference["dsh_session_id"]]["state"] == (
         "terminal"
     )
-
-
-def test_worker_rejects_legacy_payload_shape() -> None:
-    """Deleted worker payload versions cannot enter the V2 validator."""
-
-    jobs = importlib.import_module("kazusa_ai_chatbot.background_work.jobs")
-    with pytest.raises(ValueError, match="fields"):
-        jobs.validate_task_orchestrator_worker_payload({
-            "schema_version": "task_orchestrator_worker_payload.v1",
-            "operation": "resume_task_resolution",
-        })

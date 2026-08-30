@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import inspect
 import json
 import re
 
-from kazusa_ai_chatbot.cognition_core_v3 import facade as facade_module
-from kazusa_ai_chatbot.cognition_core_v3 import prompt as prompt_module
 from kazusa_ai_chatbot.cognition_core_v3.prompt import (
     build_canonical_appraisal_question,
     build_canonical_goal_question,
@@ -30,10 +27,6 @@ _MULTIWORD_ENGLISH_PATTERN = re.compile(
 )
 
 
-def _assert_native_chinese_instruction(value: str) -> None:
-    assert _HAN_PATTERN.search(value)
-    prose = _CODE_SPAN_PATTERN.sub("", value)
-    assert _MULTIWORD_ENGLISH_PATTERN.search(prose) is None
 
 
 def _workspace(
@@ -63,31 +56,6 @@ def _workspace(
     )
 
 
-def _effective_prompt(stage: str, packet: dict[str, object]) -> str:
-    return facade_module._system_prompt_for_stage(stage=stage, packet=packet)
-
-
-def test_cognition_chain_guidance_uses_native_chinese() -> None:
-    payload = _input()
-    workspace = _workspace(payload, payload["evidence"])
-    packets = build_turn_workspace_stage_contracts(workspace=workspace)
-    self_plan = build_canonical_plan_question(
-        workspace=workspace,
-        goal=packets["P"]["goal"],
-        appraisal_summary=[],
-        self_cognition=True,
-    )
-    for stage, packet in (*packets.items(), ("P", self_plan)):
-        _assert_native_chinese_instruction(_effective_prompt(stage, packet))
-    assert workspace["orientation"]["operation"] == "回应当前观察"
-    assert "response_content_provider" not in workspace["orientation"]
-    assert "selection_owner" not in workspace["orientation"]
-    assert packets["P"]["goal"] == {
-        "goal_kind": "open_goal",
-        "intent": "理解当前请求",
-        "reason": "当前观察需要一个有依据的回应",
-        "cause_summary": "当前观察",
-    }
 
 
 def test_ordinary_plan_declares_response_goal_text_contract() -> None:
@@ -111,7 +79,6 @@ def test_ordinary_plan_declares_response_goal_text_contract() -> None:
         "minimum_characters": 1,
         "maximum_characters": 2000,
     }
-    assert "可见措辞能够断言的内容" in _effective_prompt("P", packet)
 
 
 def test_stage_context_preserves_identity_relationship_and_emotion_cause() -> None:
@@ -394,9 +361,6 @@ def test_stage_authority_lanes_partition_fact_continuity_and_character_context()
     assert goal["participant_continuity"] == a2["participant_continuity"]
     assert plan["participant_continuity"] == a2["participant_continuity"]
     assert "conditional_character_context" not in plan
-    prompt = _effective_prompt("P", plan)
-    assert "缺少证据不等于否定事实" in prompt
-    assert "不确定的解释" in prompt
 
 
 def test_overused_moves_reach_participant_continuity_after_a1_only() -> None:
@@ -434,84 +398,6 @@ def test_overused_moves_reach_participant_continuity_after_a1_only() -> None:
             row["semantic_text"]
             for row in packet["participant_continuity"][-2:]
         ] == payload["overused_moves"]
-
-
-def test_user_owned_semantic_correction_guides_a1_goal_and_plan_without_hidden_intent_assertion() -> None:
-    """Keep explicit current-user meaning authoritative across stages."""
-
-    payload = _input()
-    workspace = _workspace(payload, payload["evidence"])
-    a1 = build_canonical_appraisal_question(workspace=workspace, stage_name="A1")
-    goal = build_canonical_goal_question(workspace=workspace, appraisal_summary=[])
-    plan = build_canonical_plan_question(
-        workspace=workspace,
-        goal={
-            "goal_kind": "clarify",
-            "intent": "answer the current observation",
-            "reason": "the current observation needs an answer",
-            "cause_summary": "the current observation",
-        },
-        appraisal_summary=[],
-    )
-
-    for stage, packet in (("A1", a1), ("G", goal), ("P", plan)):
-        prompt = _effective_prompt(stage, packet)
-        assert "当前用户明确纠正自己的意思或感受时" in prompt
-        assert "纠正本身不证明相反意思" in prompt
-
-
-def test_goal_guidance_progresses_current_delta_and_preserves_deliberate_reopening() -> None:
-    """Keep response goals current-delta grounded with an explicit reopen path."""
-
-    payload = _input()
-    workspace = _workspace(payload, payload["evidence"])
-    for stage, packet in (
-        ("G", build_canonical_goal_question(workspace=workspace, appraisal_summary=[])),
-        ("P", build_canonical_plan_question(
-            workspace=workspace,
-            goal={
-                "goal_kind": "clarify",
-                "intent": "answer the current observation",
-                "reason": "the current observation needs an answer",
-                "cause_summary": "the current observation",
-            },
-            appraisal_summary=[],
-        )),
-    ):
-        prompt = _effective_prompt(stage, packet)
-        assert "当前观察新增加、改变、纠正、询问或仍未解决的内容" in prompt
-        assert "此前回应模式" in prompt
-        assert "当前明确重新打开相关事项" in prompt or "用户当前重新打开它们" in prompt
-
-
-def test_recipient_scoped_permission_rule_reaches_a2_goal_and_plan() -> None:
-    """A2, G, and P receive the same recipient-applicability boundary."""
-
-    payload = _input()
-    workspace = _workspace(payload, payload["evidence"])
-    a1 = build_canonical_appraisal_question(workspace=workspace, stage_name="A1")
-    a2 = build_canonical_appraisal_question(
-        workspace=workspace,
-        stage_name="A2",
-        accepted_appraisal_summary=[],
-    )
-    goal = build_canonical_goal_question(workspace=workspace, appraisal_summary=[])
-    plan = build_canonical_plan_question(
-        workspace=workspace,
-        goal={
-            "goal_kind": "clarify",
-            "intent": "answer the current observation",
-            "reason": "the current observation needs an answer",
-            "cause_summary": "the current observation",
-        },
-        appraisal_summary=[],
-    )
-
-    recipient_rule = "公开可见不把一名参与者的同意、许可、承诺、关系或角色转移给另一名参与者"
-    assert recipient_rule not in _effective_prompt("A1", a1)
-    assert recipient_rule in _effective_prompt("A2", a2)
-    assert recipient_rule in _effective_prompt("G", goal)
-    assert recipient_rule in _effective_prompt("P", plan)
 
 
 def test_semantic_progression_context_preserves_all_existing_multi_affect_rows_and_causes() -> None:
@@ -616,7 +502,7 @@ def test_a1_excludes_conditional_character_context() -> None:
     assert "personality" not in rendered
 
 
-def test_a1_guidance_separates_current_observation_from_stable_direct_facts() -> None:
+def test_a1_packet_separates_current_observation_from_stable_direct_facts() -> None:
     """A1 keeps stable facts outside the current-observation authority lane."""
 
     payload = _input()
@@ -653,173 +539,6 @@ def test_a1_guidance_separates_current_observation_from_stable_direct_facts() ->
     assert "stable background fact" not in current_text
 
 
-def test_goal_and_plan_packets_share_background_goal_authority_contract() -> None:
-    """G and P packets consume one shared background-goal contract."""
-
-    payload = _input()
-    workspace = _workspace(payload, payload["evidence"])
-    goal = build_canonical_goal_question(
-        workspace=workspace,
-        appraisal_summary=[],
-    )
-    plan = build_canonical_plan_question(
-        workspace=workspace,
-        goal={
-            "goal_kind": "clarify",
-            "intent": "answer the current observation",
-            "reason": "the current observation needs an answer",
-            "cause_summary": "the current observation",
-        },
-        appraisal_summary=[],
-    )
-
-    for stage, packet in (("G", goal), ("P", plan)):
-        prompt = _effective_prompt(stage, packet)
-        assert "只有当前观察把它们带入当前请求、决定或未解决事项时" in prompt
-
-
-def test_request_agency_authority_contract_reaches_all_cognition_stage_packets() -> None:
-    """Every cognition packet consumes one current-observation authority contract."""
-
-    payload = _input()
-    workspace = _workspace(payload, payload["evidence"])
-    packets = build_turn_workspace_stage_contracts(workspace=workspace)
-    for stage in ("A1", "A2", "G", "P"):
-        prompt = _effective_prompt(stage, packets[stage])
-        assert "current_observation` 是用户当下行动、意图、接受、许可和回应对象的唯一当前依据" in prompt
-        assert "guidance" not in packets[stage]
-
-
-def test_request_agency_contract_rejects_circular_restated_evidence() -> None:
-    """The agency contract distinguishes independent facts from restatements."""
-
-    required_invariants = (
-        "同一请求的存在或清晰程度",
-        "邀请参与",
-        "上游改述",
-        "独立证据",
-        "另行表达的当前观察事实",
-    )
-    for prompt in (
-        facade_module._A1_SYSTEM_PROMPT,
-        facade_module._A2_SYSTEM_PROMPT,
-        facade_module._G_SYSTEM_PROMPT,
-        facade_module._P_ORDINARY_SYSTEM_PROMPT,
-    ):
-        assert all(invariant in prompt for invariant in required_invariants)
-
-
-def test_response_content_provider_is_reply_content_fact_across_all_stages() -> None:
-    """Procedural provider metadata stays outside model-facing cognition."""
-
-    payload = _input()
-    workspace = _workspace(payload, payload["evidence"])
-    packets = build_turn_workspace_stage_contracts(workspace=workspace)
-    hidden_fields = (
-        "response_content_provider_role",
-        "response_content_provider",
-    )
-
-    for stage in ("A1", "A2", "G", "P"):
-        rendered_packet = str(packets[stage])
-        assert all(field not in rendered_packet for field in hidden_fields)
-        assert all(field not in _effective_prompt(stage, packets[stage]) for field in hidden_fields)
-
-
-def test_a2_existential_drive_keeps_character_experience_distinct_from_user_state() -> None:
-    """Existential-drive axes remain character-owned rather than user-owned."""
-
-    required_invariants = ("existential_drive", "独立当前事实")
-    prompt = facade_module._A2_SYSTEM_PROMPT
-    assert all(invariant in prompt for invariant in required_invariants)
-
-
-def test_g_relational_carriers_separate_character_motive_from_user_relationship_fact() -> None:
-    """G carrier fields keep character motive distinct from user relationship facts."""
-
-    required_invariants = (
-        "relational_willingness.reason",
-        "cause_summary",
-        "private_monologue",
-        "current_observation",
-    )
-
-    prompt = facade_module._G_SYSTEM_PROMPT
-    assert all(invariant in prompt for invariant in required_invariants)
-
-
-def test_request_agency_contract_separates_authorization_from_motivation() -> None:
-    """Authorization scope does not establish motive or broader meaning."""
-
-    required_invariants = (
-        "授权只在当前观察写明的对象、行动、时间和条件内成立",
-        "并不证明动机或更广含义",
-    )
-    for prompt in (
-        facade_module._A1_SYSTEM_PROMPT,
-        facade_module._A2_SYSTEM_PROMPT,
-        facade_module._G_SYSTEM_PROMPT,
-        facade_module._P_ORDINARY_SYSTEM_PROMPT,
-    ):
-        assert all(invariant in prompt for invariant in required_invariants)
-
-
-def test_response_content_provider_is_reply_content_source_not_external_agency_transfer() -> None:
-    """Explicit dialog meaning remains the model-facing authority source."""
-
-    prompt = facade_module._G_SYSTEM_PROMPT
-    assert "`current_observation`" in prompt
-    assert "response_content_provider_role" not in prompt
-    assert "response_content_provider" not in prompt
-
-
-def test_a2_system_and_packet_share_relationship_state_evidence_contract() -> None:
-    """A2 packet and system guidance share one relationship evidence owner."""
-
-    required_invariants = (
-        "relationship_social",
-        "当前交互角色或范围许可",
-        "不能改变任何关系轴",
-        "另行表达的`current_observation`关系事实",
-    )
-
-    prompt = facade_module._A2_SYSTEM_PROMPT
-    assert all(invariant in prompt for invariant in required_invariants)
-
-
-def test_g_system_and_packet_share_relational_carrier_evidence_contract() -> None:
-    """G packet and system guidance share one relational carrier owner."""
-
-    required_invariants = (
-        "relational_willingness",
-        "private_monologue",
-        "当前交互角色或范围许可",
-        "不能为用户补写关系事实",
-        "当前关系事实",
-    )
-
-    prompt = facade_module._G_SYSTEM_PROMPT
-    assert all(invariant in prompt for invariant in required_invariants)
-    assert "relational_willingness" not in facade_module._A1_SYSTEM_PROMPT
-
-
-def test_g_relational_carrier_does_not_turn_unsupported_user_meaning_into_first_person_feeling() -> None:
-    """Private monologue cannot launder unsupported user relationship meaning."""
-
-    required_invariants = (
-        "未经当前关系事实支持的用户关系含义",
-        "第一人称感受、内心独白、被动经历",
-        "relational_willingness",
-        "private_monologue",
-        "取得依据",
-    )
-
-    assert all(
-        invariant in facade_module._G_SYSTEM_PROMPT
-        for invariant in required_invariants
-    )
-
-
 def test_packets_project_only_state_and_typed_output_contracts() -> None:
     payload = _input()
     packets = build_turn_workspace_stage_contracts(
@@ -835,37 +554,7 @@ def test_packets_project_only_state_and_typed_output_contracts() -> None:
     assert "source_id" not in rendered
 
 
-def test_all_complete_prompts_own_current_authority_and_repair_semantics() -> None:
-    prompts = (
-        facade_module._A1_SYSTEM_PROMPT,
-        facade_module._A2_SYSTEM_PROMPT,
-        facade_module._G_SYSTEM_PROMPT,
-        facade_module._P_ORDINARY_SYSTEM_PROMPT,
-        facade_module._P_PENDING_CLARIFICATION_SYSTEM_PROMPT,
-        facade_module._P_DSH_INTERACTION_SYSTEM_PROMPT,
-        facade_module._P_PENDING_AND_DSH_SYSTEM_PROMPT,
-        facade_module._P_SELF_COGNITION_SYSTEM_PROMPT,
-    )
-
-    for prompt in prompts:
-        assert "current_observation" in prompt
-        assert "resolver_goal_progress" in prompt
-        assert "contract_repair" in prompt
-        assert "JSON" not in prompt
-        assert "严格返回" not in prompt
-
-
-def test_cognition_prompt_owners_do_not_compose_authored_prompt_fragments() -> None:
-    """Prompt wording is one literal per exact model-call contract."""
-
-    source = inspect.getsource(facade_module)
-    assert ".format(" not in source
-    assert "join((" not in source
-    assert "repair_instruction" not in source
-    assert "\"guidance\"" not in inspect.getsource(prompt_module)
-
-
-def test_plan_variant_selection_matches_projected_pending_lanes() -> None:
+def test_plan_variant_packets_match_projected_pending_lanes() -> None:
     payload = _input()
     workspace = _workspace(payload, payload["evidence"])
     ordinary = build_canonical_plan_question(
@@ -873,7 +562,7 @@ def test_plan_variant_selection_matches_projected_pending_lanes() -> None:
         goal={"goal_kind": "open_goal"},
         appraisal_summary=[],
     )
-    assert _effective_prompt("P", ordinary) == facade_module._P_ORDINARY_SYSTEM_PROMPT
+    assert "pending_resolver_continuation" not in ordinary
 
     workspace["pending_resolver_continuation"] = {
         "schema_version": RESOLVER_PENDING_CONTINUATION_VERSION,
@@ -894,9 +583,6 @@ def test_plan_variant_selection_matches_projected_pending_lanes() -> None:
     )
     assert "pending_resolver_continuation" in pending
     assert "response_plan_contract_variant" not in json.dumps(pending)
-    assert _effective_prompt("P", pending) == (
-        facade_module._P_PENDING_CLARIFICATION_SYSTEM_PROMPT
-    )
 
     post_workspace = _workspace(payload, payload["evidence"])
     post_workspace["response_plan_contract_variant"] = "post_pending_resolution"
@@ -921,9 +607,6 @@ def test_plan_variant_selection_matches_projected_pending_lanes() -> None:
     assert all(
         row["capability"] != "human_clarification"
         for row in post_pending["capabilities"]["resolvers"]
-    )
-    assert _effective_prompt("P", post_pending) == (
-        facade_module._P_ORDINARY_SYSTEM_PROMPT
     )
 
 

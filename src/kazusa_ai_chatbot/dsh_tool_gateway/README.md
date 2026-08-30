@@ -1,9 +1,8 @@
 # DSH Semantic Tool Gateway
 
 The gateway publishes the description-free, storage-independent semantic
-catalog mounted by the Plan 3 DSH Standard route. It contains exactly
-fourteen rows: the thirteen Plan 2 rows below remain byte-identical and the
-sole additive row is kazusa_inspect_public_media.
+catalog mounted by the DSH Standard route. It contains exactly fourteen rows
+in canonical order.
 
 1. kazusa_search_conversation_history
 2. kazusa_read_conversation_entries
@@ -33,12 +32,11 @@ raw bytes and base64 are never model-facing.
 
 ## Catalog authority
 
-The fourteenth row changes the semantic catalog digest. A terminal or
-checkpointed V2 thread without an open interaction rotates to a fresh
-segment carrying the new digest. Old authority and grants fail closed.
-Open pre-cutover interactions and grants drain before cutover. Native
-Standard names retain precedence and submit_resolution remains the sole
-terminal surface.
+Any catalog schema change produces a new semantic catalog digest. A terminal
+or checkpointed V2 thread without an open interaction rotates to a fresh
+segment carrying the current digest. Authority and grants bound to an earlier
+digest fail closed. Native Standard names retain precedence and
+submit_resolution remains the sole terminal surface.
 
 Run gateway contract, media safety, authority, and worker tests with
 venv\Scripts\python.

@@ -54,10 +54,8 @@ async def test_lifespan_injects_one_shared_runtime_into_interaction_and_task_own
     assert task_orchestrator._TASK_RESOLUTION_RUNTIME is runtime
 
 
-def test_v2_interaction_route_has_no_checkpoint_delivery_or_reply_sink() -> None:
-    """The composition root exposes only the authenticated internal V2 route."""
-
-    import inspect
+def test_v2_interaction_route_exposes_one_internal_endpoint() -> None:
+    """The composition root exposes the authenticated internal V2 route."""
 
     from kazusa_ai_chatbot import service
 
@@ -67,9 +65,3 @@ def test_v2_interaction_route_has_no_checkpoint_delivery_or_reply_sink() -> None
         if route.path.startswith("/runtime/dsh/interactions")
     }
     assert route_paths == {"/runtime/dsh/interactions"}
-
-    source = inspect.getsource(service)
-    assert "_enact_pending_dsh_reply_after_chat" not in source
-    assert "continue_resolution=" not in source
-    assert "issue_continuation_authority=" not in source
-    assert "/runtime/dsh/interactions/checkpoint" not in source

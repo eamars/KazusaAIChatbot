@@ -1,4 +1,4 @@
-"""Real-Mongo lifecycle and fencing coverage for the Plan 3 DSH cutover."""
+"""Real-Mongo lifecycle and fencing coverage for DSH task resolution."""
 
 from __future__ import annotations
 

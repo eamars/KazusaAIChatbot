@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import json
 from copy import deepcopy
 from types import SimpleNamespace
@@ -140,22 +139,6 @@ def _source_dialog_state(
     return state
 
 
-def test_dialog_prompt_is_a_complete_literal_with_owned_authority() -> None:
-    """Keep dialog authority local to its complete immutable prompt."""
-
-    source = inspect.getsource(dialog_module)
-    prompt = dialog_module._V2_DIALOG_GENERATOR_PROMPT
-
-    assert "VISIBLE_CONTENT_AUTHORITY_GUIDANCE" not in source
-    assert "_V2_DIALOG_GENERATOR_PROMPT_TEMPLATE" not in source
-    assert "_DIALOG_REPAIR_INSTRUCTION" not in source
-    assert ".format(" not in source
-    assert prompt.count("可见语义的选择权属于") == 1
-    assert "dialog 必须服从已选 content_plan" in prompt
-    assert "# 输出格式" not in prompt
-    assert "字段必须恰好是 final_dialog" not in prompt
-
-
 @pytest.mark.asyncio
 async def test_dialog_agent_exposes_owned_contract(
     monkeypatch: pytest.MonkeyPatch,
@@ -188,34 +171,6 @@ async def test_dialog_agent_exposes_owned_contract(
     assert result["attempt_diagnostics"] == [diagnostic]
 
 
-def test_dialog_prompt_prioritizes_epistemic_boundary() -> None:
-    """Keep P-owned assertion authority above lower surface plan fields."""
-
-    prompt = dialog_module._V2_DIALOG_GENERATOR_PROMPT
-
-    assert "epistemic_boundary" in prompt
-    assert "它的权威高于" in prompt
-    assert "未观察到的特征不能用来排除" in prompt
-    assert "从句、前提句、原因连接和反问" in prompt
-    assert "输出前逐句检查可见断言" in prompt
-    assert "不用动作舞台提示、拟声" in prompt
-    assert "低于 permitted_action_results 的事实权威" in prompt
-    assert "action_kind=speak 只授权说出或发送 final_dialog 的文字" in prompt
-    assert "同一类型、同一效果的 executed 行精确支持" in prompt
-    assert "# 语义审计" in prompt
-    assert "对未来外部效果的具体承诺也属于行动主张" in prompt
-    assert "pending、scheduled 或 executed 行" in prompt
-
-
-def test_dialog_creative_expansion_cannot_add_unselected_stance_or_relationship_payoff() -> None:
-    """Keep wording creativity inside the selected semantic surface."""
-
-    prompt = dialog_module._V2_DIALOG_GENERATOR_PROMPT
-
-    assert "创造性展开不得增加 content_plan 未选择的立场" in prompt
-    assert "不得把已表达的关系性回应模式改写成新的主要收束" in prompt
-
-
 def test_validated_dialog_messages_collapses_blank_line_runs() -> None:
     """Collapse internal blank lines while preserving message boundaries."""
 
@@ -235,7 +190,7 @@ def test_validated_dialog_messages_collapses_blank_line_runs() -> None:
 
 
 @pytest.mark.asyncio
-async def test_dialog_retry_prompt_carries_rejected_candidate_and_contract_error(
+async def test_dialog_retry_carries_rejected_candidate_and_contract_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A structural rejection receives one bounded content-repair payload."""

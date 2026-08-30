@@ -1,6 +1,6 @@
 # DSH Task Resolution
 
-kazusa_ai_chatbot.task_resolution owns the single Plan 3 DSH task edge.
+kazusa_ai_chatbot.task_resolution owns the single DSH task edge.
 Cognition supplies a typed semantic task request when its evidence and
 judgment call for work. DSH owns admission, execution, checkpointing,
 recovery, and terminal projection. Dialog and the dispatcher own visible

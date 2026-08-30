@@ -1,4 +1,4 @@
-"""Read-only five-count drain gate for the Plan 3 legacy cutover."""
+"""Report whether legacy task-execution state is fully drained."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from kazusa_ai_chatbot.db._client import get_db
-from kazusa_ai_chatbot.db.script_operations import count_dsh_plan3_drain_rows
+from kazusa_ai_chatbot.db.script_operations import count_dsh_legacy_drain_rows
 
 _TERMINAL_LEDGER_STATUSES = {"completed", "rejected", "failed", "cancelled"}
 _NONTERMINAL_LEDGER_STATUSES = {
@@ -26,7 +26,7 @@ _NONTERMINAL_LEDGER_STATUSES = {
 }
 
 
-async def collect_dsh_plan3_drain(
+async def collect_dsh_legacy_drain(
     *,
     legacy_coding_workspace_root: Path,
 ) -> dict[str, object]:
@@ -34,9 +34,9 @@ async def collect_dsh_plan3_drain(
 
     root = _contained_root(legacy_coding_workspace_root)
     database = await get_db()
-    mongo_counts = await count_dsh_plan3_drain_rows(database)
+    mongo_counts = await count_dsh_legacy_drain_rows(database)
     report = {
-        "schema_version": "dsh_plan3_drain_report.v1",
+        "schema_version": "dsh_legacy_drain_report.v1",
         "generated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "counts": {
             **mongo_counts,
@@ -115,7 +115,7 @@ async def main(argv: Sequence[str] | None = None) -> dict[str, object]:
     )
     parser.add_argument("--format", choices=("json",), default="json")
     args = parser.parse_args(argv)
-    report = await collect_dsh_plan3_drain(
+    report = await collect_dsh_legacy_drain(
         legacy_coding_workspace_root=args.legacy_coding_workspace_root,
     )
     print(json.dumps(report, ensure_ascii=False, sort_keys=True))

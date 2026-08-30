@@ -4,8 +4,7 @@ The sidecar is the independently operating DSH Standard execution boundary.
 It authenticates Brain/resolver calls, persists session events and receipts,
 owns native Standard tools, and forwards the exact semantic catalog.
 
-The model-visible catalog has exactly fourteen rows. Plan 2 rows 1 through
-13 remain byte-identical; Plan 3 adds only row 14:
+The model-visible catalog has exactly fourteen rows in canonical order:
 
 1. kazusa_search_conversation_history
 2. kazusa_read_conversation_entries
@@ -30,11 +29,11 @@ MIME/magic agreement, Pillow decoding, and 1..8192 dimensions are required.
 The sidecar forwards bounded vision evidence with source dsh_public_media,
 never raw bytes or base64.
 
-The new row produces a new catalog digest. Eligible terminal/checkpointed V2
-threads rotate to a fresh segment when no interaction is open; old authority
-and grants fail closed. Open pre-cutover interactions and grants drain first.
+Any catalog schema change produces a new catalog digest. Eligible
+terminal/checkpointed V2 threads rotate to a fresh segment when no interaction
+is open; authority and grants bound to an earlier digest fail closed.
 
 system.health is ready only when authenticated route, Standard,
 semantic-worker, web, Brain, catalog, policy, workspace, profile, release,
-and store checks agree. Build and sidecar tests are run through the pinned
-package-manager command recorded by Plan 3.
+and store checks agree. Build and sidecar tests use the package-manager version
+pinned in `package.json`.

@@ -1,10 +1,9 @@
-"""Executable lifecycle tests for the Plan 3 task-resolution service."""
+"""Executable lifecycle tests for the DSH task-resolution service."""
 
 from __future__ import annotations
 
 import asyncio
 import importlib
-import inspect
 from collections.abc import Awaitable
 from typing import Any
 
@@ -214,17 +213,6 @@ def test_task_session_identity_is_stable_across_objective_paraphrases() -> None:
         _request(),
         {**first_context, "channel_id": "channel-2"},
     )
-
-
-def test_internal_dsh_interaction_never_creates_user_wait_state() -> None:
-    """The inline DSH binding graph has no interaction-wait transition."""
-
-    service = _service_module()
-    transition_allowed = getattr(service, "_inline_transition_allowed", None)
-    assert callable(transition_allowed)
-    assert transition_allowed("active", "checkpointed") is True
-    assert transition_allowed("active", "terminal") is True
-    assert "waiting_for_" + "interaction" not in inspect.getsource(service)
 
 
 @pytest.mark.asyncio

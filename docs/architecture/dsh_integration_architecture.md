@@ -1,9 +1,8 @@
-# DSH Integration Architecture — Plan 3
+# DSH Integration Architecture
 
-Status: current production integration contract. Plan 2's pinned DSH
-Standard profile, RPC/intake epochs, policy, store, native-tool ownership,
-and interaction authority remain fixed. Plan 3 adds one semantic row and
-cuts the task edge over to DSH.
+Status: current production integration contract. The pinned DSH Standard
+profile, RPC/intake epochs, policy, store, native-tool ownership, interaction
+authority, and task edge form one production runtime.
 
 ## End-to-end route
 
@@ -51,8 +50,8 @@ Brain cognition and delivery.
 
 ## Fourteen-row semantic catalog
 
-The model-visible semantic catalog contains exactly fourteen rows. Plan 2
-rows 1 through 13 remain byte-identical:
+The model-visible semantic catalog contains exactly fourteen rows in canonical
+order:
 
 1. kazusa_search_conversation_history
 2. kazusa_read_conversation_entries
@@ -79,12 +78,10 @@ bytes and base64 are excluded from all model-facing contracts.
 
 ## Digest and segment rotation
 
-The additive row changes semantic_catalog_digest. A terminal or checkpointed
-V2 thread with no open interaction rotates to a fresh segment carrying the
-new digest. The previous authority and one-shot grants fail closed after
-rotation. Open pre-cutover interactions and grants are cooperatively drained
-before the Brain/sidecar catalog switch. No Plan 2 profile, RPC, policy, or
-store epoch is changed.
+Any catalog schema change produces a new `semantic_catalog_digest`. A terminal
+or checkpointed V2 thread with no open interaction rotates to a fresh segment
+carrying the current digest. Authority and one-shot grants bound to an earlier
+digest fail closed after rotation.
 
 ## Readiness and recovery
 
@@ -109,10 +106,7 @@ evidence; it does not become a persona or final-response layer.
 The read-only operational audit is:
 
 ~~~powershell
-venv\Scripts\python scripts/check_dsh_plan3_drain.py --legacy-coding-workspace-root <abs-root> --format json
+venv\Scripts\python scripts/check_dsh_legacy_drain.py --legacy-coding-workspace-root <abs-root> --format json
 ~~~
 
-It counts five governed legacy categories and writes nothing. The removed
-background/coding route families and associated workspace/preflight/repair
-configuration are documented only as deleted configuration in the active
-Plan 3 ledger.
+It counts five governed legacy categories and writes nothing.

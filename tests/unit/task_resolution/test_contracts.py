@@ -1,4 +1,4 @@
-"""Executable tests for the closed Plan 3 task-resolution contracts."""
+"""Executable tests for the closed DSH task-resolution contracts."""
 
 from __future__ import annotations
 

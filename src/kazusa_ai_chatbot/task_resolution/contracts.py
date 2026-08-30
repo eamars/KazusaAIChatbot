@@ -1,4 +1,4 @@
-"""Closed contracts for the Plan 3 DSH task-resolution boundary."""
+"""Closed contracts for the DSH task-resolution boundary."""
 
 from __future__ import annotations
 

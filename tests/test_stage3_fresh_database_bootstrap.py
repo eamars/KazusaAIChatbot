@@ -208,29 +208,3 @@ def test_stage3_report_emits_evidence_and_native_manifest(tmp_path: Path) -> Non
     assert evidence["trace_cardinality"]["settled_episode_traces"] == 40
     assert manifest["schema_version"] == "stage3_native_schema_manifest.v1"
     assert manifest["collections"][0]["collection_name"] == "character_state"
-
-
-def test_fresh_database_fixture_uses_current_required_routes() -> None:
-    """Fresh-database cases must require DSH and omit retired routes."""
-
-    fixture_path = Path(__file__).resolve().parent / "fixtures" / "stage3_fresh_database_cases.json"
-    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
-    routes = set(fixture.get("required_routes", []))
-
-    assert "agentic_resolver" in routes
-    assert "dsh_task_resolution" in routes
-    assert "complex_task_resolver" not in routes
-
-
-def test_v2_dsh_interaction_indexes_have_no_open_reply_lookup() -> None:
-    """The V2 audit keeps identity/grant indexes without reply matching."""
-
-    from kazusa_ai_chatbot.db.dsh_interactions import INTERACTION_INDEXES
-
-    names = {str(index["name"]) for index in INTERACTION_INDEXES}
-    assert names == {
-        "dsh_interaction_id_unique",
-        "dsh_interaction_issuer_nonce_unique",
-        "dsh_interaction_grant_lookup_v2",
-    }
-    assert not any("reply" in name for name in names)
