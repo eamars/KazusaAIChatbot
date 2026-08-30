@@ -69,20 +69,6 @@ DIALOG_USAGE_MODE_SELF_COGNITION_ACTION_CANDIDATE = (
 )
 DIALOG_GENERATOR_TOTAL_ATTEMPTS = V2_MODEL_TOTAL_ATTEMPTS
 DIALOG_CANDIDATE_MAX_CHARS = 12000
-_DIALOG_OUTPUT_CONTRACT = {
-    "additionalProperties": False,
-    "required_fields": ["final_dialog"],
-    "final_dialog": {
-        "type": "array",
-        "minimum_items": 1,
-        "item": {
-            "type": "string",
-            "minimum_characters": 1,
-            "maximum_characters": DIALOG_CANDIDATE_MAX_CHARS,
-        },
-        "aggregate_maximum_characters": DIALOG_CANDIDATE_MAX_CHARS,
-    },
-}
 _HTTP_URL_PATTERN = re.compile(
     r"https?://[^\s\\)>\]}\"']+",
     re.IGNORECASE,
@@ -640,7 +626,6 @@ async def _render_dialog_candidate(
         "epistemic_boundary": validated_surface["epistemic_boundary"],
         "text_surface_output_v2": dict(validated_surface),
         "candidate_role_frame": _candidate_role_frame(validated_surface),
-        "output_contract": _DIALOG_OUTPUT_CONTRACT,
         "user_name": user_name,
     }
     if source_urls:

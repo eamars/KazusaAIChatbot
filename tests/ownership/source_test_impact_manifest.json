@@ -1129,7 +1129,6 @@
         "tests/unit/nodes/test_dialog_agent.py::test_dialog_retry_prompt_carries_rejected_candidate_and_contract_error"
       ],
       "supplemental_tests": [
-        "tests/test_dsh_plan3_cognition_admission_live_llm.py::test_live_dialog_producer_returns_plan3_marker_contract",
         "tests/test_dialog_mention_target_user.py::test_dialog_agent_returns_no_mention_flag",
         "tests/test_semantic_response_progression_live_llm.py::test_live_bounded_thermal_conduction_explanation_keeps_relational_carriers_grounded",
         "tests/test_semantic_response_progression_live_llm.py::test_live_scoped_fan_cord_permission_keeps_relational_carriers_grounded",
@@ -1844,10 +1843,12 @@
       "owner": "shared text and visual surface owner",
       "contract": "surface planning and bounded dialog handoff",
       "required_unit_tests": [
-        "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_content_plan_prompt_uses_shared_visible_content_authority_contract",
+        "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_surface_prompts_are_complete_literals_with_owned_authority",
         "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_text_surface_uses_one_content_call_and_deterministic_preference_projection",
         "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_successful_content_plan_is_not_discarded_by_deterministic_projection",
-        "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_surface_payload_projects_exact_overused_moves"
+        "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_surface_payload_projects_exact_overused_moves",
+        "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_degraded_tool_result_surface_preserves_semantic_result",
+        "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_terminal_dialog_preserves_degraded_tool_result_semantic_result"
       ],
       "supplemental_tests": [
         "tests/test_semantic_response_progression_live_llm.py::test_live_l3_does_not_reintroduce_unselected_semantic_payoff"
@@ -1862,11 +1863,9 @@
         "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_text_surface_progression_contract_keeps_one_semantic_call",
         "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_content_plan_keeps_goal_reason_outside_visible_semantic_authority",
         "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_visible_content_authority_keeps_epistemic_examples_outside_content_selection",
-        "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_visible_content_authority_blocks_relationship_meaning_laundering_as_delivery",
-        "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_content_plan_rejects_nested_candidate_and_reuses_output_contract"
+        "tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_visible_content_authority_blocks_relationship_meaning_laundering_as_delivery"
       ],
       "supplemental_tests": [
-        "tests/test_dsh_plan3_cognition_admission_live_llm.py::test_live_content_plan_producer_returns_plan3_marker_contract",
         "tests/test_semantic_response_progression_live_llm.py::test_live_l3_does_not_reintroduce_unselected_semantic_payoff",
         "tests/test_semantic_response_progression_live_llm.py::test_live_bounded_thermal_conduction_explanation_keeps_relational_carriers_grounded",
         "tests/test_semantic_response_progression_live_llm.py::test_live_scoped_fan_cord_permission_keeps_relational_carriers_grounded",

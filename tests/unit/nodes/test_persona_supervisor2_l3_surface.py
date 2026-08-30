@@ -17,6 +17,7 @@ from kazusa_ai_chatbot.background_work.result_source import (
 from kazusa_ai_chatbot.cognition_shared import surface, surface_stages
 from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionContractError,
+    CognitionExecutionError,
     TextSurfaceServicesV2,
     validate_text_surface_input_canonical,
 )
@@ -34,14 +35,18 @@ from tests.unit.nodes.surface_fixtures import (
 )
 
 
-def _tool_result_surface_state() -> tuple[dict[str, object], dict[str, object]]:
+def _tool_result_surface_state(
+    *,
+    evidence_excerpt: str = "PLAN3_E2E_BETA_SELECTED",
+    semantic_summary: str = "The beta marker is ready.",
+) -> tuple[dict[str, object], dict[str, object]]:
     """Build one L3 state carrying a validated completed task result."""
 
     job = deepcopy(_accepted_task_completed_job())
     task_result = job["task_resolution_result"]
     assert isinstance(task_result, dict)
-    task_result["evidence_excerpts"] = ["PLAN3_E2E_BETA_SELECTED"]
-    task_result["prompt_safe_summary"] = "The beta marker is ready."
+    task_result["evidence_excerpts"] = [evidence_excerpt]
+    task_result["prompt_safe_summary"] = semantic_summary
     episode = build_result_ready_episode_from_job(job)
     continuation_ref = task_result["goal_continuation_ref"]
     state = build_surface_state(build_relational_decision())
@@ -149,9 +154,7 @@ def test_surface_repair_packet_projects_runtime_diagnostics_only() -> None:
 
     assert messages[0].content == surface_stages.CONTENT_PLAN_SYSTEM_PROMPT
     assert payload["surface"] == first_payload["surface"]
-    assert payload["surface"]["output_contract"] == (
-        surface_stages._CONTENT_PLAN_OUTPUT_CONTRACT
-    )
+    assert "output_contract" not in payload["surface"]
     assert set(payload["contract_repair"]) == {
         "reason",
         "contract_error",
@@ -161,104 +164,151 @@ def test_surface_repair_packet_projects_runtime_diagnostics_only() -> None:
     assert "repair_instruction" not in json.dumps(payload)
 
 
+def test_degraded_tool_result_surface_preserves_semantic_result() -> None:
+    """A succeeded typed result remains deliverable after content exhaustion."""
+
+    marker = "PLAN3_E2E_BETA_SELECTED"
+    state, _task_result = _tool_result_surface_state(
+        evidence_excerpt="A separate provenance finding.",
+        semantic_summary=f"Resolved result: {marker}",
+    )
+    payload = l3_surface.build_text_surface_input_from_global_state(
+        state,
+        interaction_style_context="brief and natural",
+    )
+    resolver_result = payload["resolver_result"]
+    selected_intent = payload["response_plan"]["response_goal"]
+
+    degraded = surface.build_degraded_text_surface(payload)
+
+    assert resolver_result["semantic_result"] == f"Resolved result: {marker}"
+    assert resolver_result["evidence_excerpts"] == [
+        "A separate provenance finding.",
+    ]
+    assert marker not in selected_intent
+    assert degraded["content_plan"] == resolver_result["semantic_result"]
+    assert degraded["selected_surface_intent"] == selected_intent
+    assert degraded["resolver_result"] == resolver_result
+
+
+def test_degraded_ordinary_surface_keeps_selected_intent() -> None:
+    """Ordinary surface degradation preserves the selected response intent."""
+
+    payload = l3_surface.build_text_surface_input_from_global_state(
+        build_surface_state(build_relational_decision()),
+        interaction_style_context="brief and natural",
+    )
+
+    degraded = surface.build_degraded_text_surface(payload)
+
+    assert degraded["content_plan"] == payload["response_plan"]["response_goal"]
+
+
+def test_degraded_blocked_tool_result_keeps_selected_intent() -> None:
+    """A non-succeeded resolver result cannot replace selected intent."""
+
+    state, _task_result = _tool_result_surface_state()
+    payload = l3_surface.build_text_surface_input_from_global_state(
+        state,
+        interaction_style_context="brief and natural",
+    )
+    blocked_result = dict(payload["resolver_result"])
+    blocked_result.update({
+        "status": "blocked",
+        "semantic_result": "Blocked result must not become delivery text.",
+        "evidence_state": "blocked",
+        "evidence_excerpts": [],
+        "evidence_handles": [],
+        "remaining_needs": ["One required dependency is unavailable."],
+    })
+    payload["resolver_result"] = blocked_result
+
+    degraded = surface.build_degraded_text_surface(payload)
+
+    assert degraded["content_plan"] == payload["response_plan"]["response_goal"]
+    assert degraded["selected_surface_intent"] == payload["response_plan"][
+        "response_goal"
+    ]
+
+
 @pytest.mark.asyncio
-async def test_content_plan_rejects_nested_candidate_and_reuses_output_contract(
+async def test_terminal_dialog_preserves_degraded_tool_result_semantic_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Content planning regenerates from its unchanged typed packet contract."""
+    """Both exhausted model stages retain validated tool-result semantics."""
 
-    trace_rows: list[dict[str, object]] = []
+    marker = "PLAN3_E2E_BETA_SELECTED"
+    state, _task_result = _tool_result_surface_state(
+        evidence_excerpt="A separate provenance finding.",
+        semantic_summary=f"Resolved result: {marker}",
+    )
+    payload = l3_surface.build_text_surface_input_from_global_state(
+        state,
+        interaction_style_context="brief and natural",
+    )
 
-    async def record_trace_step(**kwargs: object) -> dict[str, object]:
-        trace_rows.append(kwargs)
+    async def fail_content_stage(*_args: object, **_kwargs: object) -> object:
+        raise CognitionExecutionError(
+            "content-plan candidates exhausted",
+            error_code="surface_content_plan_contract_exhausted",
+            stage="surface.content_plan",
+            attempt_count=3,
+            safe_checkpoint="post_cognition_commit",
+        )
+
+    async def record_event(**_kwargs: object) -> dict[str, object]:
         return {}
 
-    class _Invoker:
+    class _InvalidDialogInvoker:
         def __init__(self) -> None:
             self.calls: list[object] = []
-            self.outcomes = [
-                {
-                    "content_plan": [{"goal": "nested plan"}],
-                    "delivery_profile": {
-                        "lexical_register": "natural",
-                        "sentence_shape": "complete",
-                        "rhythm": "steady",
-                        "hesitation": "none",
-                        "punctuation": "clear",
-                    },
-                    "lexical_avoidances": [],
-                    "dialog": "invalid nested candidate",
-                },
-                {
-                    "content_plan": "Report PLAN3_E2E_BETA_SELECTED.",
-                    "content_requirements": [
-                        "Preserve PLAN3_E2E_BETA_SELECTED.",
-                    ],
-                    "delivery_profile": {
-                        "lexical_register": "natural",
-                        "sentence_shape": "complete",
-                        "rhythm": "steady",
-                        "hesitation": "none",
-                        "punctuation": "clear",
-                    },
-                    "lexical_avoidances": [],
-                },
-            ]
 
         async def ainvoke(self, messages, *, config):
             del config
             self.calls.append(messages)
-            outcome = self.outcomes.pop(0)
-            return SimpleNamespace(content=json.dumps(outcome))
+            return SimpleNamespace(content='{"unexpected": "field"}')
 
-    config = LLMCallConfig(
-        stage_name="content-plan",
-        route_name="test-surface",
-        base_url="http://test",
-        api_key="test",
-        model="test",
-        temperature=0.0,
-        top_p=1.0,
-        top_k=None,
-        max_completion_tokens=512,
-        presence_penalty=None,
-        thinking=LLMThinkingConfig(enabled=False),
-        context_window_tokens=4096,
+    monkeypatch.setattr(surface, "run_content_plan_stage", fail_content_stage)
+    surface_output = await surface._run_text_surface_planning(
+        payload,
+        SimpleNamespace(llm=object(), content_plan_config=object()),
+        session=None,
+    )
+    invoker = _InvalidDialogInvoker()
+    monkeypatch.setattr(dialog_agent, "_dialog_generator_llm", invoker)
+    monkeypatch.setattr(
+        dialog_agent.llm_tracing,
+        "record_llm_trace_step",
+        record_event,
     )
     monkeypatch.setattr(
-        surface_stages.llm_tracing,
-        "record_llm_trace_step",
-        record_trace_step,
+        dialog_agent.event_logging,
+        "record_llm_stage_event",
+        record_event,
     )
-    invoker = _Invoker()
+    monkeypatch.setattr(
+        dialog_agent.event_logging,
+        "record_model_contract_event",
+        record_event,
+    )
+    monkeypatch.setattr(
+        dialog_agent.event_logging,
+        "record_dialog_quality_event",
+        record_event,
+    )
+    dialog_state = build_surface_state(build_relational_decision())
+    dialog_state["cognitive_episode"] = payload["episode"]
+    dialog_state["text_surface_output_v2"] = surface_output
+    dialog_state["dialog_usage_mode"] = "live_visible_reply"
 
-    result = await surface_stages._run_surface_stage(
-        payload={"observation": "PLAN3_E2E_BETA_SELECTED"},
-        system_prompt=surface_stages.CONTENT_PLAN_SYSTEM_PROMPT,
-        llm=invoker,
-        config=config,
-        stage_name="content_plan",
-        validator=surface_stages._validate_content_plan_result,
-        safe_checkpoint="pre_state_commit",
-    )
+    dialog_output = await dialog_agent.dialog_generator(dialog_state)
 
-    first_payload = json.loads(invoker.calls[0][1].content)
-    repair_payload = json.loads(invoker.calls[1][1].content)
-    assert result[0] == "Report PLAN3_E2E_BETA_SELECTED."
-    assert len(invoker.calls) == 2
-    assert first_payload["surface"]["output_contract"] == (
-        surface_stages._CONTENT_PLAN_OUTPUT_CONTRACT
-    )
-    assert repair_payload["surface"] == first_payload["surface"]
-    assert set(repair_payload["contract_repair"]) == {
-        "reason",
-        "contract_error",
-        "invalid_candidate",
-    }
-    assert "guidance" not in json.dumps(first_payload)
-    assert "instruction" not in json.dumps(first_payload)
-    assert all(row["parse_status"] == "contract_error" for row in trace_rows[:1])
-    assert trace_rows[1]["parse_status"] == "succeeded"
+    assert surface_output["content_plan"] == f"Resolved result: {marker}"
+    assert surface_output["selected_surface_intent"] == payload["response_plan"][
+        "response_goal"
+    ]
+    assert dialog_output["final_dialog"] == [f"Resolved result: {marker}"]
+    assert len(invoker.calls) == 3
 
 
 def test_l3_surface_preserves_relational_willingness() -> None:

@@ -150,9 +150,10 @@ def build_degraded_text_surface(
 
     payload = validate_text_surface_input_canonical(input_payload)
     selected_intention = payload["response_plan"].get("response_goal", "")
+    content_plan = _degraded_content_plan(payload, selected_intention)
     output: TextSurfaceOutputV2 = {
         "schema_version": "text_surface_output.v2",
-        "content_plan": selected_intention,
+        "content_plan": content_plan,
         "content_requirements": [
             "表达已选择的回应意图，并保持当前事实、角色方向和能力结果原义。",
         ],
@@ -194,6 +195,23 @@ def build_degraded_text_surface(
         )
     validated_output = validate_text_surface_output(output)
     return validated_output
+
+
+def _degraded_content_plan(
+    payload: TextSurfaceInput,
+    selected_intention: str,
+) -> str:
+    """Preserve a succeeded tool-result semantic result through exhaustion."""
+
+    if payload["episode"]["trigger_source"] != "tool_result":
+        return selected_intention
+    resolver_result = payload.get("resolver_result")
+    if not isinstance(resolver_result, Mapping):
+        return selected_intention
+    if resolver_result["status"] != "succeeded":
+        return selected_intention
+    semantic_result = resolver_result["semantic_result"]
+    return semantic_result
 
 
 async def run_visual_surface_planning(

@@ -257,10 +257,8 @@ async def test_dialog_retry_prompt_carries_rejected_candidate_and_contract_error
     first_payload = json.loads(first_messages[1].content)
     second_payload = json.loads(second_messages[1].content)
     assert set(second_payload) == set(first_payload) | {"contract_repair"}
-    assert first_payload["output_contract"] == (
-        dialog_module._DIALOG_OUTPUT_CONTRACT
-    )
-    assert second_payload["output_contract"] == first_payload["output_contract"]
+    assert "output_contract" not in first_payload
+    assert "output_contract" not in second_payload
     repair = second_payload["contract_repair"]
     assert set(repair) == {
         "reason",

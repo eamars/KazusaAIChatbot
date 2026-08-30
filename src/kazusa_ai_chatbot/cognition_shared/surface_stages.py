@@ -49,55 +49,6 @@ DELIVERY_PROFILE_FIELDS = (
     "hesitation",
     "punctuation",
 )
-_CONTENT_PLAN_OUTPUT_CONTRACT = {
-    "additionalProperties": False,
-    "required_fields": [
-        "content_plan",
-        "content_requirements",
-        "delivery_profile",
-        "lexical_avoidances",
-    ],
-    "content_plan": {
-        "type": "string",
-        "minimum_characters": 1,
-        "maximum_characters": 1000,
-    },
-    "content_requirements": {
-        "type": "array",
-        "minimum_items": 1,
-        "maximum_items": 8,
-        "unique_items": True,
-        "item": {
-            "type": "string",
-            "minimum_characters": 1,
-            "maximum_characters": 500,
-        },
-    },
-    "delivery_profile": {
-        "type": "object",
-        "additionalProperties": False,
-        "required_fields": list(DELIVERY_PROFILE_FIELDS),
-        "fields": {
-            field_name: {
-                "type": "string",
-                "minimum_characters": 1,
-                "maximum_characters": 200,
-            }
-            for field_name in DELIVERY_PROFILE_FIELDS
-        },
-    },
-    "lexical_avoidances": {
-        "type": "array",
-        "minimum_items": 0,
-        "maximum_items": 8,
-        "unique_items": True,
-        "item": {
-            "type": "string",
-            "minimum_characters": 1,
-            "maximum_characters": 120,
-        },
-    },
-}
 
 CONTENT_PLAN_SYSTEM_PROMPT = '''规划当前角色实际会说出或发送的内容，表达已经形成的角色判断。综合 active character goal、response plan、
 visible episode、semantic affect、semantic relationship、expression policy、interaction style、
@@ -607,8 +558,6 @@ def _surface_prompt_packet(
     """Serialize and retain the exact reduced packet used by the model."""
 
     reduced_payload = dict(payload)
-    if stage_name == "content_plan":
-        reduced_payload["output_contract"] = _CONTENT_PLAN_OUTPUT_CONTRACT
     while True:
         prompt_text = json.dumps(
             {"surface": reduced_payload},
