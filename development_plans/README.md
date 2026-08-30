@@ -80,6 +80,7 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
+| [dsh_phase3_focused_e2e_signoff_reset_plan_2026-08-31.md](active/bugfix/dsh_phase3_focused_e2e_signoff_reset_plan_2026-08-31.md) | Test-only reset of the DSH Phase 3 live release oracle to one natural user-wire background-task sign-off plus independent semantic review | draft; explicit user approval and implementation command required |
 | [gemma4_thinking_disable_enforcement_gap_bugfix_plan_2026-08-25.md](active/bugfix/gemma4_thinking_disable_enforcement_gap_bugfix_plan_2026-08-25.md) | Gemma 4 provider-side thinking-disable enforcement gap | in_progress |
 | [epistemic_and_role_provenance_fidelity_bugfix_plan_2026-08-24.md](active/bugfix/epistemic_and_role_provenance_fidelity_bugfix_plan_2026-08-24.md) | Independent unsupported-fact, private-residue, and temporary-role provenance fidelity plan from the 50-turn Asuna run | draft; separate ownership and approval boundary |
 | [live_response_generation_failure_modes_problem_statement_2026-08-27.md](active/bugfix/live_response_generation_failure_modes_problem_statement_2026-08-27.md) | Live-response LLM generation failure-mode problem statement | draft; problem statement only; non-executable |
@@ -88,6 +89,7 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
+| [dsh_touched_prompt_quality_quickfix_plan_2026-08-31.md](archive/completed/bugfix/dsh_touched_prompt_quality_quickfix_plan_2026-08-31.md) | Local-LLM quality review and correction for every surviving prompt touched since the pre-DSH baseline | completed; twelve live prompt contracts reviewed and corrected, with tests deferred by explicit user instruction |
 | [public_documentation_dsh_boundary_cleanup_plan_2026-08-31.md](archive/completed/bugfix/public_documentation_dsh_boundary_cleanup_plan_2026-08-31.md) | Kazusa-first top-level presentation restoration and DSH implementation-boundary cleanup across generic adjacent documentation | completed; zero governed leakage, bilingual and ownership review passed, and 6 deterministic documentation checks passed on 2026-08-31 |
 | [dsh_integration_scope_and_test_minimality_quickfix_plan_2026-08-31.md](archive/completed/bugfix/dsh_integration_scope_and_test_minimality_quickfix_plan_2026-08-31.md) | Consolidated DSH scope audit, documentation restoration, repository hygiene, and process-test pruning | completed; deterministic, sidecar, impact, and full non-live gates passed on 2026-08-31 |
 | [live_response_recovery_ladder_and_no_fail_dialog_bugfix_plan_2026-08-27.md](archive/completed/bugfix/live_response_recovery_ladder_and_no_fail_dialog_bugfix_plan_2026-08-27.md) | Uniform live-response recovery ladder and no-fail dialog | completed; parent plan-scope sign-off passed with unrelated baseline repository failures recorded on 2026-08-27 |

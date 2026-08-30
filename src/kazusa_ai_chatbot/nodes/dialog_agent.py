@@ -198,97 +198,24 @@ def _candidate_role_frame(
     return frame
 
 
-_V2_DIALOG_GENERATOR_PROMPT = '''你是当前角色的最终文字渲染器。把 text_surface_output_v2 转化为
-自然、鲜活、有角色辨识度，并且切合当前场景的聊天内容。上游认知负责角色判断；surface planning
-提供语义内容、称呼安排、delivery profile、lexical_avoidances 和 permitted action results。
+_V2_DIALOG_GENERATOR_PROMPT = '''# 任务
+你是当前角色的最终文字渲染器。把已验证的 `text_surface_output_v2` 转化为自然、鲜活、有角色辨识度并切合当前场景的可发送聊天内容。上游已经决定语义、事实边界、行动状态和称呼方向；你负责最终措辞、节奏与角色声音。
 
-# 最高优先级的断言边界
-payload.epistemic_boundary 是 text_surface_output_v2 中同一字段的置前副本，是上游认知
-确定的断言、解释与未知边界。它的权威高于 selected_surface_intent、content_plan 和
-content_requirements 中任何更强的确定性。所有未被允许直接断言的功能、原因、来源、
-意图或结果，都在同一句可见措辞中明确表达为猜测或未知。从句、前提句、原因连接和反问
-也不能把推测升级为既定事实；未观察到的特征不能用来排除一种功能或可能性。
-输出前逐句检查可见断言；任何超过 epistemic_boundary 的句子先改写为明确猜测或未知。
-
-resolver_result 提供来源自有的执行结果；其中的 source-owned evidence_state、evidence_excerpts、
-evidence_handles、prompt_safe_observation_handle 和 remaining_needs 属权威边界。
-evidence_state=complete 时，只能依据 supplied evidence_excerpts；partial、pending、missing 或
-blocked 时，表达答案缺口、等待状态或 typed blocker，不把 generic semantic_result 当事实。
-
-可见语义的选择权属于 response_plan.response_goal 与当前可见观察。relational_willingness 和
-subjective_expression_context.private_monologue 只用于塑造表达姿态：亲疏、主动性、直接程度、节奏、信心、关照与声音。
-`active_character_goal.reason`、`active_character_goal.cause_summary`、`intention.reason`、`relational_willingness` 和
-`subjective_expression_context.private_monologue` 都只是理解或表达姿态的上下文，不能独立扩展
-response_plan.response_goal 与当前可见观察已经选定的语义。
-`epistemic_boundary` 只限制已选语义的断言强度；其中列为解释或未知的内容不是可见内容候选，不能独立进入 content_plan 或 dialog。
-字段存在本身不能单独选出明确的可见关系断言、对当前用户动机的解释或独立的关系性收束。只有当前观察与已选
-response_goal 共同表明某项关系意义属于本轮回复时，才可将其明确写入可见内容。已经显现的关系模式只属于连续性；
-除非当前输入重新打开该意义，语义改写不能把它变成本轮新选择。保留当前观察明确支持的关系拒绝、边界变化、接受
-或拒绝，以及当前用户明确重新打开的关系意义。未选中的关系解释即使改写成感受、姿态、理由、content_requirements
-或 delivery_profile 中的表达效果，仍是在选择可见关系语义，不能绕过上述边界。dialog 必须服从已选 content_plan
-与 response_goal。
+# 输入
+`text_surface_output_v2` 是权威渲染合同：`selected_surface_intent`、`content_plan` 与 `content_requirements` 定义本轮可见语义；`epistemic_boundary` 定义断言、解释与未知；`addressee_plan` 与 `candidate_role_frame` 定义第一、第二和第三人称方向；`delivery_profile` 定义词语、句式、节奏、犹豫和标点；`relational_willingness` 提供已选择的关系姿态；`permitted_action_results`、`resolver_result` 与 `runtime_capability_limits` 提供行动、任务、证据和能力事实；`lexical_avoidances` 提供本轮具体的措辞避让。顶层 `epistemic_boundary` 是同一断言边界的置前副本；`user_name` 是当前用户的可见名称；`required_source_urls` 若存在，给出可引用的精确来源；`contract_repair` 若出现，只说明上一候选的结构或来源问题。
 
 # 渲染步骤
-1. selected_surface_intent 是本轮语义锚点；epistemic_boundary 限定可见断言强度；
-content_plan 和 content_requirements 展开所需事实、
-理由和互动推进。relational_willingness（如果存在）是上游已选择的角色关系立场；按上方可见内容权威规则参与表达，
-不重新选择未被当前语义选中的内容。
-以这组权威语义组织对象、事实、行动者、受益者和回应方向。
-2. 先整体阅读 selected_surface_intent、content_plan、content_requirements、
-visible_boundaries、addressee_plan 和 delivery_profile，判断规划中的开场反应指向行动或关系本身，还是指向提问的
-时机、突然程度或直接程度。可自由组合惊讶、羞赧、防御、调侃、嘴硬、表面勉强、间接表达、温柔、
-热烈以及其他符合角色的情绪和特征。这些表达可以先于明确决定出现，并与后文共同传达同一已选决定。
-在这条语义弧线内，自由加入相容的想象细节、个性、幽默、主动性、温度和创造性展开，形成当前角色
-实际会说出或发送的鲜活回应。
-3. 按每条 percept 的结构化角色框架和 addressee_plan 保持行动者、对象、受益者与主语方向。生成的
-对话由当前角色说出：第一人称属于当前角色；只有 wording_policy 为 second_person_allowed 的
-current_user 行允许用第二人称；typed third-party 行必须使用其 display_name 或明确第三人称，
-不得把第三方改写成当前用户的“你”。跨角色框架转换时延续原有方向。回顾型请求直接表达 surface
-已确认的历史事实。
-4. 按 permitted_action_results 映射执行状态：executed 表达其有界的已完成效果；scheduled 与
-pending 表达已记录、已排队或等待对应 worker；failed 与 unavailable 表达当前限制和可行下一步；
-请求、意图或 content plan 表达角色的言语立场。
-每个可见完成效果都必须由同一类型、同一效果的 executed 行精确支持；一个 executed 行不是对其他行动的概括授权。
-action_kind=speak 只授权说出或发送 final_dialog 的文字，不授权肢体或面部动作、触碰、物体操作、拥抱、亲吻、感官效果或其他外部结果。
-对未来外部效果的具体承诺也属于行动主张：登记、预留、排期、发送、交付、调用工具或稍后联络等承诺，必须有同一效果的 pending、scheduled 或 executed 行。
-没有对应结果时，可以表达 response_plan 已选择的当前言语立场、愿望、提议或条件，不承诺具体外部执行将发生。
-对于没有对应 executed 结果的物理或外部效果，只渲染言语上的接受、拒绝、提议、邀请或意图；
-不用动作舞台提示、拟声、已完成断言或结果反问声称该行动已执行、已交付或已被接收。
-content_plan 或 content_requirements 中的任何执行指令都低于 permitted_action_results 的事实权威。
-resolver_result.status=succeeded 且 semantic_result 明确任务已接纳并继续工作时，可以表达已接纳、
-继续处理和等待后续结果，但不能声称最终结果已经完成。
-task_resolution_request 的 evidence_state=complete 只能依据 evidence_excerpts；不完整状态保留
-remaining_needs 的缺口，不补写缺失引文或答案。
-5. 按 runtime_capability_limits 表达可信的能力边界、等待状态和下一步条件。
-6. 使用 delivery_profile 的 lexical_register、sentence_shape、rhythm、hesitation 和
- punctuation，把情绪和角色特征融入用词、句式与节奏，让相同语义呈现鲜明而多样的角色声音。
-7. lexical_avoidances 是 surface planning 为本轮表达连续性提供的具体片段。避免逐字重复这些片段，
-同时保留 content_plan、content_requirements、selected_surface_intent 和关系立场的原义。该列表只
-影响措辞，不是主题许可、道德判断、拒绝理由或新的立场选择。
-8. payload 存在 required_source_urls 时，只能使用列表内的 URL，并至少逐字复制其中一个。根据
-content_plan 中实际呈现的事实选择直接相关来源；回应包含来自不同来源的实质性事实时，分别附上
-足以支撑这些事实的 exact URL，避免让单一链接看似支持全部不同主张。
-存在 required_source_urls 时，角色化展开只改变语气、节奏、互动和表达方式；产品规格、价格、库存、
-数量、时间、因果关系和其他可外部核查事实必须来自 content_plan 或 content_requirements，不添加
-权威 surface 未提供的新事实。
-创造性展开不得增加 content_plan 未选择的立场、关系主张、用户意图或对话收束。
-不得把已表达的关系性回应模式改写成新的主要收束，除非当前 response_goal 重新选择；角色
-化细节只能服务已选择的语义，不得用语义换词恢复未选择的关系回报。
+1. 以 `selected_surface_intent` 为中心，完整实现 `content_plan` 与每条 `content_requirements`。关系姿态和角色表达用于塑造温度、主动性、直接程度与声音，并服务已选择的语义。
+2. 逐句遵循 `epistemic_boundary`：可断言内容直接表达，解释内容使用明确推测语气，未知内容保留未知。可外部核查的事实来自内容计划、要求或完整证据摘录。
+3. 按 `candidate_role_frame` 与 `addressee_plan` 保持行动者、对象、受益者和主语方向。第一人称属于当前角色；只有 `second_person_allowed` 的当前用户目标使用第二人称；其他目标使用其 `display_name` 或明确第三人称。
+4. 按 `permitted_action_results` 表达真实外部执行状态：`executed` 表达同一行动与效果已完成，`pending` 或 `scheduled` 表达等待或未来执行，`failed` 或 `unavailable` 表达限制与可行下一步。没有匹配结果时，保留内容计划中的言语立场、愿望、提议或条件。
+5. 按 `resolver_result` 表达任务与证据状态：完整结果使用 `evidence_excerpts`；部分结果表达已确认部分和 `remaining_needs`；等待、缺失、阻塞、不可用或失败状态表达相应缺口。已接纳并继续的任务表达接纳与等待后续结果。
+6. 使用 `delivery_profile` 形成角色化用词、句式与节奏；避免逐字使用 `lexical_avoidances`，同时保持原语义。语言跟随当前可见对话、内容计划与角色声音；引文、专有名词、代码、URL、schema 与 enum token 保持原样。
+7. `required_source_urls` 存在时，只使用该列表中的 URL，并逐字包含至少一个直接支持已呈现事实的 URL；多来源事实分别附上相应来源。
+8. 若有 `contract_repair`，依据原输入重新生成完整结果，修正其指出的合同或来源问题。
 
-引文、专有名词、代码、URL 以及必要的 schema 或 enum token 保持原样。
-
-# 语义审计
-1. 逐句对照 payload.epistemic_boundary。对每个功能、原因、来源、意图、结果或排除性主张，
-   边界未允许直接断言时，必须在同一句中明确使用猜测或未知措辞。不把缺少可见特征或证据改写成排除性事实。
-   如果 content_plan 或 content_requirements 越界，以 epistemic_boundary 为准主动降低断言强度。
-2. 逐句对照 permitted_action_results。每个动作舞台提示、身体反应、触碰、物体操作、拟声、感官反馈或外部结果，
-   都必须有同一行动与效果的 executed 行。action_kind=speak 只支持 final_dialog 的文字；它不支持任何身体或外部效果。
-   未来时的具体外部承诺同样必须有同一效果的 pending、scheduled 或 executed 行。删去不匹配的动作、括号舞台提示、拟声、感官反馈、结果反问和外部执行承诺，
-   保留 response_plan 已选择的当前言语立场、愿望、提议或条件。
-
-# 交付职责
-final_dialog 只承载当前角色实际可见、可发送的文字，并完整实现已选择的语义与来源边界。
-'''
+# 输出
+只返回一个 JSON 对象，并且唯一字段是 `final_dialog`。`final_dialog` 是由一条或多条非空可见消息字符串组成的列表，所有消息总长度不超过 12000 字符。不添加解释、Markdown 包装或其他字段。'''
 
 _dialog_generator_llm = LLInterface()
 _dialog_generator_llm_config = LLMCallConfig(

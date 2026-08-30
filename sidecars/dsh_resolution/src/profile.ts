@@ -113,7 +113,18 @@ const SUBMIT_RESOLUTION_SCHEMA = {
   parameters: {
     type: "object",
     properties: {
-      status: { type: "string", required: true },
+      status: {
+        type: "string",
+        enum: [
+          "resolved",
+          "partial",
+          "needs_user_input",
+          "approval_required",
+          "unavailable",
+          "failed",
+        ],
+        required: true,
+      },
       summary: { type: "string", required: true },
       findings: { type: "array", required: true, items: { type: "object", additionalProperties: true } },
       completed_subgoals: { type: "array", required: true, items: { type: "string" } },
@@ -734,11 +745,14 @@ export async function buildProfile(
           name: "kazusa:terminal-contract",
           order: 190,
           text: [
-            "Resolve exactly one bounded Kazusa operation.",
-            "Use the available tools only as needed to satisfy the objective.",
-            "Once sufficient evidence is available, or the operation cannot proceed, call submit_resolution exactly once and immediately end the turn.",
-            "The only valid terminal response is one submit_resolution tool call. Do not give a prose final answer.",
-            "Keep reasoning concise; after tool results arrive, summarize them only inside submit_resolution.",
+            "Resolve one bounded operation from the user JSON object.",
+            "The objective field is the exact outcome to pursue; the facts field contains supplied evidence and constraints for that outcome.",
+            "First identify the smallest unresolved needs, then use available tools only for evidence or work required by the objective.",
+            "When the objective is resolved, partially resolved, waiting for user input or approval, unavailable, or failed, call submit_resolution exactly once and end the turn immediately.",
+            "Choose status from resolved, partial, needs_user_input, approval_required, unavailable, or failed.",
+            "Put the bounded outcome in summary, supported conclusions in findings, finished goal parts in completed_subgoals, unresolved requirements in remaining_needs, produced references in artifact_refs, and material caveats in warnings.",
+            "Set clarification_request only for needs_user_input and approval_request only for approval_required; use null for both fields in every other status.",
+            "The terminal response consists only of the submit_resolution tool call; keep intermediate reasoning concise and place the final synthesis in that call.",
           ].join(" "),
         });
         agentContext.effect(
