@@ -4,8 +4,7 @@
 
 - Owning area: project documentation
 - Applies to: RAG helper agents, RAG3 local-context stage agents,
-  `web_agent3` source subagents, DSH semantic tools, and `background_work`
-  workers
+  `web_agent3` source subagents, and `background_work` workers
 - Source evidence: family-specific registries, protocols, and module ICDs
 - Change policy: harmonize documentation categories, not runtime interfaces
 
@@ -30,7 +29,7 @@ Every family-specific ICD should describe the relevant fields below:
 | Owning package | Python package that owns discovery, validation, and execution. |
 | Runtime purpose | What problem the family solves in the current architecture. |
 | Registry or discovery | Static registry, package discovery, or explicit module list. |
-| Identifier | Stable family-local id such as `name`, `SOURCE`, a semantic tool name, or `WORKER`. |
+| Identifier | Stable family-local id such as `name`, `SOURCE`, or `WORKER`. |
 | Prompt description | Prompt-safe capability text such as `DESCRIPTION`. |
 | Supported actions | Explicit action names, node kinds, or task kinds. |
 | Input contract | Typed object, dict shape, or semantic task text accepted by the family. |
@@ -46,8 +45,8 @@ Every family-specific ICD should describe the relevant fields below:
 ## RAG Helper Agents
 
 RAG helper agents are retained source-level helper modules and historical
-coverage. Production task resolution reaches the RAG3 local-context resolver
-through the specialist described below.
+coverage. The live chat path reaches the RAG3 local-context resolver through
+the stage interface described below.
 
 | Field | Contract |
 |---|---|
@@ -110,28 +109,6 @@ configured, and source-specific metadata providers. Source modules must not
 expose adapter ids, raw credentials, filesystem work, shell work, or final
 persona wording.
 
-## DSH Semantic Task Runtime
-
-DSH is the sole multi-step task execution owner. It is a separate Standard
-sidecar, not another Python subagent family. The controller exposes native DSH
-tools plus a fixed semantic catalog through an authenticated gateway.
-
-| Field | Contract |
-|---|---|
-| Owning packages | `agentic_resolver`, `kazusa_ai_chatbot.dsh_tool_gateway`, and `sidecars/dsh_resolution` |
-| Runtime purpose | Execute one bounded task session and return typed checkpoints or terminal results. |
-| Discovery | No dynamic Kazusa registry; the sidecar publishes the reviewed native and semantic catalogs. |
-| Identifier | Native DSH tool name or one of the supported `kazusa_*` semantic tool names. |
-| Input | `dsh_resolution_intake.v2` plus fenced semantic-tool authority. |
-| Output | Committed checkpoint or evidence-bearing terminal exhaust, projected as `TaskResolutionResultV1`. |
-| Validation owner | Controller, RPC contracts, authority verifier, semantic gateway, and task-binding repository. |
-| Side effects | Only those allowed by DSH Standard and the authenticated semantic tool contract. |
-| Required tests | Contract, authority, gateway, controller, restart, binding, and focused live behavior tests. |
-
-DSH questions, approvals, and plan review are internal character-cognition
-episodes. They produce a typed answer, rejection, or one-shot grant for the
-same fenced session and do not create a user-relay subagent interface.
-
 ## Background Work Workers
 
 | Field | Contract |
@@ -140,16 +117,15 @@ same fenced session and do not create a user-relay subagent interface.
 | Discovery | Closed dispatch on `requested_worker`: `task_orchestrator` or `future_speak`. |
 | Entry functions | `execute_task_orchestrator_job(job, lease_owner=...)` and `execute_future_speak_job(job)`. |
 | Input | A claimed `background_work_job.v2` carrying `task_orchestrator_worker_payload.v2` or a typed future-speak payload. |
-| Output | A DSH checkpoint/terminal result or deterministic future-speak scheduling result. |
+| Output | A bounded task-continuation result or deterministic future-speak scheduling result. |
 | Validation owner | Background-work job validators, payload validator, accepted-task lifecycle, and worker-specific contracts. |
 | Enablement | Runtime configuration controls the worker loop; no dynamic worker discovery exists. |
-| Side effects | Open or continue the bound DSH session, or schedule a future cognition trigger according to the reviewed payload. |
+| Side effects | Open or continue bound task work, or schedule a future cognition trigger according to the reviewed payload. |
 | Required tests | Background-work runtime tests, accepted-task integration tests, worker-specific tests, and result-handoff tests. |
 
-Workers do not send adapter text or call shared cognition directly. DSH task
-work stays inside the sidecar's declared authority and semantic gateway;
-completed work returns through accepted-task result cognition. `future_speak`
-uses its documented durable scheduler path.
+Workers do not send adapter text or call shared cognition directly. Completed
+task work returns through accepted-task result cognition. `future_speak` uses
+its documented durable scheduler path.
 
 ## Cross-Family Rules
 

@@ -130,13 +130,11 @@ coordination API and not through `/chat`-specific imports.
 - Every case enters the bounded cognition resolver and each resolver cycle
   invokes the shared V2 appraisal, state-reduction, goal-branch, bid-collapse,
   and route-selection flow.
-- If V2 cognition selects `task_resolution_request`, the shared DSH
-  runtime handles the bounded task edge. Direct background admission feeds
-  only transient, model-hidden `TaskResolutionAdmissionV1` into the
-  observation path; a durable continuation observation appears only after a
-  committed checkpoint as `TaskResolutionResultV1` with
-  `DshResolutionRefV1`. Binding and recovery use
-  `dsh_task_binding.v1`, `operation_generation`, and revision CAS.
+- If V2 cognition selects `task_resolution_request`, the task-resolution owner
+  handles the bounded task edge. Direct background admission feeds only a
+  transient, model-hidden `TaskResolutionAdmissionV1` into the observation
+  path; durable continuation returns through the typed task-result contract.
+  Binding and recovery remain outside self-cognition ownership.
 - Unsupported resolver requests return a bounded failed observation; they do
   not invoke an undeclared capability.
 - If V2 cognition selects the `speech` route, the V2 text-surface connector

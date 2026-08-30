@@ -650,7 +650,7 @@ owning wording and adapter delivery for the current turn.
 The runtime roster does not expose web research, notes, image generation,
 motor actions, or arbitrary external tools as direct cognition actions.
 `task_resolution_request` is a resolver capability for generic bounded evidence
-work; it opens or continues a fenced DSH session outside the action registry.
+work; it opens or continues task-resolution work outside the action registry.
 Accepted-task controls operate only on an existing opaque task/session binding,
 future-speech materializes its declared lifecycle work, and
 `trigger_future_cognition` materializes scheduler-owned work without calling
@@ -979,7 +979,7 @@ future_speak:
   continuation: background_followup
 
 accepted_task_control:
-  owner: accepted_task -> DSH
+  owner: accepted_task -> task_resolution
   cognition_mode: deliberative
   continuation: background_followup
 
@@ -999,15 +999,16 @@ time.
 
 ```text
 task_resolution_request:
-  owner: cognition_resolver -> DSH task runtime
+  owner: cognition_resolver -> task_resolution
   cognition_mode: deliberative
   continuation: inline_or_background_checkpoint
 ```
 
 This is the only generic task-resolution capability. Cognition decides whether
-current evidence is sufficient; DSH chooses bounded native or semantic tools,
-while deterministic runtime code owns authority, budget, task binding,
-checkpoint commitment, lease fencing, idempotency, and durable job handoff.
+current evidence is sufficient; the task-resolution owner chooses bounded
+execution capabilities, while deterministic runtime code owns authorization,
+budget, task binding, continuation commitment, lease fencing, idempotency, and
+durable job handoff.
 
 ### Deferred Action Capabilities
 
@@ -1194,9 +1195,9 @@ Plans may be approved once:
 
 The live runtime implements typed trigger episodes, L2d action requests,
 `ActionSpecV1`, prompt-safe affordances, memory lifecycle ownership, and the
-shared capability/handler/audit pattern described above. DSH task results enter
-the same cognition and episode-trace path; they do not create a separate action
-registry, persona channel, dialog owner, or consolidation path.
+shared capability/handler/audit pattern described above. Task-resolution
+results enter the same cognition and episode-trace path; they do not create a
+separate action registry, persona channel, dialog owner, or consolidation path.
 
 ## Independent Reference Review Resolution
 

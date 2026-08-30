@@ -6,10 +6,10 @@ history, memories, people, calendar context, and approved web evidence; it
 returns bounded provenance-bearing evidence to cognition. Cognition owns
 stance, character judgment, and response goals. Dialog owns final wording.
 
-The live RAG3 path and its prewarm/cache owner remain outside the DSH task
-session. DSH semantic tools may retrieve the same storage-independent
-evidence during a task, but they do not replace the normal chat evidence
-route, persona judgment, consolidation, or scheduler ownership.
+The live RAG3 path and its prewarm/cache owner remain separate from bounded
+task resolution. Task work may retrieve the same storage-independent evidence,
+but it does not replace the normal chat evidence route, persona judgment,
+consolidation, or scheduler ownership.
 
 Production code must import the named RAG3/local-context boundaries and
 public database facades. It must not create a second supervisor graph,

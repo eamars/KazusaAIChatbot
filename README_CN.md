@@ -5,13 +5,6 @@
 
 <p><strong>面向长期在线数字角色的自演化认知运行时。</strong></p>
 
-<h2>DSH Standard 任务运行时</h2>
-
-<p>DSH 是 Kazusa 生产环境中唯一的多步骤任务解析路径。Python Brain
-负责角色判断、持久任务绑定、认知回流、对话与投递；独立构建的 Node
-sidecar 负责 DSH Standard 执行。配置与启动方式见
-<a href="docs/HOWTO.md#dsh-standard-sidecar">运行指南</a>。</p>
-
 <p>
     <a href="README.md">English</a>
     ·
@@ -44,25 +37,6 @@ Discord、QQ 或调试通道的原始语法。
 [运行指南](docs/HOWTO.md)。如果想理解子系统所有权，可以看
 [运行分层](#运行分层)。
 
-## DSH 任务运行时
-
-`task_resolution_request` 进入同一个 `AgenticResolverRuntime`，生产路径中
-不存在并行的任务执行器。Brain 创建持久的 `dsh_task_binding.v1`，签发带围栏的
-新 authority，并打开或继续 DSH sidecar 会话。checkpoint 和 terminal 结果以
-类型化 `TaskResolutionResultV1` observation 返回，再进入正常的认知、dialog、
-dispatcher 和适配器投递流程。
-
-运行时使用 `kazusa.dsh-resolution-rpc.v2`、`dsh_resolution_intake.v2`、
-`kazusa-resolver-standard-v2` profile，以及固定的 DSH `0.1.1-rc.2` 版本。
-DSH Standard 保留原生 filesystem、shell、coding、jobs、tests、web、approval
-和 sandbox 工具；Kazusa 另外提供 14 个与存储实现无关的语义工具，覆盖会话、
-记忆、人物、活动上下文、日历、附件媒体和公开媒体。
-
-DSH 提出的 question、approval 和 plan review 都是角色内部认知回合。Brain
-针对同一个有围栏的 thread/segment 生成类型化 answer、rejection 或一次性 grant，
-不会把这些内部判断转成面向用户的 relay。已接受任务通过同一不透明
-task/session binding 支持 `continue`、`summarize` 和 `cancel`。
-
 本文会反复用到几个核心术语：
 
 - **适配器**：平台传输层，把 Discord、QQ、调试界面或未来平台事件
@@ -85,10 +59,10 @@ task/session binding 支持 `continue`、`summarize` 和 `cancel`。
 | 有边界的实时回复路径 | 类型化入口、前沿相关性、回合结算、结算后的相关性、认知解析器、被选中的证据能力、动作路由和 L3 输出表面都是显式阶段，带有限额，且负载可检查。 |
 | 多时间尺度记忆 | 最近聊天、短期对话流、检索证据、持久记忆和已调度承诺彼此分离。 |
 | 私念残留 | 一条简短的私人残留通道，把已完成回合中有边界的第一人称理由带入下一次 L2a 认知。 |
-| 任务解析 | 同一个 DSH 运行时使用带围栏的 authority 执行有边界的前台或已接受后台任务，并把类型化 checkpoint/结果送回认知。 |
+| 任务解析 | 有边界的多步骤任务既可以在前台运行，也可以作为已接受的延迟任务继续执行；类型化结果会重新进入认知。 |
 | 分层认知 | 认知先决定立场、边界、判断、风格、动作需求和回复目标，再由被选中的 L3 输出表面渲染结果。 |
 | 后台整合 | 已完成回合根据文本以及动作/输出表面轨迹，更新持久记忆、关系状态、Cache2 失效、图片和进展。 |
-| 已接受的延迟任务 | 已接受的提醒和 DSH 任务会被持久化，由有边界的 worker 续接，并通过认知返回，而不是直接发送。 |
+| 已接受的延迟任务 | 已接受的提醒和较长任务会被持久化，由有边界的 worker 续接，并通过认知返回，而不是直接发送。 |
 | 聊天外反思 | 小时级、每日和已提升的反思运行作为审计记录保存；只有被提升的上下文可以进入普通认知。 |
 | 空闲自我认知 | 后台来源案例可以进入同一套由解析器支撑的角色路径，并遵守来源绑定投递和常规整合规则。 |
 | 日历式后续行动 | 已接受的未来承诺和到期约定可以成为持久日历触发器，稍后运行新的认知。 |
@@ -127,7 +101,6 @@ Kazusa 围绕 OpenAI 兼容端点设计，而不是绑定某个托管供应商�
 | `COGNITION_LLM_CHARACTER_CARRYOVER` | `local-model` | `http://localhost:1234/v1` |
 | `COGNITION_V3_CHAIN_LLM` | `local-model` | `http://localhost:1234/v1` |
 | `COGNITION_V3_SIDECAR_LLM` | `sidecar-model` | `http://localhost:1234/v1` |
-| `AGENTIC_RESOLVER_LLM` | `local-model` | `http://localhost:1234/v1` |
 | `DIALOG_GENERATOR_LLM` | `deepseek-v4-flash` | `https://api.deepseek.com` |
 | `CONSOLIDATION_LLM` | `local-model` | `http://localhost:1234/v1` |
 | `JSON_REPAIR_LLM` | `local-model` | `http://localhost:1234/v1` |
@@ -162,15 +135,10 @@ Kazusa 还需要一个 OpenAI 兼容的嵌入端点，用于历史对话、记�
 
 ## 架构总览
 
-这是完整的顶层地图，不是单个聊天回合的最短路径。先读这条实线实时路径：
-`adapter -> brain service -> queue/intake -> evidence -> cognition -> dialog -> persistence/scheduler`。
-然后再把各个子图当作所有权地图：证据智能体、解析器能力、DSH 任务、
-已接受任务、后台 worker 和持久维护系统。
-
-节点标签里的所有权标记是有意保留的：`[LLM]` 节点做语义判断，
-`[deterministic]` 节点负责校验或移动状态，`[worker]` 节点执行有边界的
-延迟工作。精确的子智能体命名和文档词汇见
-[子智能体接口指南](docs/SUBAGENT_INTERFACES.md)。
+这张顶层图展示角色大脑中稳定的所有权路径：
+`adapter -> brain service -> evidence -> cognition -> dialog -> delivery`。
+任务解析从认知分支出去，并在角色决定如何回应之前返回类型化结果。
+持久化、调度、反思和自我认知都位于最终的实时措辞路径之外。
 
 活跃聊天的入口路径包含两次有边界的相关性判断。前沿路由是一个紧凑的逐消息
 `discard/start/append` 判断器。被接受的群消息会在六秒静默窗口内完成结算，
@@ -193,7 +161,7 @@ flowchart TD
     B["Brain 服务<br/>类型化入口、队列、相关性"]
     R["RAG3 / 本地上下文<br/>有边界的证据"]
     C["认知<br/>立场、边界、回复目标"]
-    D["DSH 任务边缘<br/>带围栏的 sidecar 会话与语义工具"]
+    T["任务解析<br/>有边界的多步骤工作"]
     L["L3 与 dialog<br/>可见渲染"]
     P["持久化与整合<br/>记忆、进展、trace"]
     S["调度、反思、自我认知<br/>位于实时措辞路径之外"]
@@ -201,8 +169,8 @@ flowchart TD
 
     A --> B --> R --> C
     C -->|普通回复| L
-    C -->|task_resolution_request| D
-    D -->|类型化 checkpoint 或结果| C
+    C -->|任务请求| T
+    T -->|类型化观察或结果| C
     L --> O
     C --> P
     L --> P
@@ -228,14 +196,13 @@ V2 认知和 L3 输出表面。符合条件的后台整合可以通过专用的 
 控制台直接渲染这份负载，并与持久化和随时间生效（elapsed-effective）的
 角色姿态并列显示。
 
-RAG3 负责普通本地/私有上下文并投射有边界的证据；`web_agent3`
-负责获准的来源检索；DSH 通过原生工具与语义工具目录负责多步骤任务执行；
-后台工作负责持久 DSH 续接与 `future_speak`。这些证据或执行所有者都不决定
-角色立场和最终措辞。
+RAG3 负责普通本地/私有上下文并投射有边界的证据。获准的来源检索与多步骤
+任务解析保持为独立能力；后台工作负责持久任务续接与 `future_speak`。
+这些证据或执行所有者都不决定角色立场和最终措辞。
 
 解析器在每个循环中保留同一套 L1 -> L2 -> L2d 认知栈。L2d 可以用已选动作
-规格结束，也可以请求一次有边界的能力 observation。`task_resolution_request`
-会打开或继续带围栏的 DSH 会话，并把一条提示词安全的 observation 返回认知。
+规格结束，也可以请求一次有边界的能力观察。`task_resolution_request`
+会打开或继续有边界的任务，并把一条提示词安全的观察返回认知。
 独立的第一轮共享记忆预热仍可把已确认的共享记忆投射到 L2a；它不是任务结果，
 也不会让检索证据变成角色人格。
 
@@ -243,16 +210,15 @@ RAG3 负责普通本地/私有上下文并投射有边界的证据；`web_agent3
 结果、无可见输出的决定和输出表面轨迹，仍然可以在不创建平台发送的情况下，
 进入回合后进展、整合、Cache2 失效、残留记录、日历状态、反思和自我认知。
 
-通用任务通过 `task_resolution_request` 开始。前台任务使用有边界的
-DSH 预算；只有已提交的 checkpoint 才能把同一会话提升为已接受任务和
-task-orchestrator 作业。`future_speak` 保持为独立的调度动作生命周期。完成的
-已接受任务作为规范 `tool_result` 认知来源返回；状态检查只读取当前任务状态，
-不会创建新工作。
+通用任务通过 `task_resolution_request` 开始。前台任务有明确边界；已提交的
+续接状态可以把同一任务提升为已接受的延迟工作。`future_speak` 保持为独立的
+调度动作生命周期。完成的已接受任务作为规范 `tool_result` 认知来源返回；
+状态检查只读取当前任务状态，不会创建新工作。
 
 ## 真实调试示例流程
 
 下面的前三个例子来自真实 debug `/chat` 接口；它会把与运行时适配器相同
-形状的类型化聊天请求送进 Brain。例 4 展示有边界的 DSH 研究结果如何先返回
+形状的类型化聊天请求送进 Brain。例 4 展示有边界的研究结果如何先返回
 认知，再由角色大脑决定是否以及如何形成可见回答。这些例子采集于 2026 年
 7 月 2 日，之后为 README 读者翻译并压缩。它们不是完整的 trace dump。内部 id、
 cache key、原始数据库行和实现字段名都被有意省略。图里把类型化 payload
@@ -263,7 +229,7 @@ cache key、原始数据库行和实现字段名都被有意省略。图里把�
 1. **消息 / 请求** 是聊天平台或调试客户端收到的内容。
 2. **抽取** 是大脑收到的类型化、平台无关消息信封和已补全上下文的人类可读摘要。
 3. **上下文 / 证据** 是用于决策的已检索对话证据、回复上下文或结构化任务状态。
-4. **决策** 是聊天回合中的角色级判断，或有边界 DSH 结果的任务级综合规则。
+4. **决策** 是聊天回合中的角色级判断，或有边界研究结果的任务级综合规则。
 5. **输出** 是用户看到的内容、为后续工作创建的持久交接，或返回给下一阶段的语义信息包。
 
 这对应系统边界：适配器规范化平台事件，RAG 返回证据，认知决定角色立场，
@@ -334,22 +300,22 @@ dispatcher 再决定是否以及如何发送提醒。后台 worker 不直接写�
 
 ### 示例 4：复杂公开研究信息包
 
-这个非聊天解析器案例展示一个宽泛基准请求如何被拆成来源绑定的证据和比较信息包。
-它不会产生可见 dialog；它返回研究信息包，供之后的认知、检查或答案综合使用。
-这些基准数字是 2026 年 7 月 2 日采集到的 trace 内容，不是当前硬件建议。
+这个例子展示一个宽泛的基准测试请求如何被拆成来源明确的证据和比较信息包。
+有边界的结果会先返回认知，再由角色决定是否以及如何形成可见回答。
+这些基准数字来自 2026 年 7 月 2 日采集的运行记录，并非当前硬件建议。
 
 ```mermaid
 flowchart TD
     A["1. 消息<br/>比较 RTX5090 和 R9700 在 Qwen3.6 27B/35B、Gemma4 31/26B 上的表现，如果可能的话包括 Q4。"]
     B["2. 抽取<br/>公开基准任务。把 R9700 视为采集证据中使用的 AMD 32GB GPU 目标。比较 RTX 5090 和 R9700 在 Qwen3.6 27B/35B、Gemma4 31B/26B 上的表现；有证据时纳入 Q4 量化。"]
     C["3. 上下文 / 证据<br/>RTX 5090 分支：双 RTX 5090 FP8 下 Qwen3.6 27B 约 130 tokens/s；某个编码任务中 Gemma4 31B 约 231 tokens/s；Gemma4 26B Q4_K_M 可运行，约需 16GB VRAM。<br/>R9700 分支：来源报告 Qwen3.6 35B 和 27B 吞吐大约在 40 tokens/s 出头；Gemma4 31B 约 39 tokens/s；Gemma4 26B 有可用性信息，但精确 R9700 吞吐不清楚。"]
-    D["4. 决策<br/>返回有边界的知识包。只比较来源支持的数值，保留 caveat，并标出缺失的同提示词正面对比数据。"]
+    D["4. 决策<br/>返回有边界的知识包。只比较来源支持的数值，保留限制说明，并标出缺失的同提示词正面对比数据。"]
     E["5. 输出<br/>调查信息包：采集到的来源片段当时更支持 RTX 5090 的速度和配置成熟度；R9700 仍可运行，但对后端较为敏感。直接同提示词 Q4 对比和若干模型专属吞吐仍然缺失。"]
 
     A --> B --> C --> D --> E
 ```
 
-采集到的DSH 工作树展示了任务如何拆解。规划器先把证据收集和比较分开。
+采集到的研究树展示了任务如何拆解。规划器先把证据收集和比较分开。
 证据分支分别收集每块 GPU 的事实，模型可用性检查复用已经收集的证据，
 最终信息包会明确保留不被证据支持的比较。
 
@@ -373,8 +339,8 @@ flowchart TD
     B --> D
 ```
 
-关键传递的是证据和结论之间的边界。DSH 把一个宽泛请求拆成更小的证据工作。
-每个工作返回很短的来源绑定摘要和 caveat。当后续分支询问已经回答过的内容时，
+关键传递的是证据和结论之间的边界。任务解析把一个宽泛请求拆成更小的证据工作。
+每个工作返回简短的来源绑定摘要和限制说明。当后续分支询问已经回答过的内容时，
 树会指回现有证据，而不是把它当成新事实。最终信息包对 AI 开发者有用，是因为
 它把系统现在能说什么，和在做出有信心的公开比较前仍需验证什么，清楚地区分开。
 
@@ -418,15 +384,12 @@ Kazusa 不把所有上下文压平成一个提示词。即时表面文本、对�
 | 适配器 | Discord、NapCat QQ、调试界面传输和平台渲染 | [适配器 ICD](src/adapters/README.md), [运行指南](docs/HOWTO.md#adapters) |
 | 控制台 | 本地操作者认证、服务生命周期、进程日志、审计、静态 UI、调试聊天交接 | [控制台 ICD](src/control_console/README.md) |
 | 大脑服务 | HTTP API、队列、图启动、健康检查、发送回执、运行时适配器注册 | [大脑服务 ICD](src/kazusa_ai_chatbot/brain_service/README.md) |
-| DSH 交互 | Brain 内部的 question/approval/plan-review 判断与一次性 grant | [DSH 交互](src/kazusa_ai_chatbot/dsh_interaction/README.md) |
-| DSH 语义网关 | 类型化语义工具、不透明引用、证据与可重放 worker 边界 | [DSH 语义网关](src/kazusa_ai_chatbot/dsh_tool_gateway/README.md) |
-| DSH Standard sidecar | 原生工具、会话、checkpoint 与 terminal receipt | [Sidecar README](sidecars/dsh_resolution/README.md) |
 | 消息信封 | 类型化入站内容、提及、回复、附件、收件人和广播状态 | [消息信封 ICD](src/kazusa_ai_chatbot/message_envelope/README.md) |
 | LLM 接口 | 后端兼容的聊天 LLM 调用、provider 会话、诊断和模型重载重试 | [LLM 接口 ICD](src/kazusa_ai_chatbot/llm_interface/README.md) |
 | 对话进展 | 认知用来避免循环和过时重开的短期回合状态 | [对话进展](src/kazusa_ai_chatbot/conversation_progress/README.md) |
 | 私念残留 | 只加载到 L2a 认知的短期私人第一人称残留 | [私念残留 ICD](src/kazusa_ai_chatbot/internal_monologue_residue/README.md) |
 | 认知解析器 | 有边界的循环状态、能力 observation、待处理用户前置条件和循环 trace | [认知解析器 ICD](src/kazusa_ai_chatbot/cognition_resolver/README.md) |
-| 任务解析 | DSH 准入、持久任务绑定、checkpoint 回流与 terminal 结果投影 | [任务解析 ICD](src/kazusa_ai_chatbot/task_resolution/README.md) |
+| 任务解析 | 有边界的多步骤工作、持久续接与类型化结果投影 | [任务解析 ICD](src/kazusa_ai_chatbot/task_resolution/README.md) |
 | 本地上下文解析器 | RAG3 本地/私有证据图和提示词安全的证据投影 | [本地上下文解析器 ICD](src/kazusa_ai_chatbot/local_context_resolver/README.md) |
 | 认知和 dialog | 角色立场、边界、判断、风格、视觉指令和最终措辞 | [认知节点](src/kazusa_ai_chatbot/nodes/README.md) |
 | 动作规格 | L2d 动作残留、能力注册表、评估器、结果、输出表面和 trace | [动作规格](src/kazusa_ai_chatbot/action_spec/README.md) |
@@ -506,13 +469,6 @@ uvicorn kazusa_ai_chatbot.service:app --host 0.0.0.0 --port 8000
 再配置完整的可选 `COGNITION_V3_SIDECAR_LLM_*` 路由包。详细的 deadline、
 context window 和运行证据命令见 [运行指南](docs/HOWTO.md#agentic-cognition-operator-runbook)。
 
-### DSH Standard 启动
-
-先启动 Brain，并等待 `/health` 与经过认证的 `/runtime/dsh/health` 就绪；
-随后独立构建并启动 `sidecars/dsh_resolution`。需要的 DSH、workspace、
-gateway 和六项 `AGENTIC_RESOLVER_LLM_*` 配置见
-[DSH 运行指南](docs/HOWTO.md#dsh-standard-sidecar)。
-
 启动浏览器调试适配器：
 
 ```powershell
@@ -529,8 +485,6 @@ src/
   adapters/                    平台适配器和调试 UI
   kazusa_ai_chatbot/
     brain_service/             服务 API、图、入口处理、健康检查、回合后衔接
-    dsh_interaction/           Brain 内部 DSH 判断与 grant 谱系
-    dsh_tool_gateway/          类型化语义目录与 worker 边界
     message_envelope/          适配器到大脑的类型化消息合约
     llm_interface/             聊天 LLM 调用兼容层和 ICD
     cognition_resolver/        有边界的解析器循环和能力 observation
@@ -538,7 +492,7 @@ src/
     action_spec/               模态无关动作合约、注册表、结果
     accepted_task/             用户侧的已接受延迟任务生命周期
     background_work/           内部 task-orchestrator 和 future-speak 执行
-    task_resolution/           DSH 任务准入、绑定、续接和结果投影
+    task_resolution/           有边界的任务准入、续接和结果投影
     consolidation/             持久整合 helper、通道路由和 ICD
     local_context_resolver/    RAG3 本地/私有证据图和保留投影
     rag/                       RAG3 证据叶、检索工具与 Cache2 策略
@@ -555,8 +509,6 @@ src/
     character_profile.py       规范手动植入档案的校验
     db/internal_action_latches.py  内部思绪延续的持久锁存器
   scripts/                     运维和维护 CLI
-sidecars/
-  dsh_resolution/              DSH Standard 运行时与 RPC sidecar
 docs/
   HOWTO.md                     设置、运行命令、环境变量、测试
   FUTURE_ARCHITECTURE.md       独立维护的未来架构

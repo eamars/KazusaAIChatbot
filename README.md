@@ -5,25 +5,6 @@
 
 <p><strong>A self-evolving character cognition runtime for persistent digital presence.</strong></p>
 
-<h2>DSH Standard task runtime</h2>
-
-<p>DSH is Kazusa's sole production route for bounded multi-step task
-resolution. The Python Brain owns character judgment, durable task binding,
-cognition recurrence, dialog, and delivery; the separately built Node sidecar
-owns DSH Standard execution. Build the sidecar with
-<code>corepack pnpm@11.7.0 --dir sidecars/dsh_resolution install --frozen-lockfile</code>
-and <code>corepack pnpm@11.7.0 --dir sidecars/dsh_resolution build</code>,
-then start <code>node sidecars/dsh_resolution/dist/src/main.js</code> after
-the Brain is ready.</p>
-
-<p>The runtime uses <code>kazusa.dsh-resolution-rpc.v2</code>,
-<code>dsh_resolution_intake.v2</code>, profile
-<code>kazusa-resolver-standard-v2</code>, and pinned DSH release
-<code>0.1.1-rc.2</code>. Configure the authenticated sidecar, Brain, gateway,
-data/workspace/Python paths, and six <code>AGENTIC_RESOLVER_LLM_*</code>
-route fields in the <a href="docs/HOWTO.md#dsh-standard-sidecar">HOWTO</a>;
-secrets remain local.</p>
-
 <p>
     <a href="README_CN.md">简体中文</a>
     ·
@@ -58,40 +39,6 @@ For local setup, jump to [Quick Start](#quick-start) and the
 [HOWTO](docs/HOWTO.md). For subsystem ownership, use
 [Runtime Layers](#runtime-layers).
 
-## DSH Task Runtime
-
-`task_resolution_request` enters one shared `AgenticResolverRuntime`; there is
-no parallel production task executor. The Brain creates a durable
-`dsh_task_binding.v1`, issues fresh fenced authority, and opens or continues the
-DSH sidecar session. Checkpoints and terminal outcomes return as typed
-`TaskResolutionResultV1` observations and re-enter normal cognition, dialog,
-dispatcher, and adapter delivery.
-
-The wire contracts are `kazusa.dsh-resolution-rpc.v2` and
-`dsh_resolution_intake.v2`. Session state lives under
-`<KAZUSA_DSH_DATA_ROOT>/dsh/0.1.1-rc.2/`; the profile/store identity is
-`kazusa-resolver-standard-v2` /
-`dsh-sqlite-0.1.1-rc.2-standard-v2`.
-
-DSH Standard retains its native filesystem, shell, coding, jobs, tests, web,
-approval, and sandbox tools. Kazusa adds fourteen storage-independent semantic
-tools for conversation, memory, people, active context, calendar, attached
-media, and public media. The controller-owned `submit_resolution` is the sole
-model-owned terminal operation. Semantic results expose bounded entities,
-opaque references, and evidence receipts; they never become persona or final
-wording by themselves.
-
-Questions, approval decisions, and plan review are internal character-cognition
-episodes. The Brain produces a typed answer, rejection, or one-shot grant for
-the same fenced thread and segment; these internal decisions are not relayed as
-user prompts. Durable accepted-task controls support `continue`, `summarize`,
-and `cancel` on the same opaque task/session binding.
-
-See the [DSH integration architecture](docs/architecture/dsh_integration_architecture.md),
-[Agentic Resolver architecture](docs/architecture/agentic_resolver_architecture.md),
-[DSH interaction README](src/kazusa_ai_chatbot/dsh_interaction/README.md), and
-[semantic gateway README](src/kazusa_ai_chatbot/dsh_tool_gateway/README.md).
-
 Core terms used throughout this README:
 
 - **Adapter**: platform transport that normalizes Discord, QQ, debug UI, or
@@ -117,10 +64,10 @@ At a high level, Kazusa provides:
 | Bounded live response path       | Typed intake, frontline relevance, turn settlement, settled relevance, the cognition resolver, selected evidence capabilities, action routing, and L3 surfaces are explicit stages with caps and inspectable payloads. |
 | Multi-horizon memory             | Recent chat, short-term conversation flow, retrieved evidence, durable memory, and scheduled commitments remain separate.          |
 | Internal monologue residue       | A short private residue lane carries the exact bounded G-stage first-person monologue from completed episodes into the next goal-cognition pass. |
-| Task resolution                  | One DSH runtime executes bounded foreground or accepted background work with fenced authority, typed checkpoints, and cognition re-entry. |
+| Task resolution                  | Bounded multi-step work can run in the foreground or continue as accepted delayed work, with typed results returning through cognition. |
 | Layered cognition                | Cognition decides stance, boundaries, judgment, style, action needs, and response goals before selected L3 surfaces render output. |
 | Background consolidation         | Completed episodes update durable memory, relationship state, Cache2 invalidation, images, and progress from text plus action/surface traces. |
-| Accepted delayed work            | Accepted reminders and DSH tasks are persisted, resumed by bounded workers, and returned through cognition rather than sent directly. |
+| Accepted delayed work            | Accepted reminders and longer tasks are persisted, resumed by bounded workers, and returned through cognition rather than sent directly. |
 | Reflection outside chat          | Hourly, daily, and promoted reflection runs are stored as audit records and only promoted context can enter normal cognition.      |
 | Idle self-cognition              | Background source cases can enter the same resolver-backed persona path, with source-bound delivery and normal consolidation rules. |
 | Calendar follow-through          | Accepted future promises and due commitments can become durable calendar triggers that run fresh cognition later.                  |
@@ -163,7 +110,6 @@ HOWTO. One working-style configuration looks like this:
 | `COGNITION_LLM_CHARACTER_CARRYOVER` | `local-model`                     | `http://localhost:1234/v1` |
 | `COGNITION_V3_CHAIN_LLM`   | `local-model`                            | `http://localhost:1234/v1` |
 | `COGNITION_V3_SIDECAR_LLM` | `sidecar-model`                          | `http://localhost:1234/v1` |
-| `AGENTIC_RESOLVER_LLM`     | `local-model`                            | `http://localhost:1234/v1` |
 | `DIALOG_GENERATOR_LLM`     | `deepseek-v4-flash`                      | `https://api.deepseek.com` |
 | `CONSOLIDATION_LLM`        | `local-model`                            | `http://localhost:1234/v1` |
 | `JSON_REPAIR_LLM`          | `local-model`                            | `http://localhost:1234/v1` |
@@ -211,18 +157,11 @@ commonly use LM Studio or another OpenAI-compatible endpoint.
 
 ## Architecture At A Glance
 
-This is the complete top-level map, not the shortest path through one chat
-turn. Read the solid live path first:
-`adapter -> brain service -> queue/intake -> evidence -> cognition -> dialog -> persistence/scheduler`.
-Then use the subgraphs as ownership maps for helper agents, resolver
-capabilities, web sources, complex-task research, accepted tasks, background
-workers, and durable maintenance systems.
-
-Ownership tags in node labels are intentional: `[LLM]` nodes make semantic
-judgments, `[deterministic]` nodes validate or move state, and `[worker]` nodes
-execute bounded delayed work. Exact subagent naming and documentation
-vocabulary are covered by the
-[Subagent Interface Guide](docs/SUBAGENT_INTERFACES.md).
+This top-level map shows the stable ownership path through the character brain:
+`adapter -> brain service -> evidence -> cognition -> dialog -> delivery`.
+Task resolution branches from cognition and returns typed results before the
+character decides how to respond. Persistence, scheduling, reflection, and
+self-cognition remain outside final live wording.
 
 The active chat intake path has two bounded relevance decisions. The frontline
 route is a compact per-message `discard/start/append` judge. Accepted group
@@ -249,7 +188,7 @@ flowchart TD
     B["Brain service<br/>typed intake, queue, relevance"]
     R["RAG3 / local context<br/>bounded evidence"]
     C["Cognition<br/>stance, boundaries, response goals"]
-    D["DSH task edge<br/>fenced sidecar session and semantic tools"]
+    T["Task resolution<br/>bounded multi-step work"]
     L["L3 and dialog<br/>visible rendering"]
     P["Persistence and consolidation<br/>memory, progress, traces"]
     S["Scheduler, reflection, self-cognition<br/>outside live wording"]
@@ -257,8 +196,8 @@ flowchart TD
 
     A --> B --> R --> C
     C -->|ordinary response| L
-    C -->|task_resolution_request| D
-    D -->|typed checkpoint or result| C
+    C -->|task request| T
+    T -->|typed observation or result| C
     L --> O
     C --> P
     L --> P
@@ -290,15 +229,15 @@ Console renders that payload directly alongside persisted and elapsed-effective
 character posture.
 
 RAG3 resolves ordinary local/private context and projects bounded evidence.
-`web_agent3` owns approved source retrieval. DSH owns multi-step task execution
-through its native and semantic tool catalogs. Background work owns durable DSH
-continuation and `future_speak`; none of these evidence or execution owners
-decides persona stance or final wording.
+Approved source retrieval and multi-step task resolution remain separate
+capabilities. Background work owns durable task continuation and
+`future_speak`; none of these evidence or execution owners decides persona
+stance or final wording.
 
 The resolver preserves the same L1 -> L2 -> L2d cognition stack on every
 cycle. L2d may finish with selected action specs or request a bounded capability
-observation. A `task_resolution_request` opens or continues the fenced DSH
-session and returns one prompt-safe observation to cognition. The separate
+observation. A `task_resolution_request` opens or continues bounded task work
+and returns one prompt-safe observation to cognition. The separate
 first-cycle shared-memory prewarm may project confirmed shared-memory rows into
 L2a; it is not a task result and does not let retrieved evidence become
 persona.
@@ -320,20 +259,20 @@ boundary for dialog, while the private monologue remains outside the dialog
 payload. Dialog may describe a physical or external effect as completed only
 when an `executed` permitted-action result supplies that fact.
 
-Generic task work starts through `task_resolution_request`. Foreground work
-uses a bounded DSH budget; a committed checkpoint can promote the same session
-to an accepted task and task-orchestrator job. `future_speak` remains a separate
-scheduled action lifecycle. Completed accepted tasks return as canonical
-`tool_result` cognition sources, and status checks read current task state
-without creating work.
+Generic task work starts through `task_resolution_request`. Foreground work is
+bounded, and committed continuation state can promote the same task to accepted
+delayed work. `future_speak` remains a separate scheduled action lifecycle.
+Completed accepted tasks return as canonical `tool_result` cognition sources,
+and status checks read current task state without creating work.
 
 ## Real Debug Example Flows
 
 The first three examples below were captured through the real debug `/chat`
 interface, which sends the same typed chat request shape into the brain service
-as runtime adapters. Example 4 illustrates a bounded DSH research result that
-returns through cognition rather than bypassing the character brain. The examples were captured on July 2, 2026, then translated
-to English and condensed for a README audience. They are not full trace dumps.
+as runtime adapters. Example 4 illustrates a bounded research result that
+returns through cognition rather than bypassing the character brain. The
+examples were captured on July 2, 2026, then translated to English and
+condensed for a README audience. They are not full trace dumps.
 Internal ids, cache keys, raw database rows, and implementation field names are
 intentionally omitted. The diagrams render typed payloads as readable prose.
 
@@ -346,7 +285,7 @@ checkpoints:
 3. **Context / Evidence** is retrieved conversation evidence, reply context, or
    structured task state used for the decision.
 4. **Decision** is the character-level judgment for chat turns, or the
-   task-level synthesis rule for bounded DSH results.
+   task-level synthesis rule for bounded research results.
 5. **Output** is what the user sees, the durable handoff created for later
    work, or the semantic packet returned to the next stage.
 
@@ -429,10 +368,10 @@ does not write final chat text directly.
 
 ### Example 4: Complex Public Research Packet
 
-This DSH case shows how a broad benchmark request is decomposed into
-source-bound evidence and a comparison packet. The typed result returns to
-cognition before any visible answer is rendered. The benchmark numbers are captured trace content from July 2, 2026,
-not current hardware guidance.
+This example shows how a broad benchmark request is decomposed into
+source-bound evidence and a comparison packet. The bounded result returns to
+cognition before any visible answer is rendered. The benchmark numbers are
+captured trace content from July 2, 2026, not current hardware guidance.
 
 ```mermaid
 flowchart TD
@@ -445,7 +384,7 @@ flowchart TD
     A --> B --> C --> D --> E
 ```
 
-The captured DSH work tree shows how the task is broken down. The planner first
+The captured research tree shows how the task is broken down. The planner first
 separates evidence collection from comparison. Evidence branches collect facts
 for each GPU, model-availability checks reuse already-collected evidence, and
 the final packet keeps unsupported comparisons explicit.
@@ -527,15 +466,12 @@ cognition, and calendar scheduling remain in the platform-neutral core.
 | Adapters                 | Discord, NapCat QQ, debug UI transport and platform rendering                           | [Adapter ICD](src/adapters/README.md), [HOWTO](docs/HOWTO.md#adapters)                |
 | Control console          | Local operator auth, service lifecycle, process logs, audit, static UI, debug-chat handoff | [Control Console ICD](src/control_console/README.md)                                  |
 | Brain service            | HTTP API, queue, graph startup, health, delivery receipts, runtime adapter registration | [Brain Service ICD](src/kazusa_ai_chatbot/brain_service/README.md)                     |
-| DSH interaction          | Brain-owned internal approval/question/plan-review judgment and one-shot grants | [DSH interaction](src/kazusa_ai_chatbot/dsh_interaction/README.md) |
-| DSH semantic gateway     | Typed storage-independent semantic tools, opaque references, evidence, and replay-safe worker | [DSH tool gateway](src/kazusa_ai_chatbot/dsh_tool_gateway/README.md) |
-| DSH Standard sidecar     | Mounted official DSH runtime, native tools, sessions, checkpoints, and terminal receipts | [Sidecar README](sidecars/dsh_resolution/README.md) |
 | Message envelope         | Typed inbound content, mentions, replies, attachments, addressees, broadcast state      | [Message Envelope ICD](src/kazusa_ai_chatbot/message_envelope/README.md)               |
 | LLM interface            | Backend-compatible chat LLM invocation, provider sessions, diagnostics, and reload retry | [LLM Interface ICD](src/kazusa_ai_chatbot/llm_interface/README.md)                    |
 | Conversation progress    | Short-term episode state used by cognition to avoid loops and stale reopenings          | [Conversation Progress](src/kazusa_ai_chatbot/conversation_progress/README.md)         |
 | Internal monologue residue | Short-lived private first-person residue loaded only into L2a cognition               | [Internal Monologue Residue ICD](src/kazusa_ai_chatbot/internal_monologue_residue/README.md) |
 | Cognition resolver       | Bounded recurrence state, capability observations, pending user prerequisites, and cycle traces | [Cognition Resolver ICD](src/kazusa_ai_chatbot/cognition_resolver/README.md)            |
-| Task resolution          | DSH admission, durable task binding, checkpoint recurrence, and terminal result projection | [Task Resolution ICD](src/kazusa_ai_chatbot/task_resolution/README.md)                 |
+| Task resolution          | Bounded multi-step work, durable continuation, and typed result projection       | [Task Resolution ICD](src/kazusa_ai_chatbot/task_resolution/README.md)                 |
 | Local context resolver   | RAG3 local/private evidence graph and prompt-safe evidence projection                    | [Local Context Resolver ICD](src/kazusa_ai_chatbot/local_context_resolver/README.md)   |
 | Cognition and dialog     | Character stance, boundaries, judgment, style, visual directives, and final wording     | [Cognition Nodes](src/kazusa_ai_chatbot/nodes/README.md)                              |
 | Action spec              | L2d action residues, capability registry, evaluator, results, surfaces, and traces      | [Action Spec](src/kazusa_ai_chatbot/action_spec/README.md)                            |
@@ -627,16 +563,6 @@ venv\Scripts\python -m pytest -q tests/integration/cognition_core_v3/test_chain_
 venv\Scripts\python -m scripts.validate_test_impact --base-ref HEAD
 ```
 
-### DSH Standard startup
-
-Start the Brain with MongoDB and wait for `/health` plus authenticated
-`/runtime/dsh/health` to report its durable DSH store and cognition judge.
-Build/start `sidecars/dsh_resolution` as a separate process, then require
-authenticated `system.health` to report `route`, `standard`,
-`semantic_worker`, `web`, and `brain` readiness. The sidecar and Brain may be
-restarted independently; readiness still follows that dependency. Required
-DSH and route settings are in the [HOWTO DSH runbook](docs/HOWTO.md#dsh-standard-sidecar).
-
 Run the browser debug adapter:
 
 ```powershell
@@ -653,8 +579,6 @@ src/
   adapters/                    Platform adapters and debug UI
   kazusa_ai_chatbot/
     brain_service/             Service API, graph, intake, health, post-turn glue
-    dsh_interaction/           Brain-owned internal DSH judgment and grant lineage
-    dsh_tool_gateway/          Typed semantic catalog and framed worker boundary
     message_envelope/          Typed adapter-to-brain message contract
     llm_interface/             Chat LLM invocation compatibility layer and ICD
     cognition_resolver/        Bounded resolver loop and capability observations
@@ -662,7 +586,7 @@ src/
     action_spec/               Modality-neutral action contracts, registry, results
     accepted_task/             User-facing accepted delayed-work lifecycle
     background_work/           Internal task-orchestrator and future-speak execution
-    task_resolution/           DSH task admission, binding, continuation, and result projection
+    task_resolution/           Bounded task admission, continuation, and result projection
     consolidation/             Durable consolidation helpers, lane routing, and ICD
     local_context_resolver/    RAG3 local/private evidence graph and retained projection
     rag/                       RAG3 evidence leaves, retrieval utilities, and Cache2 policy
@@ -679,8 +603,6 @@ src/
     character_profile.py       Canonical manual-seed profile validation
     db/internal_action_latches.py  Durable internal-thought continuation latches
   scripts/                     Operator and maintenance CLIs
-sidecars/
-  dsh_resolution/              Mounted official DSH Standard runtime and RPC sidecar
 docs/
   HOWTO.md                     Setup, runtime commands, environment, tests
   FUTURE_ARCHITECTURE.md       Independently maintained future architecture

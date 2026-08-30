@@ -22,20 +22,18 @@ meaning remains owned by the selected response plan and current observation;
 rewriting an unselected relationship interpretation as a content requirement or
 delivery effect does not turn it into delivery-only context.
 
-## DSH task edge
+## Task-resolution edge
 
-The node graph emits task_resolution_request only from the validated cognition
-result. One shared DSH runtime handles foreground and direct-background work.
-The transient model-hidden TaskResolutionAdmissionV1 is an acknowledgement
-observation; only a committed checkpoint may become a deferred
-TaskResolutionResultV1 with DshResolutionRefV1. The accepted task binds to
-dsh_task_binding.v1 in dsh_task_bindings, and operation_generation plus
-revision CAS fence recovery. Result-ready state returns through normal
-cognition, dialog, dispatcher, and adapter delivery.
+The node graph emits `task_resolution_request` only from the validated
+cognition result. The task-resolution owner handles foreground and accepted
+delayed work. A transient model-hidden `TaskResolutionAdmissionV1` is an
+acknowledgement observation; durable continuation and result shapes belong to
+the task-resolution and accepted-task contracts. Result-ready state returns
+through normal cognition, dialog, dispatcher, and adapter delivery.
 
 RAG3/local-context and its prewarm owner remain the ordinary evidence path.
-DSH semantic evidence is bounded and provenance-bearing; it does not become
-persona stance or final wording by itself.
+Task evidence is bounded and provenance-bearing; it does not become persona
+stance or final wording by itself.
 
 ## Module Boundary
 
@@ -177,11 +175,11 @@ lifecycle review, while deterministic code resolves an eligible persistent
 row from prompt-safe references. Cognition does not select database
 identifiers or write lifecycle state directly.
 
-Accepted DSH work is queued before a selected speech surface so the surface
+Accepted task work is queued before a selected speech surface so the surface
 can describe only the actual semantic outcome. Direct background admission
-returns transient, model-hidden TaskResolutionAdmissionV1 only; binding,
-checkpoint, and recovery use dsh_task_binding.v1,
-operation_generation, and revision CAS. A request without a visible
+returns only a transient, model-hidden `TaskResolutionAdmissionV1`; durable
+binding, continuation, and recovery remain owned by the task-resolution and
+accepted-task boundaries. A request without a visible
 acknowledgement route receives a deterministic failure result instead of
 silently promising work.
 
