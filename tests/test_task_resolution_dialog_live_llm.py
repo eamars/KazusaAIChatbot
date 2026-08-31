@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +14,7 @@ from kazusa_ai_chatbot.background_work.result_source import (
 )
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from tests.cognition_test_helpers import canonical_episode
-
+from tests.test_background_work_delivery import _accepted_task_completed_job
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
 
@@ -160,7 +161,7 @@ def _assert_prompt_safe_dialog(text: str, *, anchor: str) -> None:
 
 
 def _write_artifact(case_id: str, value: dict[str, object]) -> Path:
-    """Write one raw persona result for parent-authored review."""
+    """Write one raw dialog result for parent-authored review."""
 
     _ARTIFACT_ROOT.mkdir(parents=True, exist_ok=True)
     path = _ARTIFACT_ROOT / f"{case_id}.json"
@@ -171,7 +172,7 @@ def _write_artifact(case_id: str, value: dict[str, object]) -> Path:
     return path
 
 
-async def test_live_inline_result_returns_grounded_dialog(
+async def test_live_dialog_renders_inline_grounded_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Inline partial evidence produces grounded dialog and its limitation."""
@@ -183,7 +184,7 @@ async def test_live_inline_result_returns_grounded_dialog(
         capturing_llm,
     )
     episode = canonical_episode(
-        episode_id="task-resolution-inline-persona",
+        episode_id="task-resolution-inline-dialog",
         content="What is the current Python 3.14 release status?",
     )
     surface = _surface(
@@ -205,10 +206,10 @@ async def test_live_inline_result_returns_grounded_dialog(
         for term in ("change", "current", "latest", "变化", "当前", "最新")
     )
     artifact_path = _write_artifact(
-        "persona_inline_grounded_dialog",
+        "dialog_inline_grounded_result",
         {
-            "schema_version": "task_resolution_persona_live_case.v1",
-            "case_id": "persona_inline_grounded_dialog",
+            "schema_version": "task_resolution_dialog_live_case.v1",
+            "case_id": "dialog_inline_grounded_result",
             "task_result_status": "partial",
             "task_evidence": [{
                 "summary": "Python 3.14 public release evidence is available.",
@@ -223,39 +224,47 @@ async def test_live_inline_result_returns_grounded_dialog(
     print(f"TASK_RESOLUTION_PERSONA_ARTIFACT={artifact_path}")
 
 
-async def test_live_deferred_result_reenters_cognition(
+async def test_live_dialog_renders_deferred_grounded_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A durable completed job re-enters as evidence and renders naturally."""
 
-    job = {
-        "schema_version": "background_work_job.v2",
-        "job_id": "job-task-resolution-persona",
-        "accepted_task_id": "task-task-resolution-persona",
-        "created_at": "2026-08-01T00:00:00+00:00",
-        "updated_at": "2026-08-01T00:05:00+00:00",
-        "completed_at": "2026-08-01T00:05:00+00:00",
-        "source_platform": "debug",
-        "source_platform_bot_id": "task-resolution-bot",
-        "source_channel_id": "debug:user:task-resolution-user",
-        "source_channel_type": "private",
-        "source_character_name": "Kazusa",
-        "requester_global_user_id": "task-resolution-user",
-        "requester_platform_user_id": "task-resolution-user",
-        "requester_display_name": "Test User",
-        "result_summary": (
-            "Pydantic 2.11 migration evidence is ready; one optional plugin "
-            "compatibility check remains."
-        ),
-        "artifact_text": "",
-        "failure_summary": "",
-        "worker_metadata": {},
-    }
+    job = deepcopy(_accepted_task_completed_job())
+    task_result = job["task_resolution_result"]
+    assert isinstance(task_result, dict)
+    summary = (
+        "Pydantic 2.11 migration evidence is ready; one optional plugin "
+        "compatibility check remains."
+    )
+    remaining_need = "Run the optional plugin compatibility check."
+    task_result.update({
+        "semantic_objective": "Review Pydantic 2.11 migration evidence.",
+        "status": "partial",
+        "evidence_state": "partial",
+        "evidence_excerpts": [summary],
+        "evidence_handles": [summary],
+        "prompt_safe_summary": summary,
+        "evidence": [{
+            "schema_version": "task_resolution_evidence.v1",
+            "evidence_id": "pydantic-2.11-migration-evidence",
+            "task_node_id": "dsh",
+            "specialist": "dsh",
+            "summary": summary,
+            "provenance_refs": ["local:pydantic-2.11-migration-evidence"],
+            "limitations": ["The optional plugin check remains."],
+        }],
+        "completed_subgoals": ["Review the migration evidence."],
+        "remaining_needs": [remaining_need],
+    })
     episode = build_result_ready_episode_from_job(job)
     percept = episode["percepts"][0]
-    assert percept["content"]["cognition_source"]["source_kind"] == "tool_result"
+    cognition_source = percept["content"]["cognition_source"]
+    assert cognition_source["source_kind"] == "tool_result"
     assert episode["origin_metadata"]["task_id"] == job["accepted_task_id"]
-    assert percept["content"]["semantic_summary"] == job["result_summary"]
+    assert cognition_source["task_status"] == "partial"
+    assert cognition_source["evidence_state"] == "partial"
+    assert cognition_source["evidence_excerpts"] == [summary]
+    assert cognition_source["remaining_needs"] == [remaining_need]
 
     capturing_llm = _CapturingDialogLLM(dialog_module._dialog_generator_llm)
     monkeypatch.setattr(
@@ -281,10 +290,10 @@ async def test_live_deferred_result_reenters_cognition(
         for term in ("plugin", "check", "插件", "检查")
     )
     artifact_path = _write_artifact(
-        "persona_deferred_result_reentry",
+        "dialog_deferred_grounded_result",
         {
-            "schema_version": "task_resolution_persona_live_case.v1",
-            "case_id": "persona_deferred_result_reentry",
+            "schema_version": "task_resolution_dialog_live_case.v1",
+            "case_id": "dialog_deferred_grounded_result",
             "durable_job": job,
             "result_ready_episode": episode,
             "surface": surface,

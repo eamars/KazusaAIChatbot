@@ -126,7 +126,11 @@ def _exhaust(
             "summary": "The source supplied the requested fact.",
             "findings": [{"answer": "bounded"}],
             "completed_subgoals": ["source lookup"],
-            "remaining_needs": [],
+            "remaining_needs": (
+                ["Independent verification remains."]
+                if terminal_status == "partial"
+                else []
+            ),
             "clarification_request": None,
             "approval_request": None,
             "artifact_refs": ["artifact-1", "semantic-ref-1"],
@@ -236,6 +240,13 @@ def test_dsh_exhaust_maps_to_task_result_without_semantic_reclassification() -> 
             "prompt_safe_summary"
         ]
         assert "source is bounded" in result["prompt_safe_summary"]
+
+    inconsistent_resolved = _exhaust("terminal").to_dict()
+    inconsistent_resolved["terminal"]["remaining_needs"] = [
+        "Independent verification remains.",
+    ]
+    with pytest.raises(ValueError, match="resolved.*remaining needs"):
+        project(inconsistent_resolved, start_spec)
 
     terminal_without_receipt = project(
         _exhaust("terminal", include_evidence=False),

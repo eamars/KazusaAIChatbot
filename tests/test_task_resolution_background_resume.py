@@ -142,7 +142,9 @@ async def test_worker_projects_terminal_runtime_result(monkeypatch: pytest.Monke
                 "terminal": {
                     "status": "resolved",
                     "summary": "A public source resolved the requested fact.",
-                    "findings": [],
+                    "findings": [
+                        {"answer": "A public source resolved the requested fact."},
+                    ],
                     "completed_subgoals": ["Resolve one bounded public question."],
                     "remaining_needs": [],
                     "clarification_request": None,
@@ -150,7 +152,19 @@ async def test_worker_projects_terminal_runtime_result(monkeypatch: pytest.Monke
                     "artifact_refs": [],
                     "warnings": [],
                 },
-                "evidence": [],
+                "evidence": [{
+                    "schema_version": "evidence_receipt.v2",
+                    "resolution_thread_id": reference["resolution_thread_id"],
+                    "segment_id": reference["segment_id"],
+                    "scope_fingerprint": "sha256:scope",
+                    "audience_fingerprint": "sha256:audience",
+                    "policy_epoch": "dsh-standard-policy-v2",
+                    "evidence_id": "public-evidence-1",
+                    "source_kind": "semantic",
+                    "semantic_ref": "https://example.com/source",
+                    "content_digest": "sha256:public-evidence-1",
+                    "provenance": {"tool_name": "web_search"},
+                }],
             }
 
     monkeypatch.setattr(worker, "_TASK_RESOLUTION_RUNTIME", Runtime())
@@ -160,7 +174,8 @@ async def test_worker_projects_terminal_runtime_result(monkeypatch: pytest.Monke
         lease_owner="worker-a",
     )
     assert result["status"] == "resolved"
-    assert result["evidence"] == []
+    assert result["evidence"][0]["evidence_id"] == "public-evidence-1"
+    assert result["evidence"][0]["specialist"] == "dsh"
     assert binding_store.bindings[reference["dsh_session_id"]]["state"] == (
         "terminal"
     )

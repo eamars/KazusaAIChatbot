@@ -417,6 +417,29 @@ describe("process", () => {
     expect(sidecar.process.exitCode).toBeNull();
   }, 30_000);
 
+  it("replaces an incoherent resolved terminal submission", async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), "kazusa-dsh-status-repair-"));
+    dataRoots.push(dataRoot);
+    const sidecar = await start(dataRoot, [
+      {
+        name: "submit_resolution",
+        arguments: {
+          ...terminal,
+          remaining_needs: ["independent evidence remains unavailable"],
+        },
+      },
+      { name: "submit_resolution", arguments: terminal },
+    ]);
+
+    const frame = await open(sidecar, "op-status", "thread-status", "segment-status");
+    const result = frame.result as Record<string, unknown>;
+    const exhaust = result.exhaust as Record<string, unknown>;
+    const acceptedTerminal = exhaust.terminal as Record<string, unknown>;
+    expect(result.disposition).toBe("terminal");
+    expect(acceptedTerminal.status).toBe("resolved");
+    expect(acceptedTerminal.remaining_needs).toEqual([]);
+  }, 30_000);
+
   it("restarts and cold-resumes evidence from the versioned session store", async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), "kazusa-dsh-resume-"));
     dataRoots.push(dataRoot);

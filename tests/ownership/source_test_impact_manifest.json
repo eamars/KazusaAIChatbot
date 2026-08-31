@@ -766,6 +766,7 @@
       "contract": "V1-to-V2 request/context/source projection and DSH-only task service call",
       "required_unit_tests": [
         "tests/unit/cognition_resolver/test_capabilities.py::test_task_resolution_preserves_recurrence_and_maps_dsh_deferred_result",
+        "tests/unit/cognition_resolver/test_capabilities.py::test_task_resolution_cognition_projection_preserves_all_result_excerpts",
         "tests/unit/cognition_resolver/test_capabilities.py::test_task_resolution_v2_context_projects_trusted_source_and_original_episode_ref",
         "tests/test_shared_memory_prewarm.py::test_first_cycle_prewarm_returns_explicit_outcome_dispositions",
         "tests/test_shared_memory_prewarm.py::test_merge_shared_memory_prewarm_outcome_counts_projected_entries_and_rejects_repeat_or_invalid_base",
@@ -1579,7 +1580,10 @@
       "owner": "shared deterministic state reducer owner",
       "contract": "canonical semantic reduction and authoritative state replacement",
       "required_unit_tests": [
-        "tests/unit/cognition_core_v3/test_state_transaction.py::test_state_transaction_reclaims_terminal_capacity_and_preserves_active_causes"
+        "tests/unit/cognition_core_v3/test_state_transaction.py::test_state_transaction_reclaims_terminal_capacity_and_preserves_active_causes",
+        "tests/unit/cognition_core_v3/test_state_transaction.py::test_terminal_same_source_causal_root_reactivates_without_duplicate[event-active_events-active]",
+        "tests/unit/cognition_core_v3/test_state_transaction.py::test_terminal_same_source_causal_root_reactivates_without_duplicate[threat-threats-active]",
+        "tests/unit/cognition_core_v3/test_state_transaction.py::test_terminal_same_source_causal_root_reactivates_without_duplicate[knowledge_gap-knowledge_gaps-open]"
       ],
       "supplemental_tests": []
     },

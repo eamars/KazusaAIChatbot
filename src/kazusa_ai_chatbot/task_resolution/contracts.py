@@ -645,6 +645,14 @@ def validate_task_resolution_result(value: object) -> TaskResolutionResultV1:
         data["remaining_needs"],
         "task_resolution_result.remaining_needs",
     )
+    if status == "resolved" and (not evidence or remaining):
+        raise TaskResolutionContractError(
+            "resolved task result requires DSH evidence and no remaining needs",
+        )
+    if status == "partial" and (not evidence or not remaining):
+        raise TaskResolutionContractError(
+            "partial task result requires DSH evidence and remaining needs",
+        )
     checkpoint = _dict(data["checkpoint"], "task_resolution_result.checkpoint")
     if status == "deferred":
         validate_dsh_resolution_ref(checkpoint)
@@ -659,10 +667,6 @@ def validate_task_resolution_result(value: object) -> TaskResolutionResultV1:
     if coding_context:
         raise TaskResolutionContractError(
             "task result coding_run_context must remain empty",
-        )
-    if status == "partial" and not evidence:
-        raise TaskResolutionContractError(
-            "partial task result requires DSH evidence",
         )
     return {
         "schema_version": TASK_RESOLUTION_RESULT_VERSION,

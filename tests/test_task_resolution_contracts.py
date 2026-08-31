@@ -57,7 +57,9 @@ def _result(
         "prompt_safe_summary": "One relevant fact was recovered.",
         "evidence": evidence,
         "completed_subgoals": [],
-        "remaining_needs": ["Confirm the current constraint."],
+        "remaining_needs": (
+            [] if status == "resolved" else ["Confirm the current constraint."]
+        ),
         "checkpoint": checkpoint or {},
         "coding_run_context": {},
     }
@@ -224,8 +226,7 @@ def test_nonempty_coding_context_is_rejected() -> None:
     """The predecessor field remains present but cannot carry legacy state."""
 
     module = importlib.import_module("kazusa_ai_chatbot.task_resolution")
-    result = _result(status="resolved", evidence=[])
-    result["evidence_state"] = "complete"
+    result = _result(status="resolved", evidence=[_evidence()])
     result["coding_run_context"] = {"legacy": "state"}
 
     with pytest.raises(module.TaskResolutionContractError, match="coding"):

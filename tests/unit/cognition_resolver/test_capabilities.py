@@ -183,6 +183,36 @@ def test_task_resolution_evidence_refs_ignore_unprojectable_artifact_handles() -
     assert observation["evidence_refs"][0]["evidence_id"] == "semantic-ref-1"
 
 
+def test_task_resolution_cognition_projection_preserves_all_result_excerpts() -> None:
+    """One evidence receipt may carry several source-owned findings into P."""
+
+    from kazusa_ai_chatbot.cognition_resolver import capabilities as owner
+
+    owner_excerpt = '{"owner":"Priya"}'
+    prerequisite_excerpt = '{"prerequisite":"deployment window"}'
+    result = _result("resolved")
+    result["evidence_excerpts"] = [
+        owner_excerpt,
+        prerequisite_excerpt,
+    ]
+    observation = owner._task_resolution_observation(
+        _request(),
+        _state(),
+        result,
+        durably_promoted=False,
+    )
+
+    evidence, direct_facts = owner.project_resolver_observation_for_cognition(
+        observation,
+        occurred_at="2026-08-30T00:00:00Z",
+    )
+
+    assert owner_excerpt in evidence["semantic_text"]
+    assert prerequisite_excerpt in evidence["semantic_text"]
+    assert evidence["semantic_text"].count(owner_excerpt) == 1
+    assert direct_facts == []
+
+
 def test_task_resolution_v2_context_projects_trusted_source_and_original_episode_ref(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

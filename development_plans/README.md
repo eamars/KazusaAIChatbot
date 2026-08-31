@@ -45,7 +45,6 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
-| [dsh_brain_bigbang_cutover_and_legacy_resolution_decommission_plan_2026-08-26.md](active/short_term/dsh_brain_bigbang_cutover_and_legacy_resolution_decommission_plan_2026-08-26.md) | Final Plan 3 DSH production cutover: complete function porting, public-media semantic bridge, durable Brain handover, accepted/background continuation, real user-wire E2E, and exact legacy decommission | in progress as of 2026-08-29; production implementation is authorized, while data operations and deployment require a separate command naming the target environment |
 
 ### Superseded Plans
 
@@ -62,6 +61,7 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
+| [dsh_brain_bigbang_cutover_and_legacy_resolution_decommission_plan_2026-08-26.md](archive/completed/short_term/dsh_brain_bigbang_cutover_and_legacy_resolution_decommission_plan_2026-08-26.md) | Final Plan 3 DSH production cutover: complete function porting, public-media semantic bridge, durable Brain handover, accepted/background continuation, focused trigger-source E2E sign-off, and exact legacy decommission | completed at the reviewed release-candidate boundary; final 10/10 technical and independent behavior matrix, full non-live, impact, sidecar, zero-deferred-work, and independent closure gates passed; P3-P4, P3-G9, and deployment P3-G10 were not executed by owner direction and require a future environment-specific command |
 | [dsh_semantic_tools_and_coding_capability_plan_2026-08-26.md](archive/completed/short_term/dsh_semantic_tools_and_coding_capability_plan_2026-08-26.md) | Plan 2 DSH Standard, storage-independent semantic Brain/memory capabilities, default native web/coding, autonomous runtime, and Brain judgment bridge | completed; P2-P0–P3 and G1–G10 passed without waiver; independent review passed |
 | [dsh_standalone_sidecar_and_resolution_interface_plan_2026-08-26.md](archive/completed/short_term/dsh_standalone_sidecar_and_resolution_interface_plan_2026-08-26.md) | Plan 1 standalone DSH sidecar, canonical resolution interface, durable lifecycle, and old resolver replacement | completed; all seven original gates passed without waiver |
 | [cognition_observability_icd_and_console_consistency_plan_2026-08-26.md](archive/completed/short_term/cognition_observability_icd_and_console_consistency_plan_2026-08-26.md) | Canonical cognition observability ICD, explicit prewarm outcome, and consistent control-console graph cutover | completed |
@@ -80,7 +80,6 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
-| [dsh_phase3_focused_e2e_signoff_reset_plan_2026-08-31.md](active/bugfix/dsh_phase3_focused_e2e_signoff_reset_plan_2026-08-31.md) | Test-only reset of the DSH Phase 3 live release oracle to one natural user-wire background-task sign-off plus independent semantic review | draft; explicit user approval and implementation command required |
 | [gemma4_thinking_disable_enforcement_gap_bugfix_plan_2026-08-25.md](active/bugfix/gemma4_thinking_disable_enforcement_gap_bugfix_plan_2026-08-25.md) | Gemma 4 provider-side thinking-disable enforcement gap | in_progress |
 | [epistemic_and_role_provenance_fidelity_bugfix_plan_2026-08-24.md](active/bugfix/epistemic_and_role_provenance_fidelity_bugfix_plan_2026-08-24.md) | Independent unsupported-fact, private-residue, and temporary-role provenance fidelity plan from the 50-turn Asuna run | draft; separate ownership and approval boundary |
 | [live_response_generation_failure_modes_problem_statement_2026-08-27.md](active/bugfix/live_response_generation_failure_modes_problem_statement_2026-08-27.md) | Live-response LLM generation failure-mode problem statement | draft; problem statement only; non-executable |
@@ -89,6 +88,7 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
+| [dsh_phase3_focused_e2e_signoff_reset_plan_2026-08-31.md](archive/completed/bugfix/dsh_phase3_focused_e2e_signoff_reset_plan_2026-08-31.md) | Reset of the DSH Phase 3 live release oracle to two focused cases for each of the five canonical trigger sources, with six positive entry proofs, four deliberate non-entry proofs, batch-first systematic failure analysis, and independent semantic review | completed; final-code matrix passed 10/10 technical and independent behavior review, and final closure review passed |
 | [dsh_touched_prompt_quality_quickfix_plan_2026-08-31.md](archive/completed/bugfix/dsh_touched_prompt_quality_quickfix_plan_2026-08-31.md) | Local-LLM quality review and correction for every surviving prompt touched since the pre-DSH baseline | completed; twelve live prompt contracts reviewed and corrected, with tests deferred by explicit user instruction |
 | [public_documentation_dsh_boundary_cleanup_plan_2026-08-31.md](archive/completed/bugfix/public_documentation_dsh_boundary_cleanup_plan_2026-08-31.md) | Kazusa-first top-level presentation restoration and DSH implementation-boundary cleanup across generic adjacent documentation | completed; zero governed leakage, bilingual and ownership review passed, and 6 deterministic documentation checks passed on 2026-08-31 |
 | [dsh_integration_scope_and_test_minimality_quickfix_plan_2026-08-31.md](archive/completed/bugfix/dsh_integration_scope_and_test_minimality_quickfix_plan_2026-08-31.md) | Consolidated DSH scope audit, documentation restoration, repository hygiene, and process-test pruning | completed; deterministic, sidecar, impact, and full non-live gates passed on 2026-08-31 |

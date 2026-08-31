@@ -18,6 +18,7 @@ from kazusa_ai_chatbot.task_resolution.contracts import (
     TaskResolutionResultV1,
     validate_dsh_resolution_ref,
     validate_dsh_task_start_spec,
+    validate_task_resolution_result,
 )
 
 _TERMINAL_RESULT_PROJECTIONS = {
@@ -274,7 +275,7 @@ def _project_exhaust_result(
         "checkpoint": checkpoint,
         "coding_run_context": {},
     }
-    return result  # type: ignore[return-value]
+    return validate_task_resolution_result(result)
 
 
 def _bounded_text(value: object) -> str:

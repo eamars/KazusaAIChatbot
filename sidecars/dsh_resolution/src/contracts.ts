@@ -588,6 +588,13 @@ export function validateSubmitResolution(value: unknown): SubmitResolution {
   for (const key of ["completed_subgoals", "remaining_needs", "artifact_refs", "warnings"] as const) {
     texts(row[key], `submit_resolution.${key}`);
   }
+  const remainingNeeds = row.remaining_needs as string[];
+  if (row.status === "resolved" && remainingNeeds.length !== 0) {
+    throw new ContractFault("resolved submit_resolution requires no remaining_needs");
+  }
+  if (row.status === "partial" && remainingNeeds.length === 0) {
+    throw new ContractFault("partial submit_resolution requires remaining_needs");
+  }
   if (row.status === "needs_user_input" && row.clarification_request === null) {
     throw new ContractFault("clarification_request is required");
   }

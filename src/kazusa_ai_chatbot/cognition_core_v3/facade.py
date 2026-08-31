@@ -1119,7 +1119,7 @@ def _validate_plan(
             )
         except ResolverValidationError as exc:
             raise CanonicalContractError(str(exc)) from exc
-    elif "pending_task_continuation" in raw:
+    elif raw.get("pending_task_continuation") is not None:
         raise CanonicalContractError(
             "pending_task_continuation is limited to human clarification"
         )

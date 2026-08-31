@@ -69,6 +69,19 @@ describe("contracts", () => {
 
   it("validates status-specific submit_resolution and exhaust", () => {
     expect(validateSubmitResolution(validSubmit()).status).toBe("resolved");
+    expect(() => validateSubmitResolution({
+      ...validSubmit(),
+      remaining_needs: ["independent evidence remains unavailable"],
+    })).toThrow(/resolved.*remaining_needs/u);
+    expect(validateSubmitResolution({
+      ...validSubmit(),
+      status: "partial",
+      remaining_needs: ["independent evidence remains unavailable"],
+    }).status).toBe("partial");
+    expect(() => validateSubmitResolution({
+      ...validSubmit(),
+      status: "partial",
+    })).toThrow(/partial.*remaining_needs/u);
     expect(() => validateSubmitResolution({ ...validSubmit(), status: "needs_user_input" }))
       .toThrow(/clarification_request/);
     expect(validateExhaust({ kind: "checkpointed", checkpoint: { reason: "requested" } }).kind)

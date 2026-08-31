@@ -15,6 +15,8 @@ from openai import OpenAIError
 from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.cognition_episode import GoalContinuationRefV1
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
+    MAX_RESOLVER_EVIDENCE_EXCERPT_CHARS,
+    MAX_RESOLVER_EVIDENCE_EXCERPTS,
     MAX_SHARED_MEMORY_PREWARM_LATENCY_MS,
     RESOLVER_EVIDENCE_STATE_VERSION,
     RESOLVER_OBSERVATION_VERSION,
@@ -149,22 +151,46 @@ def project_resolver_observation_for_cognition(
                 semantic_segments.append(
                     "remaining_needs=" + " | ".join(needs[:4])
                 )
-    raw_evidence_refs = observation.get("evidence_refs")
-    if (
-        factual_evidence_state in {"complete", "partial"}
-        and isinstance(raw_evidence_refs, list)
-    ):
-        evidence_excerpts = [
-            excerpt.strip()
-            for evidence_ref in raw_evidence_refs
-            if isinstance(evidence_ref, Mapping)
-            for excerpt in [evidence_ref.get("excerpt")]
-            if isinstance(excerpt, str) and excerpt.strip()
-        ][:4]
-        if evidence_excerpts:
-            semantic_segments.append(
-                "evidence_excerpts=" + " | ".join(evidence_excerpts)
+    evidence_excerpts: list[str] = []
+    if factual_evidence_state in {"complete", "partial"}:
+        raw_evidence_refs = observation.get("evidence_refs")
+        if isinstance(raw_evidence_refs, list):
+            for evidence_ref in raw_evidence_refs:
+                if not isinstance(evidence_ref, Mapping):
+                    continue
+                excerpt = evidence_ref.get("excerpt")
+                if not isinstance(excerpt, str) or not excerpt.strip():
+                    continue
+                bounded_excerpt = excerpt.strip()[
+                    :MAX_RESOLVER_EVIDENCE_EXCERPT_CHARS
+                ]
+                if bounded_excerpt not in evidence_excerpts:
+                    evidence_excerpts.append(bounded_excerpt)
+                if len(evidence_excerpts) >= MAX_RESOLVER_EVIDENCE_EXCERPTS:
+                    break
+        knowledge_projection = observation.get("knowledge_projection")
+        if isinstance(knowledge_projection, Mapping):
+            known_facts = knowledge_projection.get(
+                "knowledge_we_know_so_far"
             )
+            if isinstance(known_facts, list):
+                for known_fact in known_facts:
+                    if not isinstance(known_fact, str) or not known_fact.strip():
+                        continue
+                    bounded_fact = known_fact.strip()[
+                        :MAX_RESOLVER_EVIDENCE_EXCERPT_CHARS
+                    ]
+                    if bounded_fact not in evidence_excerpts:
+                        evidence_excerpts.append(bounded_fact)
+                    if (
+                        len(evidence_excerpts)
+                        >= MAX_RESOLVER_EVIDENCE_EXCERPTS
+                    ):
+                        break
+    if evidence_excerpts:
+        semantic_segments.append(
+            "evidence_excerpts=" + " | ".join(evidence_excerpts)
+        )
     semantic_text = "; ".join(semantic_segments)
     evidence = CognitionEvidenceV2(
         evidence_handle="e1",

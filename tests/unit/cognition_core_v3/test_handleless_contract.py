@@ -1153,6 +1153,27 @@ def test_pending_task_continuation_gates_answered_task_admission() -> None:
         )
 
 
+def test_fresh_ordinary_null_pending_task_continuation_normalizes_to_absence(
+) -> None:
+    """A null optional carrier has no semantic continuation authority."""
+
+    plan = facade_module._validate_plan(
+        {
+            "goal_resolution": "answerable_now",
+            "response_goal": "Respond to the current observation.",
+            "action_requests": [],
+            "resolver_requests": [],
+            "epistemic_boundary": "No external evidence is required.",
+            "pending_task_continuation": None,
+        },
+        self_cognition=False,
+        capabilities={"actions": [], "resolvers": []},
+        response_plan_contract_variant="fresh_ordinary",
+    )
+
+    assert plan.pending_task_continuation is None
+
+
 def test_approval_pending_row_stays_outside_clarification_continuity() -> None:
     """Approval rows retain their ledger flow without P clarification binding."""
 

@@ -7,10 +7,11 @@
   `cognition_resolver` with the completed Plan 1/Plan 2 DSH Standard runtime,
   preserve the current Brain-owned post-selector handover, and remove every
   superseded task, complex-resolution, RAG2-supervisor, and coding executor.
-- **Status:** in progress as of 2026-08-29. The user explicitly authorized
-  production implementation and local verification on 2026-08-29. Production
-  data operations and deployment still require a separate explicit command
-  naming the target environment.
+- **Status:** completed at the reviewed release-candidate boundary on
+  2026-08-31. Production implementation, local verification, focused E2E
+  sign-off, and independent closure review passed. P3-P4, P3-G9, and the
+  deployment portion of P3-G10 were not executed by owner direction because no
+  target environment or production process/data authority was supplied.
 - **Scope boundary:** one DSH-only task-execution release spanning the Python
   Brain edge, durable task binding, accepted/background continuation, legacy
   executor deletion, the one required public-media semantic port, obsolete
@@ -28,6 +29,70 @@
 - **Acceptance state:** Plan 1 and Plan 2 are completed with their recorded
   gates green; the post-Plan 2 source/data/config/test inventory and all Plan 3
   design decisions are closed below. Plan 3 implementation is in progress.
+
+## Trigger-Source E2E Sign-Off Supersession — 2026-08-31
+
+The user approved
+`development_plans/archive/completed/bugfix/dsh_phase3_focused_e2e_signoff_reset_plan_2026-08-31.md`
+as the authoritative Phase 3 live-E2E release oracle. It supersedes every
+earlier Plan 3 assertion, command, node cap, demonstration contract, and gate
+that treats the old omnibus DSH E2E or P-stage producer probes as current
+sign-off coverage. Their recorded runs remain historical failure evidence.
+
+The current sign-off matrix has exactly two independently collectible live
+nodes for each canonical cognition trigger source: positive DSH-entry proofs
+for `user_message`, `internal_thought`, and `scheduled_tick`, and deliberate
+non-entry proofs for the reachable targetless `self_cognition` source and the
+recursion-closed `tool_result` source. Automated gates validate stable source,
+readiness, lifecycle, evidence, recurrence, delivery, and cleanup contracts.
+Semantic behavior is reviewed from retained dossiers without exact visible
+phrases, language, opaque markers, private stage counts, or tool choreography.
+
+By explicit user direction, the initial diagnostic pass runs all ten nodes in
+one pytest invocation and preserves every reachable result. The executor makes
+no mid-batch behavior change, classifies shared/systematic failure modes after
+the complete batch, then fixes the smallest demonstrated owner. A production
+fix requires a bounded amendment naming the exact owner and acceptance checks
+before edit. Affected nodes then rerun individually with complete inspection.
+
+The unchanged first all-ten run completed on 2026-08-31 with 2 passed and 8
+failed. The focused plan now contains the authoritative case-by-case artifact
+ledger and systematic diagnosis. Five shared causes were found: one transient
+Mongo readiness incident affecting three cases; harness trace, shutdown, and
+startup-exception handling defects; one invalid tool-result fixture; one
+internal-latch profile-hydration defect; and one overly strict null-versus-
+absence check for the optional fresh-response continuation carrier. No failure
+supported a prompt change, source-registry change, targetless-user fabrication,
+or wider DSH redesign.
+
+The user's implementation command authorizes the focused plan's bounded
+remediation amendment. Production scope is limited to:
+
+- `self_cognition.worker._case_from_internal_action_latch`, which must hydrate
+  the existing real bound user profile before shared cognition and
+  consolidation; and
+- `cognition_core_v3.facade._validate_plan`, which may normalize explicit null
+  to absence only for the optional `fresh_ordinary`
+  `pending_task_continuation` carrier when no human clarification exists; and
+- `cognition_shared.state_reducers.materialize_causal_root`, which must
+  reactivate an exact terminal same-source causal identity in place instead of
+  appending the same deterministic id during resolver recurrence; and
+- `sidecars/dsh_resolution/src/contracts.ts::validateSubmitResolution`,
+  `task_resolution.contracts.validate_task_resolution_result`, and
+  `task_resolution.projection.project_dsh_exhaust`, which must close the
+  demonstrated terminal-status coherence gap without reclassifying semantic
+  results downstream.
+
+The third owner is supported by failed-result artifact
+`tool_result_failed_20260831T010234Z_50214975`: the typed failed result and
+zero-DSH recurrence closure survived, while a third valid cognition cycle
+failed on `duplicate knowledge_gaps entity id` before dialog. Its exact
+deterministic regression and affected live rerun are owned by the focused plan.
+
+Non-null unauthorized continuation, non-fresh exact-field closure, task
+readiness, targetless group identity, DSH schemas, prompts, model routes, and
+sidecar behavior remain unchanged. Exact deterministic regressions and
+individual live reruns named by the focused plan gate these corrections.
 
 ## Coding-Agent Test De-Overfitting Amendment — 2026-08-31
 
@@ -2378,37 +2443,34 @@ set.
 
 ## Real-LLM And Final E2E Sign-Off
 
-Run each live-LLM node separately with `-q -s`, inspect the complete visible
-result plus protected trace, and record thread/segment/session, interaction,
-accepted-task/job, evidence, cognition recurrence, and delivery lineage with
-secrets redacted.
+Run the first ten-node diagnostic pass together with `-q -s`, preserve every
+case dossier, and classify shared failure modes before remediation. Rerun
+affected nodes separately afterward. Inspect the complete visible/silent result
+plus protected trace and record source, DSH, evidence, recurrence, and delivery
+lineage with secrets redacted.
 
 | Advertised production behavior | Exact live node | Green behavior |
 |---|---|---|
-| Inline grounded task and full cognition | `tests/test_dsh_plan3_e2e_live_llm.py::test_e2e_inline_grounded_resolution_reenters_full_cognition` | Real DSH terminal evidence becomes a V1 observation; final dialog is Brain-owned and grounded. |
-| Real debug-user pre-admission prerequisite, background result-ready, and delivery | `tests/test_dsh_plan3_e2e_live_llm.py::test_e2e_real_debug_user_prerequisite_is_resolved_before_dsh_admission` | Two actual public `/chat` messages plus a registered HTTP adapter callback prove ordinary clarification before admission, beta-only DSH execution after the answer, and one normal final delivery. |
-| Native coding, internal approval, edit, test, artifact result | `tests/test_dsh_plan3_e2e_live_llm.py::test_e2e_native_coding_uses_brain_approval_and_returns_verified_artifact` | Standard native tools perform coding; full character cognition owns the exact one-shot approval without a user prompt; no Kazusa coding import appears. |
-| Delivered coding-task follow-up lifecycle | `tests/test_dsh_plan3_e2e_live_llm.py::test_e2e_coding_followups_revision_summary_status_approval_blocker_and_cancel_preserve_session` | Revise, summarize, status, internal approval/question/review handling, and cancel intents use opaque task refs, fresh generations, and one DSH thread/session without pending-user or coding-run vocabulary. |
-| Native public web, semantic public-media inspection, and semantic evidence | `tests/test_dsh_plan3_e2e_live_llm.py::test_e2e_public_research_and_media_use_native_web_and_kazusa_semantic_evidence` | DSH native web plus `kazusa_inspect_public_media` and retained semantic tools produce evidence without legacy complex/RAG2 execution. |
+| User message: local fact | `tests/test_dsh_user_message_e2e_live_llm.py::test_live_user_message_local_fact_reaches_dsh` | Public `/chat` enters DSH and returns grounded task evidence through Brain-owned cognition/dialog. |
+| User message: background summary | `tests/test_dsh_user_message_e2e_live_llm.py::test_live_user_message_background_summary_reaches_dsh` | Public `/chat` admits durable work and the result returns through normal recurrence and delivery. |
+| Internal thought: file check | `tests/test_dsh_internal_thought_e2e_live_llm.py::test_live_internal_thought_file_check_reaches_dsh` | A durable real-user latch is claimed, consumed, and admitted to DSH with exact source lineage. |
+| Internal thought: comparison | `tests/test_dsh_internal_thought_e2e_live_llm.py::test_live_internal_thought_comparison_reaches_dsh` | A second independent latch reaches DSH without fabricated user-wire input. |
+| Self-cognition: targetless group review | `tests/test_dsh_self_cognition_e2e_live_llm.py::test_live_targetless_group_review_omits_dsh_task_resolution` | The real targetless producer reaches shared cognition while task resolution remains unavailable. |
+| Self-cognition: promoted group review | `tests/test_dsh_self_cognition_e2e_live_llm.py::test_live_promoted_group_review_omits_dsh_task_resolution` | Reflection-owned group review preserves targetless readiness closure without fabricated identity. |
+| Scheduled tick: commitment due | `tests/test_dsh_scheduled_tick_e2e_live_llm.py::test_live_commitment_due_tick_reaches_dsh` | The due commitment producer carries real-user identity into DSH and settles its source run. |
+| Scheduled tick: future cognition | `tests/test_dsh_scheduled_tick_e2e_live_llm.py::test_live_scheduled_future_tick_reaches_dsh` | The scheduled-future producer reaches DSH with source/run lineage and bounded settlement. |
+| Tool result: resolved | `tests/test_dsh_tool_result_e2e_live_llm.py::test_live_resolved_tool_result_delivers_without_recursive_dsh` | A resolved result recurs through cognition/delivery without opening another DSH task. |
+| Tool result: failed | `tests/test_dsh_tool_result_e2e_live_llm.py::test_live_failed_tool_result_settles_without_recursive_dsh` | A failed result settles coherently without recursive task admission or false success. |
 
-The public-media live case uses the immutable repository fixture URL
-`https://raw.githubusercontent.com/eamars/KazusaAIChatbot/59357e591f762f46b7492f12be42752daff25632/resources/avatar.png`.
-Its approval-time local source is `resources/avatar.png`, 1,129,137 bytes,
-900x900, SHA-256
-`3bbe03444a93c736945916353845cc96d63e7e0126b01cc77a19bb4fadd0de5b`.
-The test preflights that exact remote byte digest, asks a bounded visual
-question, requires a successful `kazusa_inspect_public_media` call and
-`public_media` receipt, and records human inspection that the answer is
-grounded in visible image evidence. A network-unavailable skip cannot satisfy
-P3-G10.
+These ten nodes are the current final behavior sign-off. Component-live suites
+retain direct Standard, semantic-tool, media, interaction, and dialog coverage
+outside this source-integration release oracle.
 
-These five nodes are the final behavior sign-off. They cover the changed
-production path, the approved V2 interaction ownership, and the affected Plan
-2 coding/web/tool promises
-within the five-node final-E2E cap. Semantic wording may vary; thread, state,
-authority, tool, evidence, and delivery invariants are exact.
+### Historical Real Debug-User Demonstration Contract
 
-### Real Debug-User Demonstration Contract
+The following contract explains the repeated legacy Node 2 evidence. It is
+historical diagnostic material and is superseded as a Phase 3 release gate by
+the trigger-source matrix above.
 
 The named real debug-user node is the mandatory human-interaction-shaped E2E,
 not a service-layer simulation. It proves the boundary between ordinary
@@ -2481,9 +2543,10 @@ inspects the full per-turn log slices before sign-off.
 
 ## Verification Commands
 
-All Python commands use the project environment. Live-LLM nodes run one at a
-time. Live-DB and deployment/drain commands run only against an explicitly
-authorized available database/environment.
+All Python commands use the project environment. The initial ten-node live-LLM
+diagnostic runs as one batch; post-analysis reruns are individual. Live-DB and
+deployment/drain commands run only against an explicitly authorized available
+database/environment.
 
 ### P3-P0 Baseline And P3-P1 Collection
 
@@ -2543,16 +2606,13 @@ imports must remain.
 ### P3-P3 Live LLM, User Sign-Off, Review, And Final Documentation
 
 ```powershell
-venv\Scripts\python -m pytest -m live_llm tests/test_dsh_plan3_e2e_live_llm.py::test_e2e_inline_grounded_resolution_reenters_full_cognition -q -s
-venv\Scripts\python -m pytest -m live_llm tests/test_dsh_plan3_e2e_live_llm.py::test_e2e_real_debug_user_prerequisite_is_resolved_before_dsh_admission -q -s
-venv\Scripts\python -m pytest -m live_llm tests/test_dsh_plan3_e2e_live_llm.py::test_e2e_native_coding_uses_brain_approval_and_returns_verified_artifact -q -s
-venv\Scripts\python -m pytest -m live_llm tests/test_dsh_plan3_e2e_live_llm.py::test_e2e_coding_followups_revision_summary_status_approval_blocker_and_cancel_preserve_session -q -s
-venv\Scripts\python -m pytest -m live_llm tests/test_dsh_plan3_e2e_live_llm.py::test_e2e_public_research_and_media_use_native_web_and_kazusa_semantic_evidence -q -s
+venv\Scripts\python -m pytest -m live_llm -q -s tests/test_dsh_user_message_e2e_live_llm.py tests/test_dsh_internal_thought_e2e_live_llm.py tests/test_dsh_self_cognition_e2e_live_llm.py tests/test_dsh_scheduled_tick_e2e_live_llm.py tests/test_dsh_tool_result_e2e_live_llm.py
 ```
 
-After inspecting all five artifacts, stop for explicit user E2E sign-off.
-Then complete independent code review and any independently re-reviewed
-remediation. Documentation and bookkeeping commands run last:
+After the batch, classify generic/shared failure modes before remediation.
+Rerun affected nodes individually, inspect all ten final dossiers, and complete
+independent behavior/scope review. Documentation and bookkeeping commands run
+last:
 
 ```powershell
 venv\Scripts\python -m pytest -q tests/test_dsh_plan3_documentation.py tests/test_test_impact_manifest.py
@@ -2572,7 +2632,7 @@ venv\Scripts\python -m pytest -m "not live_db and not live_llm" -q
 | P3-G7 — Coding intent continuity | New coding, revise, summarize, status, approve/verify, blocker response, cancel, native edits/tests, and artifact result each have the exact DSH-era route and pass deterministic/live coverage. |
 | P3-G8 — Complete decommission | Every exact legacy source/test/fixture/config/doc path is removed with the justified-removal proof above; static imports and manifest are clean; RAG3/prewarm/evidence leaves remain. |
 | P3-G9 — Data and deployment safety | All five drain filters are zero, historical data disposition and catalog rotation are honored, only the named index is dropped, readiness gates intake, and rollback/roll-forward boundary is recorded. |
-| P3-G10 — Final closure, verification, and review | Every functional-port and justified-removal row is closed; zero deferred DSH integration work remains; owner tests, cross-boundary tests, sidecar suite, manifest impact, full non-live, authorized live DB, five individually inspected live-LLM E2Es, the complete real debug-user artifact set, docs, deployment evidence, and independent review are green without waiver. |
+| P3-G10 — Final closure, verification, and review | Every functional-port and justified-removal row is closed; zero deferred DSH integration work remains; owner tests, cross-boundary tests, sidecar suite, manifest impact, full non-live, authorized live DB, the exact five-source/ten-node live matrix, retained first-batch evidence, systematic-failure disposition, individual remediation verification, ten independent behavior decisions, docs, deployment evidence, and independent review are green without waiver. |
 
 All ten gates block release. A test pass without exact decommission, drain,
 real-service behavior, or independent review cannot close the plan.
@@ -3780,12 +3840,153 @@ the plan is `in_progress`. Record:
   attestation distinguishes a completed release candidate from a deployed
   release.
 
-Closure requires all gates green, a clean scoped diff, registry status
-consistency, an independent pass, every port/removal row closed, and a written
-zero-deferred-work attestation. Then mark this plan `completed`, move it
-to `development_plans/archive/completed/short_term/`, update
-`development_plans/README.md`, and preserve the execution record. Any later
-scope uses a new plan.
+### 2026-08-31 — Trigger-Source E2E Reset Technical Completion
+
+- The approved focused sign-off plan completed its required unchanged
+  all-ten diagnostic batch before remediation. That batch produced 2 passes
+  and 8 failures in 468.42 seconds; its artifacts and grouped systematic
+  diagnosis remain authoritative historical evidence.
+- The bounded harness, fixture, source-profile, optional-carrier, shared
+  causal-state, and terminal-status-coherence corrections are implemented.
+  Their final gates are green: 152 focused DSH tests, 112 direct owner tests,
+  485 exact impact nodes, 101 full-sidecar tests, sidecar typecheck/build,
+  changed-file compilation, exact 12-node live collection, scoped Ruff, and
+  diff hygiene.
+- Post-rerun review found that the original session oracle was derived from
+  Brain bindings. The strengthened harness now enumerates every isolated
+  sidecar SQLite store directly. All ten nodes reran individually under exact
+  one-binding/one-matched-session positive gates or exact
+  zero-binding/zero-session negative gates.
+- The authoritative trigger-source ledger is 10/10 technically passed: six
+  source-bound positive DSH-entry proofs and four deliberate zero-lineage
+  non-entry proofs. The final artifacts are indexed in the focused plan; the
+  six positives each contain exactly one independently matched sidecar session
+  and the four negatives contain none.
+- The stronger scheduled-future run exposed and retained one canonical status
+  conflict before remediation. The sidecar producer and Brain result boundary
+  now reject `resolved` plus remaining needs; the final live result is
+  coherently `partial` with the unavailable telemetry preserved as a need.
+- The first independent behavior review accepted nine authoritative dossiers
+  and failed `tool_result_resolved` as a material L3 false-completion: surface
+  planning and dialog extrapolated future action or risk clearance beyond the
+  typed handover evidence. The focused plan cites both the authoritative
+  failing artifact and the earlier retained sample that demonstrates the
+  repeated mode.
+- The focused plan now owns a bounded evidence-authority amendment for exactly
+  the content-planning and dialog prompts, six speech-bearing matrix reruns,
+  two dialog-component reruns, and fresh independent review. The technical
+  oracle remains green; semantic remediation and the remaining parent closure
+  gates remain open.
+
+### 2026-08-31 — Final-Code Trigger-Source Remediation Checkpoint
+
+- The bounded L3 evidence-authority remediation is implemented in exactly the
+  approved content-planning and dialog-generator prompt owners. Scoped resolver
+  completion now remains distinct from broader safety, permission, downstream
+  execution, and readiness claims. Both retained dialog-component live nodes
+  passed individually.
+- A later scheduled-case review found deterministic loss of all but the first
+  typed DSH evidence excerpt during cognition recurrence. The focused plan was
+  amended before implementation. The shared capability projection now merges
+  receipt-linked excerpts with the validated knowledge projection in source
+  order, within the existing item/character bounds and without semantic
+  synthesis. The final scheduled-commitment artifact preserves both requested
+  findings.
+- Every path affected by those final changes reran individually. The final-code
+  ledger remains 10/10 technically passed: six positive cases have one Brain
+  binding and one independently enumerated matching sidecar session; four
+  recursion/readiness-closed cases have zero bindings and zero sessions.
+- Final mechanical gates are green: 153 focused DSH owner tests, 33 direct L3
+  owner tests, six exact remediation variants, five task-result
+  contract/projection tests, 486 exact impact nodes, all changed-file
+  compilation, exact 12-node live collection, scoped Ruff, and diff hygiene.
+  The previously recorded 101-test sidecar suite, typecheck, and build remain
+  valid because the later corrections are Python prompt/projection changes.
+- The final authoritative artifacts and all retained failure/rerun reasons are
+  indexed in the focused plan. Fresh independent behavior and scope review is
+  now the next gate. Parent closure, registry/archive bookkeeping, and the
+  zero-deferred-development-work attestation remain pending that decision.
+
+### 2026-08-31 — Independent Behavior Pass And Closure Reconciliation
+
+- The fresh read-only independent review accepted all ten final-code behavior
+  dossiers and the final implementation scope. It found no blocker, high, or
+  medium issue. Its sole low observation is a harmless tense label in the
+  internal-comparison summary; the quoted evidence and responsibility change
+  remain exact. The reviewer judges the ten-node matrix sufficient as the
+  Phase 3 E2E sign-off layer.
+- The first final-code full non-live closure run ended with 3,367 passes and
+  three stale test-fixture failures. Each fixture constructed a resolved task
+  result without DSH evidence and was correctly rejected by the strengthened
+  terminal-coherence contract before reaching its intended owner. The focused
+  plan records the systematic diagnosis before correction. The three fixtures
+  now use canonical typed evidence, their exact nodes pass together, and their
+  files compile and pass Ruff. The authoritative full rerun passed 3,370 tests
+  with four opt-in skips and 508 live tests deselected.
+- The closure command that named
+  `tests/unit/scripts/test_check_dsh_plan3_drain.py`,
+  `tests/unit/task_resolution/test_decommission.py`, and
+  `tests/test_dsh_plan3_documentation.py` failed at collection because those
+  process-only suites were intentionally deleted by the approved, completed
+  DSH integration scope/test-minimality quickfix. They are historical commands,
+  not missing product coverage. Current closure uses the stable
+  `scripts/check_dsh_legacy_drain.py` compile/`--help` gate, active manifest
+  owners, direct static audits, and the full non-live suite. The drain CLI gate
+  passes; the static audit finds zero legacy runtime imports, zero obsolete
+  environment or stale catalog claims, exactly two approved read-only V1
+  worker-payload drain predicates, one intentional rejection fixture, and the
+  expected retained RAG3 imports.
+- The final README audit found its product-level ownership statements current:
+  RAG3 remains evidence-only, task resolution remains separate bounded work,
+  cognition owns stance, and L3/dialog own visible wording. No README edit is
+  required. The completed minimality quickfix remains the authoritative
+  documentation restoration record.
+- Final mechanical evidence is green: the focused plan's 10/10 live matrix,
+  153 focused owner tests, 33 L3 owner tests, six exact remediation variants,
+  five task-result contract/projection tests, 486 impact nodes, the retained
+  101-test sidecar/typecheck/build record, exact 12-node live collection,
+  changed-file compilation, scoped Ruff, and diff hygiene.
+
+### Zero-Deferred-Development-Work Attestation
+
+Every supported function in the Complete Functional Port Ledger has a current
+DSH-era owner and recorded deterministic, process, live-DB, sidecar, or live-LLM
+evidence. Every Justified Legacy Removal row is closed: the retired task,
+complex-resolution, RAG2, and coding executors have no live import route; the
+current product retains the intended RAG3, delivery, scheduler, reflection,
+memory, adapter, and dialog owners. The later test-minimality amendment removes
+only plan/prose/deletion policing and coding-agent-specific tests, not current
+typed authority, lifecycle, recovery, evidence, safety, or real behavior
+coverage.
+
+There is zero deferred DSH integration development work, compatibility tail,
+disabled integration capability, unresolved port, or release waiver. P3-P0,
+P3-P1, P3-P2, and the release-candidate portion of P3-P3 are green. P3-G1
+through P3-G8 are green. The development/review portion of P3-G10 is green.
+
+P3-P4, P3-G9, and the deployment portion of P3-G10 were not executed by owner
+direction: the user named no deployment environment and authorized no
+production process or data operation in this execution. Under the later
+User-Directed Release-Candidate Closure Boundary, that operational procedure
+is preserved for a future explicit deployment command and does not constitute
+deferred development work or a waived gate. The result is a completed,
+reviewed release candidate, distinct from a deployed release.
+
+### Final Independent Closure Decision
+
+The final read-only closure review passed with no material discrepancy. It
+confirmed the canonical evidence-only test-fixture corrections, the 3,370-test
+full non-live rerun, 486-node impact gate, focused/live/sidecar ledgers, the
+test-minimality supersession, every functional port and justified removal, and
+the zero-deferred-development-work attestation. It explicitly approved marking
+this plan and the focused E2E plan completed and moving both to their completed
+archives.
+
+This plan is therefore completed and archived at the reviewed release-
+candidate boundary. P3-P4, P3-G9, and deployment P3-G10 remain recorded as not
+executed by owner direction, not passed or waived. A future deployment requires
+a separate explicit command naming the environment and production operations.
+Any later development scope uses a new plan.
 
 ## Appendix A — Exact Dedicated Legacy Test Deletion Inventory
 

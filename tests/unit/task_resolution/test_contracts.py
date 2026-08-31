@@ -209,9 +209,33 @@ def test_dsh_start_binding_reference_and_v1_result_contracts_are_exact() -> None
             "operation_generation": 0,
         })
 
-    result = _validator(module, "validate_task_resolution_result")(_result(context))
+    result_validator = _validator(module, "validate_task_resolution_result")
+    result = result_validator(_result(context))
     assert result["evidence"][0]["specialist"] == "dsh"
     assert result["coding_run_context"] == {}
+    with pytest.raises(ValueError, match="resolved.*remaining needs"):
+        result_validator({
+            **_result(context),
+            "remaining_needs": ["Independent verification remains."],
+        })
+    with pytest.raises(ValueError, match="resolved.*evidence"):
+        result_validator({
+            **_result(context),
+            "evidence": [],
+        })
+    partial_result = result_validator({
+        **_result(context),
+        "status": "partial",
+        "evidence_state": "partial",
+        "remaining_needs": ["Independent verification remains."],
+    })
+    assert partial_result["status"] == "partial"
+    with pytest.raises(ValueError, match="partial.*remaining needs"):
+        result_validator({
+            **_result(context),
+            "status": "partial",
+            "evidence_state": "partial",
+        })
 
     with pytest.raises(ValueError):
         _validator(module, "validate_task_resolution_execution_context")({

@@ -167,6 +167,54 @@ def test_zero_clamped_gap_decrease_does_not_terminalize_before_same_episode_recu
     assert second_receipts[0]["applied_targets"][0]["applied_delta"] == 40
 
 
+@pytest.mark.parametrize(
+    ("kind", "collection", "reactivated_status"),
+    (
+        ("event", "active_events", "active"),
+        ("threat", "threats", "active"),
+        ("knowledge_gap", "knowledge_gaps", "open"),
+    ),
+)
+def test_terminal_same_source_causal_root_reactivates_without_duplicate(
+    kind: str,
+    collection: str,
+    reactivated_status: str,
+) -> None:
+    """A repeated source reactivates its stable terminal root exactly once."""
+
+    payload = _input()
+    state = payload["mutable_state"]
+    evidence = payload["evidence"][0]["evidence_ref"]
+    first_state, root_id, created = materialize_causal_root(
+        state,
+        kind=kind,
+        primary_evidence=evidence,
+        description="the original causal observation",
+    )
+    assert created is True
+    first_row = first_state[collection][0]
+    first_created_at = first_row["created_at"]
+    first_row["status"] = "resolved"
+    validate_cognition_state(first_state)
+
+    reactivated_state, reactivated_id, created = materialize_causal_root(
+        first_state,
+        kind=kind,
+        primary_evidence=evidence,
+        description="the same source became causally active again",
+    )
+
+    assert created is False
+    assert reactivated_id == root_id
+    assert len(reactivated_state[collection]) == 1
+    reactivated_row = reactivated_state[collection][0]
+    assert reactivated_row["entity_id"] == root_id
+    assert reactivated_row["status"] == reactivated_status
+    assert reactivated_row["created_at"] == first_created_at
+    assert reactivated_row["evidence_refs"] == [evidence]
+    validate_cognition_state(reactivated_state)
+
+
 def test_stale_response_goal_cutover_preserves_active_causes_and_other_goals() -> None:
     """Canonical cutover removes only stale ordinary-response goals."""
 

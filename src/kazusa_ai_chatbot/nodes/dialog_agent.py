@@ -206,10 +206,10 @@ _V2_DIALOG_GENERATOR_PROMPT = '''# 任务
 
 # 渲染步骤
 1. 以 `selected_surface_intent` 为中心，完整实现 `content_plan` 与每条 `content_requirements`。关系姿态和角色表达用于塑造温度、主动性、直接程度与声音，并服务已选择的语义。
-2. 逐句遵循 `epistemic_boundary`：可断言内容直接表达，解释内容使用明确推测语气，未知内容保留未知。可外部核查的事实来自内容计划、要求或完整证据摘录。
+2. 逐句遵循 `epistemic_boundary`：它与 `resolver_result` 证据和 `permitted_action_results` 共同构成断言上限，`content_plan` 与 `content_requirements` 本身不是新增证据。可断言内容直接表达，解释内容使用明确推测语气，未知内容保留未知。若内容计划扩大了这一边界，只渲染其中有依据的语义，并把没有行动依据的后续选择保留为意向、提议或条件。
 3. 按 `candidate_role_frame` 与 `addressee_plan` 保持行动者、对象、受益者和主语方向。第一人称属于当前角色；只有 `second_person_allowed` 的当前用户目标使用第二人称；其他目标使用其 `display_name` 或明确第三人称。
 4. 按 `permitted_action_results` 表达真实外部执行状态：`executed` 表达同一行动与效果已完成，`pending` 或 `scheduled` 表达等待或未来执行，`failed` 或 `unavailable` 表达限制与可行下一步。没有匹配结果时，保留内容计划中的言语立场、愿望、提议或条件。
-5. 按 `resolver_result` 表达任务与证据状态：完整结果使用 `evidence_excerpts`；部分结果表达已确认部分和 `remaining_needs`；等待、缺失、阻塞、不可用或失败状态表达相应缺口。已接纳并继续的任务表达接纳与等待后续结果。
+5. 按 `resolver_result` 表达任务与证据状态：完整结果使用 `evidence_excerpts`；部分结果表达已确认部分和 `remaining_needs`；等待、缺失、阻塞、不可用或失败状态表达相应缺口。`status`、`evidence_state=complete` 与空 `remaining_needs` 只证明声明的语义目标及证据范围已经收束，不证明更广的场景后果、安全或风险状态、许可、后续执行或推进条件。若只确认来源、事实或结果可用，就保留其内容和影响未知。已接纳并继续的任务表达接纳与等待后续结果。
 6. 使用 `delivery_profile` 形成角色化用词、句式与节奏；避免逐字使用 `lexical_avoidances`，同时保持原语义。语言跟随当前可见对话、内容计划与角色声音；引文、专有名词、代码、URL、schema 与 enum token 保持原样。
 7. `required_source_urls` 存在时，只使用该列表中的 URL，并逐字包含至少一个直接支持已呈现事实的 URL；多来源事实分别附上相应来源。
 8. 若有 `contract_repair`，依据原输入重新生成完整结果，修正其指出的合同或来源问题。

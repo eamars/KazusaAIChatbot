@@ -240,7 +240,7 @@ async def run_self_cognition_worker_tick(
             internal_latch_claim = None
         if internal_latch_claim is not None:
             cases = [
-                _case_from_internal_action_latch(
+                await _case_from_internal_action_latch(
                     internal_latch_claim,
                     character_profile=active_profile,
                     now=now,
@@ -1312,7 +1312,7 @@ async def _collect_cases(
     return cases
 
 
-def _case_from_internal_action_latch(
+async def _case_from_internal_action_latch(
     claim: dict[str, Any],
     *,
     character_profile: dict[str, Any],
@@ -1341,6 +1341,10 @@ def _case_from_internal_action_latch(
         or scope.get("display_name")
         or user_id
     )
+    if user_id:
+        user_profile = await db.get_user_profile(user_id)
+    else:
+        user_profile = {}
     character_name = str(character_profile.get("name") or "Character")
     source_bot_id = str(scope.get("source_platform_bot_id") or "")
     delivery_target = {
@@ -1405,7 +1409,7 @@ def _case_from_internal_action_latch(
         "delivery_mention_users": [],
         "existing_attempts": [],
         "character_profile": character_profile,
-        "user_profile": {},
+        "user_profile": dict(user_profile),
         "platform_bot_id": source_bot_id,
         "channel_topic": "",
         "promoted_reflection_context": {},

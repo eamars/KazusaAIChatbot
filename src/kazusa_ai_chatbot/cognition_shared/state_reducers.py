@@ -1289,14 +1289,50 @@ def materialize_causal_root(
     )
     digest = hashlib.sha256(material.encode("utf-8")).hexdigest()[:24]
     entity_id = f"{kind}:{digest}"
+    terminal_index = next(
+        (
+            index
+            for index, entity in enumerate(updated[collection])
+            if entity.get("entity_id") == entity_id
+        ),
+        None,
+    )
+    terminal_entity = None
+    if terminal_index is not None:
+        candidate = updated[collection][terminal_index]
+        terminal_entity = _matching_source_entity(
+            [candidate],
+            {"evidence_refs": [primary_evidence]},
+            eligible_statuses={"resolved", "replaced"},
+        )
+        if terminal_entity is None:
+            raise CognitionStateError(
+                "causal root identity conflicts with its evidence"
+            )
     timestamp = updated_at or str(updated["updated_at"])
     common = {
         "entity_id": entity_id,
         "description": description.strip()[:500],
         "salience": 0,
-        "role_refs": [],
-        "evidence_refs": [deepcopy(dict(primary_evidence))],
-        "created_at": timestamp,
+        "role_refs": (
+            deepcopy(terminal_entity["role_refs"])
+            if terminal_entity is not None
+            else []
+        ),
+        "evidence_refs": retain_bounded_evidence(
+            (
+                terminal_entity["evidence_refs"]
+                if terminal_entity is not None
+                else []
+            ),
+            [primary_evidence],
+            preserve_primary=True,
+        ),
+        "created_at": (
+            str(terminal_entity["created_at"])
+            if terminal_entity is not None
+            else timestamp
+        ),
         "updated_at": timestamp,
     }
     if kind == "event":
@@ -1341,7 +1377,10 @@ def materialize_causal_root(
             "novelty": 0,
             "model_accommodation": 0,
         }
-    updated[collection].append(entity)
+    if terminal_index is None:
+        updated[collection].append(entity)
+    else:
+        updated[collection][terminal_index] = entity
     # Admission must reclaim safe terminal capacity before the final state
     # validator runs.  A valid state at its declared cap is a legal input; the
     # reducer owns the existing protection policy for active and affect-root
@@ -1350,7 +1389,7 @@ def materialize_causal_root(
         updated,
         preserve_entity_ids={entity_id},
     )
-    return retained, entity_id, True
+    return retained, entity_id, terminal_entity is None
 
 
 def reduce_causal_event(

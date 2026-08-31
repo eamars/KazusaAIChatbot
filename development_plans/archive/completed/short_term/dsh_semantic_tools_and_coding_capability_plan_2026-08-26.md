@@ -16,7 +16,7 @@
   `development_plans/archive/completed/short_term/dsh_standalone_sidecar_and_resolution_interface_plan_2026-08-26.md`
   (Plan 1, completed with all gates green).
 - **Successor boundary:**
-  `development_plans/active/short_term/dsh_brain_bigbang_cutover_and_legacy_resolution_decommission_plan_2026-08-26.md`
+  `development_plans/archive/completed/short_term/dsh_brain_bigbang_cutover_and_legacy_resolution_decommission_plan_2026-08-26.md`
   (Plan 3 retains the production `task_resolution_request` cutover, preserves
   the current post-selector Brain handover, and deletes only the legacy task
   executors replaced by DSH).

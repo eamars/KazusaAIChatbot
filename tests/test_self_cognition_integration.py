@@ -18,6 +18,9 @@ from kazusa_ai_chatbot.cognition_core_v3.diagnostics import current_chain_scope
 from kazusa_ai_chatbot.cognition_shared.contracts import (
     build_scheduled_future_speech_authority,
 )
+from kazusa_ai_chatbot.cognition_shared.state_models import (
+    build_acquaintance_user_state,
+)
 from kazusa_ai_chatbot.db import user_memory_units as memory_units_module
 from kazusa_ai_chatbot.dispatcher import AdapterRegistry, SendResult
 from kazusa_ai_chatbot.nodes.dialog_agent import StateContractError
@@ -64,6 +67,53 @@ def _target_scope() -> dict[str, str | None]:
         "user_id": "673225019",
     }
     return scope
+
+
+@pytest.mark.asyncio
+async def test_internal_latch_case_hydrates_bound_user_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An identity-bound internal latch retains its real user state."""
+
+    user_id = "internal-latch-user"
+    user_profile = {
+        "global_user_id": user_id,
+        "display_name": "Internal Latch User",
+        "cognition_state": build_acquaintance_user_state(
+            global_user_id=user_id,
+            updated_at="2026-08-31T00:00:00Z",
+        ),
+    }
+    profile_reader = AsyncMock(return_value=user_profile)
+    monkeypatch.setattr(worker.db, "get_user_profile", profile_reader)
+
+    case = await worker._case_from_internal_action_latch(
+        {
+            "claim_token": "claim-internal-latch",
+            "latch": {
+                "latch_id": "latch-internal-profile",
+                "source_episode_id": "episode-internal-profile",
+                "source_action_attempt_id": "attempt-internal-profile",
+                "continuation_objective": "Continue the grounded task.",
+                "evidence_refs": [],
+                "target_scope": {
+                    "platform": "debug",
+                    "platform_channel_id": "private-internal-profile",
+                    "channel_type": "private",
+                    "current_global_user_id": user_id,
+                    "current_platform_user_id": "platform-internal-user",
+                    "current_display_name": "Internal Latch User",
+                    "source_platform_bot_id": "bot-internal-profile",
+                },
+            },
+        },
+        character_profile={"name": "Test Character"},
+        now=datetime(2026, 8, 31, tzinfo=timezone.utc),
+    )
+
+    profile_reader.assert_awaited_once_with(user_id)
+    assert case["user_profile"] == user_profile
+    assert case["user_profile"] is not user_profile
 
 
 class _FakeMessagingAdapter:
