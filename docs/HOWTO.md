@@ -1104,7 +1104,7 @@ Live LLM tests must be run and inspected one at a time:
 
 ```bash
 pytest -m live_llm tests/test_cognition_live_llm.py::test_live_msg_decontextualizer_returns_non_empty_output -q -s
-pytest -m live_llm tests/test_agentic_resolver_live_llm.py::test_live_standalone_sidecar_resolution_reaches_submit_resolution -q -s
+pytest -m live_llm tests/test_dsh_user_message_e2e_live_llm.py::test_live_user_message_local_fact_reaches_dsh -q -s
 ```
 
 live LLM cases remain isolated from deterministic contract and browser checks.
