@@ -16,6 +16,7 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     project_goal_progress_for_cognition,
     project_observations_for_cognition,
     project_pending_resume_for_cognition,
+    resolver_evidence_excerpts_for_cognition,
     validate_required_resolver_evidence_dependency,
     validate_resolver_cycle_trace,
     validate_resolver_goal_progress,
@@ -350,10 +351,15 @@ def validate_resolver_state(value: object) -> ResolverCycleStateV1:
         "required_resolver_evidence_dependency"
     )
     if evidence_dependency is not None:
+        normalized_dependency = validate_required_resolver_evidence_dependency(
+            evidence_dependency,
+        )
+        _validate_dependency_observation_alignment(
+            normalized_dependency,
+            observations,
+        )
         normalized["required_resolver_evidence_dependency"] = (
-            validate_required_resolver_evidence_dependency(
-                evidence_dependency,
-            )
+            normalized_dependency
         )
     pending_resume = data.get("pending_resume")
     if pending_resume is not None:
@@ -362,6 +368,56 @@ def validate_resolver_state(value: object) -> ResolverCycleStateV1:
         )
     return_value = normalized
     return return_value
+
+
+def _validate_dependency_observation_alignment(
+    dependency: Mapping[str, Any],
+    observations: list[ResolverObservationV1],
+) -> None:
+    """Require one dependency to describe its exact referenced observation."""
+
+    observation = next(
+        (
+            candidate
+            for candidate in observations
+            if candidate["observation_id"] == dependency["observation_id"]
+        ),
+        None,
+    )
+    if observation is None:
+        raise ResolverValidationError(
+            "required resolver dependency observation is unavailable"
+        )
+    if observation["capability_kind"] != "task_resolution_request":
+        raise ResolverValidationError(
+            "required resolver dependency observation has wrong capability"
+        )
+    if observation.get("goal_continuation_ref") != dependency[
+        "goal_continuation_ref"
+    ]:
+        raise ResolverValidationError(
+            "required resolver dependency continuation does not match observation"
+        )
+    evidence_state = observation.get("task_resolution_evidence_state")
+    if not isinstance(evidence_state, Mapping):
+        raise ResolverValidationError(
+            "required resolver dependency observation lacks evidence state"
+        )
+    if evidence_state["state"] != dependency["state"]:
+        raise ResolverValidationError(
+            "required resolver dependency state does not match observation"
+        )
+    if list(evidence_state["remaining_needs"]) != list(
+        dependency["remaining_needs"]
+    ):
+        raise ResolverValidationError(
+            "required resolver dependency needs do not match observation"
+        )
+    excerpts = resolver_evidence_excerpts_for_cognition(observation)
+    if len(excerpts) != len(dependency["evidence_handles"]):
+        raise ResolverValidationError(
+            "required resolver dependency evidence does not match observation"
+        )
 
 
 def _cognitive_episode_id(state: Mapping[str, Any]) -> str:

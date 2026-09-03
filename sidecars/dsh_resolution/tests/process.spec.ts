@@ -236,13 +236,13 @@ async function start(
   const modelAddress = modelServer.address();
   if (modelAddress === null || typeof modelAddress === "string") throw new Error("model server did not bind");
   const brainServer = createHttpServer((request, response) => {
-    if (request.method !== "GET" || request.url !== "/runtime/dsh/health") {
+    if (request.method !== "GET" || request.url !== "/runtime/dsh/bridge-health") {
       response.writeHead(404).end();
       return;
     }
     response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify({
-      schema_version: "dsh_brain_interaction_health.v1",
+      schema_version: "dsh_brain_bridge_health.v1",
       status: "ready",
       configured: true,
       durable_store: true,
@@ -306,6 +306,9 @@ async function start(
       }
       const route = (health as Record<string, unknown>).route;
       const catalog = (health as Record<string, unknown>).catalog;
+      if ((health as Record<string, unknown>).status !== "ready") {
+        throw new Error("sidecar health is not ready");
+      }
       if (route === null || typeof route !== "object" || Array.isArray(route)) {
         throw new Error("sidecar health route is invalid");
       }

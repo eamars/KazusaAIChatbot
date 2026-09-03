@@ -150,12 +150,12 @@ class _FakeBrainHealth:
     def __init__(self) -> None:
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self) -> None:
-                if self.path != "/runtime/dsh/health":
+                if self.path != "/runtime/dsh/bridge-health":
                     self.send_response(404)
                     self.end_headers()
                     return
                 body = json.dumps({
-                    "schema_version": "dsh_brain_interaction_health.v1",
+                    "schema_version": "dsh_brain_bridge_health.v1",
                     "status": "ready",
                     "configured": True,
                     "durable_store": True,

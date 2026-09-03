@@ -637,6 +637,10 @@ def validate_task_resolution_result(value: object) -> TaskResolutionResultV1:
     if not isinstance(evidence_value, list) or len(evidence_value) > MAX_TASK_RESOLUTION_LIST_ITEMS:
         raise TaskResolutionContractError("task result evidence is out of bounds")
     evidence = [validate_task_resolution_evidence(item) for item in evidence_value]
+    if any(item["summary"] not in handles for item in evidence):
+        raise TaskResolutionContractError(
+            "task result evidence handle is missing its semantic reference"
+        )
     completed = _bounded_text_list(
         data["completed_subgoals"],
         "task_resolution_result.completed_subgoals",

@@ -934,6 +934,8 @@ def build_canonical_turn_workspace(
             "tool_result_delivery",
         }:
             excluded_resolver_capabilities.add("task_resolution_request")
+        if validated_response_plan_variant == "tool_result_delivery":
+            excluded_resolver_capabilities.add("self_goal_resolution")
         capabilities = {
             **capabilities,
             "resolvers": [

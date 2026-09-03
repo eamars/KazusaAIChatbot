@@ -74,6 +74,105 @@ describe("evidence", () => {
 });
 
 describe("V2 evidence", () => {
+  it("projects successful Standard native tool results as authority-bound evidence", () => {
+    const authority = {
+      threadId: "thread-native",
+      segmentId: "segment-native",
+      scopeFingerprint: "sha256:scope-native",
+      audienceFingerprint: "sha256:audience-native",
+      policyEpoch: "dsh-standard-policy-v2",
+    };
+    const rebuilt = EvidenceLedger.rebuild([
+      {
+        type: "tool/call",
+        data: {
+          callId: "call-native-weather",
+          name: "web_search",
+          arguments: JSON.stringify({ query: "Christchurch current weather" }),
+        },
+      },
+      {
+        type: "tool/result",
+        data: {
+          message: {
+            id: "message-native-weather",
+            role: "user",
+            source: { kind: "tool", callId: "call-native-weather" },
+            content: [{
+              type: "tool-result",
+              toolCallId: "call-native-weather",
+              content: [{
+                type: "text",
+                text: "Christchurch: 6 C, rain, observed by wttr.in",
+              }],
+            }],
+          },
+        },
+      },
+    ], {
+      authority,
+      nativeToolNames: ["web_search", "pwsh"],
+    });
+
+    const evidence = rebuilt.all(authority);
+    expect(evidence).toHaveLength(1);
+    expect(evidence[0]).toMatchObject({
+      threadId: "thread-native",
+      segmentId: "segment-native",
+      scopeFingerprint: "sha256:scope-native",
+      audienceFingerprint: "sha256:audience-native",
+      policyEpoch: "dsh-standard-policy-v2",
+      tool_name: "web_search",
+      source_kind: "native",
+    });
+    expect(evidence[0]?.source_id).toContain("call-native-weather");
+    expect(evidence[0]?.content_digest).toMatch(/^sha256:/u);
+  });
+
+  it("does not project failed or non-catalog tool results as native evidence", () => {
+    const authority = {
+      threadId: "thread-native",
+      segmentId: "segment-native",
+      scopeFingerprint: "sha256:scope-native",
+      audienceFingerprint: "sha256:audience-native",
+      policyEpoch: "dsh-standard-policy-v2",
+    };
+    const resultEvent = (callId: string, isError: boolean) => ({
+      type: "tool/result",
+      data: {
+        message: {
+          id: `message-${callId}`,
+          role: "user",
+          source: { kind: "tool", callId },
+          content: [{
+            type: "tool-result",
+            toolCallId: callId,
+            content: [{ type: "text", text: "tool output" }],
+            isError,
+          }],
+        },
+        ...(isError ? { error: { name: "ToolError", code: "FAILED" } } : {}),
+      },
+    });
+    const rebuilt = EvidenceLedger.rebuild([
+      {
+        type: "tool/call",
+        data: { callId: "failed-native", name: "pwsh", arguments: "{}" },
+      },
+      resultEvent("failed-native", true),
+      {
+        type: "tool/call",
+        data: { callId: "unknown-tool", name: "not_standard", arguments: "{}" },
+      },
+      resultEvent("unknown-tool", false),
+    ], {
+      authority,
+      nativeToolNames: ["web_search", "pwsh"],
+    });
+
+    expect(rebuilt.all(authority)).toEqual([]);
+  });
+
   it("projects the latest 64 unique receipts in chronological order", () => {
     const references = Array.from({ length: 66 }, (_, index) => (
       reference(`ev_${index + 1}`)

@@ -57,7 +57,7 @@ CONTENT_PLAN_SYSTEM_PROMPT = '''# 任务
 `surface` 是本轮完整语义包：`episode` 提供当前可见事件和角色方向；`intention`、`active_character_goal` 与 `response_plan` 提供已选择的回应目标和可答性；`expression_policy`、`semantic_affect`、`semantic_relationship`、`relational_willingness`、`interaction_style_context` 与 `character_expression_context` 提供表达姿态；`subjective_expression_context` 提供私密动机和权威断言边界；`permitted_action_results` 提供行动结果事实；`resolver_result` 提供任务或证据结果；`runtime_capability_limits` 提供当前能力限制；`addressee_plan` 提供称呼方向；`recent_character_dialog` 与 `overused_moves` 只提供措辞连续性。`contract_repair` 若出现，只说明上一候选的结构问题。
 
 # 规划步骤
-1. 以 `response_plan.response_goal` 和当前 `episode` 为可见语义锚点，确定本轮要回应、推进或收束的内容。角色动机、关系意愿和表达语境塑造姿态；它们在当前观察支持的范围内进入可见语义。
+1. 以 `response_plan.response_goal` 和当前 `episode` 为可见语义锚点，确定本轮要回应、推进或收束的内容。若 `response_plan.terminal_work_disposition=closed`，则 `response_plan.surface_requirements` 是本轮的权威收束合同：表达当前阻塞与证据边界，在当前回复内结束，不规划重试、重新调度、后台处理或延后交付。角色动机、关系意愿和表达语境塑造姿态；它们在当前观察支持的范围内进入可见语义。
 2. 按 `subjective_expression_context.epistemic_boundary` 规划断言强度。它与当前事件、`resolver_result` 证据和 `permitted_action_results` 共同构成事实与行动断言的上限。可断言内容直接表达，解释内容使用明确推测语气，未知内容保留未知；缺少证据保持开放。私密动机、关系姿态和角色表达只塑造声音，不能补充事实或行动权限。
 3. 按 `goal_resolution` 与 `resolver_result` 规划答案：完整证据只使用 `evidence_excerpts`；部分证据表达已确认部分和 `remaining_needs`；等待、缺失、阻塞、不可用或失败状态表达相应缺口与下一步。`status`、`evidence_state=complete` 与空 `remaining_needs` 只描述该语义目标及其证据范围已经收束，不证明更广的场景后果、安全或风险状态、许可、后续执行或推进条件。已接纳并继续的任务表达接纳和等待后续结果。
 4. 若证据只确认某个来源、事实或结果可用，而没有给出其内容或影响，就只规划该可用性并保留内容或影响未知。后续动作可以作为角色的意向、提议或条件表达；只有证据或匹配的行动结果明确支持时，才能把它规划为已获许可、可以推进、已经执行或已经产生效果。

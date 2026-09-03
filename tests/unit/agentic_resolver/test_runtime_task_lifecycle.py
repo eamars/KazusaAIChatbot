@@ -5,9 +5,31 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from pymongo.errors import AutoReconnect
 
+from agentic_resolver.errors import ResolutionPersistenceError
 from agentic_resolver.fingerprints import workspace_fingerprint
+from kazusa_ai_chatbot.db.errors import DatabaseOperationError
 from kazusa_ai_chatbot.dsh_tool_gateway.contracts import content_digest
+
+
+class _TransientRepositoryOwner:
+    """Database owner double for persistence taxonomy and retry tests."""
+
+    def __init__(self) -> None:
+        self.index_calls = 0
+
+    async def ensure_indexes(self) -> None:
+        self.index_calls += 1
+        if self.index_calls < 3:
+            try:
+                raise AutoReconnect("connection closed")
+            except AutoReconnect as exc:
+                raise DatabaseOperationError("index failure") from exc
+
+    async def get_operation(self, *args: object) -> None:
+        del args
+        raise DatabaseOperationError("read failure")
 
 
 class _RuntimeController:
@@ -36,6 +58,38 @@ class _RuntimeController:
             "lease_epoch": 8,
             "fresh_authority": True,
         }
+
+
+@pytest.mark.asyncio
+async def test_mongo_repository_retries_transient_index_creation_once() -> None:
+    """Transient index connection loss is bounded and cached after recovery."""
+
+    from agentic_resolver.persistence import MongoResolutionThreadRepository
+
+    owner = _TransientRepositoryOwner()
+    repository = MongoResolutionThreadRepository()
+    repository._db = owner
+
+    await repository.ensure_indexes()
+    await repository.ensure_indexes()
+
+    assert owner.index_calls == 3
+
+
+@pytest.mark.asyncio
+async def test_mongo_repository_translates_database_owner_errors() -> None:
+    """Raw database errors cannot escape the resolver repository boundary."""
+
+    from agentic_resolver.persistence import MongoResolutionThreadRepository
+
+    repository = MongoResolutionThreadRepository()
+    repository._db = _TransientRepositoryOwner()
+
+    with pytest.raises(
+        ResolutionPersistenceError,
+        match="get_operation",
+    ):
+        await repository.get_operation("thread-1", "operation-1")
 
 
 @pytest.mark.asyncio

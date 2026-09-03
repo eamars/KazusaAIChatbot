@@ -33,6 +33,7 @@ RESOLVER_EVIDENCE_STATE_VERSION = "resolver_evidence_state.v1"
 REQUIRED_RESOLVER_EVIDENCE_DEPENDENCY_VERSION = (
     "required_resolver_evidence_dependency.v1"
 )
+TERMINAL_RESOLVER_SURFACE_DECISION = "explain terminal evidence blocker"
 SHARED_MEMORY_PREWARM_OUTCOME_VERSION = "shared_memory_prewarm_outcome.v1"
 MAX_SHARED_MEMORY_PREWARM_ENTRIES = 24
 MAX_SHARED_MEMORY_PREWARM_LATENCY_MS = 120000

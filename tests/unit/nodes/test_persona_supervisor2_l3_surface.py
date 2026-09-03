@@ -23,9 +23,13 @@ from kazusa_ai_chatbot.cognition_shared.contracts import (
 from kazusa_ai_chatbot.cognition_shared.state_projection import (
     validate_prompt_projection,
 )
+from kazusa_ai_chatbot.cognition_resolver.contracts import (
+    TERMINAL_RESOLVER_SURFACE_DECISION,
+)
 from kazusa_ai_chatbot.llm_interface import LLMCallConfig, LLMThinkingConfig
 from kazusa_ai_chatbot.nodes import dialog_agent
 from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_surface
+from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from tests.test_background_work_delivery import _accepted_task_completed_job
 from tests.test_cognition_resolver_contracts import _observation
 from tests.unit.nodes.surface_fixtures import (
@@ -349,6 +353,114 @@ def test_l3_surface_omits_resolver_result_for_ordinary_episode() -> None:
     )
 
     assert "resolver_result" not in payload
+
+
+def test_persona_graph_retains_canonical_resolver_recurrence_fields() -> None:
+    """Keep resolver closure available to downstream persona graph nodes."""
+
+    assert {
+        "resolver_state",
+        "resolver_context",
+        "resolver_capability_requests",
+        "resolver_cycle_trace",
+        "resolver_goal_progress",
+    } <= GlobalPersonaState.__optional_keys__
+
+
+def test_l3_terminal_resolver_surface_closes_stale_pending_plan() -> None:
+    """A resolver terminal speak overrides the superseded pending P plan."""
+
+    state = build_surface_state(build_relational_decision())
+    output = state["cognition_core_output"]
+    assert isinstance(output, dict)
+    response_plan = output["response_plan"]
+    assert isinstance(response_plan, dict)
+    response_plan.update({
+        "response_goal": "I will retry the blocked lookup.",
+        "goal_resolution": "requires_required_evidence",
+        "resolver_requests": [{"capability": "task_resolution_request"}],
+    })
+    observation = _observation()
+    observation.update({
+        "status": "failed",
+        "prompt_safe_summary": "The evidence path is terminally blocked.",
+        "evidence_refs": [],
+        "task_resolution_evidence_state": {
+            "schema_version": "resolver_evidence_state.v1",
+            "state": "blocked",
+            "remaining_needs": ["current Christchurch weather"],
+        },
+    })
+    continuation_ref = observation["goal_continuation_ref"]
+    terminal_detail = (
+        "Explain that current evidence retrieval is blocked, keep current "
+        "weather unknown, and close this turn without retry or deferred work."
+    )
+    terminal_spec = {
+        "kind": "speak",
+        "source_refs": [{"owner": "cognition_resolver"}],
+        "params": {
+            "surface_requirements": {
+                "decision": TERMINAL_RESOLVER_SURFACE_DECISION,
+                "detail": terminal_detail,
+            },
+        },
+        "cognition_provenance": {
+            "target_roles": [{
+                "role": "target",
+                "entity_kind": "user",
+                "entity_id": "user-1",
+            }],
+        },
+    }
+    state["action_specs"] = [terminal_spec]
+    state["resolver_state"] = {
+        "schema_version": "resolver_cycle_state.v1",
+        "cycle_index": 2,
+        "max_cycles": 3,
+        "status": "blocked",
+        "original_decontextualized_input": "Get current Christchurch weather.",
+        "observations": [observation],
+        "cycle_traces": [],
+        "held_action_specs": [terminal_spec],
+        "required_resolver_evidence_dependency": {
+            "schema_version": "required_resolver_evidence_dependency.v1",
+            "accepted_request_handle": "resolver_request_0_1",
+            "observation_id": observation["observation_id"],
+            "prompt_safe_observation_handle": "resolver_observation_0_1",
+            "capability_kind": "task_resolution_request",
+            "state": "blocked",
+            "evidence_handles": [],
+            "remaining_needs": ["current Christchurch weather"],
+            "goal_continuation_ref": continuation_ref,
+        },
+        "terminal_reason": "duplicate request converted to terminal surface",
+    }
+
+    payload = l3_surface.build_text_surface_input_from_global_state(
+        state,
+        interaction_style_context="brief and natural",
+    )
+
+    assert payload["resolver_result"]["status"] == "failed"
+    assert payload["resolver_result"]["evidence_state"] == "blocked"
+    assert payload["response_plan"] == {
+        "response_goal": terminal_detail,
+        "goal_resolution": "blocked",
+        "epistemic_boundary": (
+            "Assert the visible turn and keep unsupported details unknown."
+        ),
+        "action_requests": [],
+        "resolver_requests": [],
+        "surface_requirements": {
+            "decision": TERMINAL_RESOLVER_SURFACE_DECISION,
+            "detail": terminal_detail,
+        },
+        "terminal_work_disposition": "closed",
+    }
+    assert payload["subjective_expression_context"]["epistemic_boundary"] == (
+        terminal_detail
+    )
 
 
 def test_l3_surface_projects_current_task_resolver_dependency() -> None:

@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from agentic_resolver.errors import RpcTransportError
 from kazusa_ai_chatbot.cognition_episode import build_goal_continuation_ref
 from tests.task_resolution_test_helpers import (
     InMemoryAcceptedTaskStore,
@@ -147,6 +148,20 @@ class _AuthorityBroker:
         return "fresh-authority-token"
 
 
+class _FailingRuntime:
+    """Runtime double that fails after the binding admission callback."""
+
+    async def open(self, **kwargs: object) -> None:
+        before_resolve = kwargs["before_resolve"]
+        await before_resolve(_resolution_ref(
+            session_id=str(kwargs["task_session_id"]),
+            thread_id="thread-failed",
+            segment_id="segment-failed",
+            activation_id="activation-failed",
+        ))
+        raise RpcTransportError("sidecar unavailable")
+
+
 async def _await(value: object) -> object:
     if isinstance(value, Awaitable):
         return await value
@@ -213,6 +228,27 @@ def test_task_session_identity_is_stable_across_objective_paraphrases() -> None:
         _request(),
         {**first_context, "channel_id": "channel-2"},
     )
+
+
+@pytest.mark.asyncio
+async def test_inline_admission_failure_terminally_faults_binding() -> None:
+    """A failed runtime admission must leave no queued or opening binding."""
+
+    service = _service_module()
+    bindings = InMemoryDshBindingStore()
+
+    with pytest.raises(RpcTransportError, match="sidecar unavailable"):
+        await service.resolve_task_inline(
+            _request(),
+            _context(),
+            inline_budget_seconds=1.0,
+            runtime=_FailingRuntime(),
+            binding_store=bindings,
+        )
+
+    binding = next(iter(bindings.bindings.values()))
+    assert binding["state"] == "faulted"
+    assert binding["resolution_thread_id"] == "thread-failed"
 
 
 @pytest.mark.asyncio

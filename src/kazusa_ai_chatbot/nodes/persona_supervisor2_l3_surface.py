@@ -25,6 +25,7 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     MAX_RESOLVER_EVIDENCE_EXCERPTS,
     MAX_RESOLVER_GOAL_ITEM_CHARS,
     MAX_RESOLVER_GOAL_ITEMS,
+    TERMINAL_RESOLVER_SURFACE_DECISION,
     resolver_evidence_excerpts_for_cognition,
 )
 from kazusa_ai_chatbot.cognition_resolver.state import validate_resolver_state
@@ -109,6 +110,11 @@ def build_text_surface_input_from_global_state(
         raise ValueError("canonical private monologue is required")
     if not isinstance(epistemic_boundary, str) or not epistemic_boundary.strip():
         raise ValueError("canonical epistemic boundary is required")
+    continuation_ref = _resolver_result_continuation_ref(state)
+    resolver_result = _resolver_result(
+        state,
+        continuation_ref=continuation_ref,
+    )
     surface_response_plan = {
         key: plan[key]
         for key in (
@@ -120,6 +126,21 @@ def build_text_surface_input_from_global_state(
         )
         if key in plan
     }
+    terminal_surface = _terminal_resolver_surface_requirements(
+        state,
+        resolver_result=resolver_result,
+    )
+    if terminal_surface is not None:
+        terminal_detail = terminal_surface["detail"]
+        surface_response_plan.update({
+            "response_goal": terminal_detail,
+            "goal_resolution": "blocked",
+            "action_requests": [],
+            "resolver_requests": [],
+            "surface_requirements": terminal_surface,
+            "terminal_work_disposition": "closed",
+        })
+        epistemic_boundary = terminal_detail
     expression_context, visual_context = _character_surface_contexts(state)
     conversation_progress = state.get("conversation_progress")
     if conversation_progress is None:
@@ -136,7 +157,11 @@ def build_text_surface_input_from_global_state(
         "active_character_goal": dict(goal),
         "response_plan": surface_response_plan,
         "expression_policy": {
-            "visibility": "visible" if plan.get("response_goal") else "none",
+            "visibility": (
+                "visible"
+                if surface_response_plan.get("response_goal")
+                else "none"
+            ),
             "emotional_tone": "character-consistent",
             "intensity": "moderate",
             "directness": "balanced",
@@ -160,14 +185,66 @@ def build_text_surface_input_from_global_state(
     willingness = output.get("relational_willingness")
     if isinstance(willingness, Mapping):
         canonical_payload["relational_willingness"] = dict(willingness)
-    continuation_ref = _resolver_result_continuation_ref(state)
-    resolver_result = _resolver_result(
-        state,
-        continuation_ref=continuation_ref,
-    )
     if resolver_result is not None:
         canonical_payload["resolver_result"] = resolver_result
     return validate_text_surface_input_canonical(canonical_payload)
+
+
+def _terminal_resolver_surface_requirements(
+    state: Mapping[str, Any],
+    *,
+    resolver_result: Mapping[str, Any] | None,
+) -> dict[str, str] | None:
+    """Return the resolver-owned closed-work surface for one terminal blocker."""
+
+    if resolver_result is None or resolver_result.get("status") not in {
+        "blocked",
+        "failed",
+    }:
+        return None
+    raw_resolver_state = state.get("resolver_state")
+    if not isinstance(raw_resolver_state, Mapping):
+        raise ValueError("terminal resolver surface requires resolver state")
+    resolver_state = validate_resolver_state(raw_resolver_state)
+    if resolver_state["status"] not in {"blocked", "max_cycles"}:
+        return None
+
+    action_specs = state.get("action_specs")
+    if not isinstance(action_specs, list):
+        raise TypeError("terminal resolver surface requires action specs")
+    resolver_speak_specs = [
+        row
+        for row in action_specs
+        if isinstance(row, Mapping)
+        and row.get("kind") == "speak"
+        and any(
+            isinstance(source_ref, Mapping)
+            and source_ref.get("owner") == "cognition_resolver"
+            for source_ref in row.get("source_refs", [])
+        )
+    ]
+    if len(resolver_speak_specs) != 1:
+        raise ValueError(
+            "terminal resolver surface requires exactly one resolver-owned speak"
+        )
+    params = resolver_speak_specs[0].get("params")
+    if not isinstance(params, Mapping):
+        raise ValueError("terminal resolver speak params are required")
+    requirements = params.get("surface_requirements")
+    if not isinstance(requirements, Mapping):
+        raise ValueError("terminal resolver surface requirements are required")
+    if set(requirements) != {"decision", "detail"}:
+        raise ValueError("terminal resolver surface requirements are not exact")
+    decision = requirements.get("decision")
+    detail = requirements.get("detail")
+    if decision != TERMINAL_RESOLVER_SURFACE_DECISION:
+        raise ValueError("terminal resolver surface decision is invalid")
+    if not isinstance(detail, str) or not detail.strip() or len(detail) > 1000:
+        raise ValueError("terminal resolver surface detail is invalid")
+    return {
+        "decision": TERMINAL_RESOLVER_SURFACE_DECISION,
+        "detail": detail.strip(),
+    }
 
 
 async def call_l3_text_surface_handler(state: GlobalPersonaState) -> dict[str, Any]:

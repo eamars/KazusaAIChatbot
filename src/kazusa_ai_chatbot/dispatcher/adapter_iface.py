@@ -30,6 +30,7 @@ class MessagingAdapter(Protocol):
     """Minimal outbound messaging interface implemented by platform adapters."""
 
     platform: str
+    platform_bot_id: str
 
     async def can_send_message(
         self,

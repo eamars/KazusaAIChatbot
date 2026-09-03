@@ -972,7 +972,11 @@ async def _run_group_self_cognition_review_for_scope(
             result.defer_reason = "self-cognition sleep period"
             return result
 
-        character_profile = await get_character_profile()
+        character_profile = _group_review_character_profile(
+            character_profile=await get_character_profile(),
+            platform=channel_scope.platform,
+            adapter_registry_provider=adapter_registry_provider,
+        )
         windows = _group_activity_windows_for_scope(
             channel_scope=channel_scope,
             now=now,
@@ -1091,6 +1095,26 @@ async def _run_group_self_cognition_review_for_scope(
         if pipeline_run_handle is not None:
             await pipeline_run_handle.__aexit__(None, None, None)
     return result
+
+
+def _group_review_character_profile(
+    *,
+    character_profile: dict[str, Any],
+    platform: str,
+    adapter_registry_provider: Callable[[], AdapterRegistry | None] | None,
+) -> dict[str, Any]:
+    """Compose source adapter identity into a group-review profile."""
+
+    source_profile = dict(character_profile)
+    if adapter_registry_provider is None:
+        return source_profile
+    adapter_registry = adapter_registry_provider()
+    if adapter_registry is None or not adapter_registry.has(platform):
+        return source_profile
+    platform_bot_id = adapter_registry.get(platform).platform_bot_id.strip()
+    if platform_bot_id:
+        source_profile["platform_bot_id"] = platform_bot_id
+    return source_profile
 
 
 def _group_review_case_target_binding_failed(case: dict[str, Any]) -> bool:

@@ -3,21 +3,21 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
 import hashlib
 import os
-from pathlib import Path
 import re
 import socket
-from typing import Any, Callable, Literal
-from urllib.parse import urlparse
 import uuid
+from collections.abc import Callable
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Literal
+from urllib.parse import urlparse
 
 from control_console.audit import LocalAuditWriter
 from control_console.contracts import ServiceRuntimeState, ServiceSpec
 from control_console.log_store import ProcessLogStore
 from control_console.process_store import ProcessStore
-
 
 ENDPOINT_CONFLICT_TIMEOUT_SECONDS = 0.2
 ENDPOINT_CONFLICT_MESSAGE = (
@@ -27,6 +27,7 @@ NO_PROCESS_HANDLE_MESSAGE = "no console-owned process handle"
 PROCESS_METADATA_MISMATCH_MESSAGE = "process ownership metadata mismatch"
 DEAD_PROCESS_MESSAGE = "previous console-owned process is no longer alive"
 DEFAULT_SHUTDOWN_TIMEOUT_SECONDS = 15.0
+DEFAULT_STARTUP_TIMEOUT_SECONDS = 30.0
 PROCESS_LOG_TEXT_ENCODINGS = ("utf-8", "gb18030")
 STALE_UNOWNED_CONFLICT_MESSAGES = frozenset({
     NO_PROCESS_HANDLE_MESSAGE,
@@ -64,6 +65,7 @@ class ProcessSupervisor:
         self._processes: dict[str, asyncio.subprocess.Process] = {}
         self._log_tasks: dict[str, set[asyncio.Task[None]]] = {}
         self._process_command_fingerprints: dict[str, str] = {}
+        self._readiness_events: dict[str, asyncio.Event] = {}
 
     def service_version(self, service_id: str) -> int:
         """Return the current service state version."""
@@ -137,6 +139,8 @@ class ProcessSupervisor:
             stderr=asyncio.subprocess.PIPE,
         )
         self._processes[service_id] = process
+        if spec.ready_match is not None:
+            self._readiness_events[service_id] = asyncio.Event()
         self._start_log_readers(service_id=service_id, process=process)
         generation = f"generation-{uuid.uuid4().hex}"
         fingerprint = _command_fingerprint(
@@ -153,10 +157,32 @@ class ProcessSupervisor:
         self._store.update_service(
             service_id,
             {
-                "actual_state": "running",
+                "actual_state": (
+                    "starting" if spec.ready_match is not None else "running"
+                ),
                 "started_at": datetime.now(timezone.utc).isoformat(),
                 "stopped_at": None,
                 "exit_code": None,
+                "last_error_preview": None,
+            },
+        )
+        try:
+            await self._wait_for_process_readiness(
+                service_id=service_id,
+                process=process,
+            )
+        except (ServiceLifecycleError, TimeoutError) as exc:
+            await self._settle_failed_start(
+                service_id=service_id,
+                process=process,
+                reason=str(exc),
+            )
+            raise ServiceLifecycleError(str(exc)) from exc
+        self._readiness_events.pop(service_id, None)
+        self._store.update_service(
+            service_id,
+            {
+                "actual_state": "running",
                 "last_error_preview": None,
             },
         )
@@ -182,6 +208,65 @@ class ProcessSupervisor:
             state=state,
         )
         return response
+
+    async def _wait_for_process_readiness(
+        self,
+        *,
+        service_id: str,
+        process: asyncio.subprocess.Process,
+    ) -> None:
+        """Wait for a declared child marker before exposing it as running."""
+
+        spec = self._services[service_id]
+        if spec.ready_match is None:
+            return
+        event = self._readiness_events[service_id]
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + _startup_timeout_seconds(spec)
+        while not event.is_set():
+            if process.returncode is not None:
+                raise ServiceLifecycleError(
+                    f"service exited before readiness: {service_id}"
+                )
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise TimeoutError(
+                    f"service readiness timed out: {service_id}"
+                )
+            try:
+                await asyncio.wait_for(event.wait(), timeout=min(0.1, remaining))
+            except TimeoutError:
+                continue
+
+    async def _settle_failed_start(
+        self,
+        *,
+        service_id: str,
+        process: asyncio.subprocess.Process,
+        reason: str,
+    ) -> None:
+        """Stop and record one child that never reached readiness."""
+
+        if process.returncode is None:
+            process.terminate()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=5.0)
+            except TimeoutError:
+                process.kill()
+                await process.wait()
+        self._processes.pop(service_id, None)
+        self._process_command_fingerprints.pop(service_id, None)
+        self._readiness_events.pop(service_id, None)
+        self._cancel_log_tasks(service_id)
+        self._store.update_service(
+            service_id,
+            {
+                "actual_state": "unhealthy",
+                "pid": None,
+                "exit_code": process.returncode,
+                "last_error_preview": reason,
+            },
+        )
 
     async def stop_service(
         self,
@@ -653,6 +738,14 @@ class ProcessSupervisor:
                         stream=stream_name,
                         line=line,
                     )
+                    spec = self._services[service_id]
+                    event = self._readiness_events.get(service_id)
+                    if (
+                        event is not None
+                        and spec.ready_match is not None
+                        and spec.ready_match in line
+                    ):
+                        event.set()
         except asyncio.CancelledError:
             raise
         except (OSError, ValueError) as exc:
@@ -822,6 +915,15 @@ def _shutdown_timeout_seconds(spec: ServiceSpec) -> float:
     timeout_seconds = spec.shutdown_timeout_seconds
     if timeout_seconds is None:
         timeout_seconds = DEFAULT_SHUTDOWN_TIMEOUT_SECONDS
+    return timeout_seconds
+
+
+def _startup_timeout_seconds(spec: ServiceSpec) -> float:
+    """Return the bounded startup-readiness timeout for one service."""
+
+    timeout_seconds = spec.startup_timeout_seconds
+    if timeout_seconds is None:
+        timeout_seconds = DEFAULT_STARTUP_TIMEOUT_SECONDS
     return timeout_seconds
 
 

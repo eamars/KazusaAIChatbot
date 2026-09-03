@@ -23,6 +23,7 @@ from uuid import uuid4
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 
+from agentic_resolver.errors import AgenticResolverError
 from agentic_resolver.runtime import AgenticResolverRuntime
 from kazusa_ai_chatbot import event_logging, llm_tracing
 from kazusa_ai_chatbot.action_spec.execution import execute_action_specs_for_trace
@@ -87,6 +88,7 @@ from kazusa_ai_chatbot.brain_service.contracts import (
     CognitionRunObservationV1,
     DeliveryReceiptRequest,
     DeliveryReceiptResponse,
+    DshBrainBridgeHealthResponseV1,
     DshBrainInteractionResponseV2,
     DshInteractionHealthResponseV1,
     DshTaskResolutionHealthV1,
@@ -1294,8 +1296,8 @@ async def _configure_dsh_interaction_service_from_lifespan() -> None:
     )
 
 
-def _dsh_interaction_health() -> DshInteractionHealthResponseV1:
-    """Project non-secret readiness facts for the Brain interaction owner."""
+def _dsh_brain_bridge_health() -> DshBrainBridgeHealthResponseV1:
+    """Project local Brain owners without recursively probing DSH."""
 
     service = _dsh_interaction_service
     configured = service is not None
@@ -1303,16 +1305,46 @@ def _dsh_interaction_health() -> DshInteractionHealthResponseV1:
         getattr(service, "_interaction_store", None),
         MongoInteractionStore,
     ) if service is not None else False
-    cognition_judge = service is not None and getattr(service, "_judge", None) is not None
-    status = "ready" if configured and durable_store and cognition_judge else "unavailable"
-    return DshInteractionHealthResponseV1(
-        schema_version="dsh_brain_interaction_health.v1",
+    cognition_judge = (
+        service is not None and getattr(service, "_judge", None) is not None
+    )
+    status = (
+        "ready"
+        if configured and durable_store and cognition_judge
+        else "unavailable"
+    )
+    return DshBrainBridgeHealthResponseV1(
+        schema_version="dsh_brain_bridge_health.v1",
         status=status,
         configured=configured,
         durable_store=durable_store,
         cognition_judge=cognition_judge,
+    )
+
+
+async def _dsh_interaction_health() -> DshInteractionHealthResponseV1:
+    """Project aggregate non-secret Brain and sidecar readiness facts."""
+
+    bridge_health = _dsh_brain_bridge_health()
+    sidecar_ready = False
+    runtime = _dsh_resolver_runtime
+    if runtime is not None:
+        try:
+            readiness = await runtime.readiness()
+        except AgenticResolverError as exc:
+            logger.warning(f"DSH sidecar readiness unavailable: {exc}")
+        else:
+            sidecar_ready = readiness.get("status") == "ready"
+    local_ready = bridge_health.status == "ready"
+    status = "ready" if local_ready and sidecar_ready else "unavailable"
+    return DshInteractionHealthResponseV1(
+        schema_version="dsh_brain_interaction_health.v1",
+        status=status,
+        configured=bridge_health.configured,
+        durable_store=bridge_health.durable_store,
+        cognition_judge=bridge_health.cognition_judge,
         task_resolution=DshTaskResolutionHealthV1(
-            status=status,
+            status="ready" if sidecar_ready else "unavailable",
             sidecar_identity="dsh-resolution-v2",
             brain_bridge_identity="brain-dsh-bridge-v2",
         ),
@@ -5026,7 +5058,7 @@ async def _process_queued_chat_item(
                     error_preview=error_preview,
                     stack_fingerprint=stack_fingerprint,
                     top_frame_module=top_frame_module,
-                    recovered=True,
+                    recovered=False,
                     status="failed",
                     correlation_id=correlation_id,
                 )
@@ -6604,13 +6636,23 @@ async def health():
 
 
 @app.get(
+    "/runtime/dsh/bridge-health",
+    response_model=DshBrainBridgeHealthResponseV1,
+)
+async def runtime_dsh_bridge_health() -> DshBrainBridgeHealthResponseV1:
+    """Return local Brain bridge readiness without calling the sidecar."""
+
+    return _dsh_brain_bridge_health()
+
+
+@app.get(
     "/runtime/dsh/health",
     response_model=DshInteractionHealthResponseV1,
 )
 async def runtime_dsh_health() -> DshInteractionHealthResponseV1:
     """Return the configured Brain interaction owner's readiness facts."""
 
-    return _dsh_interaction_health()
+    return await _dsh_interaction_health()
 
 
 @app.post(

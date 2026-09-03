@@ -432,6 +432,7 @@ export interface TerminalReceipt {
   workspace_root: string;
   route_digest: string;
   scope_fingerprint: string;
+  audience_fingerprint: string;
   catalog_digest: string;
   interaction_issuer: string;
   policy_epoch: string;
@@ -641,7 +642,8 @@ export function validateTerminalReceipt(value: unknown): TerminalReceipt {
     "kind", "schema_version", "call_id", "operation_id", "operation_payload_digest",
     "request_id", "resolution_thread_id", "segment_id", "activation_id", "lease_epoch",
     "brain_conversation_ref", "workspace_root", "route_digest", "scope_fingerprint",
-    "catalog_digest", "interaction_issuer", "policy_epoch", "terminal", "terminal_digest",
+    "audience_fingerprint", "catalog_digest", "interaction_issuer", "policy_epoch",
+    "terminal", "terminal_digest",
   ], "terminal receipt");
   if (row.kind !== "terminal_resolution_v2" || row.schema_version !== "2") {
     throw new ContractFault("terminal receipt version is unsupported");
@@ -650,7 +652,8 @@ export function validateTerminalReceipt(value: unknown): TerminalReceipt {
     "call_id", "operation_id", "operation_payload_digest", "request_id",
     "resolution_thread_id", "segment_id", "activation_id", "brain_conversation_ref",
     "workspace_root", "route_digest", "scope_fingerprint", "catalog_digest",
-    "interaction_issuer", "policy_epoch", "terminal_digest",
+    "audience_fingerprint", "interaction_issuer", "policy_epoch",
+    "terminal_digest",
   ] as const) text(row[key], `terminal.${key}`);
   absolutePath(row.workspace_root as string, "terminal.workspace_root");
   const leaseEpoch = integer(row.lease_epoch, "terminal.lease_epoch", 1);
@@ -669,6 +672,7 @@ export function validateTerminalReceipt(value: unknown): TerminalReceipt {
     workspace_root: row.workspace_root as string,
     route_digest: row.route_digest as string,
     scope_fingerprint: row.scope_fingerprint as string,
+    audience_fingerprint: row.audience_fingerprint as string,
     catalog_digest: row.catalog_digest as string,
     interaction_issuer: row.interaction_issuer as string,
     policy_epoch: row.policy_epoch as string,

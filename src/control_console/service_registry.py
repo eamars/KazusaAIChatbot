@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import json
 import sys
+from pathlib import Path
 
 from pydantic import ValidationError
 
@@ -29,12 +29,25 @@ def default_service_registry() -> dict[str, ServiceSpec]:
             health_url="http://127.0.0.1:8000/health",
         ),
         ServiceSpec(
+            id="dsh.sidecar",
+            display_name="DSH resolution sidecar",
+            kind="support",
+            command=[
+                "node",
+                "sidecars/dsh_resolution/dist/src/main.js",
+            ],
+            cwd=".",
+            dependencies=["brain"],
+            ready_match="DSH_RESOLUTION_READY",
+            startup_timeout_seconds=120.0,
+        ),
+        ServiceSpec(
             id="adapter.discord",
             display_name="Discord adapter",
             kind="adapter",
             command=[python_executable, "-m", "adapters.discord_adapter"],
             cwd=".",
-            dependencies=["brain"],
+            dependencies=["brain", "dsh.sidecar"],
         ),
         ServiceSpec(
             id="adapter.napcat",
@@ -42,7 +55,7 @@ def default_service_registry() -> dict[str, ServiceSpec]:
             kind="adapter",
             command=[python_executable, "-m", "adapters.napcat_qq_adapter"],
             cwd=".",
-            dependencies=["brain"],
+            dependencies=["brain", "dsh.sidecar"],
         ),
         ServiceSpec(
             id="adapter.debug",
@@ -58,7 +71,7 @@ def default_service_registry() -> dict[str, ServiceSpec]:
                 "8080",
             ],
             cwd=".",
-            dependencies=["brain"],
+            dependencies=["brain", "dsh.sidecar"],
             health_url="http://127.0.0.1:8080/api/health",
         ),
     ]

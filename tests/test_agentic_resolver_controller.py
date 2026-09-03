@@ -357,6 +357,113 @@ def test_checkpoint_cancel_inspect_and_dispose_preserve_durable_lineage() -> Non
     assert repository.get_thread("res_controller") is not None
 
 
+@pytest.mark.asyncio
+async def test_checkpoint_terminal_race_preserves_terminal_segment_state() -> None:
+    """A terminal result returned to checkpoint control remains terminal."""
+
+    class TerminalCheckpointRpc(FakeRpc):
+        async def call(
+            self,
+            method: str,
+            params: dict[str, object],
+            **kwargs: object,
+        ) -> dict[str, object]:
+            if method == "resolution.request_checkpoint":
+                self.calls.append((method, params))
+                return {
+                    "disposition": "terminal",
+                    "exhaust": {
+                        "kind": "terminal",
+                        "operation_id": params["operation_id"],
+                    },
+                }
+            return await super().call(method, params, **kwargs)
+
+    repository = InMemoryResolutionThreadRepository()
+    rpc = TerminalCheckpointRpc()
+    controller = ResolutionController(
+        repository,
+        rpc,
+        owner_id="controller-test",
+        semantic_authority_secret=_SEMANTIC_SECRET,
+    )
+    opened = await controller.open(_intake())
+
+    result = await controller.request_checkpoint(
+        "res_controller",
+        opened["activation_id"],
+        opened["lease_epoch"],
+    )
+
+    record = repository.get_thread("res_controller")
+    assert result["disposition"] == "terminal"
+    assert record is not None
+    segment = next(
+        value
+        for value in record.segments
+        if value["segment_id"] == opened["segment_id"]
+    )
+    assert segment["state"] == "terminal"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_checkpoint_and_open_cleanup_release_once() -> None:
+    """Concurrent committed outcomes share one fenced disposal owner."""
+
+    class BarrierRpc(FakeRpc):
+        def __init__(self) -> None:
+            super().__init__()
+            self.dispose_started = asyncio.Event()
+            self.release_dispose = asyncio.Event()
+            self.dispose_count = 0
+
+        async def call(
+            self,
+            method: str,
+            params: dict[str, object],
+            **kwargs: object,
+        ) -> dict[str, object]:
+            if method == "resolution.dispose_activation":
+                self.calls.append((method, params))
+                self.dispose_count += 1
+                self.dispose_started.set()
+                await self.release_dispose.wait()
+                return {"disposition": "canceled"}
+            return await super().call(method, params, **kwargs)
+
+    repository = InMemoryResolutionThreadRepository()
+    rpc = BarrierRpc()
+    controller = ResolutionController(
+        repository,
+        rpc,
+        owner_id="controller-test",
+        semantic_authority_secret=_SEMANTIC_SECRET,
+    )
+    opened = await controller.open(_intake())
+    cleanup = {
+        "resolution_thread_id": "res_controller",
+        "segment_id": opened["segment_id"],
+        "activation_id": opened["activation_id"],
+        "lease_epoch": opened["lease_epoch"],
+    }
+
+    first = asyncio.create_task(
+        controller._dispose_and_release_if_current(**cleanup),
+    )
+    second = asyncio.create_task(
+        controller._dispose_and_release_if_current(**cleanup),
+    )
+    await asyncio.wait_for(rpc.dispose_started.wait(), timeout=1.0)
+    await asyncio.sleep(0)
+    rpc.release_dispose.set()
+    await asyncio.gather(first, second)
+
+    record = repository.get_thread("res_controller")
+    assert record is not None
+    assert record.current_lease is None
+    assert rpc.dispose_count == 1
+
+
 def test_terminal_submit_maps_to_typed_terminal_exhaust() -> None:
     controller, _, rpc = _controller()
     rpc.disposition = "terminal"

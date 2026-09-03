@@ -38,6 +38,9 @@ class ResolverController(Protocol):
     async def resolve(self, intake: Mapping[str, Any]) -> Mapping[str, Any]:
         """Resolve one canonical intake through the independent sidecar."""
 
+    async def readiness(self) -> dict[str, str]:
+        """Return the authenticated mounted-sidecar identity."""
+
 
 class AgenticResolverRuntime:
     """Small public runtime delegating lifecycle work to its controller."""
@@ -86,6 +89,11 @@ class AgenticResolverRuntime:
         value = await self._controller.resolve(intake)
         exhaust_value = value.get("exhaust", value)
         return DSHResolutionExhaustV2.from_mapping(exhaust_value)
+
+    async def readiness(self) -> dict[str, str]:
+        """Probe authenticated DSH sidecar readiness."""
+
+        return await self._controller.readiness()
 
     async def open(
         self,

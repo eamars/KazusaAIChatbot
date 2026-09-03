@@ -355,7 +355,7 @@ async function probeBrainHealth(): Promise<BrainReadiness> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 1_000);
   try {
-    const response = await fetch(new URL("runtime/dsh/health", brainUrl), {
+    const response = await fetch(new URL("runtime/dsh/bridge-health", brainUrl), {
       method: "GET",
       headers: { authorization: `Bearer ${brainSecret}` },
       signal: controller.signal,
@@ -364,8 +364,7 @@ async function probeBrainHealth(): Promise<BrainReadiness> {
     const value: unknown = await response.json();
     if (value === null || typeof value !== "object" || Array.isArray(value)) return "unavailable";
     const health = value as Record<string, unknown>;
-    return health.schema_version === "dsh_brain_interaction_health.v1"
-      && health.status === "ready"
+    return health.schema_version === "dsh_brain_bridge_health.v1"
       && health.configured === true
       && health.durable_store === true
       && health.cognition_judge === true
@@ -410,7 +409,7 @@ function epoch(params: Record<string, unknown>): number {
   return value as number;
 }
 
-const health = async () => {
+const buildHealth = async (): Promise<Record<string, unknown>> => {
   brainReadiness = await probeBrainHealth();
   const semanticWorkerReadiness = await worker.probe();
   const readiness = {
@@ -454,6 +453,17 @@ const health = async () => {
   };
 };
 
+let healthInFlight: Promise<Record<string, unknown>> | undefined;
+const health = async (): Promise<Record<string, unknown>> => {
+  if (healthInFlight !== undefined) return await healthInFlight;
+  healthInFlight = buildHealth();
+  try {
+    return await healthInFlight;
+  } finally {
+    healthInFlight = undefined;
+  }
+};
+
 const handlers = {
   "system.health": async () => health(),
   "resolution.open": async (params: Record<string, unknown>) => runtime.open(params.intake, text(params, "activation_id"), epoch(params)),
@@ -475,6 +485,20 @@ const server = createRpcServer(
 );
 
 let shuttingDown = false;
+async function announceReadiness(): Promise<void> {
+  while (!shuttingDown) {
+    try {
+      const current = await health();
+      if (current.status === "ready") {
+        process.stdout.write("DSH_RESOLUTION_READY\n");
+        return;
+      }
+    } catch {}
+    await new Promise((accept) => setTimeout(accept, 100));
+  }
+}
+void announceReadiness();
+
 async function shutdown(): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;

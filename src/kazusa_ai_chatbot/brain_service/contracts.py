@@ -232,6 +232,18 @@ class DshBrainInteractionResponseV2(BaseModel):
         return self
 
 
+class DshBrainBridgeHealthResponseV1(BaseModel):
+    """Local readiness facts required by the DSH sidecar Brain bridge."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["dsh_brain_bridge_health.v1"]
+    status: Literal["ready", "unavailable"]
+    configured: bool
+    durable_store: bool
+    cognition_judge: bool
+
+
 class DshInteractionHealthResponseV1(BaseModel):
     """Readiness facts for the configured Brain interaction owner."""
 

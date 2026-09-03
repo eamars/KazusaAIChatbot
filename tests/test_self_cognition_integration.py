@@ -1289,7 +1289,11 @@ async def test_collect_commitment_due_cognition_cases_projects_calendar_runs() -
 
     cases = await sources.collect_commitment_due_cognition_cases(
         now=datetime(2026, 5, 13, 0, 30, tzinfo=timezone.utc),
-        character_profile={"name": "Character", "mood": "focused"},
+        character_profile={
+            "name": "Character",
+            "mood": "focused",
+            "platform_bot_id": "bot-001",
+        },
         max_cases=2,
         list_due_calendar_runs_func=list_due_runs,
         memory_unit_reader_func=read_memory_unit,
@@ -1302,6 +1306,8 @@ async def test_collect_commitment_due_cognition_cases_projects_calendar_runs() -
     assert cases[0]["case_name"] == models.CASE_COMMITMENT_PAST_DUE
     assert cases[0]["trigger_kind"] == models.TRIGGER_ACTIVE_COMMITMENT_DUE_CHECK
     assert cases[0]["source_calendar_run_id"] == "calendar_run_commitment_123"
+    assert cases[0]["platform_bot_id"] == "bot-001"
+    assert cases[0]["delivery_target"]["source_platform_bot_id"] == "bot-001"
     assert cases[0]["source_refs"][0] == {
         "source_kind": "user_memory_unit",
         "source_id": "promise-001",

@@ -332,6 +332,7 @@ function inspectEvents(
   events: readonly SessionEvent[],
   operationId: string,
   payloadDigest: string,
+  nativeToolNames: readonly string[],
 ): JsonObject | undefined {
   const found = findAdmission(events, operationId, payloadDigest);
   if (found === undefined) return undefined;
@@ -359,6 +360,16 @@ function inspectEvents(
       );
       const ledger = EvidenceLedger.rebuild(
         evidenceEvents as unknown as Record<string, unknown>[],
+        {
+          authority: {
+            threadId: receipt.resolution_thread_id,
+            segmentId: receipt.segment_id,
+            scopeFingerprint: receipt.scope_fingerprint,
+            audienceFingerprint: receipt.audience_fingerprint,
+            policyEpoch: receipt.policy_epoch,
+          },
+          nativeToolNames,
+        },
       );
       const terminalExhaust = replayTerminalExhaust(
         [event as unknown as Record<string, unknown>],
@@ -579,6 +590,7 @@ export async function buildProfile(
         inspection.events,
         operationId,
         payloadDigest,
+        catalog.native_names,
       );
       if (result !== undefined) return result;
     }

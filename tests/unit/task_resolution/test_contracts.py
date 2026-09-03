@@ -213,6 +213,11 @@ def test_dsh_start_binding_reference_and_v1_result_contracts_are_exact() -> None
     result = result_validator(_result(context))
     assert result["evidence"][0]["specialist"] == "dsh"
     assert result["coding_run_context"] == {}
+    with pytest.raises(ValueError, match="missing its semantic reference"):
+        result_validator({
+            **_result(context),
+            "evidence_handles": ["different-semantic-ref"],
+        })
     with pytest.raises(ValueError, match="resolved.*remaining needs"):
         result_validator({
             **_result(context),

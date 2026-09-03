@@ -25,6 +25,7 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     RESOLVER_CYCLE_TRACE_VERSION,
     RESOLVER_EVIDENCE_STATE_VERSION,
     RESOLVER_OBSERVATION_VERSION,
+    TERMINAL_RESOLVER_SURFACE_DECISION,
     ResolverCapabilityRequestV1,
     ResolverCycleStateV1,
     ResolverObservationV1,
@@ -119,6 +120,10 @@ async def _call_cognition_preserving_observations(
 
 logger = logging.getLogger(__name__)
 
+_PENDING_TASK_RESOLUTION_EXECUTIONS: set[
+    asyncio.Task[ResolverObservationV1]
+] = set()
+
 
 async def call_cognition_resolver_loop(
     state: GlobalPersonaState,
@@ -194,6 +199,37 @@ async def call_cognition_resolver_loop(
             return return_value
 
         if _is_repeated_capability_request(selected_request, resolver_state):
+            remaining_requests = _without_same_continuation_task_requests(
+                cognition_state.get("resolver_capability_requests"),
+                selected_request["goal_continuation_ref"],
+            )
+            if (
+                not remaining_requests
+                and _is_already_admitted_pending_task_request(
+                    selected_request,
+                    resolver_state,
+                )
+            ):
+                cognition_state["resolver_capability_requests"] = []
+                final_state = await _finalize_without_capability(
+                    cognition_state,
+                    resolver_state=resolver_state,
+                    status_before=status_before,
+                    apply_pending_resolution_func=(
+                        apply_pending_resolution_func
+                    ),
+                    terminal_reason=(
+                        "duplicate pending task request suppressed; accepted "
+                        "task remains pending"
+                    ),
+                )
+                return_value = await _enforce_final_lifecycle_state(
+                    final_state,
+                    status_before=status_before,
+                    call_cognition_subgraph_func=call_cognition_subgraph_func,
+                    apply_pending_resolution_func=apply_pending_resolution_func,
+                )
+                return return_value
             final_state = await _run_duplicate_request_final_cognition(
                 cognition_state,
                 selected_request=selected_request,
@@ -920,9 +956,13 @@ async def _run_max_cycle_final_cognition(
         final_terminal_reason = ANSWERABLE_NOW_TERMINAL_REASON
     if final_selected_request is not None:
         cognition_state["resolver_capability_requests"] = []
-        if cognition_state.get("action_specs"):
-            final_terminal_reason = "maximum resolver cycles reached"
-        elif _should_surface_terminal_blocker(cognition_state):
+        is_terminal_task_request = (
+            final_selected_request["capability_kind"]
+            == "task_resolution_request"
+        )
+        if is_terminal_task_request and _should_surface_terminal_blocker(
+            cognition_state
+        ):
             logger.warning(
                 "Resolver converted max-cycle terminal capability request to "
                 "visible blocker surface"
@@ -937,11 +977,30 @@ async def _run_max_cycle_final_cognition(
             final_terminal_reason = (
                 "maximum resolver cycles converted to terminal surface"
             )
-        else:
+        elif is_terminal_task_request:
+            cognition_state["action_specs"] = []
             logger.warning(
                 "Resolver kept max-cycle terminal capability request private "
                 "for non-user source"
             )
+            final_terminal_reason = (
+                "maximum resolver cycles kept private for non-user source"
+            )
+        elif cognition_state.get("action_specs"):
+            final_terminal_reason = "maximum resolver cycles reached"
+        elif _should_surface_terminal_blocker(cognition_state):
+            cognition_state["action_specs"] = [
+                _terminal_blocker_speak_action_spec(
+                    cognition_state,
+                    final_selected_request,
+                    blocker,
+                ),
+            ]
+            final_terminal_reason = (
+                "maximum resolver cycles converted to terminal surface"
+            )
+        else:
+            cognition_state["action_specs"] = []
             final_terminal_reason = (
                 "maximum resolver cycles kept private for non-user source"
             )
@@ -1022,12 +1081,13 @@ async def _run_duplicate_request_final_cognition(
         final_terminal_reason = ANSWERABLE_NOW_TERMINAL_REASON
     if final_repeated_request is not None:
         cognition_state["resolver_capability_requests"] = []
-        if cognition_state.get("action_specs"):
-            final_terminal_reason = (
-                "duplicate resolver capability request final cognition "
-                "completed"
-            )
-        elif _should_surface_terminal_blocker(cognition_state):
+        is_terminal_task_request = (
+            final_repeated_request["capability_kind"]
+            == "task_resolution_request"
+        )
+        if is_terminal_task_request and _should_surface_terminal_blocker(
+            cognition_state
+        ):
             logger.warning(
                 "Resolver converted terminal capability request after "
                 "duplicate blocking to visible blocker surface"
@@ -1043,11 +1103,35 @@ async def _run_duplicate_request_final_cognition(
                 "duplicate resolver capability request converted to "
                 "terminal surface"
             )
-        else:
+        elif is_terminal_task_request:
+            cognition_state["action_specs"] = []
             logger.warning(
                 "Resolver kept terminal capability request private after "
                 "duplicate blocking for non-user source"
             )
+            final_terminal_reason = (
+                "duplicate resolver capability request kept private for "
+                "non-user source"
+            )
+        elif cognition_state.get("action_specs"):
+            final_terminal_reason = (
+                "duplicate resolver capability request final cognition "
+                "completed"
+            )
+        elif _should_surface_terminal_blocker(cognition_state):
+            cognition_state["action_specs"] = [
+                _terminal_blocker_speak_action_spec(
+                    cognition_state,
+                    final_repeated_request,
+                    blocker,
+                ),
+            ]
+            final_terminal_reason = (
+                "duplicate resolver capability request converted to "
+                "terminal surface"
+            )
+        else:
+            cognition_state["action_specs"] = []
             final_terminal_reason = (
                 "duplicate resolver capability request kept private for "
                 "non-user source"
@@ -1701,15 +1785,54 @@ async def _execute_with_timeout(
 ) -> ResolverObservationV1:
     """Execute one capability with a structural timeout observation."""
 
-    try:
-        observation = await asyncio.wait_for(
+    if request["capability_kind"] == "task_resolution_request":
+        execution = asyncio.create_task(
             execute_capability_func(request, state),
-            timeout=capability_timeout_seconds,
+            name="resolver_task_resolution_execution",
         )
-    except TimeoutError:
-        observation = _timeout_observation(request, state)
+        try:
+            observation = await asyncio.wait_for(
+                asyncio.shield(execution),
+                timeout=capability_timeout_seconds,
+            )
+        except TimeoutError:
+            _retain_task_resolution_execution(execution)
+            observation = _timeout_observation(request, state)
+    else:
+        try:
+            observation = await asyncio.wait_for(
+                execute_capability_func(request, state),
+                timeout=capability_timeout_seconds,
+            )
+        except TimeoutError:
+            observation = _timeout_observation(request, state)
     return_value = validate_resolver_observation(observation)
     return return_value
+
+
+def _retain_task_resolution_execution(
+    execution: asyncio.Task[ResolverObservationV1],
+) -> None:
+    """Own timed-out DSH work until checkpoint and promotion finish."""
+
+    _PENDING_TASK_RESOLUTION_EXECUTIONS.add(execution)
+    execution.add_done_callback(_finish_task_resolution_execution)
+
+
+def _finish_task_resolution_execution(
+    execution: asyncio.Task[ResolverObservationV1],
+) -> None:
+    """Release completed DSH handoff work and surface unexpected faults."""
+
+    _PENDING_TASK_RESOLUTION_EXECUTIONS.discard(execution)
+    if execution.cancelled():
+        return
+    try:
+        execution.result()
+    except Exception:
+        logger.exception(
+            "Timed-out DSH capability failed before durable lifecycle closure",
+        )
 
 
 def _validate_capability_handoff(
@@ -1842,6 +1965,23 @@ def _is_repeated_capability_request(
     return return_value
 
 
+def _is_already_admitted_pending_task_request(
+    request: ResolverCapabilityRequestV1,
+    resolver_state: ResolverCycleStateV1,
+) -> bool:
+    """Identify a repeated request whose accepted background task is active."""
+
+    if request["capability_kind"] != "task_resolution_request":
+        return False
+    dependency = resolver_state.get("required_resolver_evidence_dependency")
+    if dependency is None or dependency["state"] != "pending":
+        return False
+    return _same_continuation_ref(
+        dependency["goal_continuation_ref"],
+        request["goal_continuation_ref"],
+    )
+
+
 def _resolver_request_ordinal(
     state: GlobalPersonaState,
     selected_request: ResolverCapabilityRequestV1,
@@ -1953,11 +2093,30 @@ def _mark_existing_dependency_blocked(
         return return_value
     updated_dependency = dict(dependency)
     updated_dependency["state"] = "blocked"
+    updated_dependency["observation_id"] = observation["observation_id"]
+    updated_dependency["prompt_safe_observation_handle"] = (
+        f"resolver_terminal_{observation['observation_id']}"
+    )
+    updated_dependency["evidence_handles"] = [
+        f"resolver_terminal_evidence_{index}"
+        for index, evidence_ref in enumerate(
+            observation["evidence_refs"],
+            start=1,
+        )
+        if isinstance(evidence_ref.get("excerpt"), str)
+        and evidence_ref["excerpt"].strip()
+    ]
     evidence_state = observation.get("task_resolution_evidence_state")
     if isinstance(evidence_state, Mapping):
         updated_dependency["remaining_needs"] = list(
             evidence_state["remaining_needs"]
         )
+    continuation_ref = observation.get("goal_continuation_ref")
+    if not isinstance(continuation_ref, Mapping):
+        raise ResolverValidationError(
+            "terminal task observation lacks a continuation reference"
+        )
+    updated_dependency["goal_continuation_ref"] = dict(continuation_ref)
     updated = dict(resolver_state)
     updated["required_resolver_evidence_dependency"] = (
         validate_required_resolver_evidence_dependency(updated_dependency)
@@ -2096,7 +2255,7 @@ def _terminal_blocker_speak_action_spec(
             "delivery_mode": "visible_reply",
             "execute_at": None,
             "surface_requirements": {
-                "decision": "explain terminal evidence blocker",
+                "decision": TERMINAL_RESOLVER_SURFACE_DECISION,
                 "detail": detail,
             },
         },

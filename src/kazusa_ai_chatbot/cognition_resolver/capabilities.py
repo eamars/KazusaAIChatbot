@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from openai import OpenAIError
 
+from agentic_resolver.errors import AgenticResolverError
 from kazusa_ai_chatbot import event_logging
 from kazusa_ai_chatbot.cognition_episode import GoalContinuationRefV1
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
@@ -40,7 +41,10 @@ from kazusa_ai_chatbot.config import (
     BACKGROUND_WORK_OUTPUT_CHAR_LIMIT,
     TASK_RESOLUTION_INLINE_BUDGET_SECONDS,
 )
-from kazusa_ai_chatbot.db.errors import DatabaseBackendError
+from kazusa_ai_chatbot.db.errors import (
+    DatabaseBackendError,
+    DatabaseOperationError,
+)
 from kazusa_ai_chatbot.local_context_resolver import (
     DEFAULT_OPTION_LIMITS,
     LOCAL_CONTEXT_RESOLVER_CONTEXT_VERSION,
@@ -824,7 +828,11 @@ async def _execute_task_resolution_request(
                 requester_display_name=_required_state_text(state, "user_name"),
                 source_llm_trace_id=text_or_empty(state.get("llm_trace_id")),
             )
-        except TaskResolutionContractError as exc:
+        except (
+            AgenticResolverError,
+            DatabaseOperationError,
+            TaskResolutionContractError,
+        ) as exc:
             return _task_resolution_failure_observation(request, state, exc)
         admission_observation = _task_resolution_admission_observation(
             request,
@@ -838,7 +846,11 @@ async def _execute_task_resolution_request(
             execution_context,
             inline_budget_seconds=TASK_RESOLUTION_INLINE_BUDGET_SECONDS,
         )
-    except TaskResolutionContractError as exc:
+    except (
+        AgenticResolverError,
+        DatabaseOperationError,
+        TaskResolutionContractError,
+    ) as exc:
         return _task_resolution_failure_observation(request, state, exc)
 
     if result["status"] == "deferred":
@@ -854,7 +866,11 @@ async def _execute_task_resolution_request(
                 requester_display_name=_required_state_text(state, "user_name"),
                 source_llm_trace_id=text_or_empty(state.get("llm_trace_id")),
             )
-        except TaskResolutionContractError as exc:
+        except (
+            AgenticResolverError,
+            DatabaseOperationError,
+            TaskResolutionContractError,
+        ) as exc:
             return _task_resolution_failure_observation(request, state, exc)
     return _task_resolution_observation(
         request,
@@ -1100,11 +1116,15 @@ def _task_resolution_admission_observation(
 def _task_resolution_failure_observation(
     request: ResolverCapabilityRequestV1,
     state: GlobalPersonaState,
-    exc: TaskResolutionContractError,
+    exc: (
+        AgenticResolverError
+        | DatabaseOperationError
+        | TaskResolutionContractError
+    ),
 ) -> ResolverObservationV1:
     """Return a bounded failure observation without exposing internal errors."""
 
-    logger.warning(f"Task-resolution capability failed validation: {exc}")
+    logger.warning(f"Task-resolution capability failed: {exc}")
     observation = _observation_base(
         request,
         state,

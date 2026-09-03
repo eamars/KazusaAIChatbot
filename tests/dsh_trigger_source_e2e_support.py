@@ -38,6 +38,28 @@ DSH_RPC_PROTOCOL_VERSION = "kazusa.dsh-resolution-rpc.v2"
 CASE_PROCESS_TIMEOUT_SECONDS = 30 * 60
 LIVE_HTTP_TIMEOUT_SECONDS = 10 * 60
 SOURCE_TRACE_SETTLEMENT_TIMEOUT_SECONDS = 90.0
+CONFIGURED_COMPLETION_TIMEOUT_SECONDS = 10 * 60
+EVIDENCE_COLLECTION_TIMEOUT_SECONDS = 10.0
+SIGNOFF_FINGERPRINT_PATHS = (
+    "src",
+    "sidecars/dsh_resolution/src",
+    "sidecars/dsh_resolution/dist/src",
+    "sidecars/dsh_resolution/package.json",
+    "sidecars/dsh_resolution/pnpm-lock.yaml",
+    "sidecars/dsh_resolution/tsconfig.json",
+    "personalities/example.json",
+    "pyproject.toml",
+    "pytest.ini",
+    "scripts/validate_dsh_signoff.py",
+    "tests/dsh_trigger_source_e2e_support.py",
+    "tests/test_dsh_internal_thought_e2e_live_llm.py",
+    "tests/test_dsh_operational_e2e_live_llm.py",
+    "tests/test_dsh_scheduled_tick_e2e_live_llm.py",
+    "tests/test_dsh_self_cognition_e2e_live_llm.py",
+    "tests/test_dsh_tool_result_e2e_live_llm.py",
+    "tests/test_dsh_user_message_e2e_live_llm.py",
+)
+SIGNOFF_FINGERPRINT_SUFFIXES = frozenset({".js", ".json", ".py", ".ts"})
 
 
 @dataclass(frozen=True)
@@ -49,6 +71,7 @@ class TriggerSourceCaseSpec:
     expects_dsh_entry: bool
     workspace_files: Mapping[str, str]
     expected_evidence_files: tuple[str, ...] = ()
+    expected_fact_groups: tuple[tuple[str, ...], ...] = ()
 
 
 CASE_SPECS = {
@@ -63,6 +86,7 @@ CASE_SPECS = {
             ),
         },
         expected_evidence_files=("status_note.txt",),
+        expected_fact_groups=(("mira",),),
     ),
     "user_message_background_summary": TriggerSourceCaseSpec(
         case_id="user_message_background_summary",
@@ -75,6 +99,7 @@ CASE_SPECS = {
             ),
         },
         expected_evidence_files=("incident_note.txt",),
+        expected_fact_groups=(("rowan",),),
     ),
     "internal_thought_file_check": TriggerSourceCaseSpec(
         case_id="internal_thought_file_check",
@@ -82,11 +107,12 @@ CASE_SPECS = {
         expects_dsh_entry=True,
         workspace_files={
             "internal/health_note.txt": (
-                "The service is stable. The next checkpoint is the queue-depth "
-                "review."
+                "Nora owns the health check. The service is stable, and the "
+                "next checkpoint is the queue-depth review."
             ),
         },
         expected_evidence_files=("health_note.txt",),
+        expected_fact_groups=(("nora",),),
     ),
     "internal_thought_comparison": TriggerSourceCaseSpec(
         case_id="internal_thought_comparison",
@@ -103,6 +129,7 @@ CASE_SPECS = {
             ),
         },
         expected_evidence_files=("early_shift.txt", "late_shift.txt"),
+        expected_fact_groups=(("dev",),),
     ),
     "self_cognition_targetless_group": TriggerSourceCaseSpec(
         case_id="self_cognition_targetless_group",
@@ -137,6 +164,7 @@ CASE_SPECS = {
             ),
         },
         expected_evidence_files=("commitment_note.txt",),
+        expected_fact_groups=(("priya",),),
     ),
     "scheduled_tick_future": TriggerSourceCaseSpec(
         case_id="scheduled_tick_future",
@@ -144,17 +172,20 @@ CASE_SPECS = {
         expects_dsh_entry=True,
         workspace_files={
             "scheduled/future_note.txt": (
-                "The rollout condition is satisfied because the canary is "
-                "healthy and the error budget remains intact."
+                "Leona owns rollout approval. The rollout condition is "
+                "satisfied because the canary is healthy and the error "
+                "budget remains intact."
             ),
         },
         expected_evidence_files=("future_note.txt",),
+        expected_fact_groups=(("leona",),),
     ),
     "tool_result_resolved": TriggerSourceCaseSpec(
         case_id="tool_result_resolved",
         trigger_source="tool_result",
         expects_dsh_entry=False,
         workspace_files={},
+        expected_fact_groups=(("morgan",), ("checksum",)),
     ),
     "tool_result_failed": TriggerSourceCaseSpec(
         case_id="tool_result_failed",
@@ -163,6 +194,78 @@ CASE_SPECS = {
         workspace_files={},
     ),
 }
+
+SIDECAR_LOSS_CASE_SPEC = TriggerSourceCaseSpec(
+    case_id="sidecar_loss_user_message",
+    trigger_source="user_message",
+    expects_dsh_entry=False,
+    workspace_files={},
+)
+
+CONFIGURED_WEATHER_CASE_SPEC = TriggerSourceCaseSpec(
+    case_id="configured_service_christchurch_weather",
+    trigger_source="user_message",
+    expects_dsh_entry=True,
+    workspace_files={},
+)
+
+
+def _case_spec(case_id: str) -> TriggerSourceCaseSpec:
+    """Return one declared matrix or operational-fault case."""
+
+    if case_id == SIDECAR_LOSS_CASE_SPEC.case_id:
+        return SIDECAR_LOSS_CASE_SPEC
+    if case_id == CONFIGURED_WEATHER_CASE_SPEC.case_id:
+        return CONFIGURED_WEATHER_CASE_SPEC
+    try:
+        return CASE_SPECS[case_id]
+    except KeyError as exc:
+        raise AssertionError(f"unknown DSH E2E case: {case_id}") from exc
+
+
+def signoff_case_ids() -> tuple[str, ...]:
+    """Return every live case required for one complete sign-off."""
+
+    return (
+        *CASE_SPECS,
+        SIDECAR_LOSS_CASE_SPEC.case_id,
+        CONFIGURED_WEATHER_CASE_SPEC.case_id,
+    )
+
+
+def signoff_code_fingerprint() -> str:
+    """Hash every production and harness owner certified by live artifacts."""
+
+    digest = sha256()
+    files: list[Path] = []
+    for relative_path in SIGNOFF_FINGERPRINT_PATHS:
+        path = PROJECT_ROOT / relative_path
+        if not path.exists():
+            raise FileNotFoundError(
+                f"DSH sign-off fingerprint owner is missing: {relative_path}"
+            )
+        if path.is_file():
+            files.append(path)
+            continue
+        owned_files = [
+            candidate
+            for candidate in path.rglob("*")
+            if candidate.is_file()
+            and candidate.suffix in SIGNOFF_FINGERPRINT_SUFFIXES
+            and "__pycache__" not in candidate.parts
+        ]
+        if not owned_files:
+            raise ValueError(
+                f"DSH sign-off fingerprint owner is empty: {relative_path}"
+            )
+        files.extend(owned_files)
+    for path in sorted(set(files)):
+        relative = path.relative_to(PROJECT_ROOT).as_posix()
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return f"sha256:{digest.hexdigest()}"
 
 
 class _ChildProcess:
@@ -195,6 +298,7 @@ class _LoopbackAdapterServer:
         self._lock = Lock()
         self._capability_payloads: list[dict[str, Any]] = []
         self._delivery_payloads: list[dict[str, Any]] = []
+        self._started = False
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -225,15 +329,20 @@ class _LoopbackAdapterServer:
         """Start the callback server."""
 
         self._thread.start()
+        self._started = True
 
     def stop(self) -> None:
         """Stop and join the callback server."""
 
+        if not self._started:
+            self._server.server_close()
+            return
         self._server.shutdown()
         self._server.server_close()
         self._thread.join(timeout=5)
         if self._thread.is_alive():
             raise RuntimeError("loopback adapter thread did not stop")
+        self._started = False
 
     def capability_payloads(self) -> list[dict[str, Any]]:
         """Return a copy of all capability probes."""
@@ -342,6 +451,12 @@ def _artifact_directory(case_id: str) -> Path:
 def _require_live_configuration() -> None:
     """Require the externally configured real-model routes."""
 
+    from kazusa_ai_chatbot import config
+
+    os.environ.setdefault(
+        "CHARACTER_GLOBAL_USER_ID",
+        config.CHARACTER_GLOBAL_USER_ID,
+    )
     if os.environ.get("KAZUSA_RUN_LIVE_LLM") != "1":
         pytest.skip("set KAZUSA_RUN_LIVE_LLM=1 for real-model coverage")
     required = (
@@ -351,7 +466,6 @@ def _require_live_configuration() -> None:
         "AGENTIC_RESOLVER_LLM_CONTEXT_WINDOW_TOKENS",
         "AGENTIC_RESOLVER_LLM_MAX_COMPLETION_TOKENS",
         "AGENTIC_RESOLVER_LLM_THINKING_ENABLED",
-        "CHARACTER_GLOBAL_USER_ID",
     )
     missing = [name for name in required if not os.environ.get(name)]
     if missing:
@@ -420,6 +534,60 @@ def _case_environment(
     return environment
 
 
+def _configured_case_environment(
+    *,
+    tmp_path: Path,
+    database_name: str,
+) -> dict[str, str]:
+    """Build an isolated case environment without rewriting service URLs."""
+
+    required = (
+        "KAZUSA_DSH_SIDECAR_URL",
+        "KAZUSA_DSH_RPC_TOKEN",
+        "KAZUSA_DSH_BRAIN_URL",
+        "KAZUSA_DSH_BRAIN_SHARED_SECRET",
+        "KAZUSA_DSH_TOOL_GATEWAY_SECRET",
+    )
+    missing = [name for name in required if not os.environ.get(name)]
+    if missing:
+        pytest.fail(
+            "configured DSH service settings are missing: "
+            + ", ".join(missing)
+        )
+    workspace_root = (tmp_path / "workspace").resolve()
+    data_root = (tmp_path / "dsh-data").resolve()
+    workspace_root.mkdir(parents=True, exist_ok=False)
+    data_root.mkdir(parents=True, exist_ok=False)
+    environment = os.environ.copy()
+    python_path_parts = [
+        str((PROJECT_ROOT / "src").resolve()),
+        str(PROJECT_ROOT.resolve()),
+    ]
+    existing_python_path = environment.get("PYTHONPATH", "").strip()
+    if existing_python_path:
+        python_path_parts.append(existing_python_path)
+    environment.update({
+        "PYTHONPATH": os.pathsep.join(python_path_parts),
+        "MONGODB_DB_NAME": database_name,
+        "KAZUSA_TEST_DB_GUARD": "1",
+        "KAZUSA_EPHEMERAL_TEST_DATABASE_GUARD": "1",
+        "KAZUSA_EPHEMERAL_TEST_DATABASE_NAME": database_name,
+        "AGENTIC_RESOLVER_WORKSPACE_ROOT": str(workspace_root),
+        "KAZUSA_DSH_DATA_ROOT": str(data_root),
+        "KAZUSA_DSH_PYTHON_EXECUTABLE": str(PYTHON_EXECUTABLE.resolve()),
+        "CALENDAR_SCHEDULER_ENABLED": "false",
+        "SELF_COGNITION_ENABLED": "false",
+        "BACKGROUND_WORK_WORKER_ENABLED": "true",
+        "BACKGROUND_WORK_WORKER_INTERVAL_SECONDS": "1",
+        "REFLECTION_CYCLE_ENABLED": "false",
+        "CHARACTER_SLEEP_LOCAL_PERIOD": "",
+        "COGNITION_VISUAL_DIRECTIVES_ENABLED": "false",
+        "LLM_TRACE_CAPTURE_MODE": "full",
+        "TASK_RESOLUTION_INLINE_BUDGET_SECONDS": "30.0",
+    })
+    return environment
+
+
 def _write_workspace_files(
     spec: TriggerSourceCaseSpec,
     *,
@@ -448,25 +616,50 @@ async def run_trigger_source_case(case_id: str, tmp_path: Path) -> None:
     """Run one matrix node in a configuration-isolated child process."""
 
     _require_live_configuration()
-    try:
-        spec = CASE_SPECS[case_id]
-    except KeyError as exc:
-        raise AssertionError(f"unknown DSH E2E case: {case_id}") from exc
+    await _run_isolated_parent_case(_case_spec(case_id), tmp_path)
 
+
+async def run_sidecar_loss_case(tmp_path: Path) -> None:
+    """Run the public-chat sidecar-loss canary in an isolated process."""
+
+    _require_live_configuration()
+    await _run_isolated_parent_case(SIDECAR_LOSS_CASE_SPEC, tmp_path)
+
+
+async def run_configured_weather_case(tmp_path: Path) -> None:
+    """Run the weather regression through configured supervised services."""
+
+    _require_live_configuration()
+    await _run_isolated_parent_case(CONFIGURED_WEATHER_CASE_SPEC, tmp_path)
+
+
+async def _run_isolated_parent_case(
+    spec: TriggerSourceCaseSpec,
+    tmp_path: Path,
+) -> None:
+    """Launch and verify one isolated live DSH child case."""
+
+    case_id = spec.case_id
     artifact_dir = _artifact_directory(case_id)
     case_tmp = (tmp_path / case_id).resolve()
     case_tmp.mkdir(parents=True, exist_ok=False)
-    brain_port = _free_loopback_port()
-    sidecar_port = _free_loopback_port()
-    if brain_port == sidecar_port:
-        sidecar_port = _free_loopback_port()
     database_name = f"{EPHEMERAL_DATABASE_PREFIX}{uuid4().hex}"
-    environment = _case_environment(
-        tmp_path=case_tmp,
-        database_name=database_name,
-        brain_port=brain_port,
-        sidecar_port=sidecar_port,
-    )
+    if spec.case_id == CONFIGURED_WEATHER_CASE_SPEC.case_id:
+        environment = _configured_case_environment(
+            tmp_path=case_tmp,
+            database_name=database_name,
+        )
+    else:
+        brain_port = _free_loopback_port()
+        sidecar_port = _free_loopback_port()
+        if brain_port == sidecar_port:
+            sidecar_port = _free_loopback_port()
+        environment = _case_environment(
+            tmp_path=case_tmp,
+            database_name=database_name,
+            brain_port=brain_port,
+            sidecar_port=sidecar_port,
+        )
     workspace_records = _write_workspace_files(
         spec,
         workspace_root=Path(environment["AGENTIC_RESOLVER_WORKSPACE_ROOT"]),
@@ -478,8 +671,12 @@ async def run_trigger_source_case(case_id: str, tmp_path: Path) -> None:
             "trigger_source": spec.trigger_source,
             "expects_dsh_entry": spec.expects_dsh_entry,
             "expected_evidence_files": list(spec.expected_evidence_files),
+            "expected_fact_groups": [
+                list(group) for group in spec.expected_fact_groups
+            ],
             "workspace_files": workspace_records,
             "database_name": database_name,
+            "signoff_code_fingerprint": signoff_code_fingerprint(),
         },
     )
 
@@ -546,6 +743,11 @@ async def run_trigger_source_case(case_id: str, tmp_path: Path) -> None:
             f"{case_id} hard gates failed: {result.get('failures', [])}; "
             f"exit={return_code}; cleanup={cleanup}; artifacts={artifact_dir}"
         )
+    if result.get("signoff_code_fingerprint") != signoff_code_fingerprint():
+        pytest.fail(
+            f"{case_id} certified a stale code fingerprint; "
+            f"artifacts: {artifact_dir}"
+        )
     if cleanup.get("database_dropped") is not True:
         pytest.fail(
             f"{case_id} did not confirm guarded database cleanup; "
@@ -565,6 +767,7 @@ async def _prepare_case_database(artifact_dir: Path) -> None:
     from kazusa_ai_chatbot.db.character_identity_growth import (
         ensure_seed_identity,
     )
+    from kazusa_ai_chatbot.db.errors import DatabaseOperationError
 
     database_name = os.environ.get("MONGODB_DB_NAME", "").strip()
     if not database_name.startswith(EPHEMERAL_DATABASE_PREFIX):
@@ -584,7 +787,7 @@ async def _prepare_case_database(artifact_dir: Path) -> None:
                 character_id=CHARACTER_GLOBAL_USER_ID,
                 seed=seed,
             )
-        except PyMongoError as exc:
+        except (DatabaseOperationError, PyMongoError) as exc:
             attempts.append({
                 "attempt": attempt_index + 1,
                 "duration_ms": round(
@@ -706,6 +909,7 @@ async def _wait_for_runtime_readiness(
     brain_task: asyncio.Task[Any],
     sidecar: _ChildProcess,
     artifact_dir: Path,
+    artifact_name: str,
 ) -> dict[str, Any]:
     """Wait for the live Brain and DSH sidecar health contracts."""
 
@@ -799,11 +1003,64 @@ async def _wait_for_runtime_readiness(
                 ),
             }
             if brain_probe["ready"] and sidecar_probe["ready"]:
-                _write_json(artifact_dir / "readiness.json", latest)
+                _write_json(artifact_dir / artifact_name, latest)
                 return latest
             await asyncio.sleep(0.25)
-    _write_json(artifact_dir / "readiness.json", latest)
+    _write_json(artifact_dir / artifact_name, latest)
     raise AssertionError("Brain and sidecar readiness timed out")
+
+
+async def _wait_for_brain_dsh_unavailable(
+    *,
+    brain_task: asyncio.Task[Any],
+    artifact_dir: Path,
+) -> dict[str, Any]:
+    """Wait for Brain to revoke DSH readiness after sidecar loss."""
+
+    brain_url = os.environ["KAZUSA_DSH_BRAIN_URL"].rstrip("/")
+    brain_secret = os.environ["KAZUSA_DSH_BRAIN_SHARED_SECRET"]
+    started_at = time.perf_counter()
+    deadline = time.monotonic() + 15.0
+    latest: dict[str, Any] = {}
+    timeout = httpx.Timeout(3.0, connect=1.0, write=1.0, pool=1.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        while time.monotonic() < deadline:
+            if brain_task.done():
+                raise RuntimeError("Brain exited while revoking DSH readiness")
+            try:
+                response = await client.get(
+                    f"{brain_url}/runtime/dsh/health",
+                    headers={"Authorization": f"Bearer {brain_secret}"},
+                )
+                payload = response.json()
+                latest = {
+                    "http_status": response.status_code,
+                    "payload": payload,
+                    "duration_ms": round(
+                        (time.perf_counter() - started_at) * 1000
+                    ),
+                }
+                if (
+                    response.status_code == 200
+                    and isinstance(payload, Mapping)
+                    and payload.get("status") == "unavailable"
+                    and isinstance(payload.get("task_resolution"), Mapping)
+                    and payload["task_resolution"].get("status")
+                    == "unavailable"
+                ):
+                    _write_json(
+                        artifact_dir / "readiness_after_sidecar_loss.json",
+                        latest,
+                    )
+                    return latest
+            except (httpx.RequestError, ValueError) as exc:
+                latest = {"error_class": type(exc).__name__}
+            await asyncio.sleep(0.1)
+    _write_json(
+        artifact_dir / "readiness_after_sidecar_loss.json",
+        latest,
+    )
+    raise AssertionError("Brain did not revoke DSH readiness after sidecar loss")
 
 
 async def _serve_embedded_brain(server: Any) -> None:
@@ -1101,11 +1358,15 @@ async def _capture_case_evidence(
         "self_cognition_action_attempts",
         "llm_trace_runs",
         "llm_trace_steps",
+        "event_log_events",
         "conversation_history",
     )
     mongo_state: dict[str, list[dict[str, Any]]] = {}
     for collection_name in collection_names:
-        mongo_state[collection_name] = await _read_collection(collection_name)
+        mongo_state[collection_name] = await asyncio.wait_for(
+            _read_collection(collection_name),
+            timeout=EVIDENCE_COLLECTION_TIMEOUT_SECONDS,
+        )
     bindings = mongo_state["dsh_task_bindings"]
     dsh_sessions = _read_all_dsh_sessions(bindings)
     evidence = {
@@ -1291,6 +1552,54 @@ async def _run_user_message_case(
         "input_text": text,
         "response": response,
         "background_ticks": background_ticks,
+    }
+
+
+async def _run_sidecar_loss_user_message_case() -> dict[str, Any]:
+    """Send the production-regression command after sidecar loss."""
+
+    spec = SIDECAR_LOSS_CASE_SPEC
+    identity = _case_identity(spec.case_id)
+    text = (
+        "Please check today's current weather in Christchurch and tell me "
+        "the conditions and temperature now."
+    )
+    request = _chat_request(
+        channel_id=identity["channel_id"],
+        user_id=identity["platform_user_id"],
+        message_id=identity["source_message_id"],
+        text=text,
+    )
+    response = await _post_chat(request)
+    return {
+        "entrypoint": "POST /chat after authenticated DSH readiness loss",
+        "identity": identity,
+        "input_text": text,
+        "response": response,
+    }
+
+
+async def _run_configured_weather_user_message_case() -> dict[str, Any]:
+    """Replay the production-regression command through configured services."""
+
+    spec = CONFIGURED_WEATHER_CASE_SPEC
+    identity = _case_identity(spec.case_id)
+    text = (
+        "Please check today's current weather in Christchurch and tell me "
+        "the conditions and temperature now."
+    )
+    request = _chat_request(
+        channel_id=identity["channel_id"],
+        user_id=identity["platform_user_id"],
+        message_id=identity["source_message_id"],
+        text=text,
+    )
+    response = await _post_chat(request)
+    return {
+        "entrypoint": "POST /chat on configured supervised services",
+        "identity": identity,
+        "input_text": text,
+        "response": response,
     }
 
 
@@ -1810,10 +2119,13 @@ def _typed_task_result(
         status = "resolved"
         evidence_state = "complete"
         summary = (
-            "The bounded source check completed and the requested handover "
-            "fact is available."
+            "The bounded source check completed. Morgan owns the handover. "
+            "The release prerequisite is checksum review complete."
         )
-        evidence_excerpts = [summary]
+        evidence_excerpts = [
+            "Handover owner: Morgan.",
+            "Release prerequisite: checksum review complete.",
+        ]
         evidence_handles = [summary]
         evidence = [
             {
@@ -1826,7 +2138,10 @@ def _typed_task_result(
                 "limitations": [],
             }
         ]
-        completed_subgoals = ["Checked the bounded source."]
+        completed_subgoals = [
+            "Checked the bounded source.",
+            "Identified the handover owner and release prerequisite.",
+        ]
         remaining_needs: list[str] = []
     else:
         status = "failed"
@@ -2155,7 +2470,10 @@ async def _wait_for_source_trace_settlement(
     deadline = time.monotonic() + SOURCE_TRACE_SETTLEMENT_TIMEOUT_SECONDS
     latest_rows: list[dict[str, Any]] = []
     while time.monotonic() < deadline:
-        trace_rows = await _read_collection("llm_trace_runs")
+        trace_rows = await asyncio.wait_for(
+            _read_collection("llm_trace_runs"),
+            timeout=EVIDENCE_COLLECTION_TIMEOUT_SECONDS,
+        )
         evidence = {
             "source_output": source_output,
             "mongo_state": {"llm_trace_runs": trace_rows},
@@ -2182,6 +2500,105 @@ async def _wait_for_source_trace_settlement(
     }
 
 
+def _configured_completion_settled(
+    *,
+    bindings: list[dict[str, Any]],
+    accepted_tasks: list[dict[str, Any]],
+    jobs: list[dict[str, Any]],
+    delivery_payloads: list[dict[str, Any]],
+) -> bool:
+    """Require either inline settlement or complete deferred delivery."""
+
+    if len(bindings) != 1:
+        return False
+    binding = bindings[0]
+    if not isinstance(binding.get("latest_task_resolution_result"), Mapping):
+        return False
+    if not jobs:
+        return binding.get("state") == "consumed_inline"
+    return (
+        binding.get("state") == "terminal"
+        and len(accepted_tasks) == 1
+        and len(jobs) == 1
+        and accepted_tasks[0].get("state") == "delivered"
+        and jobs[0].get("status") == "delivered"
+        and jobs[0].get("delivery_state") == "delivered"
+        and len(delivery_payloads) == 1
+    )
+
+
+def _configured_completion_failed(
+    *,
+    bindings: list[dict[str, Any]],
+    jobs: list[dict[str, Any]],
+) -> bool:
+    """Identify terminal lifecycle failure without waiting for the deadline."""
+
+    if any(row.get("state") in {"faulted", "canceled"} for row in bindings):
+        return True
+    return any(
+        row.get("status") in {"failed", "delivery_failed"}
+        for row in jobs
+    )
+
+
+async def _wait_for_configured_completion(
+    adapter: _LoopbackAdapterServer,
+) -> dict[str, Any]:
+    """Wait for the configured inline or deferred DSH lifecycle to settle."""
+
+    started_at = time.perf_counter()
+    deadline = time.monotonic() + CONFIGURED_COMPLETION_TIMEOUT_SECONDS
+    latest: dict[str, Any] = {}
+    while time.monotonic() < deadline:
+        bindings, accepted_tasks, jobs = await asyncio.gather(
+            _read_collection("dsh_task_bindings"),
+            _read_collection("accepted_tasks"),
+            _read_collection("background_work_jobs"),
+        )
+        delivery_payloads = adapter.delivery_payloads()
+        latest = {
+            "binding_states": [row.get("state") for row in bindings],
+            "accepted_task_states": [row.get("state") for row in accepted_tasks],
+            "job_states": [
+                {
+                    "status": row.get("status"),
+                    "delivery_state": row.get("delivery_state"),
+                }
+                for row in jobs
+            ],
+            "delivery_payload_count": len(delivery_payloads),
+        }
+        if _configured_completion_settled(
+            bindings=bindings,
+            accepted_tasks=accepted_tasks,
+            jobs=jobs,
+            delivery_payloads=delivery_payloads,
+        ):
+            return {
+                "settled": True,
+                "duration_ms": round(
+                    (time.perf_counter() - started_at) * 1000
+                ),
+                **latest,
+            }
+        if _configured_completion_failed(bindings=bindings, jobs=jobs):
+            return {
+                "settled": False,
+                "terminal_failure": True,
+                "duration_ms": round(
+                    (time.perf_counter() - started_at) * 1000
+                ),
+                **latest,
+            }
+        await asyncio.sleep(0.5)
+    return {
+        "settled": False,
+        "duration_ms": round((time.perf_counter() - started_at) * 1000),
+        **latest,
+    }
+
+
 def _delivery_payloads(evidence: Mapping[str, object]) -> list[dict[str, Any]]:
     """Return captured outward adapter messages."""
 
@@ -2205,6 +2622,178 @@ def _worker_succeeded(source_output: Mapping[str, object]) -> bool:
     )
 
 
+def _source_traces_succeeded(traces: list[dict[str, Any]]) -> bool:
+    """Require every source-owned trace to finish successfully."""
+
+    return bool(traces) and all(
+        row.get("status") == "succeeded" for row in traces
+    )
+
+
+def _runtime_failure_events(
+    mongo: Mapping[str, object],
+) -> list[dict[str, Any]]:
+    """Return isolated runtime or pipeline failures from one case."""
+
+    events = [
+        dict(value)
+        for value in mongo.get("event_log_events", [])
+        if isinstance(value, Mapping)
+    ]
+    return [
+        event
+        for event in events
+        if event.get("event_family") == "runtime_error"
+        or (
+            event.get("event_family") == "pipeline_turn"
+            and event.get("status") == "failed"
+        )
+    ]
+
+
+def _expected_facts_present(
+    spec: TriggerSourceCaseSpec,
+    *values: object,
+) -> bool:
+    """Match required source facts while allowing natural paraphrases."""
+
+    if not spec.expected_fact_groups:
+        return True
+    text = json.dumps(values, ensure_ascii=False, default=str).lower()
+    return all(
+        any(alternative.lower() in text for alternative in alternatives)
+        for alternatives in spec.expected_fact_groups
+    )
+
+
+def _current_weather_measurement_present(value: object) -> bool:
+    """Require a measured weather answer plus independently typed provenance."""
+
+    if not isinstance(value, Mapping):
+        return False
+    semantic_text = json.dumps(
+        {
+            "prompt_safe_summary": value.get("prompt_safe_summary"),
+            "evidence_excerpts": value.get("evidence_excerpts"),
+            "completed_subgoals": value.get("completed_subgoals"),
+        },
+        ensure_ascii=False,
+        default=str,
+    ).lower()
+    has_location = "christchurch" in semantic_text
+    has_temperature_measurement = (
+        any(character.isdigit() for character in semantic_text)
+        and any(
+            marker in semantic_text
+            for marker in ("temperature", "celsius", "degrees", "°c", "° c")
+        )
+    )
+    evidence = value.get("evidence")
+    has_native_receipt = isinstance(evidence, list) and any(
+        isinstance(row, Mapping)
+        and (
+            str(row.get("evidence_id", "")).startswith("native:")
+            or str(row.get("summary", "")).startswith("dsh-native:")
+        )
+        and bool(row.get("provenance_refs"))
+        for row in evidence
+    )
+    return has_location and has_temperature_measurement and has_native_receipt
+
+
+def _terminal_surface_has_no_active_work(
+    source_steps: list[Mapping[str, object]],
+    trace_text: str,
+) -> bool:
+    """Require resolver-owned closure or a terminal plan with no new request."""
+
+    if (
+        '"terminal_work_disposition": "closed"' in trace_text
+        and '"decision": "explain terminal evidence blocker"' in trace_text
+    ):
+        return True
+    final_plans = [
+        step["parsed_output"]
+        for step in source_steps
+        if step.get("stage_name") == "cognition_core_v3.P"
+        and step.get("status") == "succeeded"
+        and isinstance(step.get("parsed_output"), Mapping)
+    ]
+    if not final_plans:
+        return False
+    final_plan = final_plans[-1]
+    resolver_requests = final_plan.get("resolver_requests")
+    return (
+        final_plan.get("goal_resolution") in {"answerable_now", "blocked"}
+        and isinstance(resolver_requests, list)
+        and not resolver_requests
+    )
+
+
+def _evaluate_sidecar_loss_case(
+    spec: TriggerSourceCaseSpec,
+    evidence: Mapping[str, object],
+) -> tuple[dict[str, bool], list[str]]:
+    """Require graceful public behavior after authenticated sidecar loss."""
+
+    mongo_state = evidence.get("mongo_state")
+    mongo = mongo_state if isinstance(mongo_state, Mapping) else {}
+    traces = _source_trace_rows(spec, evidence)
+    source_value = evidence.get("source_output")
+    source = source_value if isinstance(source_value, Mapping) else {}
+    response_value = source.get("response")
+    response = response_value if isinstance(response_value, Mapping) else {}
+    messages = [
+        value.strip()
+        for value in response.get("messages", [])
+        if isinstance(value, str) and value.strip()
+    ]
+    trace_ids = {
+        str(row.get("trace_id") or "") for row in traces if row.get("trace_id")
+    }
+    source_steps = [
+        value
+        for value in mongo.get("llm_trace_steps", [])
+        if isinstance(value, Mapping) and value.get("trace_id") in trace_ids
+    ]
+    trace_text = json.dumps(source_steps, ensure_ascii=False, default=str).lower()
+    visible_text = "\n".join(messages).lower()
+    graph = response.get("cognition_graph")
+    graph_mapping = graph if isinstance(graph, Mapping) else {}
+    bindings = [
+        value
+        for value in mongo.get("dsh_task_bindings", [])
+        if isinstance(value, Mapping)
+    ]
+    checks = {
+        "brain_revoked_dsh_readiness": (
+            source.get("dsh_health_after_loss") == "unavailable"
+        ),
+        "source_trace_succeeded": _source_traces_succeeded(traces),
+        "no_runtime_or_pipeline_failure": not _runtime_failure_events(mongo),
+        "no_operational_error": not bool(response.get("operational_error")),
+        "cognition_graph_completed": graph_mapping.get("status") == "completed",
+        "coherent_visible_failure_path": bool(messages),
+        "task_resolution_was_attempted": "task_resolution_request" in trace_text,
+        "blocked_observation_reached_cognition": "blocked" in trace_text,
+        "terminal_surface_has_no_active_work": (
+            _terminal_surface_has_no_active_work(source_steps, trace_text)
+        ),
+        "failed_admission_binding_terminally_faulted": (
+            len(bindings) == 1
+            and bindings[0].get("state") == "faulted"
+            and bindings[0].get("latest_task_resolution_result") is None
+        ),
+        "no_false_sidecar_session": not list(evidence.get("dsh_sessions", [])),
+        "transport_details_not_exposed": all(
+            value not in visible_text
+            for value in ("connection refused", "rpc", "sidecar")
+        ),
+    }
+    failures = [name for name, passed in checks.items() if not passed]
+    return checks, failures
+
+
 def _evaluate_case(
     spec: TriggerSourceCaseSpec,
     evidence: Mapping[str, object],
@@ -2215,6 +2804,9 @@ def _evaluate_case(
         TaskResolutionContractError,
         validate_task_resolution_result,
     )
+
+    if spec.case_id == SIDECAR_LOSS_CASE_SPEC.case_id:
+        return _evaluate_sidecar_loss_case(spec, evidence)
 
     mongo_state = evidence.get("mongo_state")
     mongo = mongo_state if isinstance(mongo_state, Mapping) else {}
@@ -2247,8 +2839,8 @@ def _evaluate_case(
     ]
     checks: dict[str, bool] = {
         "source_trace_present": bool(traces),
-        "source_trace_finalized": bool(traces)
-        and all(str(row.get("status") or "") != "running" for row in traces),
+        "source_trace_succeeded": _source_traces_succeeded(traces),
+        "no_runtime_or_pipeline_failure": not _runtime_failure_events(mongo),
     }
 
     if spec.expects_dsh_entry:
@@ -2275,7 +2867,8 @@ def _evaluate_case(
             validated_result = None
         checks["typed_terminal_task_result"] = (
             validated_result is not None
-            and validated_result.get("status") in {"resolved", "partial"}
+            and validated_result.get("status") == "resolved"
+            and validated_result.get("evidence_state") == "complete"
             and bool(validated_result.get("evidence"))
         )
         result_text = json.dumps(
@@ -2287,9 +2880,35 @@ def _evaluate_case(
             file_name.lower() in result_text
             for file_name in spec.expected_evidence_files
         )
-        checks["typed_dsh_terminal_event"] = (
-            _terminal_dsh_event_count(evidence) >= 1
+        checks["required_source_facts_grounded"] = _expected_facts_present(
+            spec,
+            validated_result,
+            source_output,
+            _delivery_payloads(evidence),
         )
+        checks["typed_dsh_terminal_event"] = (
+            _terminal_dsh_event_count(evidence) == 1
+        )
+        if spec.case_id == CONFIGURED_WEATHER_CASE_SPEC.case_id:
+            checks["current_weather_measurement_grounded"] = (
+                _current_weather_measurement_present(validated_result)
+            )
+            checks["configured_lifecycle_terminally_settled"] = (
+                _configured_completion_settled(
+                    bindings=bindings,
+                    accepted_tasks=accepted_tasks,
+                    jobs=jobs,
+                    delivery_payloads=_delivery_payloads(evidence),
+                )
+                and isinstance(
+                    source_output.get("configured_completion_settlement"),
+                    Mapping,
+                )
+                and source_output["configured_completion_settlement"].get(
+                    "settled"
+                )
+                is True
+            )
     else:
         checks["dsh_non_entry_preserved"] = len(bindings) == 0
         checks["no_sidecar_session_created"] = len(sessions) == 0
@@ -2391,6 +3010,28 @@ def _evaluate_case(
             and cognition_mapping.get("evidence_state")
             == expected_evidence_state
         )
+        trace_ids = {
+            str(row.get("trace_id") or "")
+            for row in traces
+            if row.get("trace_id")
+        }
+        source_steps = [
+            value
+            for value in mongo.get("llm_trace_steps", [])
+            if isinstance(value, Mapping) and value.get("trace_id") in trace_ids
+        ]
+        trace_text = json.dumps(
+            source_steps,
+            ensure_ascii=False,
+            default=str,
+        ).lower()
+        checks["terminal_result_surface_has_no_active_work"] = (
+            _terminal_surface_has_no_active_work(source_steps, trace_text)
+        )
+        if spec.case_id == "tool_result_resolved":
+            checks["resolved_result_facts_delivered"] = (
+                _expected_facts_present(spec, callbacks)
+            )
 
     failures = [name for name, passed in checks.items() if not passed]
     return checks, failures
@@ -2486,6 +3127,244 @@ async def _execute_source_case(
     raise AssertionError(f"unsupported trigger source: {spec.trigger_source}")
 
 
+async def _wait_for_configured_runtime_readiness(
+    *,
+    artifact_dir: Path,
+) -> dict[str, Any]:
+    """Verify both configured service contracts after supervised startup."""
+
+    brain_url = os.environ["KAZUSA_DSH_BRAIN_URL"].rstrip("/")
+    sidecar_url = os.environ["KAZUSA_DSH_SIDECAR_URL"]
+    brain_secret = os.environ["KAZUSA_DSH_BRAIN_SHARED_SECRET"]
+    rpc_token = os.environ["KAZUSA_DSH_RPC_TOKEN"]
+    started_at = time.perf_counter()
+    deadline = time.monotonic() + 30.0
+    latest: dict[str, Any] = {}
+    timeout = httpx.Timeout(5.0, connect=1.0, write=2.0, pool=2.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        while time.monotonic() < deadline:
+            try:
+                brain_response = await client.get(
+                    f"{brain_url}/runtime/dsh/health",
+                    headers={"Authorization": f"Bearer {brain_secret}"},
+                )
+                brain_payload = brain_response.json()
+                sidecar_response = await client.post(
+                    sidecar_url,
+                    headers={
+                        "Authorization": f"Bearer {rpc_token}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": f"configured-health-{time.time_ns()}",
+                        "method": "system.health",
+                        "params": {
+                            "protocol_version": DSH_RPC_PROTOCOL_VERSION,
+                        },
+                    },
+                )
+                sidecar_payload = sidecar_response.json()
+                sidecar_result = (
+                    sidecar_payload.get("result")
+                    if isinstance(sidecar_payload, Mapping)
+                    else None
+                )
+                latest = {
+                    "brain": {
+                        "http_status": brain_response.status_code,
+                        "payload": brain_payload,
+                    },
+                    "sidecar": {
+                        "http_status": sidecar_response.status_code,
+                        "payload": sidecar_payload,
+                    },
+                    "duration_ms": round(
+                        (time.perf_counter() - started_at) * 1000
+                    ),
+                }
+                if (
+                    brain_response.status_code == 200
+                    and isinstance(brain_payload, Mapping)
+                    and brain_payload.get("status") == "ready"
+                    and sidecar_response.status_code == 200
+                    and isinstance(sidecar_result, Mapping)
+                    and sidecar_result.get("status") == "ready"
+                ):
+                    _write_json(
+                        artifact_dir / "configured_readiness.json",
+                        latest,
+                    )
+                    return latest
+            except (httpx.RequestError, ValueError) as exc:
+                latest = {"error_class": type(exc).__name__}
+            await asyncio.sleep(0.1)
+    _write_json(artifact_dir / "configured_readiness.json", latest)
+    raise AssertionError("configured Brain and DSH readiness timed out")
+
+
+async def _run_configured_service_case_process(
+    *,
+    spec: TriggerSourceCaseSpec,
+    artifact_dir: Path,
+) -> int:
+    """Run the weather canary through console-owned configured services."""
+
+    from control_console.audit import LocalAuditWriter
+    from control_console.log_store import ProcessLogStore
+    from control_console.process_store import ProcessStore
+    from control_console.service_registry import default_service_registry
+    from control_console.supervisor import ProcessSupervisor
+
+    started_at = time.perf_counter()
+    adapter = _LoopbackAdapterServer(
+        platform="debug",
+        shared_secret=f"adapter-{uuid4().hex}",
+    )
+    adapter_started = False
+    supervisor = ProcessSupervisor(
+        services=default_service_registry(),
+        store=ProcessStore(artifact_dir / "control_console_state.json"),
+        log_store=ProcessLogStore(artifact_dir / "control_console_logs"),
+        audit_writer=LocalAuditWriter(
+            artifact_dir / "control_console_audit.jsonl"
+        ),
+    )
+    source_output: dict[str, Any] = {}
+    evidence: dict[str, Any] | None = None
+    checks: dict[str, bool] = {}
+    failures: list[str] = []
+    error: dict[str, str] | None = None
+    cleanup: dict[str, Any] = {
+        "services_stopped": False,
+        "adapter_stopped": False,
+        "database_dropped": False,
+        "warnings": [],
+        "errors": [],
+    }
+    try:
+        await _prepare_case_database(artifact_dir)
+        await supervisor.start_service(
+            service_id="brain",
+            operator_id="dsh-e2e",
+            reason="configured DSH sign-off",
+        )
+        await supervisor.start_service(
+            service_id="dsh.sidecar",
+            operator_id="dsh-e2e",
+            reason="configured DSH sign-off",
+        )
+        _write_json(
+            artifact_dir / "configured_service_states.json",
+            [
+                state.model_dump(mode="json")
+                for state in supervisor.all_service_states()
+            ],
+        )
+        await _wait_for_configured_runtime_readiness(
+            artifact_dir=artifact_dir,
+        )
+        adapter.start()
+        adapter_started = True
+        registration = await _register_adapter(adapter)
+        _write_json(artifact_dir / "adapter_registration.json", registration)
+        source_output = await _run_configured_weather_user_message_case()
+        source_output["source_trace_settlement"] = (
+            await _wait_for_source_trace_settlement(spec, source_output)
+        )
+        source_output["configured_completion_settlement"] = (
+            await _wait_for_configured_completion(adapter)
+        )
+        evidence = await _capture_case_evidence(
+            source_output=source_output,
+            adapter=adapter,
+        )
+        checks, failures = _evaluate_case(spec, evidence)
+        _write_evidence_artifacts(
+            artifact_dir=artifact_dir,
+            spec=spec,
+            evidence=evidence,
+            checks=checks,
+        )
+    except Exception as exc:  # noqa: BLE001 - preserve case evidence.
+        error = {
+            "error_class": type(exc).__name__,
+            "error": str(exc),
+            "traceback": traceback.format_exc(),
+        }
+        failures.append(f"case_exception:{type(exc).__name__}")
+        _write_json(artifact_dir / "case_exception.json", error)
+        try:
+            evidence = await _capture_case_evidence(
+                source_output=source_output,
+                adapter=adapter,
+            )
+            _write_evidence_artifacts(
+                artifact_dir=artifact_dir,
+                spec=spec,
+                evidence=evidence,
+                checks=checks,
+            )
+        except Exception as capture_exc:  # noqa: BLE001 - retain root error.
+            _write_json(
+                artifact_dir / "evidence_capture_exception.json",
+                {
+                    "error_class": type(capture_exc).__name__,
+                    "error": str(capture_exc),
+                    "traceback": traceback.format_exc(),
+                },
+            )
+    finally:
+        if adapter_started:
+            try:
+                adapter.stop()
+                cleanup["adapter_stopped"] = True
+            except Exception as exc:  # noqa: BLE001 - continue cleanup.
+                cleanup["errors"].append(
+                    f"adapter:{type(exc).__name__}: {exc}"
+                )
+        else:
+            cleanup["adapter_stopped"] = True
+        try:
+            await supervisor.shutdown_owned_services(
+                operator_id="dsh-e2e",
+                reason="configured DSH sign-off cleanup",
+            )
+            cleanup["services_stopped"] = True
+        except Exception as exc:  # noqa: BLE001 - continue cleanup.
+            cleanup["errors"].append(
+                f"services:{type(exc).__name__}: {exc}"
+            )
+        try:
+            await _drop_case_database()
+            cleanup["database_dropped"] = True
+        except Exception as exc:  # noqa: BLE001 - report cleanup failure.
+            cleanup["errors"].append(
+                f"database:{type(exc).__name__}: {exc}"
+            )
+        _write_json(artifact_dir / "cleanup.json", cleanup)
+
+    if cleanup["errors"]:
+        failures.append("cleanup_incomplete")
+    technical_status = "passed" if not failures else "failed"
+    _write_json(
+        artifact_dir / "case_result.json",
+        {
+            "schema_version": "dsh_trigger_source_case_result.v1",
+            "case_id": spec.case_id,
+            "trigger_source": spec.trigger_source,
+            "expects_dsh_entry": spec.expects_dsh_entry,
+            "technical_status": technical_status,
+            "checks": checks,
+            "failures": failures,
+            "error": error,
+            "duration_ms": round((time.perf_counter() - started_at) * 1000),
+            "signoff_code_fingerprint": signoff_code_fingerprint(),
+        },
+    )
+    return 0 if technical_status == "passed" else 1
+
+
 async def _run_case_process(
     *,
     case_id: str,
@@ -2493,7 +3372,12 @@ async def _run_case_process(
 ) -> int:
     """Own the complete live runtime, evidence, and cleanup for one case."""
 
-    spec = CASE_SPECS[case_id]
+    spec = _case_spec(case_id)
+    if spec.case_id == CONFIGURED_WEATHER_CASE_SPEC.case_id:
+        return await _run_configured_service_case_process(
+            spec=spec,
+            artifact_dir=artifact_dir,
+        )
     started_at = time.perf_counter()
     adapter = _LoopbackAdapterServer(
         platform="debug",
@@ -2561,13 +3445,37 @@ async def _run_case_process(
             brain_task=server_task,
             sidecar=sidecar,
             artifact_dir=artifact_dir,
+            artifact_name="readiness_before_source.json",
         )
         registration = await _register_adapter(adapter)
         _write_json(artifact_dir / "adapter_registration.json", registration)
-        source_output = await _execute_source_case(spec, service=service)
+        if spec.case_id == SIDECAR_LOSS_CASE_SPEC.case_id:
+            await _stop_child(sidecar)
+            cleanup["sidecar_stopped"] = True
+            sidecar = None
+            loss_health = await _wait_for_brain_dsh_unavailable(
+                brain_task=server_task,
+                artifact_dir=artifact_dir,
+            )
+            source_output = await _run_sidecar_loss_user_message_case()
+            loss_payload = loss_health.get("payload")
+            source_output["dsh_health_after_loss"] = (
+                loss_payload.get("status")
+                if isinstance(loss_payload, Mapping)
+                else ""
+            )
+        else:
+            source_output = await _execute_source_case(spec, service=service)
         source_output["source_trace_settlement"] = (
             await _wait_for_source_trace_settlement(spec, source_output)
         )
+        if sidecar is not None:
+            await _wait_for_runtime_readiness(
+                brain_task=server_task,
+                sidecar=sidecar,
+                artifact_dir=artifact_dir,
+                artifact_name="readiness_after_source.json",
+            )
         evidence = await _capture_case_evidence(
             source_output=source_output,
             adapter=adapter,
@@ -2663,6 +3571,7 @@ async def _run_case_process(
             "failures": failures,
             "error": error,
             "duration_ms": round((time.perf_counter() - started_at) * 1000),
+            "signoff_code_fingerprint": signoff_code_fingerprint(),
         },
     )
     return 0 if technical_status == "passed" else 1
@@ -2672,7 +3581,14 @@ def _parse_args() -> argparse.Namespace:
     """Parse the private case-process command line."""
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--execute-case", choices=tuple(CASE_SPECS))
+    parser.add_argument(
+        "--execute-case",
+        choices=(
+            *CASE_SPECS,
+            SIDECAR_LOSS_CASE_SPEC.case_id,
+            CONFIGURED_WEATHER_CASE_SPEC.case_id,
+        ),
+    )
     parser.add_argument("--artifact-dir", type=Path)
     return parser.parse_args()
 

@@ -19,6 +19,11 @@ export interface EvidenceReference extends EvidenceAuthority {
   content_digest: string;
 }
 
+export interface NativeEvidenceReplay {
+  authority: EvidenceAuthority;
+  nativeToolNames: readonly string[];
+}
+
 export const MAX_PUBLIC_EVIDENCE_RECEIPTS = 64;
 
 /**
@@ -100,39 +105,62 @@ export class EvidenceLedger {
   private readonly references = new Map<string, EvidenceReference>();
   private readonly history: EvidenceReference[] = [];
 
-  static rebuild(events: readonly Record<string, unknown>[]): EvidenceLedger {
+  static rebuild(
+    events: readonly Record<string, unknown>[],
+    nativeReplay?: NativeEvidenceReplay,
+  ): EvidenceLedger {
     const ledger = new EvidenceLedger();
+    const nativeToolNames = new Set(nativeReplay?.nativeToolNames ?? []);
+    const nativeCalls = new Map<string, string>();
     for (const event of events) {
-      if (event.type !== "tool/result") continue;
-      const data = (
-        event.data !== null
-        && typeof event.data === "object"
-        && !Array.isArray(event.data)
-      ) ? event.data as Record<string, unknown> : undefined;
-      const meta = event.meta ?? data?.meta;
-      if (meta === null || typeof meta !== "object" || Array.isArray(meta)) continue;
-      const row = meta as Record<string, unknown>;
-      const candidates = [
-        ...(Array.isArray(row.evidence) ? row.evidence : []),
-        ...(
-          row.kazusa === null || typeof row.kazusa !== "object"
-            ? []
-            : [row.kazusa]
-        ),
-      ];
-      for (const receipt of candidates) {
+      const data = eventData(event);
+      if (event.type === "tool/call") {
+        const callId = nonemptyText(data?.callId);
+        const toolName = nonemptyText(data?.name);
         if (
-          receipt === null
-          || typeof receipt !== "object"
-          || Array.isArray(receipt)
+          callId !== undefined
+          && toolName !== undefined
+          && nativeToolNames.has(toolName)
         ) {
-          continue;
+          nativeCalls.set(callId, toolName);
         }
-        try {
-          ledger.registerLatest(validateEvidenceReceipt(receipt));
-        } catch {
-          continue;
+        continue;
+      }
+      if (event.type !== "tool/result") continue;
+      const meta = event.meta ?? data?.meta;
+      if (meta !== null && typeof meta === "object" && !Array.isArray(meta)) {
+        const row = meta as Record<string, unknown>;
+        const candidates = [
+          ...(Array.isArray(row.evidence) ? row.evidence : []),
+          ...(
+            row.kazusa === null || typeof row.kazusa !== "object"
+              ? []
+              : [row.kazusa]
+          ),
+        ];
+        for (const receipt of candidates) {
+          if (
+            receipt === null
+            || typeof receipt !== "object"
+            || Array.isArray(receipt)
+          ) {
+            continue;
+          }
+          try {
+            ledger.registerLatest(validateEvidenceReceipt(receipt));
+          } catch {
+            continue;
+          }
         }
+      }
+      if (nativeReplay === undefined || data === undefined) continue;
+      const nativeReceipt = nativeResultReceipt(
+        data,
+        nativeCalls,
+        nativeReplay.authority,
+      );
+      if (nativeReceipt !== undefined) {
+        ledger.registerLatest(nativeReceipt);
       }
     }
     return ledger;
@@ -208,4 +236,70 @@ export class EvidenceLedger {
     }
     return [...this.references.values()].map((reference) => structuredClone(reference));
   }
+}
+
+function eventData(
+  event: Readonly<Record<string, unknown>>,
+): Record<string, unknown> | undefined {
+  const data = event.data;
+  if (data === null || typeof data !== "object" || Array.isArray(data)) {
+    return undefined;
+  }
+  return data as Record<string, unknown>;
+}
+
+function nonemptyText(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length === 0) return undefined;
+  return value;
+}
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
+}
+
+function nativeResultReceipt(
+  data: Readonly<Record<string, unknown>>,
+  nativeCalls: ReadonlyMap<string, string>,
+  authority: EvidenceAuthority,
+): EvidenceReceipt | undefined {
+  if (data.error !== undefined) return undefined;
+  const message = record(data.message);
+  const source = record(message?.source);
+  const callId = nonemptyText(source?.callId);
+  if (source?.kind !== "tool" || callId === undefined) return undefined;
+  const toolName = nativeCalls.get(callId);
+  if (toolName === undefined) return undefined;
+  const content = message?.content;
+  if (!Array.isArray(content) || content.length !== 1) return undefined;
+  const resultBlock = record(content[0]);
+  if (
+    resultBlock?.type !== "tool-result"
+    || resultBlock.toolCallId !== callId
+    || resultBlock.isError === true
+    || !Array.isArray(resultBlock.content)
+  ) {
+    return undefined;
+  }
+  const contentDigest = digest(resultBlock.content);
+  const evidenceDigest = digest({
+    call_id: callId,
+    tool_name: toolName,
+    content_digest: contentDigest,
+  });
+  return validateEvidenceReceipt({
+    schema_version: "evidence_receipt.v2",
+    resolution_thread_id: authority.threadId,
+    segment_id: authority.segmentId,
+    scope_fingerprint: authority.scopeFingerprint,
+    audience_fingerprint: authority.audienceFingerprint,
+    policy_epoch: authority.policyEpoch,
+    evidence_id: `native:${evidenceDigest.slice("sha256:".length)}`,
+    source_kind: "native",
+    semantic_ref: `dsh-native:${toolName}:${callId}`,
+    content_digest: contentDigest,
+    provenance: { tool_name: toolName },
+  });
 }

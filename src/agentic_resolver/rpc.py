@@ -328,7 +328,9 @@ class _HttpRpcTransport:
             with urlopen(request, timeout=timeout) as response:
                 value = json.loads(response.read())
         except (HTTPError, URLError, TimeoutError, OSError) as exc:
-            raise RpcTransportError("sidecar loopback transport failed") from exc
+            raise RpcTransportError(
+                f"sidecar loopback transport failed: {exc}"
+            ) from exc
         if not isinstance(value, Mapping):
             raise RpcContractError("RPC response must be an object")
         return value

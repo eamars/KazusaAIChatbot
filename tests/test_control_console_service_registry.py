@@ -114,6 +114,27 @@ def test_registry_rejects_shell_strings_external_identifiers_duplicate_ids_and_d
         load_service_registry(override_path=cycle_path, repo_root=tmp_path)
 
 
+def test_default_registry_manages_dsh_between_brain_and_adapters() -> None:
+    """The supported lifecycle should own DSH before opening adapter intake."""
+
+    from control_console.service_registry import default_service_registry
+
+    defaults = default_service_registry()
+
+    assert "dsh.sidecar" in defaults
+    assert defaults["dsh.sidecar"].command[-1:] == [
+        "sidecars/dsh_resolution/dist/src/main.js",
+    ]
+    assert defaults["dsh.sidecar"].dependencies == ["brain"]
+    assert defaults["dsh.sidecar"].ready_match == "DSH_RESOLUTION_READY"
+    for adapter_id in (
+        "adapter.discord",
+        "adapter.napcat",
+        "adapter.debug",
+    ):
+        assert defaults[adapter_id].dependencies == ["brain", "dsh.sidecar"]
+
+
 def test_brain_module_command_exposes_cli_help() -> None:
     """The default brain module command should invoke the uvicorn CLI wrapper."""
 

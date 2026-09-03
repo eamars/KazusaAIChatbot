@@ -926,6 +926,69 @@ async def test_loop_records_timeout_observation_then_returns_to_cognition() -> N
 
 
 @pytest.mark.asyncio
+async def test_task_resolution_timeout_preserves_durable_handoff_work() -> None:
+    """A foreground timeout must not cancel DSH checkpoint and promotion work."""
+
+    request = _resolver_request(objective="检索需要转入后台的当前证据。")
+    capability_started = asyncio.Event()
+    allow_handoff = asyncio.Event()
+    handoff_completed = asyncio.Event()
+    capability_canceled = False
+
+    async def call_cognition(state: dict) -> dict:
+        if not state["resolver_state"]["observations"]:
+            return _cognition_result(
+                internal_monologue="第一轮：需要当前证据。",
+                resolver_requests=[request],
+            )
+        return _cognition_result(
+            internal_monologue="第二轮：前台等待结束，后台接管。",
+            action_specs=[_speak_action_spec("我会在结果完成后继续。")],
+        )
+
+    async def execute_capability(_request: dict, _state: dict) -> dict:
+        nonlocal capability_canceled
+        capability_started.set()
+        try:
+            await allow_handoff.wait()
+        except asyncio.CancelledError:
+            capability_canceled = True
+            raise
+        handoff_completed.set()
+        return {
+            "schema_version": RESOLVER_OBSERVATION_VERSION,
+            "observation_id": "resolver_obs_deferred_handoff",
+            "capability_kind": request["capability_kind"],
+            "goal_continuation_ref": request["goal_continuation_ref"],
+            "request_objective": request["objective"],
+            "request_reason": request["reason"],
+            "status": "blocked",
+            "prompt_safe_summary": "DSH work was durably promoted.",
+            "evidence_refs": [],
+            "task_resolution_evidence_state": {
+                "schema_version": "resolver_evidence_state.v1",
+                "state": "blocked",
+                "remaining_needs": [request["objective"]],
+            },
+            "created_at_utc": "2026-05-29T21:00:00+00:00",
+        }
+
+    result = await call_cognition_resolver_loop(
+        _resolver_state(),
+        call_cognition_subgraph_func=call_cognition,
+        execute_capability_func=execute_capability,
+        max_cycles=3,
+        capability_timeout_seconds=0.01,
+    )
+    await asyncio.wait_for(capability_started.wait(), timeout=1.0)
+    allow_handoff.set()
+    await asyncio.wait_for(handoff_completed.wait(), timeout=1.0)
+
+    assert result["resolver_state"]["observations"][0]["status"] == "failed"
+    assert capability_canceled is False
+
+
+@pytest.mark.asyncio
 async def test_loop_blocks_duplicate_capability_objective_before_execution() -> None:
     """Exact repeated resolver objectives should not execute indefinitely."""
 
@@ -1237,6 +1300,69 @@ async def test_duplicate_final_cognition_repeated_request_gets_terminal_speak() 
 
 
 @pytest.mark.asyncio
+async def test_duplicate_final_request_replaces_stale_pending_surface() -> None:
+    """A blocked repeated task cannot keep a pending-work acknowledgement."""
+
+    request = _resolver_request(
+        capability_kind="task_resolution_request",
+        objective="Retrieve one unavailable current fact.",
+    )
+    cognition_call_count = 0
+
+    async def call_cognition(_state: dict) -> dict:
+        nonlocal cognition_call_count
+        cognition_call_count += 1
+        action_specs = []
+        if cognition_call_count == 3:
+            action_specs = [_speak_action_spec("Work is still running.")]
+        return _cognition_result(
+            internal_monologue="The same task remains unresolved.",
+            resolver_requests=[request],
+            action_specs=action_specs,
+        )
+
+    async def execute_capability(
+        capability_request: dict,
+        _state: dict,
+    ) -> dict:
+        return {
+            "schema_version": RESOLVER_OBSERVATION_VERSION,
+            "observation_id": "resolver_obs_unavailable_fact",
+            "capability_kind": capability_request["capability_kind"],
+            **_task_observation_fields(capability_request),
+            "request_objective": capability_request["objective"],
+            "request_reason": capability_request["reason"],
+            "status": "failed",
+            "prompt_safe_summary": "The external fact is unavailable.",
+            "evidence_refs": [],
+            "task_resolution_evidence_state": {
+                "schema_version": "resolver_evidence_state.v1",
+                "state": "blocked",
+                "remaining_needs": [capability_request["objective"]],
+            },
+            "created_at_utc": "2026-05-29T21:00:00+00:00",
+        }
+
+    result = await call_cognition_resolver_loop(
+        _resolver_state(),
+        call_cognition_subgraph_func=call_cognition,
+        execute_capability_func=execute_capability,
+        max_cycles=3,
+        capability_timeout_seconds=1.0,
+    )
+
+    action_spec = result["action_specs"][0]
+
+    assert cognition_call_count == 3
+    assert action_spec["source_refs"][0]["ref_id"] == (
+        "resolver_obs_duplicate_request"
+    )
+    assert action_spec["params"]["surface_requirements"]["decision"] == (
+        "explain terminal evidence blocker"
+    )
+
+
+@pytest.mark.asyncio
 async def test_duplicate_final_cognition_changed_request_gets_terminal_speak() -> None:
     """Terminal duplicate handling should not run a rephrased tool request."""
 
@@ -1489,6 +1615,69 @@ async def test_loop_converts_max_cycle_request_to_visible_blocker() -> None:
     )
     assert resolver_state["cycle_traces"][-1]["terminal_reason"] == (
         "maximum resolver cycles converted to terminal surface"
+    )
+
+
+@pytest.mark.asyncio
+async def test_max_cycle_request_replaces_stale_pending_surface() -> None:
+    """A capped task cannot keep a surface that promises later completion."""
+
+    request = _resolver_request(
+        capability_kind="task_resolution_request",
+        objective="Retrieve one current fact before answering.",
+    )
+    cognition_call_count = 0
+
+    async def call_cognition(_state: dict) -> dict:
+        nonlocal cognition_call_count
+        cognition_call_count += 1
+        action_specs = []
+        if cognition_call_count == 2:
+            action_specs = [_speak_action_spec("Work is still running.")]
+        return _cognition_result(
+            internal_monologue="The task still needs unavailable evidence.",
+            resolver_requests=[request],
+            action_specs=action_specs,
+        )
+
+    async def execute_capability(
+        capability_request: dict,
+        _state: dict,
+    ) -> dict:
+        return {
+            "schema_version": RESOLVER_OBSERVATION_VERSION,
+            "observation_id": "resolver_obs_capped_fact",
+            "capability_kind": capability_request["capability_kind"],
+            **_task_observation_fields(capability_request),
+            "request_objective": capability_request["objective"],
+            "request_reason": capability_request["reason"],
+            "status": "failed",
+            "prompt_safe_summary": "The fact remains unavailable.",
+            "evidence_refs": [],
+            "task_resolution_evidence_state": {
+                "schema_version": "resolver_evidence_state.v1",
+                "state": "blocked",
+                "remaining_needs": [capability_request["objective"]],
+            },
+            "created_at_utc": "2026-05-29T21:00:00+00:00",
+        }
+
+    result = await call_cognition_resolver_loop(
+        _resolver_state(),
+        call_cognition_subgraph_func=call_cognition,
+        execute_capability_func=execute_capability,
+        max_cycles=1,
+        capability_timeout_seconds=1.0,
+    )
+
+    action_spec = result["action_specs"][0]
+
+    assert cognition_call_count == 2
+    assert action_spec["source_refs"][0]["ref_id"] == (
+        "resolver_obs_max_cycles"
+    )
+    assert action_spec["params"]["surface_requirements"]["decision"] == (
+        "explain terminal evidence blocker"
     )
 
 

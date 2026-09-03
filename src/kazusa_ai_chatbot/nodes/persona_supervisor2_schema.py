@@ -245,6 +245,13 @@ class GlobalPersonaState(TypedDict):
     resolver_pending_resolution: NotRequired[ResolverPendingResolutionV1]
     pending_task_continuation: NotRequired[PendingTaskContinuationV1]
 
+    # Canonical resolver recurrence state retained across persona graph nodes.
+    resolver_state: NotRequired[ResolverCycleStateV1]
+    resolver_context: NotRequired[str]
+    resolver_capability_requests: NotRequired[list[ResolverCapabilityRequestV1]]
+    resolver_cycle_trace: NotRequired[ResolverCycleTraceV1]
+    resolver_goal_progress: NotRequired[ResolverGoalProgressV1]
+
     # Debug
     debug_modes: DebugModes
 

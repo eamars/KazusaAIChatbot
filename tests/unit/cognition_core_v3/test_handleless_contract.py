@@ -643,6 +643,7 @@ def test_tool_result_delivery_variant_closes_recursive_admission() -> None:
         available_resolvers=[
             {"capability": "approval_preparation"},
             {"capability": "human_clarification"},
+            {"capability": "self_goal_resolution"},
             {"capability": "task_resolution_request"},
         ],
         overused_moves=payload["overused_moves"],
@@ -674,6 +675,11 @@ def test_tool_result_delivery_variant_closes_recursive_admission() -> None:
     assert "pending_resolution_fields" not in contract
     assert "response_plan_contract_variant" not in contract
     assert "tool_result_delivery" not in json.dumps(packet)
+    assert facade_module._system_prompt_for_stage(
+        stage="P",
+        packet=packet,
+        response_plan_contract_variant="tool_result_delivery",
+    ) is facade_module._P_TOOL_RESULT_SYSTEM_PROMPT
 
     canonical_plan = {
         "goal_resolution": "answerable_now",

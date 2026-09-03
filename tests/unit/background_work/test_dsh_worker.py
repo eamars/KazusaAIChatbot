@@ -7,7 +7,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from tests.task_resolution_test_helpers import _goal_continuation_ref
+from tests.task_resolution_test_helpers import (
+    InMemoryDshBindingStore,
+    _context,
+    _goal_continuation_ref,
+)
 
 
 def _job(*, state: str = "running", generation: int = 0) -> dict[str, Any]:
@@ -50,7 +54,7 @@ def _job(*, state: str = "running", generation: int = 0) -> dict[str, Any]:
             "operation_generation": generation,
             "control": None,
         },
-        "task_execution_context": {},
+        "task_execution_context": _context(),
         "task_resolution_result": None,
         "artifact_text": "",
         "failure_summary": "",
@@ -219,6 +223,113 @@ async def test_worker_rejects_stale_or_canceled_generation(
     assert result["processed_count"] == 1
     execute.assert_not_awaited()
     failed.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_worker_operational_failure_persists_deliverable_typed_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A caught task failure remains a valid result-delivery carrier."""
+
+    worker = _worker()
+    claimed = _job()
+    claim = AsyncMock(side_effect=[claimed, None])
+    running = AsyncMock(return_value={"state": "running"})
+    process = AsyncMock(side_effect=RuntimeError("projection failed"))
+    failed_job = AsyncMock(return_value={"status": "failed"})
+    failed_task = AsyncMock(return_value={"state": "failure_ready"})
+    fault_binding = AsyncMock()
+    monkeypatch.setattr(worker, "claim_background_work_job", claim)
+    monkeypatch.setattr(worker, "mark_accepted_task_running", running)
+    monkeypatch.setattr(worker, "_run_claimed_job", process)
+    monkeypatch.setattr(worker, "fail_background_work_job", failed_job)
+    monkeypatch.setattr(
+        worker,
+        "fault_task_resolution_binding",
+        fault_binding,
+    )
+    monkeypatch.setattr(
+        worker,
+        "mark_accepted_task_failure_ready",
+        failed_task,
+    )
+
+    result = await worker.run_background_work_worker_tick(
+        claim_limit=1,
+        worker_id="worker-1",
+    )
+
+    assert result["failed_count"] == 1
+    task_result = failed_job.await_args.kwargs["task_resolution_result"]
+    assert task_result["status"] == "failed"
+    assert task_result["evidence_state"] == "blocked"
+    assert task_result["goal_continuation_ref"] == (
+        claimed["goal_continuation_ref"]
+    )
+    assert task_result["remaining_needs"]
+    assert failed_job.await_args.kwargs["skip_result_delivery"] is False
+    fault_binding.assert_awaited_once_with(
+        task_session_id="session-1",
+        updated_at=failed_job.await_args.kwargs["failed_at"],
+    )
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_continuation_advances_durable_activation_fence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A same-segment continuation persists its newly leased activation."""
+
+    orchestrator = __import__(
+        "kazusa_ai_chatbot.background_work.subagent.task_orchestrator",
+        fromlist=["task_orchestrator"],
+    )
+    store = InMemoryDshBindingStore()
+    store.bindings["session-1"] = {
+        "task_session_id": "session-1",
+        "operation_generation": 0,
+        "state": "active",
+        "revision": 3,
+        "resolution_thread_id": "thread-1",
+        "segment_id": "segment-1",
+        "resolution_ref": {
+            "schema_version": "dsh_resolution_ref.v1",
+            "resolution_thread_id": "thread-1",
+            "segment_id": "segment-1",
+            "dsh_session_id": "session-1",
+            "activation_id": "activation-1",
+            "lease_epoch": 1,
+            "document_revision": 1,
+            "last_committed_seq": 4,
+        },
+        "latest_task_resolution_result": None,
+    }
+    monkeypatch.setattr(orchestrator, "_TASK_RESOLUTION_BINDING_STORE", store)
+    exhaust = {
+        "kind": "terminal",
+        "identity": {
+            "resolution_thread_id": "thread-1",
+            "segment_id": "segment-1",
+            "dsh_session_id": "session-1",
+            "activation_id": "activation-2",
+            "lease_epoch": 2,
+            "document_revision": 2,
+            "last_committed_seq": 9,
+        },
+    }
+
+    await orchestrator._record_binding_outcome(
+        task_session_id="session-1",
+        operation_generation=0,
+        exhaust=exhaust,
+        result=_result(),
+        allow_reference_advance=True,
+    )
+
+    binding = store.bindings["session-1"]
+    assert binding["resolution_ref"]["activation_id"] == "activation-2"
+    assert binding["resolution_ref"]["lease_epoch"] == 2
+    assert binding["state"] == "terminal"
 
 
 @pytest.mark.asyncio

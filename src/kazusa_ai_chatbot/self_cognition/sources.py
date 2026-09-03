@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Callable
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from copy import deepcopy
 from datetime import datetime, timedelta
 from typing import Any
@@ -30,6 +29,7 @@ from kazusa_ai_chatbot.db import (
     get_user_profile,
     query_active_commitment_memory_units,
 )
+from kazusa_ai_chatbot.rag.conversation_evidence import ConversationEvidenceAgent
 from kazusa_ai_chatbot.reflection_cycle.activity_windows import (
     GroupActivityWindow,
     build_group_activity_windows,
@@ -39,7 +39,6 @@ from kazusa_ai_chatbot.reflection_cycle.group_scene_digest import (
     normalize_group_scene_digest_output,
 )
 from kazusa_ai_chatbot.reflection_cycle.selector import collect_reflection_inputs
-from kazusa_ai_chatbot.rag.conversation_evidence import ConversationEvidenceAgent
 from kazusa_ai_chatbot.self_cognition import models
 from kazusa_ai_chatbot.self_cognition.group_review_participant_context import (
     THREAD_REFERENCE_GUIDANCE,
@@ -646,6 +645,7 @@ async def resolve_self_cognition_delivery_target(
     clean_target_platform_user_id = (
         text_or_empty(target_platform_user_id) or None
     )
+    clean_source_platform_bot_id = text_or_empty(source_platform_bot_id)
 
     if not clean_platform:
         failure = _target_binding_failure(
@@ -680,6 +680,17 @@ async def resolve_self_cognition_delivery_target(
             target_platform_user_id=clean_target_platform_user_id,
         )
         return failure
+    if not clean_source_platform_bot_id:
+        failure = _target_binding_failure(
+            reason="missing_source_platform_bot_id",
+            platform=clean_platform,
+            source_ref=clean_source_ref,
+            source_platform_channel_id=clean_source_channel_id,
+            source_channel_type=clean_source_channel_type,
+            target_global_user_id=clean_target_global_user_id,
+            target_platform_user_id=clean_target_platform_user_id,
+        )
+        return failure
 
     target = _delivery_target(
         platform=clean_platform,
@@ -693,7 +704,7 @@ async def resolve_self_cognition_delivery_target(
         source_channel_type=clean_source_channel_type,
         source_message_id=clean_source_message_id,
         source_global_user_id=clean_source_global_user_id,
-        source_platform_bot_id=text_or_empty(source_platform_bot_id),
+        source_platform_bot_id=clean_source_platform_bot_id,
         source_character_name=(
             text_or_empty(source_character_name) or "active character"
         ),
@@ -1787,6 +1798,9 @@ def _build_active_commitment_case(
         "visible_context": _visible_context(rows),
         "character_profile": _project_character_profile(character_profile),
         "user_profile": dict(user_profile),
+        "platform_bot_id": text_or_empty(
+            character_profile.get("platform_bot_id")
+        ),
     }
     return case
 

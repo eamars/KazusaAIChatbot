@@ -78,6 +78,46 @@ async def resolve_task_inline(
     runtime: object | None = None,
     binding_store: object | None = None,
 ) -> TaskResolutionResultV1:
+    """Run one foreground operation and terminally close failed admission."""
+
+    context = _context_for_service(execution_context)
+    task_session_id = _task_session_id(request, context)
+    configured_store = (
+        binding_store
+        if binding_store is not None
+        else _TASK_RESOLUTION_BINDING_STORE
+    )
+    try:
+        return await _resolve_task_inline_operation(
+            request,
+            context,
+            inline_budget_seconds=inline_budget_seconds,
+            runtime=runtime,
+            binding_store=configured_store,
+        )
+    except Exception:
+        if configured_store is not None:
+            try:
+                await fault_task_resolution_binding(
+                    binding_store=configured_store,
+                    task_session_id=task_session_id,
+                    updated_at=str(context.get("current_timestamp_utc", "")),
+                )
+            except Exception as cleanup_exc:
+                raise TaskResolutionContractError(
+                    "failed DSH admission could not be terminally recorded",
+                ) from cleanup_exc
+        raise
+
+
+async def _resolve_task_inline_operation(
+    request: Mapping[str, object],
+    execution_context: Mapping[str, object],
+    *,
+    inline_budget_seconds: float,
+    runtime: object | None = None,
+    binding_store: object | None = None,
+) -> TaskResolutionResultV1:
     """Run one DSH operation under a shielded caller budget."""
 
     _validate_inline_budget(inline_budget_seconds)
@@ -414,6 +454,70 @@ async def _open_binding_before_activation(
             "foreground DSH binding opening transition was not durable",
         )
     return dict(transitioned)
+
+
+async def fault_task_resolution_binding(
+    *,
+    task_session_id: str,
+    updated_at: str,
+    binding_store: object | None = None,
+) -> None:
+    """Close one failed task-resolution operation through its durable graph."""
+
+    selected_store = (
+        binding_store
+        if binding_store is not None
+        else _TASK_RESOLUTION_BINDING_STORE
+    )
+    if selected_store is None:
+        raise TaskResolutionContractError(
+            "failed DSH operation has no durable binding store",
+        )
+
+    stored = await _store_call(
+        selected_store,
+        "find_binding_by_session",
+        task_session_id=task_session_id,
+    )
+    if stored is None:
+        return
+    if not isinstance(stored, Mapping):
+        raise TaskResolutionContractError(
+            "failed DSH admission returned an invalid durable binding",
+        )
+    current = dict(stored)
+    state = current.get("state")
+    if state in {"faulted", "canceled", "terminal", "consumed_inline"}:
+        return
+    if state not in {"queued", "opening", "checkpointed", "active"}:
+        raise TaskResolutionContractError(
+            "failed DSH admission has an unsupported binding state",
+        )
+    revision = current.get("revision")
+    generation = current.get("operation_generation")
+    if (
+        not isinstance(revision, int)
+        or isinstance(revision, bool)
+        or not isinstance(generation, int)
+        or isinstance(generation, bool)
+    ):
+        raise TaskResolutionContractError(
+            "failed DSH admission has invalid binding fences",
+        )
+    transitioned = await _store_call(
+        selected_store,
+        "transition_task_binding",
+        task_session_id=task_session_id,
+        expected_revision=revision,
+        expected_state=state,
+        next_state="faulted",
+        operation_generation=generation,
+        updated_at=updated_at,
+    )
+    if not isinstance(transitioned, Mapping):
+        raise TaskResolutionContractError(
+            "failed DSH admission fault transition was not durable",
+        )
 
 
 async def _record_inline_binding_outcome(

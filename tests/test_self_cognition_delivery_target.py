@@ -138,6 +138,18 @@ async def test_resolver_rejects_invalid_source_channel_type() -> None:
 
 
 @pytest.mark.asyncio
+async def test_resolver_rejects_missing_source_platform_bot_id() -> None:
+    """A delivery target without bot identity must fail before dispatch."""
+
+    failure = await sources.resolve_self_cognition_delivery_target(
+        **_source_kwargs(source_platform_bot_id=""),
+    )
+
+    assert failure["status"] == "target_binding_failed"
+    assert failure["reason"] == "missing_source_platform_bot_id"
+
+
+@pytest.mark.asyncio
 async def test_production_collectors_attach_delivery_target_before_cognition(
 ) -> None:
     """Active commitment cases should leave collection with a bound target."""
@@ -180,7 +192,7 @@ async def test_production_collectors_attach_delivery_target_before_cognition(
 
     cases = await sources.collect_active_commitment_cases(
         now=now,
-        character_profile={"name": "Character"},
+        character_profile={"name": "Character", "platform_bot_id": "bot-1"},
         max_cases=1,
         list_active_commitments_func=list_active_commitments,
         get_conversation_history_func=get_conversation_history,
@@ -194,6 +206,7 @@ async def test_production_collectors_attach_delivery_target_before_cognition(
     )
     assert cases[0]["delivery_target"]["platform_channel_id"] == "group-1"
     assert cases[0]["delivery_target"]["channel_type"] == "group"
+    assert cases[0]["delivery_target"]["source_platform_bot_id"] == "bot-1"
     assert cases[0]["delivery_target"]["fallback_reason"] == ""
 
 

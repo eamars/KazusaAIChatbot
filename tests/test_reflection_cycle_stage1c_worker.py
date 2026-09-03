@@ -415,16 +415,24 @@ async def test_phase_intent_skips_group_review_for_private_scope(
 async def test_group_review_passes_adapter_registry_provider_to_self_cognition(
     monkeypatch,
 ) -> None:
-    """Selected group review should pass one case to the normal worker."""
+    """Group review should compose its bot identity from the source adapter."""
 
     captured: dict[str, object] = {}
     ledger_rows = []
     now = datetime(2026, 5, 5, 18, 15, tzinfo=timezone.utc)
 
-    def adapter_provider():
-        return object()
+    adapter = MagicMock(platform="qq", platform_bot_id="bot-1")
+    adapter_registry = worker_module.AdapterRegistry()
+    adapter_registry.register(adapter)
 
-    character_profile = {"name": "Character", "platform_bot_id": "bot-1"}
+    def adapter_provider():
+        return adapter_registry
+
+    character_profile = {"name": "Character"}
+    expected_source_profile = {
+        "name": "Character",
+        "platform_bot_id": "bot-1",
+    }
     channel_scope = _group_scope_with_window_minutes(
         [1],
         base_date="2026-05-05",
@@ -433,7 +441,7 @@ async def test_group_review_passes_adapter_registry_provider_to_self_cognition(
 
     async def _collect_group_review_cases(**kwargs):
         assert kwargs["now"] == now
-        assert kwargs["character_profile"] == character_profile
+        assert kwargs["character_profile"] == expected_source_profile
         assert kwargs["max_cases"] == REFLECTION_PHASE_GROUPS_PER_SLOT
         captured["windows"] = kwargs["windows"]
         return [_group_review_case_from_window(kwargs["windows"][0])]
@@ -501,6 +509,7 @@ async def test_group_review_passes_adapter_registry_provider_to_self_cognition(
     assert captured["adapter_registry_provider"] is adapter_provider
     assert captured["collect_cases_func"] is not None
     assert captured["max_cases"] == REFLECTION_PHASE_GROUPS_PER_SLOT
+    assert captured["character_profile"] == expected_source_profile
     assert [
         window.source_id
         for window in captured["windows"]

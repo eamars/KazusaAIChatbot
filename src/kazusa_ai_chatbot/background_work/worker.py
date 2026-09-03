@@ -41,6 +41,11 @@ from kazusa_ai_chatbot.task_resolution.contracts import (
     TaskResolutionContractError,
     TaskResolutionResultV1,
     validate_dsh_resolution_ref,
+    validate_task_resolution_execution_context,
+    validate_task_resolution_result,
+)
+from kazusa_ai_chatbot.task_resolution.service import (
+    fault_task_resolution_binding,
 )
 from kazusa_ai_chatbot.time_boundary import storage_utc_now_iso
 
@@ -127,18 +132,44 @@ async def run_background_work_worker_tick(
                 f"Background-work job {job['job_id']} could not complete: {exc}",
             )
             failed_at = storage_utc_now_iso()
+            requested_worker = _job_text(job, "requested_worker")
+            failure_result = (
+                _operational_failure_result(job)
+                if requested_worker == TASK_ORCHESTRATOR_WORKER
+                else None
+            )
+            if failure_result is not None:
+                payload = job.get("worker_payload")
+                if not isinstance(payload, Mapping):
+                    raise TaskResolutionContractError(
+                        "failed task job is missing its worker payload",
+                    )
+                task_session_id = _job_text(payload, "task_session_id")
+                if not task_session_id:
+                    raise TaskResolutionContractError(
+                        "failed task job is missing its task session",
+                    )
+                await fault_task_resolution_binding(
+                    task_session_id=task_session_id,
+                    updated_at=failed_at,
+                )
+            skip_result_delivery = failure_result is None
             await fail_background_work_job(
                 job_id=job["job_id"],
                 lease_owner=lease_token,
                 failure_summary="The background task could not complete.",
                 result_summary="The accepted task could not complete.",
                 failed_at=failed_at,
+                task_resolution_result=failure_result,
+                skip_result_delivery=skip_result_delivery,
             )
-            if accepted_task_id:
+            if accepted_task_id and failure_result is not None:
                 await mark_accepted_task_failure_ready(
                     accepted_task_id=accepted_task_id,
                     failure_summary="The accepted task could not complete.",
                     completed_at=failed_at,
+                    result_kind="failed",
+                    remaining_needs=list(failure_result["remaining_needs"]),
                 )
             failed_count += 1
             continue
@@ -156,6 +187,47 @@ async def run_background_work_worker_tick(
         "deferred_count": deferred_count,
     }
     return result
+
+
+def _operational_failure_result(
+    job: Mapping[str, object],
+) -> TaskResolutionResultV1:
+    """Build the typed delivery carrier for one caught worker failure."""
+
+    objective = _required_job_text(job, "semantic_objective")
+    context = validate_task_resolution_execution_context(
+        job.get("task_execution_context"),
+    )
+    try:
+        continuation_ref = validate_goal_continuation_ref(
+            job.get("goal_continuation_ref"),
+        )
+    except CognitiveEpisodeValidationError as exc:
+        raise TaskResolutionContractError(
+            f"background job goal_continuation_ref is invalid: {exc}",
+        ) from exc
+    result = {
+        "schema_version": "task_resolution_result.v1",
+        "semantic_objective": objective,
+        "status": "failed",
+        "scene_context": dict(context["scene_context"]),
+        "goal_continuation_ref": continuation_ref,
+        "evidence_state": "blocked",
+        "evidence_excerpts": [],
+        "evidence_handles": [],
+        "prompt_safe_summary": (
+            "The task-resolution operation failed before it could produce "
+            "a verified result."
+        ),
+        "evidence": [],
+        "completed_subgoals": [],
+        "remaining_needs": [
+            "Retry the accepted task after task resolution is available."
+        ],
+        "checkpoint": {},
+        "coding_run_context": {},
+    }
+    return validate_task_resolution_result(result)
 
 
 async def _run_claimed_job(

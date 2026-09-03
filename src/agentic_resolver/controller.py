@@ -19,6 +19,7 @@ from agentic_resolver.contracts import (
 from agentic_resolver.errors import (
     OperationIdReuseMismatchError,
     OperationOutcomeUncertainError,
+    RpcContractError,
 )
 from agentic_resolver.fingerprints import (
     operation_payload_digest,
@@ -112,6 +113,7 @@ class ResolutionController:
         self._owner_id = owner_id
         self._semantic_authority_secret = semantic_authority_secret
         self._observed_states: dict[str, str] = {}
+        self._disposal_lock = asyncio.Lock()
 
     @staticmethod
     async def recover_after_runtime_fault(
@@ -156,6 +158,11 @@ class ResolutionController:
         if intake.mode == "start":
             return await self.open(intake.to_dict())
         return await self.continue_resolution(intake.to_dict())
+
+    async def readiness(self) -> dict[str, str]:
+        """Return the authenticated mounted-sidecar identity."""
+
+        return await self._health_identity()
 
     async def open(self, value: Mapping[str, Any]) -> dict[str, Any]:
         intake = DSHResolutionIntakeV2.from_mapping(value)
@@ -769,9 +776,10 @@ class ResolutionController:
             activation_id,
             lease_epoch,
         )
-        await self._repository_call(
-            "release_lease",
-            resolution_thread_id, activation_id, lease_epoch
+        await self._release_lease_if_current(
+            resolution_thread_id,
+            activation_id,
+            lease_epoch,
         )
         return result
 
@@ -1076,29 +1084,76 @@ class ResolutionController:
         activation_id: str,
         lease_epoch: int,
     ) -> None:
-        record = await self._repository_call(
-            "get_thread", resolution_thread_id
-        )
-        if record is None:
-            raise RuntimeError("resolution thread disappeared during disposal")
+        async with self._disposal_lock:
+            record = await self._repository_call(
+                "get_thread", resolution_thread_id
+            )
+            if record is None:
+                raise RuntimeError(
+                    "resolution thread disappeared during disposal"
+                )
+            if not self._lease_is_current(
+                record,
+                activation_id=activation_id,
+                lease_epoch=lease_epoch,
+            ):
+                return
+            await self._dispose_sidecar_activation(
+                resolution_thread_id,
+                segment_id,
+                activation_id,
+                lease_epoch,
+            )
+            await self._repository_call(
+                "release_lease",
+                resolution_thread_id,
+                activation_id,
+                lease_epoch,
+            )
+
+    async def _release_lease_if_current(
+        self,
+        resolution_thread_id: str,
+        activation_id: str,
+        lease_epoch: int,
+    ) -> None:
+        """Serialize lease cleanup that already disposed its sidecar owner."""
+
+        async with self._disposal_lock:
+            record = await self._repository_call(
+                "get_thread", resolution_thread_id
+            )
+            if record is None:
+                raise RuntimeError(
+                    "resolution thread disappeared during lease release"
+                )
+            if not self._lease_is_current(
+                record,
+                activation_id=activation_id,
+                lease_epoch=lease_epoch,
+            ):
+                return
+            await self._repository_call(
+                "release_lease",
+                resolution_thread_id,
+                activation_id,
+                lease_epoch,
+            )
+
+    @staticmethod
+    def _lease_is_current(
+        record: Any,
+        *,
+        activation_id: str,
+        lease_epoch: int,
+    ) -> bool:
+        """Return whether one record still carries the exact cleanup fence."""
+
         current_lease = record.current_lease
-        if (
-            current_lease is None
-            or current_lease.get("activation_id") != activation_id
-            or current_lease.get("lease_epoch") != lease_epoch
-        ):
-            return
-        await self._dispose_sidecar_activation(
-            resolution_thread_id,
-            segment_id,
-            activation_id,
-            lease_epoch,
-        )
-        await self._repository_call(
-            "release_lease",
-            resolution_thread_id,
-            activation_id,
-            lease_epoch,
+        return (
+            current_lease is not None
+            and current_lease.get("activation_id") == activation_id
+            and current_lease.get("lease_epoch") == lease_epoch
         )
 
     @staticmethod
@@ -1259,11 +1314,16 @@ class ResolutionController:
             fault_code=self._fault_code(result),
         )
         if method in {"resolution.request_checkpoint", "resolution.cancel"}:
-            state = (
-                "checkpointed"
-                if method == "resolution.request_checkpoint"
-                else "canceled"
-            )
+            state = {
+                "terminal": "terminal",
+                "checkpointed": "checkpointed",
+                "canceled": "canceled",
+                "faulted": "faulted",
+            }.get(disposition)
+            if state is None:
+                raise RpcContractError(
+                    "DSH control returned a non-committed disposition"
+                )
             changes: dict[str, Any] = {
                 "state": state,
                 "last_used_at": _now(),
@@ -1276,15 +1336,9 @@ class ResolutionController:
                 record.current_segment_id,
                 **changes,
             )
-            await self._dispose_sidecar_activation(
+            await self._dispose_and_release_if_current(
                 resolution_thread_id,
                 record.current_segment_id,
-                activation_id,
-                lease_epoch,
-            )
-            await self._repository_call(
-                "release_lease",
-                resolution_thread_id,
                 activation_id,
                 lease_epoch,
             )
@@ -1316,31 +1370,36 @@ class ResolutionController:
 
         value = await self._rpc.call("system.health", {})
         if not isinstance(value, Mapping):
-            raise RuntimeError("sidecar health identity is unavailable")
+            raise RpcContractError("sidecar health identity is unavailable")
         if value.get("protocol_version") != "kazusa.dsh-resolution-rpc.v2":
-            raise RuntimeError("sidecar health protocol is unsupported")
+            raise RpcContractError("sidecar health protocol is unsupported")
         if value.get("status") != "ready":
-            raise RuntimeError("sidecar health is not ready")
+            raise RpcContractError("sidecar health is not ready")
         route = value.get("route")
         catalog = value.get("catalog")
         workspace = value.get("workspace")
         policy = value.get("policy")
         if not isinstance(route, Mapping):
-            raise RuntimeError("sidecar health route identity is unavailable")
+            raise RpcContractError("sidecar health route identity is unavailable")
         if not isinstance(catalog, Mapping):
-            raise RuntimeError("sidecar health catalog identity is unavailable")
+            raise RpcContractError("sidecar health catalog identity is unavailable")
         if not isinstance(workspace, Mapping):
-            raise RuntimeError("sidecar health workspace identity is unavailable")
+            raise RpcContractError(
+                "sidecar health workspace identity is unavailable"
+            )
         if not isinstance(policy, Mapping):
-            raise RuntimeError("sidecar health policy identity is unavailable")
+            raise RpcContractError("sidecar health policy identity is unavailable")
 
         def required_text(value: object, field: str) -> str:
             if not isinstance(value, str) or not value:
-                raise RuntimeError(f"sidecar health {field} is unavailable")
+                raise RpcContractError(
+                    f"sidecar health {field} is unavailable"
+                )
             return value
 
         root = required_text(workspace.get("root"), "workspace.root")
         return {
+            "status": "ready",
             "route_digest": required_text(route.get("digest"), "route.digest"),
             "native_catalog_digest": required_text(
                 catalog.get("native_catalog_digest"),

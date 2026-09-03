@@ -118,6 +118,7 @@ describe("contracts", () => {
       workspace_root: "C:/workspace/project",
       route_digest: "sha256:route",
       scope_fingerprint: "sha256:scope",
+      audience_fingerprint: "sha256:audience",
       catalog_digest: "sha256:catalog",
       interaction_issuer: "dsh-sidecar",
       policy_epoch: "2026-08-28.1",

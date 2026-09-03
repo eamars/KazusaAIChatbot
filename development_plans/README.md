@@ -80,6 +80,7 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
+| [dsh_operational_e2e_quality_signoff_and_transport_failure_remediation_plan_2026-08-31.md](active/bugfix/dsh_operational_e2e_quality_signoff_and_transport_failure_remediation_plan_2026-08-31.md) | DSH cognition-chain error-policy compliance, complete pre-E2E failure mapping, deterministic fault-injection coverage, and final production E2E sign-off | in_progress; execution stopped for handoff, E2E locked, production sign-off withheld |
 | [gemma4_thinking_disable_enforcement_gap_bugfix_plan_2026-08-25.md](active/bugfix/gemma4_thinking_disable_enforcement_gap_bugfix_plan_2026-08-25.md) | Gemma 4 provider-side thinking-disable enforcement gap | in_progress |
 | [epistemic_and_role_provenance_fidelity_bugfix_plan_2026-08-24.md](active/bugfix/epistemic_and_role_provenance_fidelity_bugfix_plan_2026-08-24.md) | Independent unsupported-fact, private-residue, and temporary-role provenance fidelity plan from the 50-turn Asuna run | draft; separate ownership and approval boundary |
 | [live_response_generation_failure_modes_problem_statement_2026-08-27.md](active/bugfix/live_response_generation_failure_modes_problem_statement_2026-08-27.md) | Live-response LLM generation failure-mode problem statement | draft; problem statement only; non-executable |

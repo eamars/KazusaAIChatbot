@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Mapping
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
+
+from pymongo.errors import AutoReconnect
 
 from agentic_resolver.contracts import (
     DSH_RELEASE,
@@ -19,6 +23,9 @@ from agentic_resolver.errors import (
     StaleActivationOrLeaseError,
 )
 from kazusa_ai_chatbot.db import resolution_threads
+from kazusa_ai_chatbot.db.errors import DatabaseOperationError
+
+_INDEX_RETRY_DELAYS_SECONDS = (0.05, 0.1)
 
 
 def _future(now: str, days: int = 1) -> str:
@@ -345,19 +352,54 @@ class InMemoryResolutionThreadRepository:
         if now is not None:
             document["updated_at"] = now
 
+
 class MongoResolutionThreadRepository:
     """Async adapter delegating raw selectors to the V2 DB owner module."""
 
     def __init__(self) -> None:
         self._db = resolution_threads
+        self._indexes_ready = False
+        self._index_lock = asyncio.Lock()
 
     async def ensure_indexes(self) -> None:
-        await self._db.ensure_indexes()
+        if self._indexes_ready:
+            return
+        async with self._index_lock:
+            if self._indexes_ready:
+                return
+            for attempt in range(len(_INDEX_RETRY_DELAYS_SECONDS) + 1):
+                try:
+                    await self._db.ensure_indexes()
+                except DatabaseOperationError as exc:
+                    if (
+                        not isinstance(exc.__cause__, AutoReconnect)
+                        or attempt >= len(_INDEX_RETRY_DELAYS_SECONDS)
+                    ):
+                        raise ResolutionPersistenceError(
+                            "failed to ensure resolution thread indexes",
+                        ) from exc
+                    await asyncio.sleep(
+                        _INDEX_RETRY_DELAYS_SECONDS[attempt]
+                    )
+                else:
+                    self._indexes_ready = True
+                    return
+
+    async def _call(self, name: str, *args: Any, **kwargs: Any) -> Any:
+        """Translate database-owner failures into resolver taxonomy."""
+
+        method = getattr(self._db, name)
+        try:
+            return await method(*args, **kwargs)
+        except DatabaseOperationError as exc:
+            raise ResolutionPersistenceError(
+                f"resolution repository operation failed: {name}",
+            ) from exc
 
     async def get_thread(
         self, resolution_thread_id: str
     ) -> ResolutionThreadRecordV2 | None:
-        value = await self._db.get_thread(resolution_thread_id)
+        value = await self._call("get_thread", resolution_thread_id)
         if value is None:
             return None
         return ResolutionThreadRecordV2.from_mapping(value)
@@ -365,42 +407,50 @@ class MongoResolutionThreadRepository:
     async def get_operation(
         self, resolution_thread_id: str, operation_id: str
     ) -> dict[str, Any] | None:
-        return await self._db.get_operation(resolution_thread_id, operation_id)
+        return await self._call(
+            "get_operation",
+            resolution_thread_id,
+            operation_id,
+        )
 
-    async def create_thread_v2(self, *args: Any, **kwargs: Any) -> ResolutionThreadRecordV2:
+    async def create_thread_v2(
+        self,
+        *args: Any,
+        **kwargs: Any,
+    ) -> ResolutionThreadRecordV2:
         await self.ensure_indexes()
         return ResolutionThreadRecordV2.from_mapping(
-            await self._db.create_thread_v2(*args, **kwargs)
+            await self._call("create_thread_v2", *args, **kwargs)
         )
 
     async def prepare_operation(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return await self._db.prepare_operation(*args, **kwargs)
+        return await self._call("prepare_operation", *args, **kwargs)
 
     async def update_operation(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return await self._db.update_operation(*args, **kwargs)
+        return await self._call("update_operation", *args, **kwargs)
 
     async def acquire_lease(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return await self._db.acquire_lease(*args, **kwargs)
+        return await self._call("acquire_lease", *args, **kwargs)
 
     async def renew_lease(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return await self._db.renew_lease(*args, **kwargs)
+        return await self._call("renew_lease", *args, **kwargs)
 
     async def release_lease(self, *args: Any, **kwargs: Any) -> None:
-        await self._db.release_lease(*args, **kwargs)
+        await self._call("release_lease", *args, **kwargs)
 
     async def rotate_segment(
         self, *args: Any, **kwargs: Any
     ) -> ResolutionThreadRecordV2:
         return ResolutionThreadRecordV2.from_mapping(
-            await self._db.rotate_segment(*args, **kwargs)
+            await self._call("rotate_segment", *args, **kwargs)
         )
 
     async def update_segment(
         self, *args: Any, **kwargs: Any
     ) -> ResolutionThreadRecordV2:
         return ResolutionThreadRecordV2.from_mapping(
-            await self._db.update_segment(*args, **kwargs)
+            await self._call("update_segment", *args, **kwargs)
         )
 
     async def validate_fence(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return await self._db.validate_fence(*args, **kwargs)
+        return await self._call("validate_fence", *args, **kwargs)

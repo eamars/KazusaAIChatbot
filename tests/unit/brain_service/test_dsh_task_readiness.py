@@ -5,6 +5,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from agentic_resolver.errors import RpcTransportError
+
 
 def test_task_capability_is_available_only_when_full_dsh_runtime_is_ready() -> None:
     """Readiness validates the sidecar and Brain bridge as one closed carrier."""
@@ -49,3 +51,85 @@ def test_task_capability_is_available_only_when_full_dsh_runtime_is_ready() -> N
                 "brain_bridge_identity": "brain-v2",
             },
         })
+
+
+class _InteractionService:
+    """Provide the local Brain owners required by the health projection."""
+
+    def __init__(self) -> None:
+        self._interaction_store = object()
+        self._judge = object()
+
+
+class _ReadyRuntime:
+    """Return one valid authenticated sidecar readiness identity."""
+
+    async def readiness(self) -> dict[str, str]:
+        return {
+            "status": "ready",
+            "route_digest": "route-digest",
+            "semantic_catalog_digest": "catalog-digest",
+        }
+
+
+class _UnavailableRuntime:
+    """Represent an unreachable configured DSH sidecar."""
+
+    async def readiness(self) -> dict[str, str]:
+        raise RpcTransportError("sidecar unavailable: connection refused")
+
+
+@pytest.mark.asyncio
+async def test_dsh_health_requires_live_sidecar_readiness(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Local Brain construction is insufficient without sidecar readiness."""
+
+    from kazusa_ai_chatbot import service
+
+    monkeypatch.setattr(service, "MongoInteractionStore", object)
+    monkeypatch.setattr(service, "_dsh_interaction_service", _InteractionService())
+    monkeypatch.setattr(service, "_dsh_resolver_runtime", _ReadyRuntime())
+
+    health = await service._dsh_interaction_health()
+
+    assert health.status == "ready"
+    assert health.task_resolution.status == "ready"
+
+
+@pytest.mark.asyncio
+async def test_dsh_health_is_unavailable_when_sidecar_probe_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unreachable sidecar should revoke Brain task readiness."""
+
+    from kazusa_ai_chatbot import service
+
+    monkeypatch.setattr(service, "MongoInteractionStore", object)
+    monkeypatch.setattr(service, "_dsh_interaction_service", _InteractionService())
+    monkeypatch.setattr(service, "_dsh_resolver_runtime", _UnavailableRuntime())
+
+    health = await service._dsh_interaction_health()
+
+    assert health.status == "unavailable"
+    assert health.configured is True
+    assert health.durable_store is True
+    assert health.cognition_judge is True
+    assert health.task_resolution.status == "unavailable"
+
+
+def test_dsh_bridge_health_does_not_depend_on_sidecar(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The sidecar's Brain probe must terminate at local bridge owners."""
+
+    from kazusa_ai_chatbot import service
+
+    monkeypatch.setattr(service, "MongoInteractionStore", object)
+    monkeypatch.setattr(service, "_dsh_interaction_service", _InteractionService())
+    monkeypatch.setattr(service, "_dsh_resolver_runtime", _UnavailableRuntime())
+
+    health = service._dsh_brain_bridge_health()
+
+    assert health.schema_version == "dsh_brain_bridge_health.v1"
+    assert health.status == "ready"

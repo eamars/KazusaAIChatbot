@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from agentic_resolver.errors import RpcTransportError
+from kazusa_ai_chatbot.db.errors import DatabaseOperationError
 from tests.task_resolution_test_helpers import _goal_continuation_ref
 
 
@@ -298,3 +300,87 @@ def test_task_capability_uses_runtime_readiness_without_legacy_fallback() -> Non
             _state(),
             cognition_scene_context={**_scene(), "private": "hidden"},
         )
+
+
+@pytest.mark.asyncio
+async def test_task_resolution_transport_failure_returns_blocked_observation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Foreground sidecar loss should remain inside the evidence boundary."""
+
+    from kazusa_ai_chatbot.cognition_resolver import capabilities as owner
+
+    async def unavailable_runtime(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise RpcTransportError("sidecar unavailable: connection refused")
+
+    monkeypatch.setattr(owner, "list_session_media_refs", lambda _scope: [])
+    monkeypatch.setattr(owner, "resolve_task_inline", unavailable_runtime)
+
+    observation = await owner._execute_task_resolution_request(
+        _request(),
+        _state(),
+    )
+
+    assert observation["status"] == "failed"
+    assert observation["task_resolution_evidence_state"] == {
+        "schema_version": "resolver_evidence_state.v1",
+        "state": "blocked",
+        "remaining_needs": ["Resolve this bounded goal."],
+    }
+    assert "connection refused" not in observation["prompt_safe_summary"]
+
+
+@pytest.mark.asyncio
+async def test_background_task_resolution_transport_failure_returns_blocked_observation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Background admission loss should not escape the resolver boundary."""
+
+    from kazusa_ai_chatbot.cognition_resolver import capabilities as owner
+
+    async def unavailable_runtime(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise RpcTransportError("sidecar unavailable: connection refused")
+
+    request = {**_request(), "priority": "background"}
+    monkeypatch.setattr(owner, "list_session_media_refs", lambda _scope: [])
+    monkeypatch.setattr(
+        owner,
+        "start_task_resolution_in_background",
+        unavailable_runtime,
+    )
+
+    observation = await owner._execute_task_resolution_request(
+        request,
+        _state(),
+    )
+
+    assert observation["status"] == "failed"
+    assert observation["task_resolution_evidence_state"]["state"] == "blocked"
+    assert "connection refused" not in observation["prompt_safe_summary"]
+
+
+@pytest.mark.asyncio
+async def test_task_resolution_database_failure_returns_blocked_observation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A DSH persistence outage must remain inside the evidence boundary."""
+
+    from kazusa_ai_chatbot.cognition_resolver import capabilities as owner
+
+    async def unavailable_store(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise DatabaseOperationError("resolution store unavailable")
+
+    monkeypatch.setattr(owner, "list_session_media_refs", lambda _scope: [])
+    monkeypatch.setattr(owner, "resolve_task_inline", unavailable_store)
+
+    observation = await owner._execute_task_resolution_request(
+        _request(),
+        _state(),
+    )
+
+    assert observation["status"] == "failed"
+    assert observation["task_resolution_evidence_state"]["state"] == "blocked"
+    assert "resolution store" not in observation["prompt_safe_summary"]

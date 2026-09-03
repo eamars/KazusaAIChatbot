@@ -151,6 +151,7 @@ async def execute_task_orchestrator_job(
         operation_generation=generation,
         exhaust=exhaust,
         result=result,
+        allow_reference_advance=(operation == "continue_dsh_resolution"),
     )
     return result
 
@@ -418,6 +419,7 @@ async def _record_binding_outcome(
     operation_generation: int,
     exhaust: object,
     result: Mapping[str, object],
+    allow_reference_advance: bool = False,
 ) -> None:
     """Persist the result, identity, and state transition for one generation."""
 
@@ -442,10 +444,33 @@ async def _record_binding_outcome(
             operation_generation=operation_generation,
             reference=reference,
         )
-    elif validate_dsh_resolution_ref(existing) != reference:
-        raise TaskResolutionContractError(
-            "DSH result identity conflicts with its durable binding",
-        )
+    else:
+        current_reference = validate_dsh_resolution_ref(existing)
+        if current_reference != reference:
+            if not _reference_progression_allowed(
+                current_reference,
+                reference,
+                allow_fresh_fence=allow_reference_advance,
+            ):
+                raise TaskResolutionContractError(
+                    "DSH result identity conflicts with its durable binding",
+                )
+            revision = binding.get("revision")
+            if not isinstance(revision, int) or isinstance(revision, bool):
+                raise TaskResolutionContractError(
+                    "DSH task binding revision is invalid",
+                )
+            advanced = await _store_call(
+                "attach_resolution_ref",
+                task_session_id=task_session_id,
+                expected_revision=revision,
+                resolution_ref=dict(reference),
+            )
+            if not isinstance(advanced, Mapping):
+                raise TaskResolutionContractError(
+                    "DSH continuation fence advance was not durable",
+                )
+            binding = dict(advanced)
     state = binding.get("state")
     next_state = _binding_state_for_exhaust(exhaust)
     revision = binding.get("revision")
@@ -536,6 +561,7 @@ def _reference_from_exhaust(
     reference = validate_dsh_resolution_ref(bound)
     identity = candidate.get("identity")
     if isinstance(identity, Mapping):
+        projected = dict(reference)
         for field in (
             "resolution_thread_id",
             "segment_id",
@@ -545,16 +571,52 @@ def _reference_from_exhaust(
             "document_revision",
             "last_committed_seq",
         ):
-            if field in identity and identity[field] != reference[field]:
-                raise TaskResolutionContractError(
-                    "DSH exhaust identity conflicts with its binding: "
-                    f"{field}",
-                )
+            if field in identity:
+                projected[field] = identity[field]
+        try:
+            reference = validate_dsh_resolution_ref(projected)
+        except (TypeError, ValueError) as exc:
+            raise TaskResolutionContractError(
+                f"DSH exhaust identity is invalid: {exc}",
+            ) from exc
     if reference["dsh_session_id"] != task_session_id:
         raise TaskResolutionContractError(
             "DSH result reference belongs to another task session",
         )
     return reference
+
+
+def _reference_progression_allowed(
+    current: DshResolutionRefV1,
+    candidate: DshResolutionRefV1,
+    *,
+    allow_fresh_fence: bool,
+) -> bool:
+    """Allow only monotonic progress on the same durable DSH lineage."""
+
+    for field in (
+        "resolution_thread_id",
+        "segment_id",
+        "dsh_session_id",
+    ):
+        if candidate[field] != current[field]:
+            return False
+    if (
+        candidate["document_revision"] < current["document_revision"]
+        or candidate["last_committed_seq"] < current["last_committed_seq"]
+    ):
+        return False
+    same_fence = (
+        candidate["activation_id"] == current["activation_id"]
+        and candidate["lease_epoch"] == current["lease_epoch"]
+    )
+    if same_fence:
+        return True
+    return (
+        allow_fresh_fence
+        and candidate["activation_id"] != current["activation_id"]
+        and candidate["lease_epoch"] == current["lease_epoch"] + 1
+    )
 
 
 def _binding_state_for_exhaust(exhaust: object) -> str | None:

@@ -419,6 +419,7 @@ async def test_graph_failure_records_runtime_error_and_failed_pipeline(
     runtime_kwargs = record_runtime_error_event.await_args.kwargs
     assert runtime_kwargs["error_class"] == "RuntimeError"
     assert runtime_kwargs["status"] == "failed"
+    assert runtime_kwargs["recovered"] is False
     record_pipeline_turn_event.assert_awaited_once()
     pipeline_kwargs = record_pipeline_turn_event.await_args.kwargs
     assert pipeline_kwargs["status"] == "failed"

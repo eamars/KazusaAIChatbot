@@ -157,6 +157,22 @@ _P_ORDINARY_SYSTEM_PROMPT = '''# 任务
 # 输出
 只返回一个 JSON 对象。字段、嵌套字段、列表、枚举、条件字段与能力参数严格遵循 `output_contract`，不添加其他字段。自由文本使用简体中文；引文、专有名词、代码、URL、schema 与 enum token 保持原样。'''
 
+_P_TOOL_RESULT_SYSTEM_PROMPT = '''# 任务
+把已经终结的工具结果交付为当前角色拥有的一次最终回应，报告返回的事实、限制或失败原因。
+
+# 输入
+`stage` 标识回应计划合同；`goal` 是已选择的当前角色目标；`current_observation` 提供已经完成或失败的工具结果；`direct_facts` 提供稳定背景；`participant_continuity` 与 `continuation_state` 提供此前互动和任务连续性；`capabilities` 只列出终态交付仍可使用的非递归能力；`resolver_goal_progress` 提供原任务的语义范围；`output_contract` 定义精确输出结构与能力参数。`contract_repair` 若出现，只说明上一候选的结构问题。
+
+# 决策步骤
+1. 把当前工具结果视为原任务的终态返回，不把“结果已可用”误解为再次执行或重新获取同一任务的邀请。
+2. 结果已解决时，选择 `answerable_now`，让 `response_goal` 直接交付返回的事实和证据限制；结果失败或受阻时，选择 `blocked`，如实交付失败原因和仍缺少的条件。
+3. 只使用当前结果实际返回的语义、证据和限制，不补写未返回的细节。
+4. 不承诺稍后查询、核实、继续处理或再次回复。缺少的细节作为当前终态限制交付，不能伪装成仍在运行的工作。
+5. 在 `epistemic_boundary` 中区分可直接断言、只能解释和未返回的内容。若有 `contract_repair`，重新生成完整候选并保持终态交付语义。
+
+# 输出
+只返回一个 JSON 对象。字段、嵌套字段、列表、枚举、条件字段与能力参数严格遵循 `output_contract`，不添加其他字段。自由文本使用简体中文；引文、专有名词、代码、URL、schema 与 enum token 保持原样。'''
+
 _P_PENDING_CLARIFICATION_SYSTEM_PROMPT = '''# 任务
 判断当前观察如何处置一个开放澄清，并形成由当前角色拥有的回应计划。
 
@@ -257,6 +273,7 @@ def _system_prompt_for_stage(
     *,
     stage: str,
     packet: Mapping[str, object],
+    response_plan_contract_variant: ResponsePlanContractVariant | None = None,
 ) -> str:
     """Select the complete literal prompt for this exact model-call contract."""
 
@@ -273,6 +290,8 @@ def _system_prompt_for_stage(
         raise CognitionContractError("P output contract is invalid")
     if "self_cognition_response" in output_contract.get("required_fields", []):
         return _P_SELF_COGNITION_SYSTEM_PROMPT
+    if response_plan_contract_variant == "tool_result_delivery":
+        return _P_TOOL_RESULT_SYSTEM_PROMPT
     has_pending_resolver = "pending_resolver_continuation" in packet
     has_pending_dsh = "pending_dsh_interaction" in packet
     if has_pending_resolver and has_pending_dsh:
@@ -512,6 +531,7 @@ async def _run_cognition_stage(
     packet: dict[str, object],
     validator: Callable[[object], object],
     deadline_monotonic: float,
+    response_plan_contract_variant: ResponsePlanContractVariant | None = None,
 ) -> object:
     """Run one cognition stage with bounded feedback-bearing recovery."""
 
@@ -521,7 +541,11 @@ async def _run_cognition_stage(
         output_mode="json_object",
     )
     system_message = SystemMessage(
-        content=_system_prompt_for_stage(stage=stage, packet=packet),
+        content=_system_prompt_for_stage(
+            stage=stage,
+            packet=packet,
+            response_plan_contract_variant=response_plan_contract_variant,
+        ),
     )
     base_messages = [
         system_message,
@@ -1441,6 +1465,9 @@ async def _run_cognition(
             ],
         ),
         deadline_monotonic=deadline_monotonic,
+        response_plan_contract_variant=workspace[
+            "response_plan_contract_variant"
+        ],
     )
     if not isinstance(plan_result, CanonicalResponsePlan):
         raise CognitionContractError("P response plan result is invalid")
