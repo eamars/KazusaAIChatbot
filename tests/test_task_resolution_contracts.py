@@ -22,7 +22,7 @@ def _evidence(*, evidence_id: str = "evidence-1") -> dict[str, object]:
         "evidence_id": evidence_id,
         "task_node_id": "dsh-node-1",
         "specialist": "dsh",
-        "summary": "A relevant prior commitment was found.",
+        "summary": "memory:item-1",
         "provenance_refs": ["memory:item-1"],
         "limitations": [],
     }
@@ -52,8 +52,10 @@ def _result(
         "scene_context": _scene_context(),
         "goal_continuation_ref": _goal_continuation_ref(),
         "evidence_state": evidence_state,
-        "evidence_excerpts": [str(item["summary"]) for item in evidence],
-        "evidence_handles": [str(item["evidence_id"]) for item in evidence],
+        "evidence_excerpts": [
+            "A relevant prior commitment was found." for _item in evidence
+        ],
+        "evidence_handles": [str(item["summary"]) for item in evidence],
         "prompt_safe_summary": "One relevant fact was recovered.",
         "evidence": evidence,
         "completed_subgoals": [],

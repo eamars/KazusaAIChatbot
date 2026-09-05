@@ -99,3 +99,9 @@ RAG3 route retains its planner, subagent, and web-provider settings.
 Use venv\Scripts\python for deterministic tests. Exercise contract,
 controller, process-recovery, task-resolution, binding, catalog, and
 readiness tests before any live-DB or live-LLM rehearsal.
+
+`experiments/dsh_runtime_probe.py` is the reusable black-box process owner for
+sidecar lifecycle, guarded Brain/task persistence, and transport-loss probes.
+It records the tested revision, child PIDs and exits, observations, artifacts,
+and cleanup in `dsh_runtime_probe_result.v1`; a blocked prerequisite returns
+exit code 2 instead of being reported as a pass.

@@ -12,43 +12,10 @@ from kazusa_ai_chatbot.cognition_shared.contracts import (
     build_scheduled_future_speech_authority,
 )
 from kazusa_ai_chatbot.db.errors import DatabaseOperationError
-from tests.task_resolution_test_helpers import _context, _goal_continuation_ref
-
-
-def _resume_queue_request() -> dict[str, object]:
-    """Build one generation-zero DSH queue request without authority."""
-
-    return {
-        "job_id": "job-001",
-        "source_action_attempt_id": "action_attempt:task-resolution-001",
-        "source_llm_trace_id": "llmtrace_source-1",
-        "idempotency_key": "background_work:task-resolution-001",
-        "accepted_task_id": "task-001",
-        "task_identity_key": "accepted_task:v2:abc",
-        "semantic_objective": "Resolve one bounded public question.",
-        "goal_continuation_ref": _goal_continuation_ref(),
-        "requested_worker": "task_orchestrator",
-        "worker_payload": {
-            "schema_version": "task_orchestrator_worker_payload.v2",
-            "operation": "open_dsh_resolution",
-            "task_session_id": "session-task-001",
-            "operation_generation": 0,
-            "control": None,
-        },
-        "task_execution_context": _context(),
-        "source_platform": "debug",
-        "source_channel_id": "debug:user:test-user",
-        "source_channel_type": "private",
-        "source_message_id": "message-1",
-        "source_platform_bot_id": "debug-bot",
-        "source_character_name": "Test Character",
-        "requester_global_user_id": "user-1",
-        "requester_platform_user_id": "debug-user-1",
-        "requester_display_name": "Test User",
-        "requested_delivery": "send_result_when_done",
-        "max_output_chars": 3000,
-        "storage_timestamp_utc": "2026-06-06T00:00:00+00:00",
-    }
+from tests.task_resolution_test_helpers import (
+    _goal_continuation_ref,
+    resume_queue_request,
+)
 
 
 def _future_speak_queue_request() -> dict[str, object]:
@@ -73,7 +40,7 @@ def _future_speak_queue_request() -> dict[str, object]:
             "provenance_role": "current_event",
         }],
     )
-    request = _resume_queue_request()
+    request = resume_queue_request()
     request["requested_worker"] = "future_speak"
     request["worker_payload"] = {
         "trigger_at": "2026-06-06 13:00",
@@ -137,7 +104,7 @@ async def test_enqueue_persists_one_generation_zero_dsh_job(
         return job
 
     monkeypatch.setattr(jobs, "insert_background_work_job", insert)
-    result = await jobs.enqueue_background_work_request(_resume_queue_request())
+    result = await jobs.enqueue_background_work_request(resume_queue_request())
 
     assert result["status"] == "pending"
     assert len(stored) == 1
@@ -154,7 +121,7 @@ async def test_enqueue_rejects_unsupported_worker() -> None:
     """Only DSH task orchestration and future-speak remain queue workers."""
 
     jobs = importlib.import_module("kazusa_ai_chatbot.background_work.jobs")
-    request = _resume_queue_request()
+    request = resume_queue_request()
     request["requested_worker"] = "unsupported_worker"
     with pytest.raises(ValueError, match="requested_worker"):
         await jobs.enqueue_background_work_request(request)
@@ -164,7 +131,7 @@ def test_worker_payload_rejects_unknown_operations() -> None:
     """The payload validator closes the operation vocabulary."""
 
     jobs = importlib.import_module("kazusa_ai_chatbot.background_work.jobs")
-    payload = dict(_resume_queue_request()["worker_payload"])
+    payload = dict(resume_queue_request()["worker_payload"])
     payload["operation"] = "unsupported"
     with pytest.raises(ValueError, match="operation"):
         jobs.validate_task_orchestrator_worker_payload(payload)
@@ -205,7 +172,7 @@ def test_job_document_keeps_task_lineage() -> None:
     """Durable queue rows retain task identity, trace, and continuation ref."""
 
     jobs = importlib.import_module("kazusa_ai_chatbot.background_work.jobs")
-    request = _resume_queue_request()
+    request = resume_queue_request()
     job = jobs._build_job_document(
         request,
         job_id="job-task-001",
@@ -222,7 +189,7 @@ async def test_enqueue_rejects_task_without_goal_continuation_ref() -> None:
     """A DSH task cannot be queued without its exact goal lineage."""
 
     jobs = importlib.import_module("kazusa_ai_chatbot.background_work.jobs")
-    request = _resume_queue_request()
+    request = resume_queue_request()
     request["goal_continuation_ref"] = None
     with pytest.raises(ValueError, match="goal_continuation_ref"):
         await jobs.enqueue_background_work_request(request)
@@ -252,7 +219,7 @@ async def test_insert_job_records_source_trace_conflict(
     monkeypatch.setattr(db_module, "get_db", AsyncMock(return_value=db))
     jobs = importlib.import_module("kazusa_ai_chatbot.background_work.jobs")
     job = jobs._build_job_document(
-        _resume_queue_request(),
+        resume_queue_request(),
         job_id="job-incoming",
         storage_timestamp_utc="2026-06-06T00:00:00+00:00",
     )
@@ -299,7 +266,7 @@ async def test_insert_job_rejects_continuation_ref_mismatch(
     monkeypatch.setattr(db_module, "get_db", AsyncMock(return_value=db))
     jobs = importlib.import_module("kazusa_ai_chatbot.background_work.jobs")
     job = jobs._build_job_document(
-        _resume_queue_request(),
+        resume_queue_request(),
         job_id="job-incoming",
         storage_timestamp_utc="2026-06-06T00:00:00+00:00",
     )

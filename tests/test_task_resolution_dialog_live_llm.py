@@ -14,7 +14,7 @@ from kazusa_ai_chatbot.background_work.result_source import (
 )
 from kazusa_ai_chatbot.nodes import dialog_agent as dialog_module
 from tests.cognition_test_helpers import canonical_episode
-from tests.test_background_work_delivery import _accepted_task_completed_job
+from tests.task_resolution_test_helpers import accepted_task_completed_job
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.live_llm]
 
@@ -229,7 +229,7 @@ async def test_live_dialog_renders_deferred_grounded_result(
 ) -> None:
     """A durable completed job re-enters as evidence and renders naturally."""
 
-    job = deepcopy(_accepted_task_completed_job())
+    job = deepcopy(accepted_task_completed_job())
     task_result = job["task_resolution_result"]
     assert isinstance(task_result, dict)
     summary = (

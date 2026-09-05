@@ -567,7 +567,7 @@ def _operational_failure_metadata(
         retryable = False
         branch_id = ""
     elif isinstance(exc, CognitionExecutionError):
-        error_code = "model_contract"
+        error_code = exc.error_code
         stage = str(getattr(exc, "stage", ""))
         failure_attempt_count = int(getattr(exc, "attempt_count", 1))
         retryable = bool(getattr(exc, "retryable", False))
@@ -677,7 +677,7 @@ def _operational_error_response(
     operational_error = OperationalErrorOut(
         error_code=error_code,
         status="exhausted" if exhausted else "failed",
-        retryable=retryable,
+        retryable=retryable and not exhausted,
         exhausted=exhausted,
         attempt_count=max(1, attempt_count, failure_attempt_count),
         correlation_id=correlation_id,

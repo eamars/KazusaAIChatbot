@@ -13,6 +13,10 @@ import pytest
 from kazusa_ai_chatbot.background_work.result_source import (
     build_result_ready_episode_from_job,
 )
+from kazusa_ai_chatbot.cognition_resolver.contracts import (
+    TERMINAL_RESOLVER_SURFACE_DECISION,
+    ResolverValidationError,
+)
 from kazusa_ai_chatbot.cognition_shared import surface, surface_stages
 from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionContractError,
@@ -23,15 +27,14 @@ from kazusa_ai_chatbot.cognition_shared.contracts import (
 from kazusa_ai_chatbot.cognition_shared.state_projection import (
     validate_prompt_projection,
 )
-from kazusa_ai_chatbot.cognition_resolver.contracts import (
-    TERMINAL_RESOLVER_SURFACE_DECISION,
-)
 from kazusa_ai_chatbot.llm_interface import LLMCallConfig, LLMThinkingConfig
 from kazusa_ai_chatbot.nodes import dialog_agent
 from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_surface
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
-from tests.test_background_work_delivery import _accepted_task_completed_job
-from tests.test_cognition_resolver_contracts import _observation
+from tests.task_resolution_test_helpers import (
+    accepted_task_completed_job,
+    resolver_task_observation,
+)
 from tests.unit.nodes.surface_fixtures import (
     build_relational_decision,
     build_surface_state,
@@ -45,7 +48,7 @@ def _tool_result_surface_state(
 ) -> tuple[dict[str, object], dict[str, object]]:
     """Build one L3 state carrying a validated completed task result."""
 
-    job = deepcopy(_accepted_task_completed_job())
+    job = deepcopy(accepted_task_completed_job())
     task_result = job["task_resolution_result"]
     assert isinstance(task_result, dict)
     task_result["evidence_excerpts"] = [evidence_excerpt]
@@ -260,7 +263,7 @@ def test_l3_surface_projects_typed_tool_result_with_evidence_lineage() -> None:
     assert isinstance(cognition_source, dict)
     assert resolver_result["semantic_result"] == cognition_source["semantic_summary"]
     assert resolver_result["evidence_excerpts"] == ["PLAN3_E2E_BETA_SELECTED"]
-    assert resolver_result["evidence_handles"] == ["public-evidence-1"]
+    assert resolver_result["evidence_handles"] == ["https://example.com/source"]
     continuation_ref = task_result["goal_continuation_ref"]
     assert episode["origin_metadata"]["goal_continuation_ref"] == continuation_ref
     assert cognition_source["goal_continuation_ref"] == continuation_ref
@@ -380,7 +383,7 @@ def test_l3_terminal_resolver_surface_closes_stale_pending_plan() -> None:
         "goal_resolution": "requires_required_evidence",
         "resolver_requests": [{"capability": "task_resolution_request"}],
     })
-    observation = _observation()
+    observation = resolver_task_observation()
     observation.update({
         "status": "failed",
         "prompt_safe_summary": "The evidence path is terminally blocked.",
@@ -391,7 +394,6 @@ def test_l3_terminal_resolver_surface_closes_stale_pending_plan() -> None:
             "remaining_needs": ["current Christchurch weather"],
         },
     })
-    continuation_ref = observation["goal_continuation_ref"]
     terminal_detail = (
         "Explain that current evidence retrieval is blocked, keep current "
         "weather unknown, and close this turn without retry or deferred work."
@@ -424,15 +426,9 @@ def test_l3_terminal_resolver_surface_closes_stale_pending_plan() -> None:
         "cycle_traces": [],
         "held_action_specs": [terminal_spec],
         "required_resolver_evidence_dependency": {
-            "schema_version": "required_resolver_evidence_dependency.v1",
+            "schema_version": "required_resolver_evidence_dependency.v2",
             "accepted_request_handle": "resolver_request_0_1",
             "observation_id": observation["observation_id"],
-            "prompt_safe_observation_handle": "resolver_observation_0_1",
-            "capability_kind": "task_resolution_request",
-            "state": "blocked",
-            "evidence_handles": [],
-            "remaining_needs": ["current Christchurch weather"],
-            "goal_continuation_ref": continuation_ref,
         },
         "terminal_reason": "duplicate request converted to terminal surface",
     }
@@ -466,26 +462,50 @@ def test_l3_terminal_resolver_surface_closes_stale_pending_plan() -> None:
 def test_l3_surface_projects_current_task_resolver_dependency() -> None:
     """A current task observation retains validated source-owned evidence."""
 
-    observation = _observation()
+    observation = resolver_task_observation()
     continuation_ref = observation["goal_continuation_ref"]
-    dependency = {
-        "goal_continuation_ref": continuation_ref,
-        "prompt_safe_observation_handle": "resolver_observation_0_1",
-        "evidence_handles": ["evidence-handle-1"],
-        "state": "complete",
-        "remaining_needs": [],
-    }
 
     resolver_result = l3_surface._task_resolver_result(
         observation,
-        dependency=dependency,
+        required=True,
         continuation_ref=continuation_ref,
     )
 
     assert resolver_result["capability_kind"] == "task_resolution_request"
     assert resolver_result["status"] == "succeeded"
-    assert resolver_result["evidence_handles"] == ["evidence-handle-1"]
+    assert resolver_result["evidence_handles"] == [
+        "resolver_evidence_raw-tool-run-123_1"
+    ]
     assert resolver_result["evidence_excerpts"] == ["bounded summary only"]
+
+
+def test_l3_surface_rejects_missing_required_task_observation_before_planning(
+) -> None:
+    """L3 rejects a dangling V2 dependency before building prompt input."""
+
+    state = build_surface_state(build_relational_decision())
+    state["resolver_state"] = {
+        "schema_version": "resolver_cycle_state.v1",
+        "cycle_index": 0,
+        "max_cycles": 3,
+        "status": "terminal",
+        "original_decontextualized_input": "Resolve one evidence goal.",
+        "observations": [],
+        "cycle_traces": [],
+        "held_action_specs": [],
+        "required_resolver_evidence_dependency": {
+            "schema_version": "required_resolver_evidence_dependency.v2",
+            "accepted_request_handle": "resolver_request_0_1",
+            "observation_id": "missing-observation",
+        },
+        "terminal_reason": "invalid required evidence reference",
+    }
+
+    with pytest.raises(ResolverValidationError, match="unavailable"):
+        l3_surface.build_text_surface_input_from_global_state(
+            state,
+            interaction_style_context="brief and natural",
+        )
 
 
 def test_l3_surface_omits_brain_owned_dsh_decision_from_prompt_projection() -> None:

@@ -24,7 +24,6 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     MAX_RESOLVER_EVIDENCE_EXCERPT_CHARS,
     MAX_RESOLVER_EVIDENCE_EXCERPTS,
     RESOLVER_EVIDENCE_STATE_VERSION,
-    RequiredResolverEvidenceDependencyV1,
     ResolverValidationError,
     validate_resolver_evidence_state,
 )
@@ -3763,31 +3762,6 @@ def _validate_surface_task_evidence_fields(value: Mapping[str, Any]) -> None:
         raise CognitionContractError(
             "blocked surface resolver result needs blocked evidence"
         )
-
-
-def _validate_surface_resolver_result_dependency(
-    result: Mapping[str, Any],
-    dependency: RequiredResolverEvidenceDependencyV1,
-) -> None:
-    """Require the surface result to match its exact internal dependency."""
-
-    if result["capability_kind"] != dependency["capability_kind"]:
-        raise CognitionContractError(
-            "surface resolver capability does not match dependency"
-        )
-    for field_name in (
-        "prompt_safe_observation_handle",
-        "evidence_state",
-        "evidence_handles",
-        "remaining_needs",
-    ):
-        dependency_field = (
-            "state" if field_name == "evidence_state" else field_name
-        )
-        if result[field_name] != dependency[dependency_field]:
-            raise CognitionContractError(
-                f"surface resolver dependency field mismatch: {field_name}"
-            )
 
 
 def validate_surface_addressee_plan(value: Any) -> None:

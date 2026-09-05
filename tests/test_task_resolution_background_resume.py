@@ -10,53 +10,8 @@ from tests.task_resolution_test_helpers import (
     InMemoryDshBindingStore,
     _context,
     _resolution_ref,
+    recorded_task_checkpoint,
 )
-
-
-def _recorded_checkpoint(
-    *,
-    status: str = "resolved",
-    initial_checkpoint: dict[str, object] | None = None,
-) -> tuple[dict[str, object], dict[str, object]]:
-    """Build a typed DSH result and its durable reference fixture."""
-
-    checkpoint = initial_checkpoint or {
-        "schema_version": "dsh_resolution_ref.v1",
-        "resolution_thread_id": "thread-task-001",
-        "segment_id": "segment-task-001",
-        "dsh_session_id": "session-task-001",
-        "activation_id": "activation-task-001",
-        "lease_epoch": 1,
-        "document_revision": 0,
-        "last_committed_seq": 0,
-    }
-    summary = "A public source resolved the requested fact."
-    is_resolved = status == "resolved"
-    result = {
-        "schema_version": "task_resolution_result.v1",
-        "semantic_objective": "Resolve one bounded public question.",
-        "status": status,
-        "scene_context": _context()["scene_context"],
-        "goal_continuation_ref": _context()["goal_continuation_ref"],
-        "evidence_state": "complete" if is_resolved else "pending",
-        "evidence_excerpts": [summary] if is_resolved else [],
-        "evidence_handles": ["public-evidence-1"] if is_resolved else [],
-        "prompt_safe_summary": summary if is_resolved else "Continuation is pending.",
-        "evidence": [{
-            "schema_version": "task_resolution_evidence.v1",
-            "evidence_id": "public-evidence-1",
-            "task_node_id": "dsh",
-            "specialist": "dsh",
-            "summary": summary,
-            "provenance_refs": ["https://example.com/source"],
-            "limitations": [],
-        }] if is_resolved else [],
-        "completed_subgoals": ["Resolve one bounded public question."] if is_resolved else [],
-        "remaining_needs": [] if is_resolved else ["Continue the DSH task."],
-        "checkpoint": {} if is_resolved else checkpoint,
-        "coding_run_context": {},
-    }
-    return checkpoint, result
 
 
 def _job(*, operation: str = "open_dsh_resolution") -> dict[str, object]:
@@ -82,7 +37,7 @@ def test_recorded_result_is_canonical_and_dsh_owned() -> None:
     """The retained fixture follows the one public V1 result carrier."""
 
     module = importlib.import_module("kazusa_ai_chatbot.task_resolution.contracts")
-    _checkpoint, result = _recorded_checkpoint()
+    _checkpoint, result = recorded_task_checkpoint()
     validated = module.validate_task_resolution_result(result)
     assert validated["evidence"][0]["specialist"] == "dsh"
     assert validated["coding_run_context"] == {}

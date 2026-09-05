@@ -12,10 +12,10 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     MAX_RESOLVER_SUMMARY_CHARS,
     MAX_RESOLVER_TRACE_CHARS,
     PENDING_TASK_CONTINUATION_VERSION,
+    REQUIRED_RESOLVER_EVIDENCE_DEPENDENCY_VERSION,
     RESOLVER_CAPABILITY_REQUEST_VERSION,
     RESOLVER_CYCLE_STATE_VERSION,
     RESOLVER_GOAL_PROGRESS_VERSION,
-    RESOLVER_OBSERVATION_VERSION,
     RESOLVER_PENDING_RESOLUTION_VERSION,
     RESOLVER_PENDING_RESUME_VERSION,
     ResolverValidationError,
@@ -24,6 +24,7 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     project_observations_for_cognition,
     project_pending_resume_for_cognition,
     validate_pending_task_continuation,
+    validate_required_resolver_evidence_dependency,
     validate_resolver_capability_request,
     validate_resolver_cycle_trace,
     validate_resolver_goal_progress,
@@ -39,9 +40,12 @@ from kazusa_ai_chatbot.cognition_resolver.state import (
     ensure_initial_resolver_inputs,
     new_resolver_state,
     project_resolver_context,
+    required_task_observation,
+    validate_resolver_state,
 )
 from kazusa_ai_chatbot.time_boundary import build_turn_clock
 from tests.cognition_test_helpers import canonical_user_message_episode
+from tests.task_resolution_test_helpers import resolver_task_observation
 
 
 def _goal_continuation_ref() -> dict:
@@ -90,37 +94,8 @@ def test_v2_observation_projection_has_typed_evidence_without_state_authority(
     assert "replacement_state" not in evidence
 
 
-def _observation() -> dict:
-    return {
-        "schema_version": RESOLVER_OBSERVATION_VERSION,
-        "observation_id": "raw-tool-run-123",
-        "capability_kind": "task_resolution_request",
-        "request_objective": "Retrieve relationship evidence.",
-        "request_reason": "The current cycle lacks enough evidence.",
-        "status": "succeeded",
-        "prompt_safe_summary": "Found two relevant relationship evidence rows.",
-        "evidence_refs": [
-            {
-                "schema_version": "evidence_ref.v1",
-                "evidence_kind": "tool_result",
-                "evidence_id": "raw-evidence-row-456",
-                "owner": "cognition_resolver",
-                "excerpt": "bounded summary only",
-                "observed_at": "2026-05-30T00:00:00+00:00",
-            }
-        ],
-        "task_resolution_evidence_state": {
-            "schema_version": "resolver_evidence_state.v1",
-            "state": "complete",
-            "remaining_needs": [],
-        },
-        "goal_continuation_ref": _goal_continuation_ref(),
-        "created_at_utc": "2026-05-30T00:00:00+00:00",
-    }
-
-
 def _rag_observation() -> dict:
-    observation = _observation()
+    observation = resolver_task_observation()
     observation["request_objective"] = "raw-user-id-should-stay-out"
     observation["rag_result"] = {
         "answer": "RAG prompt-safe answer with evidence.",
@@ -308,7 +283,7 @@ def test_capability_request_validator_rejects_empty_objective() -> None:
 def test_observation_validator_clips_prompt_safe_summary() -> None:
     """Long observations should be clipped before they enter cognition."""
 
-    observation = _observation()
+    observation = resolver_task_observation()
     observation["prompt_safe_summary"] = "x" * (MAX_RESOLVER_SUMMARY_CHARS + 50)
 
     validated = validate_resolver_observation(observation)
@@ -320,7 +295,7 @@ def test_observation_validator_clips_prompt_safe_summary() -> None:
 def test_observation_validator_projects_typed_user_input_blocker() -> None:
     """Blocked observations may expose a bounded user-input reason."""
 
-    observation = _observation()
+    observation = resolver_task_observation()
     observation["status"] = "blocked"
     observation["blocker_kind"] = "requires_user_input"
     observation["task_resolution_evidence_state"] = {
@@ -364,7 +339,7 @@ def test_observation_projection_hides_raw_ids() -> None:
 def test_observation_projection_preserves_semantic_knowledge_context() -> None:
     """Knowledge projections should read as evidence context, not judgment."""
 
-    observation = _observation()
+    observation = resolver_task_observation()
     observation["capability_kind"] = "task_resolution_request"
     observation["prompt_safe_summary"] = "Public research returned context."
     observation["knowledge_projection"] = {
@@ -392,7 +367,7 @@ def test_observation_projection_preserves_semantic_knowledge_context() -> None:
 def test_validators_strip_unknown_fields() -> None:
     """Validation should not preserve raw handler metadata fields."""
 
-    observation = _observation()
+    observation = resolver_task_observation()
     observation["raw_handler_payload"] = {"secret_id": "raw-secret"}
     pending = _pending_resume()
     pending["raw_scope"] = {"platform_user_id": "raw-user"}
@@ -467,6 +442,91 @@ def test_pending_task_continuation_validator_requires_exact_v1_shape() -> None:
         match="on_answered_clarification: expected one of",
     ):
         validate_pending_task_continuation(invalid)
+
+
+def _resolver_state_with_required_observation() -> dict:
+    """Build one state whose V2 dependency references its sole observation."""
+
+    observation = resolver_task_observation()
+    state = new_resolver_state(
+        decontextualized_input="Retrieve relationship evidence.",
+        max_cycles=3,
+        episode_id="resolver-test-episode",
+    )
+    state["observations"] = [observation]
+    state["required_resolver_evidence_dependency"] = {
+        "schema_version": REQUIRED_RESOLVER_EVIDENCE_DEPENDENCY_VERSION,
+        "accepted_request_handle": "resolver_request_0_1",
+        "observation_id": observation["observation_id"],
+    }
+    return state
+
+
+def test_required_evidence_dependency_v2_accepts_reference_only() -> None:
+    """The dependency contains identity only and owns no evidence semantics."""
+
+    dependency = validate_required_resolver_evidence_dependency({
+        "schema_version": REQUIRED_RESOLVER_EVIDENCE_DEPENDENCY_VERSION,
+        "accepted_request_handle": "resolver_request_0_1",
+        "observation_id": "resolver-observation-1",
+    })
+
+    assert dependency == {
+        "schema_version": "required_resolver_evidence_dependency.v2",
+        "accepted_request_handle": "resolver_request_0_1",
+        "observation_id": "resolver-observation-1",
+    }
+
+
+def test_required_evidence_dependency_v2_rejects_legacy_copied_fields() -> None:
+    """The big-bang V2 boundary rejects every legacy semantic snapshot."""
+
+    dependency = {
+        "schema_version": REQUIRED_RESOLVER_EVIDENCE_DEPENDENCY_VERSION,
+        "accepted_request_handle": "resolver_request_0_1",
+        "observation_id": "resolver-observation-1",
+        "state": "complete",
+    }
+
+    with pytest.raises(ResolverValidationError, match="fields are not exact"):
+        validate_required_resolver_evidence_dependency(dependency)
+
+
+def test_required_evidence_dependency_resolves_one_task_observation() -> None:
+    """State and prompt projection derive evidence from the referenced row."""
+
+    state = validate_resolver_state(_resolver_state_with_required_observation())
+
+    observation = required_task_observation(state)
+    projection = project_resolver_context(state)
+
+    assert observation == state["observations"][0]
+    assert "observation_handle=resolver_observation_raw-tool-run-123" in projection
+    assert "state=complete" in projection
+    assert "evidence_handles=resolver_evidence_raw-tool-run-123_1" in projection
+
+
+def test_required_evidence_dependency_rejects_missing_or_wrong_kind_observation(
+) -> None:
+    """A dependency cannot name an absent or non-task observation."""
+
+    state = _resolver_state_with_required_observation()
+    state["required_resolver_evidence_dependency"]["observation_id"] = "missing"
+
+    with pytest.raises(ResolverValidationError, match="unavailable"):
+        validate_resolver_state(state)
+
+    wrong_kind_observation = resolver_task_observation()
+    wrong_kind_observation["capability_kind"] = "human_clarification"
+    wrong_kind_observation.pop("task_resolution_evidence_state")
+    wrong_kind_observation.pop("goal_continuation_ref")
+    state["observations"] = [wrong_kind_observation]
+    state["required_resolver_evidence_dependency"]["observation_id"] = (
+        wrong_kind_observation["observation_id"]
+    )
+
+    with pytest.raises(ResolverValidationError, match="wrong capability"):
+        validate_resolver_state(state)
 
 
 def test_pending_resume_v1_and_v2_fail_closed_without_continuation_fallback() -> None:
@@ -545,7 +605,7 @@ def test_append_observation_projects_alias_and_caps_context() -> None:
         episode_id="resolver-test-episode",
     )
     for index in range(MAX_PROJECTED_RESOLVER_OBSERVATIONS + 2):
-        observation = _observation()
+        observation = resolver_task_observation()
         observation["observation_id"] = f"raw-tool-run-{index}"
         observation["prompt_safe_summary"] = f"summary {index}"
         state = append_observation(state, observation)

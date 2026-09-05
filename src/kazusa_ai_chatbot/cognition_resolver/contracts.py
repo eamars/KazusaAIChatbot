@@ -31,7 +31,7 @@ RESOLVER_PENDING_RESOLUTION_VERSION = "resolver_pending_resolution.v1"
 RESOLVER_GOAL_PROGRESS_VERSION = "resolver_goal_progress.v1"
 RESOLVER_EVIDENCE_STATE_VERSION = "resolver_evidence_state.v1"
 REQUIRED_RESOLVER_EVIDENCE_DEPENDENCY_VERSION = (
-    "required_resolver_evidence_dependency.v1"
+    "required_resolver_evidence_dependency.v2"
 )
 TERMINAL_RESOLVER_SURFACE_DECISION = "explain terminal evidence blocker"
 SHARED_MEMORY_PREWARM_OUTCOME_VERSION = "shared_memory_prewarm_outcome.v1"
@@ -265,18 +265,12 @@ class ResolverEvidenceStateV1(TypedDict):
     remaining_needs: list[str]
 
 
-class RequiredResolverEvidenceDependencyV1(TypedDict):
-    """Exact resolver dependency bound to one accepted answer-evidence request."""
+class RequiredResolverEvidenceDependencyV2(TypedDict):
+    """Identity reference from one accepted request to its task observation."""
 
-    schema_version: Literal["required_resolver_evidence_dependency.v1"]
+    schema_version: Literal["required_resolver_evidence_dependency.v2"]
     accepted_request_handle: str
     observation_id: str
-    prompt_safe_observation_handle: str
-    capability_kind: Literal["task_resolution_request"]
-    state: Literal["complete", "partial", "pending", "missing", "blocked"]
-    evidence_handles: list[str]
-    remaining_needs: list[str]
-    goal_continuation_ref: GoalContinuationRefV1
 
 
 class ResolverCycleTraceV1(TypedDict):
@@ -413,7 +407,7 @@ class ResolverCycleStateV1(TypedDict):
     pending_resume: NotRequired[ResolverPendingResumeV3]
     goal_progress: NotRequired[ResolverGoalProgressV1]
     required_resolver_evidence_dependency: NotRequired[
-        RequiredResolverEvidenceDependencyV1
+        RequiredResolverEvidenceDependencyV2
     ]
     terminal_reason: str
 
@@ -704,8 +698,8 @@ def validate_resolver_evidence_state(
 
 def validate_required_resolver_evidence_dependency(
     value: object,
-) -> RequiredResolverEvidenceDependencyV1:
-    """Validate one accepted resolver request's answer-evidence dependency."""
+) -> RequiredResolverEvidenceDependencyV2:
+    """Validate one accepted request's task-observation identity reference."""
 
     data = _require_mapping(value, "required_resolver_evidence_dependency")
     _require_exact_keys(
@@ -714,12 +708,6 @@ def validate_required_resolver_evidence_dependency(
             "schema_version",
             "accepted_request_handle",
             "observation_id",
-            "prompt_safe_observation_handle",
-            "capability_kind",
-            "state",
-            "evidence_handles",
-            "remaining_needs",
-            "goal_continuation_ref",
         },
         "required_resolver_evidence_dependency",
     )
@@ -729,49 +717,10 @@ def validate_required_resolver_evidence_dependency(
         "accepted_request_handle",
     )
     observation_id = _require_non_empty_string(data, "observation_id")
-    prompt_safe_observation_handle = _require_non_empty_string(
-        data,
-        "prompt_safe_observation_handle",
-    )
-    if data.get("capability_kind") != "task_resolution_request":
-        raise ResolverValidationError(
-            "required_resolver_evidence_dependency: capability_kind is invalid"
-        )
-    state = _require_enum(data, "state", ALLOWED_RESOLVER_EVIDENCE_STATES)
-    evidence_handles = _normalize_string_handle_list(
-        data,
-        "evidence_handles",
-    )
-    remaining_needs = _normalize_goal_text_list(data, "remaining_needs")
-    continuation_ref = _validate_continuation_ref(
-        data.get("goal_continuation_ref")
-    )
-    if continuation_ref is None:
-        raise ResolverValidationError(
-            "required_resolver_evidence_dependency: goal_continuation_ref is required"
-        )
-    if state == "complete" and (not evidence_handles or remaining_needs):
-        raise ResolverValidationError(
-            "complete dependency requires evidence handles and no remaining needs"
-        )
-    if state == "partial" and (not evidence_handles or not remaining_needs):
-        raise ResolverValidationError(
-            "partial dependency requires evidence handles and remaining needs"
-        )
-    if state == "missing" and evidence_handles:
-        raise ResolverValidationError(
-            "missing dependency cannot contain evidence handles"
-        )
-    return_value: RequiredResolverEvidenceDependencyV1 = {
+    return_value: RequiredResolverEvidenceDependencyV2 = {
         "schema_version": REQUIRED_RESOLVER_EVIDENCE_DEPENDENCY_VERSION,
         "accepted_request_handle": accepted_request_handle,
         "observation_id": observation_id,
-        "prompt_safe_observation_handle": prompt_safe_observation_handle,
-        "capability_kind": "task_resolution_request",
-        "state": state,
-        "evidence_handles": evidence_handles,
-        "remaining_needs": remaining_needs,
-        "goal_continuation_ref": continuation_ref,
     }
     return return_value
 

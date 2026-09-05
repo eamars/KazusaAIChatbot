@@ -47,6 +47,7 @@ from kazusa_ai_chatbot.cognition_resolver.state import (
     append_observation,
     ensure_initial_resolver_inputs,
     project_resolver_context,
+    required_task_observation,
     update_goal_progress,
     validate_resolver_state,
 )
@@ -120,11 +121,6 @@ async def _call_cognition_preserving_observations(
 
 logger = logging.getLogger(__name__)
 
-_PENDING_TASK_RESOLUTION_EXECUTIONS: set[
-    asyncio.Task[ResolverObservationV1]
-] = set()
-
-
 async def call_cognition_resolver_loop(
     state: GlobalPersonaState,
     *,
@@ -140,10 +136,13 @@ async def call_cognition_resolver_loop(
     """Run cognition, deterministic capability observation, then cognition again."""
 
     _validate_loop_limits(max_cycles, capability_timeout_seconds)
-    current_state = ensure_initial_resolver_inputs(
-        state,
-        max_cycles=max_cycles,
-    )
+    try:
+        current_state = ensure_initial_resolver_inputs(
+            state,
+            max_cycles=max_cycles,
+        )
+    except ResolverValidationError as exc:
+        raise _resolver_state_execution_error(exc) from exc
 
     while _resolver_state(current_state)["cycle_index"] < max_cycles:
         status_before = _resolver_state(current_state)["status"]
@@ -480,10 +479,17 @@ def _final_lifecycle_conflict(
 
     task_requests = _task_resolution_requests(state)
     resolver_state = _resolver_state(state)
-    dependency = resolver_state.get("required_resolver_evidence_dependency")
-    dependency_request = _request_from_required_dependency(
-        resolver_state,
-        dependency,
+    dependency_observation = required_task_observation(resolver_state)
+    dependency_request = _request_from_required_dependency(resolver_state)
+    dependency_ref = (
+        dependency_observation.get("goal_continuation_ref")
+        if dependency_observation is not None
+        else None
+    )
+    dependency_evidence_state = (
+        dependency_observation.get("task_resolution_evidence_state")
+        if dependency_observation is not None
+        else None
     )
     tool_result_ref = _tool_result_continuation_ref(state)
 
@@ -529,9 +535,9 @@ def _final_lifecycle_conflict(
             action_ref,
         )
         matching_dependency = (
-            isinstance(dependency, Mapping)
+            dependency_observation is not None
             and _same_continuation_ref(
-                dependency.get("goal_continuation_ref"),
+                dependency_ref,
                 action_ref,
             )
         )
@@ -544,7 +550,11 @@ def _final_lifecycle_conflict(
                     matching_request,
                     "factual surface cannot coexist with a same-reference task request",
                 )
-            if matching_dependency and dependency.get("state") != "complete":
+            if (
+                matching_dependency
+                and isinstance(dependency_evidence_state, Mapping)
+                and dependency_evidence_state.get("state") != "complete"
+            ):
                 if fallback_request is None:
                     raise ResolverValidationError(
                         "same-reference dependency lacks a request for fail-closed status"
@@ -575,7 +585,8 @@ def _final_lifecycle_conflict(
         if (
             surface_role == "task_acknowledgement"
             and matching_dependency
-            and dependency.get("state") != "pending"
+            and isinstance(dependency_evidence_state, Mapping)
+            and dependency_evidence_state.get("state") != "pending"
         ):
             if fallback_request is None:
                 raise ResolverValidationError(
@@ -588,7 +599,9 @@ def _final_lifecycle_conflict(
         if (
             surface_role == "task_result"
             and matching_dependency
-            and dependency.get("state") not in {"complete", "partial"}
+            and isinstance(dependency_evidence_state, Mapping)
+            and dependency_evidence_state.get("state")
+            not in {"complete", "partial"}
         ):
             if fallback_request is None:
                 raise ResolverValidationError(
@@ -634,31 +647,21 @@ def _request_for_continuation_ref(
 
 def _request_from_required_dependency(
     resolver_state: ResolverCycleStateV1,
-    dependency: object,
 ) -> ResolverCapabilityRequestV1 | None:
     """Rebuild a status-only request from validated dependency provenance."""
 
-    if not isinstance(dependency, Mapping):
+    observation = required_task_observation(resolver_state)
+    if observation is None:
         return None
-    observation_id = dependency.get("observation_id")
-    continuation_ref = dependency.get("goal_continuation_ref")
-    if not isinstance(observation_id, str) or not isinstance(
-        continuation_ref,
-        Mapping,
-    ):
-        return None
-    for observation in resolver_state["observations"]:
-        if observation["observation_id"] != observation_id:
-            continue
-        return validate_resolver_capability_request({
-            "schema_version": "resolver_capability_request.v1",
-            "capability_kind": "task_resolution_request",
-            "objective": observation["request_objective"],
-            "reason": observation["request_reason"],
-            "priority": "now",
-            "goal_continuation_ref": dict(continuation_ref),
-        })
-    return None
+    continuation_ref = observation["goal_continuation_ref"]
+    return validate_resolver_capability_request({
+        "schema_version": "resolver_capability_request.v1",
+        "capability_kind": "task_resolution_request",
+        "objective": observation["request_objective"],
+        "reason": observation["request_reason"],
+        "priority": "now",
+        "goal_continuation_ref": dict(continuation_ref),
+    })
 
 
 def _continuation_surface_ref(
@@ -1786,18 +1789,7 @@ async def _execute_with_timeout(
     """Execute one capability with a structural timeout observation."""
 
     if request["capability_kind"] == "task_resolution_request":
-        execution = asyncio.create_task(
-            execute_capability_func(request, state),
-            name="resolver_task_resolution_execution",
-        )
-        try:
-            observation = await asyncio.wait_for(
-                asyncio.shield(execution),
-                timeout=capability_timeout_seconds,
-            )
-        except TimeoutError:
-            _retain_task_resolution_execution(execution)
-            observation = _timeout_observation(request, state)
+        observation = await execute_capability_func(request, state)
     else:
         try:
             observation = await asyncio.wait_for(
@@ -1808,31 +1800,6 @@ async def _execute_with_timeout(
             observation = _timeout_observation(request, state)
     return_value = validate_resolver_observation(observation)
     return return_value
-
-
-def _retain_task_resolution_execution(
-    execution: asyncio.Task[ResolverObservationV1],
-) -> None:
-    """Own timed-out DSH work until checkpoint and promotion finish."""
-
-    _PENDING_TASK_RESOLUTION_EXECUTIONS.add(execution)
-    execution.add_done_callback(_finish_task_resolution_execution)
-
-
-def _finish_task_resolution_execution(
-    execution: asyncio.Task[ResolverObservationV1],
-) -> None:
-    """Release completed DSH handoff work and surface unexpected faults."""
-
-    _PENDING_TASK_RESOLUTION_EXECUTIONS.discard(execution)
-    if execution.cancelled():
-        return
-    try:
-        execution.result()
-    except Exception:
-        logger.exception(
-            "Timed-out DSH capability failed before durable lifecycle closure",
-        )
 
 
 def _validate_capability_handoff(
@@ -1973,11 +1940,14 @@ def _is_already_admitted_pending_task_request(
 
     if request["capability_kind"] != "task_resolution_request":
         return False
-    dependency = resolver_state.get("required_resolver_evidence_dependency")
-    if dependency is None or dependency["state"] != "pending":
+    observation = required_task_observation(resolver_state)
+    if observation is None:
+        return False
+    evidence_state = observation["task_resolution_evidence_state"]
+    if evidence_state["state"] != "pending":
         return False
     return _same_continuation_ref(
-        dependency["goal_continuation_ref"],
+        observation["goal_continuation_ref"],
         request["goal_continuation_ref"],
     )
 
@@ -2042,35 +2012,25 @@ def _bind_required_evidence_dependency(
     ):
         return_value = resolver_state
         return return_value
-    evidence_state = observation.get("task_resolution_evidence_state")
-    if not isinstance(evidence_state, Mapping):
+    if not isinstance(
+        observation.get("task_resolution_evidence_state"),
+        Mapping,
+    ):
         raise ResolverValidationError(
             "task observation is missing its evidence state"
         )
     cycle_index = resolver_state["cycle_index"]
-    evidence_handles = [
-        f"resolver_evidence_{cycle_index}_{request_ordinal}_{index}"
-        for index, evidence_ref in enumerate(
-            observation["evidence_refs"],
-            start=1,
+    continuation_ref = _task_continuation_ref(selected_request)
+    if observation.get("goal_continuation_ref") != continuation_ref:
+        raise ResolverValidationError(
+            "task observation continuation does not match accepted request"
         )
-        if isinstance(evidence_ref.get("excerpt"), str)
-        and evidence_ref["excerpt"].strip()
-    ]
     dependency = {
-        "schema_version": "required_resolver_evidence_dependency.v1",
+        "schema_version": "required_resolver_evidence_dependency.v2",
         "accepted_request_handle": (
             f"resolver_request_{cycle_index}_{request_ordinal}"
         ),
         "observation_id": observation["observation_id"],
-        "prompt_safe_observation_handle": (
-            f"resolver_observation_{cycle_index}_{request_ordinal}"
-        ),
-        "capability_kind": "task_resolution_request",
-        "state": evidence_state["state"],
-        "evidence_handles": evidence_handles[:4],
-        "remaining_needs": list(evidence_state["remaining_needs"]),
-        "goal_continuation_ref": _task_continuation_ref(selected_request),
     }
     validated_dependency = validate_required_resolver_evidence_dependency(
         dependency,
@@ -2091,32 +2051,21 @@ def _mark_existing_dependency_blocked(
     if dependency is None:
         return_value = resolver_state
         return return_value
-    updated_dependency = dict(dependency)
-    updated_dependency["state"] = "blocked"
-    updated_dependency["observation_id"] = observation["observation_id"]
-    updated_dependency["prompt_safe_observation_handle"] = (
-        f"resolver_terminal_{observation['observation_id']}"
-    )
-    updated_dependency["evidence_handles"] = [
-        f"resolver_terminal_evidence_{index}"
-        for index, evidence_ref in enumerate(
-            observation["evidence_refs"],
-            start=1,
-        )
-        if isinstance(evidence_ref.get("excerpt"), str)
-        and evidence_ref["excerpt"].strip()
-    ]
     evidence_state = observation.get("task_resolution_evidence_state")
-    if isinstance(evidence_state, Mapping):
-        updated_dependency["remaining_needs"] = list(
-            evidence_state["remaining_needs"]
+    if not isinstance(evidence_state, Mapping):
+        raise ResolverValidationError(
+            "terminal task observation lacks an evidence state"
         )
     continuation_ref = observation.get("goal_continuation_ref")
     if not isinstance(continuation_ref, Mapping):
         raise ResolverValidationError(
             "terminal task observation lacks a continuation reference"
         )
-    updated_dependency["goal_continuation_ref"] = dict(continuation_ref)
+    updated_dependency = {
+        "schema_version": "required_resolver_evidence_dependency.v2",
+        "accepted_request_handle": dependency["accepted_request_handle"],
+        "observation_id": observation["observation_id"],
+    }
     updated = dict(resolver_state)
     updated["required_resolver_evidence_dependency"] = (
         validate_required_resolver_evidence_dependency(updated_dependency)
@@ -2422,8 +2371,26 @@ def _merge_state(
 def _resolver_state(state: GlobalPersonaState) -> ResolverCycleStateV1:
     """Read and validate resolver state from persona state."""
 
-    return_value = validate_resolver_state(state["resolver_state"])
+    try:
+        return_value = validate_resolver_state(state["resolver_state"])
+    except ResolverValidationError as exc:
+        raise _resolver_state_execution_error(exc) from exc
     return return_value
+
+
+def _resolver_state_execution_error(
+    exception: ResolverValidationError,
+) -> CognitionExecutionError:
+    """Classify invalid resolver state at the graph's pre-commit boundary."""
+
+    return CognitionExecutionError(
+        f"resolver state contract failed: {exception}",
+        error_code="resolver_state_contract",
+        stage="cognition_resolver",
+        attempt_count=1,
+        safe_checkpoint="pre_state_commit",
+        retryable=True,
+    )
 
 
 def _state_text(state: GlobalPersonaState, field_name: str) -> str:

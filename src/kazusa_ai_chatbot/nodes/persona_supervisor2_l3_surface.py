@@ -28,7 +28,10 @@ from kazusa_ai_chatbot.cognition_resolver.contracts import (
     TERMINAL_RESOLVER_SURFACE_DECISION,
     resolver_evidence_excerpts_for_cognition,
 )
-from kazusa_ai_chatbot.cognition_resolver.state import validate_resolver_state
+from kazusa_ai_chatbot.cognition_resolver.state import (
+    required_task_observation,
+    validate_resolver_state,
+)
 from kazusa_ai_chatbot.cognition_shared.contracts import (
     MAX_RECENT_CHARACTER_DIALOG_CHARS,
     MAX_RECENT_CHARACTER_DIALOG_ROWS,
@@ -773,9 +776,9 @@ def _resolver_result_continuation_ref(
     if not isinstance(raw_resolver_state, Mapping):
         return None
     resolver_state = validate_resolver_state(raw_resolver_state)
-    dependency = resolver_state.get("required_resolver_evidence_dependency")
-    if dependency is not None:
-        return dependency["goal_continuation_ref"]
+    required_observation = required_task_observation(resolver_state)
+    if required_observation is not None:
+        return required_observation["goal_continuation_ref"]
     observations = resolver_state["observations"]
     if (
         not observations
@@ -846,29 +849,11 @@ def _resolver_result(
     observations = resolver_state["observations"]
     if not observations:
         return None
-    dependency = resolver_state.get(
-        "required_resolver_evidence_dependency"
-    )
-    if dependency is not None:
-        observation = next(
-            (
-                candidate
-                for candidate in observations
-                if candidate["observation_id"] == dependency["observation_id"]
-            ),
-            None,
-        )
-        if observation is None:
-            raise ValueError(
-                "required resolver evidence observation is unavailable"
-            )
-        if observation["capability_kind"] != "task_resolution_request":
-            raise ValueError(
-                "required resolver evidence observation has wrong capability"
-            )
+    required_observation = required_task_observation(resolver_state)
+    if required_observation is not None:
         return _task_resolver_result(
-            observation,
-            dependency=dependency,
+            required_observation,
+            required=True,
             continuation_ref=continuation_ref,
         )
 
@@ -876,7 +861,7 @@ def _resolver_result(
     if observation["capability_kind"] == "task_resolution_request":
         return _task_resolver_result(
             observation,
-            dependency=None,
+            required=False,
             continuation_ref=continuation_ref,
         )
     return {
@@ -989,15 +974,14 @@ def _episode_tool_result_source(
 def _task_resolver_result(
     observation: Mapping[str, Any],
     *,
-    dependency: Mapping[str, Any] | None,
+    required: bool,
     continuation_ref: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
     """Project one task observation with source-owned evidence metadata.
 
-    The observation and any required dependency must carry the exact
-    goal-continuation reference committed by cognition; a missing or
-    mismatched reference fails closed so no result wording can detach from
-    its original goal.
+    The observation must carry the exact goal-continuation reference committed
+    by cognition; a missing or mismatched reference fails closed so no result
+    wording can detach from its original goal.
     """
 
     observation_ref = observation.get("goal_continuation_ref")
@@ -1010,36 +994,21 @@ def _task_resolver_result(
     if not isinstance(evidence_state, Mapping):
         raise ValueError("task resolver observation lacks evidence state")
     excerpts = resolver_evidence_excerpts_for_cognition(observation)
-    if dependency is None:
+    if not required:
         prompt_safe_observation_handle = "resolver_observation_optional"
         evidence_handles = [
             f"resolver_evidence_optional_{index}"
             for index, _excerpt in enumerate(excerpts, start=1)
         ]
     else:
-        if dependency["goal_continuation_ref"] != continuation_ref:
-            raise ValueError(
-                "required resolver dependency continuation reference conflicts "
-                "with the committed cognition reference"
-            )
-        prompt_safe_observation_handle = dependency[
-            "prompt_safe_observation_handle"
+        observation_id = observation["observation_id"]
+        prompt_safe_observation_handle = (
+            f"resolver_observation_{observation_id}"
+        )
+        evidence_handles = [
+            f"resolver_evidence_{observation_id}_{index}"
+            for index, _excerpt in enumerate(excerpts, start=1)
         ]
-        evidence_handles = list(dependency["evidence_handles"])
-        if len(evidence_handles) != len(excerpts):
-            raise ValueError(
-                "required resolver evidence handles do not match excerpts"
-            )
-        if dependency["state"] != evidence_state["state"]:
-            raise ValueError(
-                "required resolver evidence state does not match observation"
-            )
-        if list(dependency["remaining_needs"]) != list(
-            evidence_state["remaining_needs"]
-        ):
-            raise ValueError(
-                "required resolver remaining needs do not match observation"
-            )
     return {
         "capability_kind": observation["capability_kind"],
         "status": observation["status"],

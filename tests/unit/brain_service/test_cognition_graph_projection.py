@@ -301,8 +301,8 @@ def test_legacy_cognition_graph_projection_symbols_are_absent_from_production() 
         assert symbol not in source
 
 
-def test_cognition_contract_exhaustion_maps_to_model_contract_error_code() -> None:
-    """Typed cognition model exhaustion keeps the stable service category."""
+def test_cognition_contract_exhaustion_preserves_typed_error_code() -> None:
+    """Typed cognition exhaustion keeps its producer-owned service code."""
 
     error = service.CognitionExecutionError(
         "cognition stage contract exhausted",
@@ -315,7 +315,7 @@ def test_cognition_contract_exhaustion_maps_to_model_contract_error_code() -> No
 
     metadata = service._operational_failure_metadata(error)
 
-    assert metadata[0] == "model_contract"
+    assert metadata[0] == "cognition_p_contract_exhausted"
     assert metadata[1] == "cognition_core_v3.P"
     assert metadata[2] == 3
     assert metadata[3] is True

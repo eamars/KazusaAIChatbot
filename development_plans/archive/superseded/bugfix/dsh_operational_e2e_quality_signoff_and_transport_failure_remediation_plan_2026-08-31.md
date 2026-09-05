@@ -6,7 +6,8 @@
   with a layered sign-off that detects sidecar startup, readiness, transport,
   graph-propagation, source-lineage, persistence, result, dialog, and delivery
   failures before DSH is declared production-ready.
-- **Status:** in_progress
+- **Status:** superseded on 2026-09-04 by
+  `dsh_probe_first_architecture_cleanup_and_final_signoff_plan_2026-09-04.md`.
 - **Scope boundary:** DSH process ownership and readiness, task-resolution
   failure projection, terminal-failure telemetry, the ten canonical
   trigger-source live cases, and an opt-in configured-running-service canary.

@@ -19,7 +19,6 @@ from tests.cognition_test_helpers import (
     canonical_service_character_profile,
 )
 
-
 _TURN_CLOCK = build_turn_clock("2026-05-14 12:00:00")
 
 
@@ -104,6 +103,98 @@ def _patch_character_identity(monkeypatch: pytest.MonkeyPatch) -> None:
         service_module.llm_tracing,
         "finalize_llm_trace_run",
         AsyncMock(),
+    )
+
+
+def _patch_graph_worker_dependencies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[AsyncMock, AsyncMock, AsyncMock]:
+    """Patch worker I/O while retaining the real graph retry policy."""
+
+    _patch_character_identity(monkeypatch)
+    record_database_operation_event = AsyncMock()
+    record_pipeline_turn_event = AsyncMock()
+    record_runtime_error_event = AsyncMock()
+    monkeypatch.setattr(
+        service_module.event_logging,
+        "record_database_operation_event",
+        record_database_operation_event,
+    )
+    monkeypatch.setattr(
+        service_module.event_logging,
+        "record_pipeline_turn_event",
+        record_pipeline_turn_event,
+    )
+    monkeypatch.setattr(
+        service_module.event_logging,
+        "record_runtime_error_event",
+        record_runtime_error_event,
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_active_character_name_snapshot",
+        "Character",
+    )
+    monkeypatch.setattr(service_module, "_runtime_character_state", {})
+    monkeypatch.setattr(
+        service_module,
+        "_ensure_character_global_identity",
+        AsyncMock(return_value="character-global-id"),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_resolve_queued_user",
+        AsyncMock(return_value=("global-user-1", {})),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_resolve_message_envelope_identities",
+        AsyncMock(return_value=_request("msg").message_envelope.model_dump()),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "get_conversation_history",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_hydrate_reply_context",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_save_user_message_from_item",
+        AsyncMock(return_value="row-user"),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "save_conversation",
+        AsyncMock(return_value="row-assistant"),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_refresh_runtime_character_state",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "build_promoted_reflection_context",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "_save_assistant_message",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "upsert_post_turn_lifecycle_record",
+        AsyncMock(),
+    )
+    return (
+        record_database_operation_event,
+        record_pipeline_turn_event,
+        record_runtime_error_event,
     )
 
 
@@ -437,86 +528,11 @@ async def test_precommit_cognition_conflict_retries_graph_once(
 ) -> None:
     """A cognition state race is retried before any visible surface work."""
 
-    _patch_character_identity(monkeypatch)
-    record_database_operation_event = AsyncMock()
-    record_pipeline_turn_event = AsyncMock()
-    record_runtime_error_event = AsyncMock()
-    monkeypatch.setattr(
-        service_module.event_logging,
-        "record_database_operation_event",
+    (
         record_database_operation_event,
-    )
-    monkeypatch.setattr(
-        service_module.event_logging,
-        "record_pipeline_turn_event",
         record_pipeline_turn_event,
-    )
-    monkeypatch.setattr(
-        service_module.event_logging,
-        "record_runtime_error_event",
         record_runtime_error_event,
-    )
-    monkeypatch.setattr(
-        service_module,
-        "_active_character_name_snapshot",
-        "Character",
-    )
-    monkeypatch.setattr(service_module, "_runtime_character_state", {})
-    monkeypatch.setattr(
-        service_module,
-        "_ensure_character_global_identity",
-        AsyncMock(return_value="character-global-id"),
-    )
-    monkeypatch.setattr(
-        service_module,
-        "_resolve_queued_user",
-        AsyncMock(return_value=("global-user-1", {})),
-    )
-    monkeypatch.setattr(
-        service_module,
-        "_resolve_message_envelope_identities",
-        AsyncMock(return_value=_request("msg").message_envelope.model_dump()),
-    )
-    monkeypatch.setattr(
-        service_module,
-        "get_conversation_history",
-        AsyncMock(return_value=[]),
-    )
-    monkeypatch.setattr(
-        service_module,
-        "_hydrate_reply_context",
-        AsyncMock(return_value={}),
-    )
-    monkeypatch.setattr(
-        service_module,
-        "_save_user_message_from_item",
-        AsyncMock(return_value="row-user"),
-    )
-    monkeypatch.setattr(
-        service_module,
-        "save_conversation",
-        AsyncMock(return_value="row-assistant"),
-    )
-    monkeypatch.setattr(
-        service_module,
-        "_refresh_runtime_character_state",
-        AsyncMock(),
-    )
-    monkeypatch.setattr(
-        service_module,
-        "build_promoted_reflection_context",
-        AsyncMock(return_value={}),
-    )
-    monkeypatch.setattr(
-        service_module,
-        "_save_assistant_message",
-        AsyncMock(),
-    )
-    monkeypatch.setattr(
-        service_module,
-        "upsert_post_turn_lifecycle_record",
-        AsyncMock(),
-    )
+    ) = _patch_graph_worker_dependencies(monkeypatch)
 
     conflict = service_module.CognitionExecutionError(
         "canonical cognition state commit encountered a version conflict",
@@ -555,6 +571,54 @@ async def test_precommit_cognition_conflict_retries_graph_once(
     record_database_operation_event.assert_not_awaited()
     record_pipeline_turn_event.assert_not_awaited()
     record_runtime_error_event.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resolver_state_contract_retries_once_then_settles_operational_failure(
+    monkeypatch,
+) -> None:
+    """A repeated invalid resolver state settles after one safe graph retry."""
+
+    (
+        _record_database_operation_event,
+        record_pipeline_turn_event,
+        record_runtime_error_event,
+    ) = _patch_graph_worker_dependencies(monkeypatch)
+    state_error = service_module.CognitionExecutionError(
+        "required resolver observation is unavailable",
+        error_code="resolver_state_contract",
+        stage="cognition_resolver",
+        attempt_count=1,
+        safe_checkpoint="pre_state_commit",
+        retryable=True,
+    )
+
+    class _Graph:
+        """Repeat the same pre-commit contract failure on both attempts."""
+
+        def __init__(self):
+            self.attempts = 0
+
+        async def ainvoke(self, _state):
+            self.attempts += 1
+            raise state_error
+
+    graph = _Graph()
+    monkeypatch.setattr(service_module, "_graph", graph)
+    item = _item("msg", body_text="private resolver state failure")
+
+    await service_module._process_queued_chat_item(item)
+
+    operational_error = item.future.result().operational_error
+    assert graph.attempts == 2
+    assert operational_error is not None
+    assert operational_error.error_code == "resolver_state_contract"
+    assert operational_error.stage == "cognition_resolver"
+    assert operational_error.attempt_count == 2
+    assert operational_error.exhausted is True
+    assert operational_error.retryable is False
+    record_pipeline_turn_event.assert_awaited()
+    record_runtime_error_event.assert_awaited()
 
 
 @pytest.mark.asyncio

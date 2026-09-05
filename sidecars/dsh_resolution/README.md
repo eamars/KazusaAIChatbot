@@ -37,3 +37,10 @@ system.health is ready only when authenticated route, Standard,
 semantic-worker, web, Brain, catalog, policy, workspace, profile, release,
 and store checks agree. Build and sidecar tests use the package-manager version
 pinned in `package.json`.
+
+The reusable real-process verification owner is
+`experiments/dsh_runtime_probe.py`. Its `sidecar-lifecycle` mode drives the
+built Standard sidecar through authenticated semantic work, SQLite checkpoint
+restart, and exact terminal replay with a deterministic model endpoint. Tests
+assert public behavior and compatibility; installed package file hashes and
+internal composition row counts are not release contracts.

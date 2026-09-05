@@ -79,6 +79,18 @@ Task-resolution requests use the caller-provided capability and continuation
 context. The planner sees only the semantic capability roster and does not see
 specialists, queue state, persistence mechanics, or private identifiers.
 
+Required task evidence is represented by
+`required_resolver_evidence_dependency.v2`, which contains only the accepted
+request handle and referenced observation id. `required_task_observation(...)`
+is the single semantic lookup owner. L3 derives evidence state, remaining
+needs, continuation, excerpts, and prompt-safe handles from that observation;
+the dependency never copies those mutable values.
+
+The task-resolution service is the sole owner of its inline budget,
+checkpoint, and deferred promotion. The generic resolver timeout continues to
+bound other capabilities, while task resolution is awaited directly so the
+loop cannot return with an unowned detached task still mutating durable state.
+
 ## Public Interfaces
 
 | Entrypoint | Owner | Purpose |

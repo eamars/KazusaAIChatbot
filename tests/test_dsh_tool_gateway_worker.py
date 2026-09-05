@@ -344,17 +344,15 @@ def test_real_sidecar_worker_round_trip_preserves_authority_result_and_evidence(
     """The compiled Node sidecar drives a signed call through the real worker."""
     from urllib.error import HTTPError
 
+    from experiments.dsh_runtime_probe import (
+        ProbeRecorder,
+        build_intake,
+        open_resolution,
+        rpc_call,
+        start_sidecar,
+    )
     from kazusa_ai_chatbot.dsh_tool_gateway.authority import activation_id_for
     from kazusa_ai_chatbot.dsh_tool_gateway.contracts import content_digest
-    from tests.test_agentic_resolver_sidecar_process import (
-        _ROUTE_BASES,
-        _intake,
-        _open,
-        _route_digest,
-        _rpc,
-        _start,
-        _stop,
-    )
 
     terminal = {
         "status": "resolved",
@@ -367,9 +365,17 @@ def test_real_sidecar_worker_round_trip_preserves_authority_result_and_evidence(
         "artifact_refs": [],
         "warnings": [],
     }
-    process, url = _start(
-        tmp_path,
-        [
+    artifact_dir = tmp_path / "artifacts"
+    artifact_dir.mkdir()
+    recorder = ProbeRecorder(
+        probe_name="semantic-worker-authority",
+        artifact_dir=artifact_dir,
+    )
+    sidecar = start_sidecar(
+        tmp_path / "data",
+        recorder,
+        name="sidecar",
+        script=[
             {
                 "name": "kazusa_recall_active_context",
                 "arguments": {"kinds": ["history"], "max_results": 1},
@@ -378,15 +384,19 @@ def test_real_sidecar_worker_round_trip_preserves_authority_result_and_evidence(
         ],
     )
     try:
-        first = _open(url, "op-worker-sidecar", "thread-worker-sidecar", "segment-worker-sidecar")
+        first = open_resolution(
+            sidecar,
+            "op-worker-sidecar",
+            "thread-worker-sidecar",
+            "segment-worker-sidecar",
+        )
         result = first["result"]
         assert result["disposition"] == "terminal"
         assert "exhaust" in result, result
-        fake_openai = process._fake_openai  # type: ignore[attr-defined]
-        assert fake_openai.calls >= 2
-        assert len(fake_openai.requests) >= 2
+        assert sidecar.provider.calls >= 2
+        assert len(sidecar.provider.requests) >= 2
         assert "kazusa_semantic_capability_result.v1" in json.dumps(
-            fake_openai.requests[1],
+            sidecar.provider.requests[1],
             ensure_ascii=False,
         )
         exhaust = result["exhaust"]
@@ -397,21 +407,21 @@ def test_real_sidecar_worker_round_trip_preserves_authority_result_and_evidence(
         assert identity["segment_id"] == "segment-worker-sidecar"
         assert identity["scope_fingerprint"] == content_digest({
             "platform": "debug",
-            "platform_channel_id": "sidecar-process",
-            "global_user_id": "user",
+            "platform_channel_id": "dsh-runtime-probe",
+            "global_user_id": "probe-user",
         })
 
-        tampered = _intake(
+        tampered = build_intake(
+            sidecar,
             "op-worker-sidecar-tampered",
             "thread-worker-sidecar-tampered",
             "segment-worker-sidecar-tampered",
-            route_digest=_route_digest(_ROUTE_BASES[url]),
         )
         semantic = tampered["semantic_tool_authority"]
         token = str(semantic["token"])
         semantic["token"] = f"{token[:-1]}{'0' if token[-1] != '0' else '1'}"
         with pytest.raises(HTTPError):
-            _rpc(url, "resolution.open", {
+            rpc_call(sidecar.url, "resolution.open", {
                 "operation_id": "op-worker-sidecar-tampered",
                 "operation_payload_digest": "sha256:op-worker-sidecar-tampered",
                 "activation_id": activation_id_for(
@@ -423,4 +433,4 @@ def test_real_sidecar_worker_round_trip_preserves_authority_result_and_evidence(
                 "intake": tampered,
             })
     finally:
-        _stop(process)
+        sidecar.stop()

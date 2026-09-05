@@ -136,6 +136,7 @@ def test_howto_documents_canonical_observation_and_browser_checks() -> None:
     """Operator guidance should name the canonical and browser verification paths."""
 
     howto = _read("docs/HOWTO.md")
+    normalized_howto = howto.casefold()
 
     for clause in (
         "cognition_run_observation.v1",
@@ -150,7 +151,7 @@ def test_howto_documents_canonical_observation_and_browser_checks() -> None:
         "zero page or console error logs",
         "live LLM cases",
     ):
-        assert clause in howto, clause
+        assert clause.casefold() in normalized_howto, clause
     assert "latest_cognition_graph" not in howto
 
 

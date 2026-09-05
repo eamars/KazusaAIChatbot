@@ -326,6 +326,19 @@ The authenticated Brain endpoint `GET /runtime/dsh/health` must report
 catalog, policy, workspace, profile, release, and store identity before task
 admission is enabled.
 
+Run the permanent non-LLM process probes with a new or empty artifact
+directory for each invocation:
+
+```powershell
+venv\Scripts\python experiments\dsh_runtime_probe.py sidecar-lifecycle --artifact-dir <new-directory>
+venv\Scripts\python experiments\dsh_runtime_probe.py brain-task-lifecycle --artifact-dir <new-directory>
+venv\Scripts\python experiments\dsh_runtime_probe.py transport-loss --artifact-dir <new-directory>
+```
+
+The latter two require MongoDB and use a unique guarded test database that the
+probe drops during cleanup. Exit codes are 0 for pass, 1 for observed failure,
+and 2 for a blocked prerequisite.
+
 The model-visible semantic catalog contains fourteen supported tools for
 conversation history, memory, people, active context, calendar, attached
 media, and public media. `kazusa_inspect_public_media` accepts an HTTP(S) image
@@ -1104,10 +1117,16 @@ Live LLM tests must be run and inspected one at a time:
 
 ```bash
 pytest -m live_llm tests/test_cognition_live_llm.py::test_live_msg_decontextualizer_returns_non_empty_output -q -s
-pytest -m live_llm tests/test_dsh_user_message_e2e_live_llm.py::test_live_user_message_local_fact_reaches_dsh -q -s
+pytest -m live_llm tests/test_dsh_behavior_live_llm.py::test_live_foreground_task_resolution_is_grounded_and_character_owned -q -s
+pytest -m live_llm tests/test_dsh_behavior_live_llm.py::test_live_deferred_task_result_recurs_and_delivers_once -q -s
+pytest -m live_llm tests/test_dsh_behavior_live_llm.py::test_live_internal_dsh_judgment_is_character_owned -q -s
 ```
 
-live LLM cases remain isolated from deterministic contract and browser checks.
+Each DSH behavior case writes a guarded technical dossier and a pending
+character-review artifact under `test_artifacts/dsh_behavior_e2e/`. Final DSH
+sign-off remains withheld until all three cases run with available models and
+receive an independent character-behavior review. Live LLM cases remain
+isolated from deterministic contract and browser checks.
 
 Live DB tests can be run explicitly when MongoDB is available:
 

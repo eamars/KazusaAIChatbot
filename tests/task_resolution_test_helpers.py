@@ -37,6 +37,46 @@ def _goal_continuation_ref() -> dict[str, object]:
     )
 
 
+def resolver_task_observation() -> dict[str, object]:
+    """Build one canonical succeeded task-resolution observation."""
+
+    return {
+        "schema_version": "resolver_observation.v1",
+        "observation_id": "raw-tool-run-123",
+        "capability_kind": "task_resolution_request",
+        "request_objective": "Retrieve relationship evidence.",
+        "request_reason": "The current cycle lacks enough evidence.",
+        "status": "succeeded",
+        "prompt_safe_summary": "Found two relevant relationship evidence rows.",
+        "evidence_refs": [
+            {
+                "schema_version": "evidence_ref.v1",
+                "evidence_kind": "tool_result",
+                "evidence_id": "raw-evidence-row-456",
+                "owner": "cognition_resolver",
+                "excerpt": "bounded summary only",
+                "observed_at": "2026-05-30T00:00:00+00:00",
+            }
+        ],
+        "task_resolution_evidence_state": {
+            "schema_version": "resolver_evidence_state.v1",
+            "state": "complete",
+            "remaining_needs": [],
+        },
+        "goal_continuation_ref": build_goal_continuation_ref(
+            source_episode_id="resolver-test-episode",
+            source_message_id="resolver-test-message",
+            branch_id="task_resolution",
+            goal_ref={
+                "scope": "user",
+                "kind": "goal",
+                "entity_id": "resolver-test-goal",
+            },
+        ),
+        "created_at_utc": "2026-05-30T00:00:00+00:00",
+    }
+
+
 def _context() -> dict[str, object]:
     """Build the canonical V2 context shared by retained task tests."""
 
@@ -89,6 +129,114 @@ def _resolution_ref(
         "lease_epoch": 1,
         "document_revision": 0,
         "last_committed_seq": 0,
+    }
+
+
+def recorded_task_checkpoint(
+    *,
+    status: str = "resolved",
+    initial_checkpoint: dict[str, object] | None = None,
+) -> tuple[dict[str, object], dict[str, object]]:
+    """Build a typed DSH result and its durable reference fixture."""
+
+    checkpoint = initial_checkpoint or _resolution_ref()
+    summary = "A public source resolved the requested fact."
+    semantic_ref = "https://example.com/source"
+    is_resolved = status == "resolved"
+    result = {
+        "schema_version": "task_resolution_result.v1",
+        "semantic_objective": "Resolve one bounded public question.",
+        "status": status,
+        "scene_context": _context()["scene_context"],
+        "goal_continuation_ref": _context()["goal_continuation_ref"],
+        "evidence_state": "complete" if is_resolved else "pending",
+        "evidence_excerpts": [summary] if is_resolved else [],
+        "evidence_handles": [semantic_ref] if is_resolved else [],
+        "prompt_safe_summary": summary if is_resolved else "Continuation is pending.",
+        "evidence": [{
+            "schema_version": "task_resolution_evidence.v1",
+            "evidence_id": "public-evidence-1",
+            "task_node_id": "dsh",
+            "specialist": "dsh",
+            "summary": semantic_ref,
+            "provenance_refs": [semantic_ref],
+            "limitations": [],
+        }] if is_resolved else [],
+        "completed_subgoals": [
+            "Resolve one bounded public question."
+        ] if is_resolved else [],
+        "remaining_needs": [] if is_resolved else ["Continue the DSH task."],
+        "checkpoint": {} if is_resolved else checkpoint,
+        "coding_run_context": {},
+    }
+    return checkpoint, result
+
+
+def resume_queue_request() -> dict[str, object]:
+    """Build one generation-zero DSH queue request without authority."""
+
+    return {
+        "job_id": "job-001",
+        "source_action_attempt_id": "action_attempt:task-resolution-001",
+        "source_llm_trace_id": "llmtrace_source-1",
+        "idempotency_key": "background_work:task-resolution-001",
+        "accepted_task_id": "task-001",
+        "task_identity_key": "accepted_task:v2:abc",
+        "semantic_objective": "Resolve one bounded public question.",
+        "goal_continuation_ref": _goal_continuation_ref(),
+        "requested_worker": "task_orchestrator",
+        "worker_payload": {
+            "schema_version": "task_orchestrator_worker_payload.v2",
+            "operation": "open_dsh_resolution",
+            "task_session_id": "session-task-001",
+            "operation_generation": 0,
+            "control": None,
+        },
+        "task_execution_context": _context(),
+        "source_platform": "debug",
+        "source_channel_id": "debug:user:test-user",
+        "source_channel_type": "private",
+        "source_message_id": "message-1",
+        "source_platform_bot_id": "debug-bot",
+        "source_character_name": "Test Character",
+        "requester_global_user_id": "user-1",
+        "requester_platform_user_id": "debug-user-1",
+        "requester_display_name": "Test User",
+        "requested_delivery": "send_result_when_done",
+        "max_output_chars": 3000,
+        "storage_timestamp_utc": "2026-06-06T00:00:00+00:00",
+    }
+
+
+def accepted_task_completed_job() -> dict[str, object]:
+    """Build one completed accepted-task job with a canonical DSH result."""
+
+    _checkpoint, task_result = recorded_task_checkpoint(status="resolved")
+    return {
+        "job_id": "job-001",
+        "task_brief": "Generate a Fibonacci function snippet.",
+        "worker": "text_artifact",
+        "status": "completed",
+        "artifact_text": "def fib(n): return n",
+        "failure_summary": "",
+        "result_summary": "Generated a compact Fibonacci snippet.",
+        "worker_metadata": {"task_type": "coding_snippet"},
+        "source_platform": "debug",
+        "source_channel_id": "debug-private-1",
+        "source_channel_type": "private",
+        "source_message_id": "message-1",
+        "source_platform_bot_id": "bot-1",
+        "source_character_name": "Test Character",
+        "requester_global_user_id": "global-user-1",
+        "requester_platform_user_id": "platform-user-1",
+        "requester_display_name": "Test User",
+        "created_at": "2026-06-06T00:00:00+00:00",
+        "completed_at": "2026-06-06T00:01:00+00:00",
+        "goal_continuation_ref": _goal_continuation_ref(),
+        "accepted_task_id": "task-001",
+        "task_identity_key": "accepted_task:v1:abc",
+        "source_llm_trace_id": "llmtrace-parent-1",
+        "task_resolution_result": task_result,
     }
 
 

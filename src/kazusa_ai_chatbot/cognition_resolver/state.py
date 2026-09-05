@@ -294,16 +294,25 @@ def project_resolver_context(
     pending_context = project_pending_resume_for_cognition(pending_resume)
     if pending_context:
         lines.append(pending_context)
-    dependency = normalized_state.get(
-        "required_resolver_evidence_dependency"
-    )
-    if dependency is not None:
+    required_observation = required_task_observation(normalized_state)
+    if required_observation is not None:
+        evidence_state = required_observation[
+            "task_resolution_evidence_state"
+        ]
+        observation_id = required_observation["observation_id"]
+        evidence_handles = [
+            f"resolver_evidence_{observation_id}_{index}"
+            for index, _excerpt in enumerate(
+                resolver_evidence_excerpts_for_cognition(required_observation),
+                start=1,
+            )
+        ]
         lines.append(
             "required_resolver_evidence_dependency: "
-            f"observation_handle={dependency['prompt_safe_observation_handle']}; "
-            f"state={dependency['state']}; "
-            f"evidence_handles={','.join(dependency['evidence_handles'])}; "
-            f"remaining_needs={' | '.join(dependency['remaining_needs'])}"
+            f"observation_handle=resolver_observation_{observation_id}; "
+            f"state={evidence_state['state']}; "
+            f"evidence_handles={','.join(evidence_handles)}; "
+            f"remaining_needs={' | '.join(evidence_state['remaining_needs'])}"
         )
     return_value = "\n".join(lines)
     return return_value
@@ -354,13 +363,10 @@ def validate_resolver_state(value: object) -> ResolverCycleStateV1:
         normalized_dependency = validate_required_resolver_evidence_dependency(
             evidence_dependency,
         )
-        _validate_dependency_observation_alignment(
-            normalized_dependency,
-            observations,
-        )
         normalized["required_resolver_evidence_dependency"] = (
             normalized_dependency
         )
+        required_task_observation(normalized)
     pending_resume = data.get("pending_resume")
     if pending_resume is not None:
         normalized["pending_resume"] = validate_resolver_pending_resume(
@@ -370,16 +376,18 @@ def validate_resolver_state(value: object) -> ResolverCycleStateV1:
     return return_value
 
 
-def _validate_dependency_observation_alignment(
-    dependency: Mapping[str, Any],
-    observations: list[ResolverObservationV1],
-) -> None:
-    """Require one dependency to describe its exact referenced observation."""
+def required_task_observation(
+    resolver_state: ResolverCycleStateV1,
+) -> ResolverObservationV1 | None:
+    """Resolve and validate the task observation named by a V2 dependency."""
 
+    dependency = resolver_state.get("required_resolver_evidence_dependency")
+    if dependency is None:
+        return None
     observation = next(
         (
             candidate
-            for candidate in observations
+            for candidate in resolver_state["observations"]
             if candidate["observation_id"] == dependency["observation_id"]
         ),
         None,
@@ -392,32 +400,17 @@ def _validate_dependency_observation_alignment(
         raise ResolverValidationError(
             "required resolver dependency observation has wrong capability"
         )
-    if observation.get("goal_continuation_ref") != dependency[
-        "goal_continuation_ref"
-    ]:
-        raise ResolverValidationError(
-            "required resolver dependency continuation does not match observation"
-        )
     evidence_state = observation.get("task_resolution_evidence_state")
     if not isinstance(evidence_state, Mapping):
         raise ResolverValidationError(
             "required resolver dependency observation lacks evidence state"
         )
-    if evidence_state["state"] != dependency["state"]:
+    continuation_ref = observation.get("goal_continuation_ref")
+    if not isinstance(continuation_ref, Mapping):
         raise ResolverValidationError(
-            "required resolver dependency state does not match observation"
+            "required resolver dependency observation lacks continuation"
         )
-    if list(evidence_state["remaining_needs"]) != list(
-        dependency["remaining_needs"]
-    ):
-        raise ResolverValidationError(
-            "required resolver dependency needs do not match observation"
-        )
-    excerpts = resolver_evidence_excerpts_for_cognition(observation)
-    if len(excerpts) != len(dependency["evidence_handles"]):
-        raise ResolverValidationError(
-            "required resolver dependency evidence does not match observation"
-        )
+    return observation
 
 
 def _cognitive_episode_id(state: Mapping[str, Any]) -> str:

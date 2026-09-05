@@ -62,7 +62,7 @@ def test_registry_rejects_shell_strings_external_identifiers_duplicate_ids_and_d
         "-m",
         "adapters.napcat_qq_adapter",
     ]
-    assert defaults["adapter.napcat"].dependencies == ["brain"]
+    assert defaults["adapter.napcat"].dependencies == ["brain", "dsh.sidecar"]
     assert defaults["adapter.debug"].health_url == "http://127.0.0.1:8080/api/health"
 
     duplicate_path = _write_registry(

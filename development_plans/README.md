@@ -50,6 +50,7 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
+| [dsh_operational_e2e_quality_signoff_and_transport_failure_remediation_plan_2026-08-31.md](archive/superseded/bugfix/dsh_operational_e2e_quality_signoff_and_transport_failure_remediation_plan_2026-08-31.md) | Exact-topology operational E2E matrix and exhaustive pre-E2E failure ledger | superseded by the consolidated probe-first DSH architecture cleanup and final sign-off plan |
 | [agentic_resolver_phase2_readiness_real_llm_evaluation_plan_2026-08-23.md](archive/superseded/agentic_resolver_phase2_readiness_real_llm_evaluation_plan_2026-08-23.md) | Retired standalone-first four-facade resolver readiness evaluation | superseded by the renewed agentic resolver target architecture |
 | [cognition_v3_cache_affine_semantic_chain_bigbang_plan.md](archive/superseded/cognition_v3_cache_affine_semantic_chain_bigbang_plan.md) | Former parallel cache-affine semantic-chain projection and partial execution record | superseded by `cognition_v3_hybrid_agentic_loop_reconciliation_plan.md` |
 | [cognition_v3_hybrid_agentic_loop_static_architecture_review_2026-08-21.md](archive/superseded/cognition_v3_hybrid_agentic_loop_static_architecture_review_2026-08-21.md) | Static findings for the retired hybrid cognition chain | superseded by the handleless cognition cutover |
@@ -80,7 +81,8 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
-| [dsh_operational_e2e_quality_signoff_and_transport_failure_remediation_plan_2026-08-31.md](active/bugfix/dsh_operational_e2e_quality_signoff_and_transport_failure_remediation_plan_2026-08-31.md) | DSH cognition-chain error-policy compliance, complete pre-E2E failure mapping, deterministic fault-injection coverage, and final production E2E sign-off | in_progress; execution stopped for handoff, E2E locked, production sign-off withheld |
+| [dsh_probe_first_architecture_cleanup_and_final_signoff_plan_2026-09-04.md](active/bugfix/dsh_probe_first_architecture_cleanup_and_final_signoff_plan_2026-09-04.md) | Consolidated probe-first DSH architecture cleanup and final sign-off | in_progress; remediation and real LLM execution authorized; remaining gates and independent sign-off pending |
+| [dsh_integration_boundary_and_test_contract_remediation_plan_2026-09-05.md](active/bugfix/dsh_integration_boundary_and_test_contract_remediation_plan_2026-09-05.md) | Bounded cancellation correction, production/test isolation, interface-only DSH verification, and economical live behavior coverage | in_progress; implementation and real LLM execution explicitly authorized on 2026-09-05 |
 | [gemma4_thinking_disable_enforcement_gap_bugfix_plan_2026-08-25.md](active/bugfix/gemma4_thinking_disable_enforcement_gap_bugfix_plan_2026-08-25.md) | Gemma 4 provider-side thinking-disable enforcement gap | in_progress |
 | [epistemic_and_role_provenance_fidelity_bugfix_plan_2026-08-24.md](active/bugfix/epistemic_and_role_provenance_fidelity_bugfix_plan_2026-08-24.md) | Independent unsupported-fact, private-residue, and temporary-role provenance fidelity plan from the 50-turn Asuna run | draft; separate ownership and approval boundary |
 | [live_response_generation_failure_modes_problem_statement_2026-08-27.md](active/bugfix/live_response_generation_failure_modes_problem_statement_2026-08-27.md) | Live-response LLM generation failure-mode problem statement | draft; problem statement only; non-executable |

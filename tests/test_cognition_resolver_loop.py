@@ -42,6 +42,7 @@ from kazusa_ai_chatbot.cognition_resolver.telemetry import (
     build_resolver_terminal_event,
     write_human_readable_resolver_trace,
 )
+from kazusa_ai_chatbot.cognition_shared.contracts import CognitionExecutionError
 from kazusa_ai_chatbot.cognition_shared.state_models import (
     build_acquaintance_user_state,
     build_character_production_state,
@@ -456,8 +457,8 @@ async def test_task_resolution_handoff_rejects_missing_cognition_scene_before_ex
 
 
 @pytest.mark.asyncio
-async def test_resolver_request_and_dependency_preserve_goal_continuation_ref() -> None:
-    """A task request, observation, and dependency share one exact ref."""
+async def test_required_dependency_references_single_task_observation() -> None:
+    """A required dependency points to the observation that owns semantics."""
 
     request = _resolver_request(objective="Resolve one bounded evidence goal.")
     evidence_ref = {
@@ -520,9 +521,44 @@ async def test_resolver_request_and_dependency_preserve_goal_continuation_ref() 
     assert resolver_state["observations"][0]["goal_continuation_ref"] == (
         request["goal_continuation_ref"]
     )
-    assert resolver_state[
-        "required_resolver_evidence_dependency"
-    ]["goal_continuation_ref"] == request["goal_continuation_ref"]
+    assert resolver_state["required_resolver_evidence_dependency"] == {
+        "schema_version": "required_resolver_evidence_dependency.v2",
+        "accepted_request_handle": "resolver_request_0_1",
+        "observation_id": "resolver_obs_typed_evidence",
+    }
+
+
+@pytest.mark.asyncio
+async def test_invalid_required_dependency_fails_closed_before_l3() -> None:
+    """Invalid referenced evidence becomes one retryable pre-commit error."""
+
+    state = ensure_initial_resolver_inputs(_resolver_state(), max_cycles=3)
+    resolver_state = dict(state["resolver_state"])
+    resolver_state["required_resolver_evidence_dependency"] = {
+        "schema_version": "required_resolver_evidence_dependency.v2",
+        "accepted_request_handle": "resolver_request_0_1",
+        "observation_id": "missing-observation",
+    }
+    state["resolver_state"] = resolver_state
+    call_cognition = AsyncMock()
+    execute_capability = AsyncMock()
+
+    with pytest.raises(CognitionExecutionError) as error:
+        await call_cognition_resolver_loop(
+            state,
+            call_cognition_subgraph_func=call_cognition,
+            execute_capability_func=execute_capability,
+            max_cycles=3,
+            capability_timeout_seconds=1.0,
+        )
+
+    assert error.value.error_code == "resolver_state_contract"
+    assert error.value.stage == "cognition_resolver"
+    assert error.value.attempt_count == 1
+    assert error.value.safe_checkpoint == "pre_state_commit"
+    assert error.value.retryable is True
+    call_cognition.assert_not_awaited()
+    execute_capability.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -882,7 +918,10 @@ async def test_loop_projects_goal_progress_across_iterations() -> None:
 async def test_loop_records_timeout_observation_then_returns_to_cognition() -> None:
     """Capability timeouts should become observations, not Python decisions."""
 
-    request = _resolver_request(objective="检索一个会超时的证据目标。")
+    request = _resolver_request(
+        capability_kind="self_goal_resolution",
+        objective="检索一个会超时的证据目标。",
+    )
     cognition_inputs: list[dict] = []
 
     async def call_cognition(state: dict) -> dict:
@@ -914,7 +953,7 @@ async def test_loop_records_timeout_observation_then_returns_to_cognition() -> N
     assert "timed out" in cognition_inputs[1]["resolver_context"]
     observation = result["resolver_state"]["observations"][0]
     assert observation["status"] == "failed"
-    assert observation["capability_kind"] == "task_resolution_request"
+    assert observation["capability_kind"] == "self_goal_resolution"
     assert observation["request_objective"] == request["objective"]
     assert "timed out" in observation["prompt_safe_summary"]
     terminal_event = build_resolver_terminal_event(result, duration_ms=1)
@@ -926,14 +965,11 @@ async def test_loop_records_timeout_observation_then_returns_to_cognition() -> N
 
 
 @pytest.mark.asyncio
-async def test_task_resolution_timeout_preserves_durable_handoff_work() -> None:
-    """A foreground timeout must not cancel DSH checkpoint and promotion work."""
+async def test_task_resolution_uses_task_service_timeout_without_detached_resolver_task(
+) -> None:
+    """The loop awaits the task service's already-bounded lifecycle result."""
 
     request = _resolver_request(objective="检索需要转入后台的当前证据。")
-    capability_started = asyncio.Event()
-    allow_handoff = asyncio.Event()
-    handoff_completed = asyncio.Event()
-    capability_canceled = False
 
     async def call_cognition(state: dict) -> dict:
         if not state["resolver_state"]["observations"]:
@@ -947,14 +983,7 @@ async def test_task_resolution_timeout_preserves_durable_handoff_work() -> None:
         )
 
     async def execute_capability(_request: dict, _state: dict) -> dict:
-        nonlocal capability_canceled
-        capability_started.set()
-        try:
-            await allow_handoff.wait()
-        except asyncio.CancelledError:
-            capability_canceled = True
-            raise
-        handoff_completed.set()
+        await asyncio.sleep(0.02)
         return {
             "schema_version": RESOLVER_OBSERVATION_VERSION,
             "observation_id": "resolver_obs_deferred_handoff",
@@ -962,12 +991,12 @@ async def test_task_resolution_timeout_preserves_durable_handoff_work() -> None:
             "goal_continuation_ref": request["goal_continuation_ref"],
             "request_objective": request["objective"],
             "request_reason": request["reason"],
-            "status": "blocked",
+            "status": "succeeded",
             "prompt_safe_summary": "DSH work was durably promoted.",
             "evidence_refs": [],
             "task_resolution_evidence_state": {
                 "schema_version": "resolver_evidence_state.v1",
-                "state": "blocked",
+                "state": "pending",
                 "remaining_needs": [request["objective"]],
             },
             "created_at_utc": "2026-05-29T21:00:00+00:00",
@@ -978,19 +1007,21 @@ async def test_task_resolution_timeout_preserves_durable_handoff_work() -> None:
         call_cognition_subgraph_func=call_cognition,
         execute_capability_func=execute_capability,
         max_cycles=3,
-        capability_timeout_seconds=0.01,
+        capability_timeout_seconds=0.001,
     )
-    await asyncio.wait_for(capability_started.wait(), timeout=1.0)
-    allow_handoff.set()
-    await asyncio.wait_for(handoff_completed.wait(), timeout=1.0)
 
-    assert result["resolver_state"]["observations"][0]["status"] == "failed"
-    assert capability_canceled is False
+    observation = result["resolver_state"]["observations"][0]
+    assert observation["status"] == "succeeded"
+    assert observation["prompt_safe_summary"] == (
+        "DSH work was durably promoted."
+    )
+    assert not hasattr(loop_module, "_PENDING_TASK_RESOLUTION_EXECUTIONS")
 
 
 @pytest.mark.asyncio
-async def test_loop_blocks_duplicate_capability_objective_before_execution() -> None:
-    """Exact repeated resolver objectives should not execute indefinitely."""
+async def test_duplicate_task_blocker_replaces_dependency_reference_without_copying_state(
+) -> None:
+    """A duplicate blocker moves the V2 reference without copying semantics."""
 
     request = _resolver_request(
         capability_kind="task_resolution_request",
@@ -1047,6 +1078,11 @@ async def test_loop_blocks_duplicate_capability_objective_before_execution() -> 
     assert result["resolver_state"]["status"] == "blocked"
     assert observations[-1]["observation_id"] == "resolver_obs_duplicate_request"
     assert observations[-1]["request_objective"] == request["objective"]
+    assert result["resolver_state"]["required_resolver_evidence_dependency"] == {
+        "schema_version": "required_resolver_evidence_dependency.v2",
+        "accepted_request_handle": "resolver_request_0_1",
+        "observation_id": "resolver_obs_duplicate_request",
+    }
     assert result["action_specs"][0]["kind"] == "speak"
 
 
@@ -1102,11 +1138,11 @@ async def test_loop_blocks_same_capability_retry_after_timeout() -> None:
     """Timed-out capability work should not be retried with renamed objective."""
 
     first_request = _resolver_request(
-        capability_kind="task_resolution_request",
+        capability_kind="self_goal_resolution",
         objective="检索当前外部事实。",
     )
     renamed_request = _resolver_request(
-        capability_kind="task_resolution_request",
+        capability_kind="self_goal_resolution",
         objective="换一种说法再次检索当前外部事实。",
     )
     execute_count = 0

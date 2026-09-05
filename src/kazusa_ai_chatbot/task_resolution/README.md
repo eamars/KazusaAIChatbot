@@ -47,6 +47,9 @@ not expose queue leases, raw evidence, credentials, adapters, or paths.
 Deterministic code enforces schema, budgets, idempotency, persistence order,
 lease fencing, CAS, and delivery boundaries. The DSH semantic worker owns
 semantic tool choice and task judgment under the pinned Standard profile.
+This service is also the sole owner of the foreground inline timeout. It either
+returns a terminal result or commits and projects the same session's deferred
+checkpoint before control returns to cognition.
 RAG3/local-context and its prewarm owner remain the evidence path for ordinary
 chat context; they are not replaced by task-resolution documentation.
 
@@ -60,3 +63,14 @@ Run the task-resolution contract, lifecycle, binding, recovery, accepted-task,
 background-work, and cognition handoff tests with venv\Scripts\python.
 Live DB and live LLM nodes are explicit, one case at a time, and require
 inspection of their saved evidence.
+
+The permanent non-LLM integration probes are:
+
+```powershell
+venv\Scripts\python experiments\dsh_runtime_probe.py sidecar-lifecycle --artifact-dir <new-directory>
+venv\Scripts\python experiments\dsh_runtime_probe.py brain-task-lifecycle --artifact-dir <new-directory>
+venv\Scripts\python experiments\dsh_runtime_probe.py transport-loss --artifact-dir <new-directory>
+```
+
+Each writes `dsh_runtime_probe_result.v1`. The Mongo probes create and drop
+only uniquely named guarded test databases.
