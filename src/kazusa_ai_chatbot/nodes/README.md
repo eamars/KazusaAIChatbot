@@ -34,6 +34,10 @@ through normal cognition, dialog, dispatcher, and adapter delivery.
 RAG3/local-context and its prewarm owner remain the ordinary evidence path.
 Task evidence is bounded and provenance-bearing; it does not become persona
 stance or final wording by itself.
+Dialog source-token validation reads both completed inline resolver evidence
+and delayed tool-result percepts. Exact HTTP citations in those sources remain
+available to the character's final wording; user input alone does not authorize
+a new source citation.
 
 ## Module Boundary
 

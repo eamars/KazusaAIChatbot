@@ -622,9 +622,8 @@ venv\Scripts\python -m pytest -q
 
 For runtime changes, first exercise the smallest real path that can expose the
 failure. Use observed results to select necessary fixes and regression checks.
-DSH execution follows the single
-[runtime completion plan](development_plans/active/bugfix/dsh_runtime_completion_plan_2026-09-05.md),
-with real-model viability preceding broad regression verification.
+The DSH [runtime completion record](development_plans/archive/completed/bugfix/dsh_runtime_completion_plan_2026-09-05.md)
+records fresh real-model behavior, observed repairs, and recovery verification.
 
 Live LLM tests must be run one case at a time with output inspected. Live DB
 tests require MongoDB. See [docs/HOWTO.md](docs/HOWTO.md#testing) for the

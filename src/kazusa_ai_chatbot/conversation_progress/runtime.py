@@ -20,6 +20,7 @@ from kazusa_ai_chatbot.conversation_progress.compaction import (
 )
 from kazusa_ai_chatbot.conversation_progress.delta_merge import (
     ConversationProgressContractError,
+    _source_turn_ref,
 )
 from kazusa_ai_chatbot.conversation_progress.history import (
     assemble_logical_turns_with_diagnostics,
@@ -265,11 +266,7 @@ class ConversationProgressRuntime:
                 reconciliation_status=reconciliation_status,
                 packet_turn_count=diagnostics['packet_turn_count'],
             )
-            return _failed_record_result(
-                prior_packet=prior_packet,
-                diagnostics=diagnostics,
-                reconciliation_status=reconciliation_status,
-            )
+            raise
         except (DatabaseOperationError, TimeoutError) as exc:
             reconciliation_status = await _reconcile_after_interruption(
                 record_input=record_input,

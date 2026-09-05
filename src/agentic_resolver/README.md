@@ -104,9 +104,10 @@ RAG3 route retains its planner, subagent, and web-provider settings.
 
 Use venv\Scripts\python for the existing real-model Brain/DSH behavior cases.
 After essential launch and isolation checks, establish model viability before
-recovery diagnostics and retained integration checks. The single
-[runtime completion plan](../../development_plans/active/bugfix/dsh_runtime_completion_plan_2026-09-05.md)
-governs the whole DSH runtime. Dedicated component suites are retired.
+recovery diagnostics and retained integration checks. The
+[runtime completion record](../../development_plans/archive/completed/bugfix/dsh_runtime_completion_plan_2026-09-05.md)
+records the observed runtime repairs and their verification. Dedicated
+component suites are retired.
 
 `experiments/dsh_runtime_probe.py` is the reusable black-box process owner for
 sidecar lifecycle, guarded Brain/task persistence, and transport-loss probes.

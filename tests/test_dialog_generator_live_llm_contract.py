@@ -430,7 +430,8 @@ async def test_live_dialog_source_url_feedback_converges() -> None:
     await _skip_if_dialog_generator_unavailable()
     state, source_url = _long_source_dialog_state()
     source_urls = dialog_module._completed_tool_result_source_urls(
-        dialog_module._current_visible_percepts(state["cognitive_episode"])
+        dialog_module._current_visible_percepts(state["cognitive_episode"]),
+        resolver_result=state["text_surface_output_v2"].get("resolver_result"),
     )
     assert source_urls == [source_url]
     concise_repaired_message = "已核对该来源，当前判断以这份证据为准。"

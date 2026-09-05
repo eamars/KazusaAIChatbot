@@ -10,13 +10,16 @@ authority, and task edge form one production runtime.
 adapter/debug client
   -> authenticated Brain intake
   -> cognition task_resolution_request
-  -> accepted_task.v2 and reviewed background_work_job.v2
-  -> transient TaskResolutionAdmissionV1
-  -> dsh_task_binding.v1 / dsh_task_bindings
-  -> claim-time operation_generation and fresh authority
+  -> inline task binding OR direct-background admission
+     inline: dsh_task_binding.v1 -> bounded execution
+     background: accepted_task.v2 + background_work_job.v2
+       -> transient TaskResolutionAdmissionV1
+       -> worker claim -> dsh_task_binding.v1
+  -> operation_generation and fresh authority
   -> DSH Standard sidecar
   -> native tools + semantic catalog
   -> checkpoint or terminal exhaust
+     inline checkpoint: promote the existing binding to one task/job
   -> TaskResolutionResultV1
   -> Brain observation/result-ready projection
   -> normal cognition/dialog/dispatcher/adapter delivery
@@ -35,6 +38,20 @@ schema_version, accepted_task_id, background_work_job_id, and task_session_id.
 It is transient and model-hidden, with no authority or checkpoint reference.
 Only a committed checkpoint may produce deferred
 TaskResolutionResultV1 with DshResolutionRefV1.
+
+An internal DSH interaction can commit cognition before its originating turn
+finishes. If that turn retries, task admission matches the trusted source scope
+and goal continuation. Completed inline work returns its validated stored
+result; checkpointed or promoted work returns its existing checkpoint.
+Promotion retains an existing accepted task and background job. Regenerated
+objective wording is not a new task identity: the result projection preserves
+the objective actually executed and its original evidence.
+
+Dialog's bounded source-URL extraction includes both validated inline
+task-resolution evidence and delayed tool-result percepts. A source mentioned
+only in user input is not sufficient citation authority. Requested source
+verification requires retrieved text; unavailable verification remains partial
+in the task result rather than becoming a completed fact.
 
 The worker payload is task_orchestrator_worker_payload.v2. Its task
 operations are open_dsh_resolution and continue_dsh_resolution. Claim-time
@@ -90,6 +107,10 @@ configured, durable_store, and cognition_judge. The sidecar's authenticated
 system.health is ready only when route, Standard, semantic-worker, web,
 Brain, catalog, policy, workspace, profile, release, and store values match.
 Readiness gates admission and recovery.
+
+The sidecar receiver tolerates up to 50 ms of future activation issuance for
+Python/Node clock precision on Windows. Expiration has no grace period, and
+signature, scope and fencing validation still apply.
 
 On sidecar loss, the durable task binding and checkpoint remain the source of
 truth. Claim-time fresh authority and generation checks prevent duplicate

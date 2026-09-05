@@ -120,6 +120,10 @@ function activationTime(value: string, name: string): number {
   return parsed;
 }
 
+// Python's precise Windows clock can lead Node's wall clock by a timer tick.
+// This allowance applies only to issuance; expiration remains a hard boundary.
+const ACTIVATION_ISSUANCE_CLOCK_SKEW_MS = 50;
+
 export function validateActivationAuthority(value: unknown): ActivationAuthority {
   const row = activationExact(value, ACTIVATION_AUTHORITY_FIELDS, "authority");
   if (row.schema_version !== AUTHORITY_SCHEMA_VERSION) {
@@ -236,7 +240,7 @@ export function verifyActivationToken(
   }
   const issued = activationTime(authority.issued_at, "authority.issued_at");
   const expires = activationTime(authority.expires_at, "authority.expires_at");
-  if (now < issued || now > expires) {
+  if (now + ACTIVATION_ISSUANCE_CLOCK_SKEW_MS < issued || now > expires) {
     throw new ContractFault("activation authority has expired", "AUTHORITY_TOKEN_EXPIRED");
   }
   return authority;

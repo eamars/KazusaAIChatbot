@@ -23,6 +23,7 @@ from kazusa_ai_chatbot.task_resolution.contracts import (
     validate_dsh_task_start_spec,
     validate_task_resolution_admission,
     validate_task_resolution_execution_context,
+    validate_task_resolution_result,
 )
 from kazusa_ai_chatbot.task_resolution.projection import (
     build_model_facts,
@@ -152,6 +153,34 @@ async def _resolve_task_inline_operation(
     _require_runtime(runtime)
     _require_store(binding_store, "create_task_binding")
     _require_store(binding_store, "find_binding_by_session")
+    existing = await _store_call(
+        binding_store,
+        "find_binding_by_session",
+        task_session_id=task_session_id,
+    )
+    if existing is not None:
+        if not isinstance(existing, Mapping):
+            raise TaskResolutionContractError("stored DSH binding is invalid")
+        if (
+            existing["source_scope"] != _source_scope(context)
+            or existing["goal_continuation_ref"] != context["goal_continuation_ref"]
+        ):
+            raise TaskResolutionContractError(
+                "stored DSH binding belongs to a different source or goal",
+            )
+        if existing["state"] == "consumed_inline":
+            # A Brain interaction can commit cognition while its parent task
+            # runs. Replaying that parent's cognition must reuse completed work.
+            return validate_task_resolution_result(
+                existing["latest_task_resolution_result"],
+            )
+        if existing["state"] in {"checkpointed", "active", "terminal"}:
+            return _deferred_result(
+                existing["semantic_objective"],
+                context,
+                existing["resolution_ref"],
+                existing["start_spec"],
+            )
     binding: Mapping[str, object] = {
         "schema_version": "dsh_task_binding.v1",
         "task_session_id": task_session_id,
@@ -1363,6 +1392,26 @@ async def _promote_deferred_task_resolution_operation(
         raise TaskResolutionContractError(
             "deferred DSH reference conflicts with its binding",
         )
+    if (
+        binding_snapshot["source_scope"] != _source_scope(context)
+        or binding_snapshot["goal_continuation_ref"] != context["goal_continuation_ref"]
+    ):
+        raise TaskResolutionContractError(
+            "deferred DSH binding belongs to a different source or goal",
+        )
+    if (
+        binding_snapshot["state"] in {"active", "terminal"}
+        and binding_snapshot["current_accepted_task_id"] is not None
+        and binding_snapshot["current_background_work_job_id"] is not None
+    ):
+        # Promotion already committed before the parent cognition retried.
+        # Preserve the current worker and its single delivery owner.
+        return dict(_deferred_result(
+            binding_snapshot["semantic_objective"],
+            context,
+            reference,
+            binding_snapshot["start_spec"],
+        ))
 
     semantic_objective = result.get("semantic_objective")
     if not isinstance(semantic_objective, str) or not semantic_objective.strip():

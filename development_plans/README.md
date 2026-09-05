@@ -51,7 +51,7 @@ recorded evidence.
 | Document | Type | Status |
 |---|---|---|
 | [dsh_probe_first_architecture_cleanup_and_final_signoff_plan_2026-09-04.md](archive/superseded/bugfix/dsh_probe_first_architecture_cleanup_and_final_signoff_plan_2026-09-04.md) | Former DSH cleanup and staged test sign-off | superseded by the whole-codebase runtime completion plan; prior test gates retired |
-| [dsh_integration_boundary_and_test_contract_remediation_plan_2026-09-05.md](archive/superseded/bugfix/dsh_integration_boundary_and_test_contract_remediation_plan_2026-09-05.md) | Former integration and test-contract remediation | superseded by the whole-codebase runtime completion plan; functional work and evidence carried forward |
+| [dsh_integration_boundary_and_test_contract_remediation_plan_2026-09-05.md](archive/superseded/bugfix/dsh_integration_boundary_and_test_contract_remediation_plan_2026-09-05.md) | Former integration and test-contract remediation | superseded; historical prescriptions excluded from the fresh DSH purpose contract |
 | [dsh_operational_e2e_quality_signoff_and_transport_failure_remediation_plan_2026-08-31.md](archive/superseded/bugfix/dsh_operational_e2e_quality_signoff_and_transport_failure_remediation_plan_2026-08-31.md) | Exact-topology operational E2E matrix and exhaustive pre-E2E failure ledger | superseded by the consolidated probe-first DSH architecture cleanup and final sign-off plan |
 | [agentic_resolver_phase2_readiness_real_llm_evaluation_plan_2026-08-23.md](archive/superseded/agentic_resolver_phase2_readiness_real_llm_evaluation_plan_2026-08-23.md) | Retired standalone-first four-facade resolver readiness evaluation | superseded by the renewed agentic resolver target architecture |
 | [cognition_v3_cache_affine_semantic_chain_bigbang_plan.md](archive/superseded/cognition_v3_cache_affine_semantic_chain_bigbang_plan.md) | Former parallel cache-affine semantic-chain projection and partial execution record | superseded by `cognition_v3_hybrid_agentic_loop_reconciliation_plan.md` |
@@ -83,7 +83,6 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
-| [dsh_runtime_completion_plan_2026-09-05.md](active/bugfix/dsh_runtime_completion_plan_2026-09-05.md) | Whole-codebase DSH runtime completion with real-model viability first and owner-directed test reductions | in_progress; sole active DSH contract; real runtime evidence and final acceptance pending |
 | [gemma4_thinking_disable_enforcement_gap_bugfix_plan_2026-08-25.md](active/bugfix/gemma4_thinking_disable_enforcement_gap_bugfix_plan_2026-08-25.md) | Gemma 4 provider-side thinking-disable enforcement gap | in_progress |
 | [epistemic_and_role_provenance_fidelity_bugfix_plan_2026-08-24.md](active/bugfix/epistemic_and_role_provenance_fidelity_bugfix_plan_2026-08-24.md) | Independent unsupported-fact, private-residue, and temporary-role provenance fidelity plan from the 50-turn Asuna run | draft; separate ownership and approval boundary |
 | [live_response_generation_failure_modes_problem_statement_2026-08-27.md](active/bugfix/live_response_generation_failure_modes_problem_statement_2026-08-27.md) | Live-response LLM generation failure-mode problem statement | draft; problem statement only; non-executable |
@@ -92,6 +91,7 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
+| [dsh_runtime_completion_plan_2026-09-05.md](archive/completed/bugfix/dsh_runtime_completion_plan_2026-09-05.md) | DSH runtime completion through fresh real-model execution | completed; five live behavior cases reviewed, task retry/shutdown/activation/citation fixes verified, recovery probes passed; MongoDB setup resets and research latency recorded |
 | [dsh_excluded_legacy_live_test_decommission_plan_2026-08-31.md](archive/completed/bugfix/dsh_excluded_legacy_live_test_decommission_plan_2026-08-31.md) | Removal of old DSH live component suites excluded from the approved Phase 3 execution | completed; seven excluded live nodes removed and the retained twelve-node DSH surface collected successfully |
 | [dsh_phase3_focused_e2e_signoff_reset_plan_2026-08-31.md](archive/completed/bugfix/dsh_phase3_focused_e2e_signoff_reset_plan_2026-08-31.md) | Reset of the DSH Phase 3 live release oracle to two focused cases for each of the five canonical trigger sources, with six positive entry proofs, four deliberate non-entry proofs, batch-first systematic failure analysis, and independent semantic review | completed; final-code matrix passed 10/10 technical and independent behavior review, and final closure review passed |
 | [dsh_touched_prompt_quality_quickfix_plan_2026-08-31.md](archive/completed/bugfix/dsh_touched_prompt_quality_quickfix_plan_2026-08-31.md) | Local-LLM quality review and correction for every surviving prompt touched since the pre-DSH baseline | completed; twelve live prompt contracts reviewed and corrected, with tests deferred by explicit user instruction |

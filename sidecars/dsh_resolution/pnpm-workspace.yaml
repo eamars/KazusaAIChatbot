@@ -1,6 +1,8 @@
 allowBuilds:
-  '@deepseek-ai/dsh-subprocess-local': set this to true or false
-  '@google/genai': set this to true or false
-  koffi: set this to true or false
-  node-pty: set this to true or false
-  protobufjs: set this to true or false
+  # Native shell execution and sandbox bindings require their install hooks.
+  '@deepseek-ai/dsh-subprocess-local': true
+  koffi: true
+  node-pty: true
+  # These published JavaScript packages need no installation-time build.
+  '@google/genai': false
+  protobufjs: false

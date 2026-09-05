@@ -32,6 +32,7 @@ from kazusa_ai_chatbot.cognition_episode import (
 )
 from kazusa_ai_chatbot.cognition_shared.contracts import (
     CognitionContractError,
+    SurfaceResolverResultV2,
     TextSurfaceInput,
     TextSurfaceOutputV2,
     validate_terminal_text_seed,
@@ -431,7 +432,8 @@ async def dialog_generator(state: DialogAgentState) -> DialogAgentState:
         state["cognitive_episode"]
     )
     required_source_urls = _completed_tool_result_source_urls(
-        current_visible_percepts
+        current_visible_percepts,
+        resolver_result=surface_output.get("resolver_result"),
     )
     llm_trace_id = state.get("llm_trace_id", "")
     accepted_dialog: list[str] | None = None
@@ -989,18 +991,33 @@ async def dialog_agent(
 
 def _completed_tool_result_source_urls(
     current_visible_percepts: list[dict[str, Any]],
+    *,
+    resolver_result: SurfaceResolverResultV2 | None,
 ) -> list[str]:
-    """Extract exact HTTP source tokens from completed tool-result evidence."""
+    """Extract exact sources from inline and delayed task evidence."""
 
     source_urls: list[str] = []
     remaining_scan_chars = _DIALOG_VISIBLE_PERCEPT_SCAN_MAX_CHARS
-    for percept in current_visible_percepts:
+    contents = [
+        percept.get("content", {})
+        for percept in current_visible_percepts
+        if percept.get("input_source") == "tool_result"
+    ]
+    if (
+        resolver_result is not None
+        and resolver_result["capability_kind"] == "task_resolution_request"
+        and resolver_result["status"] == "succeeded"
+        and resolver_result["evidence_state"] in {"complete", "partial"}
+    ):
+        contents.insert(0, {
+            "semantic_result": resolver_result["semantic_result"],
+            "evidence_excerpts": resolver_result["evidence_excerpts"],
+        })
+    for content in contents:
         if remaining_scan_chars <= 0:
             break
-        if percept.get("input_source") != "tool_result":
-            continue
         serialized_content = json.dumps(
-            percept.get("content", {}),
+            content,
             ensure_ascii=False,
             default=str,
         )

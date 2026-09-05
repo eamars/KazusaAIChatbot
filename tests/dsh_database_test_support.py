@@ -69,5 +69,22 @@ class GuardedDshDiagnostics:
             raise ValueError('diagnostic cleanup lost its database guard')
         await self.client.drop_database(self.database_name)
 
+    async def delivery_completed(self, channel_id: str) -> bool:
+        """Observe the durable completion of this scenario's source delivery."""
+        database = self.client[self.database_name]
+        delivered = await database.background_work_jobs.find_one(
+            {'source_channel_id': channel_id, 'delivery_state': 'delivered'},
+            {'_id': 1},
+        )
+        return delivered is not None
+
+    async def has_background_work(self, channel_id: str) -> bool:
+        """Identify a durable job before waiting for delayed scenario delivery."""
+        database = self.client[self.database_name]
+        job = await database.background_work_jobs.find_one(
+            {'source_channel_id': channel_id}, {'_id': 1},
+        )
+        return job is not None
+
     def close(self) -> None:
         self.client.close()

@@ -3,10 +3,10 @@
 ## Document Control
 
 - **Status:** superseded by explicit owner direction on 2026-09-05.
-- **Successor:** [DSH runtime completion](../../../active/bugfix/dsh_runtime_completion_plan_2026-09-05.md).
+- **Successor:** [DSH runtime completion](../../completed/bugfix/dsh_runtime_completion_plan_2026-09-05.md).
   The successor covers the entire existing and new DSH codebase. Historical
-  test matrices and readiness-before-live gates below are retired; functional
-  obligations and evidence continue under the successor.
+  prescriptions below are retired. The successor defines a fresh investigation
+  and excludes this attempt from the next agent's decision context.
 - **Created:** 2026-09-04.
 - **Historical execution authority:** the earlier user request covered this
   plan's then-reviewed implementation cleanup through the real-LLM hold point.

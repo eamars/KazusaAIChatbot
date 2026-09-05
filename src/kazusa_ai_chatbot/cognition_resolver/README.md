@@ -78,6 +78,10 @@ valid affordances while omitting task resolution.
 Task-resolution requests use the caller-provided capability and continuation
 context. The planner sees only the semantic capability roster and does not see
 specialists, queue state, persistence mechanics, or private identifiers.
+Task results are correlated by their validated goal continuation. A cognition
+retry may paraphrase that goal, while the task service reuses its completed
+operation. The observation retains the stored result's original objective and
+evidence so cognition can judge what the executed work actually establishes.
 
 Required task evidence is represented by
 `required_resolver_evidence_dependency.v2`, which contains only the accepted

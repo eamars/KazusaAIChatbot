@@ -10,6 +10,7 @@ import socket
 import subprocess
 import sys
 import time
+import traceback
 from collections.abc import Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -50,6 +51,7 @@ WORKSPACE_ROOT = PROJECT_ROOT.resolve()
 PROBE_NAMES = (
     "sidecar-lifecycle",
     "brain-task-lifecycle",
+    "brain-task-promotion-replay",
     "transport-loss",
 )
 PROCESS_EXIT_TIMEOUT_SECONDS = 15.0
@@ -1036,7 +1038,11 @@ def _mongo_prerequisite_failure(exception: BaseException) -> bool:
     return False
 
 
-async def _brain_task_lifecycle_async(recorder: ProbeRecorder) -> None:
+async def _brain_task_lifecycle_async(
+    recorder: ProbeRecorder,
+    *,
+    promote_checkpoint: bool,
+) -> None:
     database_name = f"_test_kazusa_dsh_probe_{uuid4().hex}"
     data_root = recorder.artifact_dir / "brain-task-data"
     sidecar = start_sidecar(
@@ -1047,6 +1053,7 @@ async def _brain_task_lifecycle_async(recorder: ProbeRecorder) -> None:
             {
                 "name": "kazusa_recall_active_context",
                 "arguments": {"kinds": ["history"], "max_results": 1},
+                "wait": promote_checkpoint,
             },
             {},
         ],
@@ -1062,7 +1069,10 @@ async def _brain_task_lifecycle_async(recorder: ProbeRecorder) -> None:
             )
             from agentic_resolver.runtime import AgenticResolverRuntime
             from kazusa_ai_chatbot.db import task_resolution_sessions
+            from kazusa_ai_chatbot import accepted_task
+            from kazusa_ai_chatbot.background_work import jobs
             from kazusa_ai_chatbot.task_resolution.service import (
+                promote_deferred_task_resolution,
                 resolve_task_inline,
             )
 
@@ -1074,10 +1084,19 @@ async def _brain_task_lifecycle_async(recorder: ProbeRecorder) -> None:
             result = await resolve_task_inline(
                 request,
                 context,
-                inline_budget_seconds=10.0,
+                inline_budget_seconds=0.2 if promote_checkpoint else 10.0,
                 runtime=runtime,
                 binding_store=task_resolution_sessions,
             )
+            if promote_checkpoint:
+                _require(result["status"] == "deferred", "task did not checkpoint")
+                result = await promote_deferred_task_resolution(
+                    result,
+                    context,
+                    binding_store=task_resolution_sessions,
+                    accepted_task_store=accepted_task,
+                    background_queue=jobs,
+                )
             discovered = await _discover_only_binding(database_name)
             session_id = str(discovered["task_session_id"])
             binding = await task_resolution_sessions.find_binding_by_session(
@@ -1087,8 +1106,32 @@ async def _brain_task_lifecycle_async(recorder: ProbeRecorder) -> None:
             thread_id = str(binding["resolution_thread_id"])
             thread = await MongoResolutionThreadRepository().get_thread(thread_id)
             _require(thread is not None, "Mongo resolution thread is unavailable")
-            _require(result["status"] == "resolved", "task did not resolve inline")
-            _require(binding["state"] == "consumed_inline", "binding is not closed")
+            expected_state = "active" if promote_checkpoint else "consumed_inline"
+            expected_status = "deferred" if promote_checkpoint else "resolved"
+            _require(result["status"] == expected_status, "unexpected task result")
+            _require(binding["state"] == expected_state, "unexpected binding state")
+            replay = await resolve_task_inline(
+                {**request, "semantic_goal": "Reworded request for the same goal."},
+                {**context, "current_timestamp_utc": _utc_now()},
+                inline_budget_seconds=10.0,
+                runtime=runtime,
+                binding_store=task_resolution_sessions,
+            )
+            if promote_checkpoint:
+                replay = await promote_deferred_task_resolution(
+                    replay,
+                    context,
+                    binding_store=task_resolution_sessions,
+                    accepted_task_store=accepted_task,
+                    background_queue=jobs,
+                )
+            replay_binding = await task_resolution_sessions.find_binding_by_session(
+                task_session_id=session_id,
+            )
+            replay_thread = await MongoResolutionThreadRepository().get_thread(thread_id)
+            _require(replay == result, "cognition retry changed the admitted result")
+            _require(replay_binding == binding, "cognition retry mutated the binding")
+            _require(replay_thread == thread, "cognition retry executed another operation")
             recorder.observe(
                 "brain_task_lifecycle",
                 readiness_status=readiness["status"],
@@ -1097,6 +1140,9 @@ async def _brain_task_lifecycle_async(recorder: ProbeRecorder) -> None:
                 binding_state=binding["state"],
                 resolution_thread_id=thread_id,
                 thread_state=thread.state,
+                cognition_retry_reused_result=True,
+                accepted_task_id=binding["current_accepted_task_id"],
+                background_job_id=binding["current_background_work_job_id"],
                 database_name=database_name,
             )
         except Exception as exc:
@@ -1111,7 +1157,11 @@ async def _brain_task_lifecycle_async(recorder: ProbeRecorder) -> None:
 
 
 def _brain_task_lifecycle_probe(recorder: ProbeRecorder) -> None:
-    asyncio.run(_brain_task_lifecycle_async(recorder))
+    asyncio.run(_brain_task_lifecycle_async(recorder, promote_checkpoint=False))
+
+
+def _brain_task_promotion_replay_probe(recorder: ProbeRecorder) -> None:
+    asyncio.run(_brain_task_lifecycle_async(recorder, promote_checkpoint=True))
 
 
 def _capability_state(context: Mapping[str, object]) -> dict[str, object]:
@@ -1248,6 +1298,7 @@ def run_probe(probe_name: str, artifact_dir: Path) -> dict[str, object]:
         {
             "sidecar-lifecycle": _sidecar_lifecycle_probe,
             "brain-task-lifecycle": _brain_task_lifecycle_probe,
+            "brain-task-promotion-replay": _brain_task_promotion_replay_probe,
             "transport-loss": _transport_loss_probe,
         }[probe_name](recorder)
     except ProbeBlocked as exc:
@@ -1255,7 +1306,7 @@ def run_probe(probe_name: str, artifact_dir: Path) -> dict[str, object]:
         error = str(exc)
     except Exception as exc:  # noqa: BLE001 - serialize unexpected probe failure.
         status = "failed"
-        error = f"{exc.__class__.__name__}: {exc}"
+        error = "".join(traceback.format_exception(exc))
     result = recorder.result(status, error)
     result_path = artifact_dir / "result.json"
     result_path.write_text(

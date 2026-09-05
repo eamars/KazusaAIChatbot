@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
 import pytest
 
-from tests.task_resolution_test_helpers import _goal_continuation_ref
+from tests.task_resolution_test_helpers import (
+    _context,
+    _goal_continuation_ref,
+    _resolution_ref,
+)
 
 
 def _scene() -> dict[str, object]:
@@ -92,6 +99,99 @@ def _result(status: str) -> dict[str, object]:
     }
 
 
+def test_retried_task_projects_original_objective_and_completed_evidence() -> None:
+    """A paraphrased retry retains the executed task's evidence and identity."""
+
+    from kazusa_ai_chatbot.cognition_resolver import capabilities as owner
+
+    request = {**_request(), "objective": "Reword the same bounded goal."}
+    result = _result("resolved")
+
+    observation = owner._task_resolution_observation(
+        request,
+        _state(),
+        result,
+        durably_promoted=False,
+    )
+
+    assert observation["status"] == "succeeded"
+    assert observation["request_objective"] == result["semantic_objective"]
+    assert observation["goal_continuation_ref"] == request["goal_continuation_ref"]
+    assert observation["knowledge_projection"]["knowledge_we_know_so_far"] == (
+        result["evidence_excerpts"]
+    )
+    assert request["objective"] == "Reword the same bounded goal."
+
+
+def test_task_result_from_another_goal_is_rejected() -> None:
+    """Matching prose cannot substitute for the caller's trusted goal identity."""
+
+    from kazusa_ai_chatbot.cognition_episode import build_goal_continuation_ref
+    from kazusa_ai_chatbot.cognition_resolver import capabilities as owner
+    from kazusa_ai_chatbot.cognition_resolver.contracts import ResolverValidationError
+
+    result = _result("resolved")
+    result["goal_continuation_ref"] = build_goal_continuation_ref(
+        source_episode_id="another-episode",
+        source_message_id="another-message",
+        branch_id="b1",
+        goal_ref={"scope": "user", "kind": "goal", "entity_id": "another-goal"},
+    )
+
+    with pytest.raises(ResolverValidationError, match="continuation reference"):
+        owner._task_resolution_observation(
+            _request(),
+            _state(),
+            result,
+            durably_promoted=False,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("binding_state", ["active", "terminal"])
+async def test_cognition_retry_preserves_promoted_task_and_delivery(binding_state: str) -> None:
+    """Replaying an admitted checkpoint performs no new work or promotion."""
+
+    from kazusa_ai_chatbot.task_resolution import service as owner
+
+    context = _context()
+    request = {**_request(), "objective": "A regenerated description of the same goal."}
+    reference = _resolution_ref()
+    binding = {
+        "state": binding_state,
+        "semantic_objective": "The originally accepted goal.",
+        "goal_continuation_ref": context["goal_continuation_ref"],
+        "source_scope": owner._source_scope(context),
+        "start_spec": owner._build_start_spec(request, context),
+        "resolution_ref": reference,
+        "current_accepted_task_id": "existing-task",
+        "current_background_work_job_id": "existing-job",
+    }
+    store = SimpleNamespace(
+        find_binding_by_session=AsyncMock(return_value=binding),
+        create_task_binding=AsyncMock(),
+    )
+    runtime = SimpleNamespace(open=AsyncMock())
+    accepted = SimpleNamespace(create_or_return_active_accepted_task=AsyncMock())
+    queue = SimpleNamespace(enqueue=AsyncMock())
+
+    replay = await owner.resolve_task_inline(
+        request, context, inline_budget_seconds=1, runtime=runtime, binding_store=store,
+    )
+    promoted = await owner.promote_deferred_task_resolution(
+        replay, context, binding_store=store, accepted_task_store=accepted,
+        background_queue=queue,
+    )
+
+    assert promoted["status"] == "deferred"
+    assert promoted["semantic_objective"] == "The originally accepted goal."
+    assert promoted["checkpoint"] == reference
+    runtime.open.assert_not_awaited()
+    store.create_task_binding.assert_not_awaited()
+    accepted.create_or_return_active_accepted_task.assert_not_awaited()
+    queue.enqueue.assert_not_awaited()
+
+
 
 
 
@@ -118,9 +218,6 @@ def test_task_resolution_v2_context_projects_trusted_source_and_original_episode
     assert context["source_llm_trace_id"] == ""
     assert context["brain_conversation_ref"] == "episode-task-001"
     assert "coding_workspace_root" not in context
-
-
-
 
 
 

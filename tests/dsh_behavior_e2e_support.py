@@ -1,4 +1,4 @@
-"""Isolated real-model support for the three DSH behavior contracts."""
+"""Isolated real-model support for DSH behavior contracts."""
 
 from __future__ import annotations
 
@@ -634,11 +634,14 @@ async def _post_internal_interaction(scenario: Mapping[str, str]) -> dict[str, A
     return result
 
 
-async def _wait_for_deferred_delivery(adapter: CallbackAdapter) -> None:
+async def _wait_for_deferred_delivery(
+    adapter: CallbackAdapter,
+    diagnostics: GuardedDshDiagnostics,
+    channel_id: str,
+) -> None:
     deadline = time.monotonic() + HTTP_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
-        if adapter.deliveries:
-            await asyncio.sleep(2)
+        if adapter.deliveries and await diagnostics.delivery_completed(channel_id):
             return
         await asyncio.sleep(0.5)
     raise RuntimeError("deferred DSH delivery did not settle")
@@ -680,8 +683,10 @@ def _evaluate_case(case: BehaviorCase, evidence: Mapping[str, Any]) -> tuple[dic
             "ambiguity_response_visible": bool(turns[0]["response"]["messages"]),
             "clarified_response_visible": bool(visible),
             "source_owner_literal_preserved": "Mira" in visible,
-            "clarified_correlated_dsh_entry": any(
-                row["source_scope"]["source_message_id"] == turns[-1]["request"]["platform_message_id"]
+            "conversation_correlated_dsh_entry": any(
+                row["source_scope"]["source_message_id"] in {
+                    turn["request"]["platform_message_id"] for turn in turns
+                }
                 for row in mongo["dsh_task_bindings"]
             ),
             "grounded_result_available": any(result["evidence"] for result in results),
@@ -698,6 +703,31 @@ def _evaluate_case(case: BehaviorCase, evidence: Mapping[str, Any]) -> tuple[dic
             "correct_audience": all(row["channel_id"] == channel for row in deliveries),
             "source_owner_literal_preserved": "Rowan" in visible,
             "grounded_result_available": any(result["evidence"] for result in results),
+        })
+    elif case.case_id == "research":
+        visible = "\n".join([
+            *response["turns"][-1]["response"]["messages"],
+            *(row["text"] for row in evidence["adapter"]["delivery_payloads"]),
+        ])
+        checks.update({
+            "correlated_dsh_entry": bool(mongo["dsh_task_bindings"]),
+            "grounded_result_available": any(result["evidence"] for result in results),
+            "documented_class_visible": "DictReader" in visible,
+            "documentation_cited": "https://docs.python.org/3/library/csv.html" in visible,
+        })
+    elif case.case_id == "workspace":
+        visible = "\n".join([
+            *response["turns"][-1]["response"]["messages"],
+            *(row["text"] for row in evidence["adapter"]["delivery_payloads"]),
+        ])
+        artifacts = evidence["workspace_artifacts"]
+        report = artifacts["report.json"]
+        checks.update({
+            "correlated_dsh_entry": bool(mongo["dsh_task_bindings"]),
+            "program_created": bool(artifacts["summarize.py"]),
+            "computed_report_correct": report == {"row_count": 2, "total": 27.5},
+            "task_resolved": any(result["status"] == "resolved" for result in results),
+            "result_visible": bool(visible),
         })
     else:
         interactions = response["interactions"]
@@ -732,12 +762,13 @@ async def _stop_brain(server: Any, task: asyncio.Task[Any]) -> None:
     server.should_exit = True
     try:
         await asyncio.wait_for(asyncio.shield(task), timeout=45)
-    except TimeoutError:
+    except TimeoutError as exc:
         task.cancel()
         try:
             await task
         except asyncio.CancelledError:
             pass
+        raise RuntimeError("Brain graceful shutdown exceeded 45 seconds") from exc
 
 
 async def _execute_case(case: BehaviorCase, artifact_dir: Path) -> int:
@@ -835,9 +866,10 @@ async def _execute_case(case: BehaviorCase, artifact_dir: Path) -> int:
             turn_response = await _post_chat(case_id, text)
             response["turns"].append({"input": text, **turn_response})
             _write_json(artifact_dir / f"turn_{len(response['turns'])}.json", response["turns"][-1])
-        if case_id == "deferred":
+        if case_id in {"deferred", "research", "workspace"}:
             assert adapter is not None
-            await _wait_for_deferred_delivery(adapter)
+            if await diagnostics.has_background_work(channel_id):
+                await _wait_for_deferred_delivery(adapter, diagnostics, channel_id)
         for scenario in case.interaction_inputs:
             interaction = await _post_internal_interaction(scenario)
             response["interactions"].append(interaction)
@@ -861,6 +893,14 @@ async def _execute_case(case: BehaviorCase, artifact_dir: Path) -> int:
                 "elapsed_ms": round((time.perf_counter() - started_at) * 1000),
             },
         }
+        if case_id == "workspace":
+            workspace_root = Path(os.environ["AGENTIC_RESOLVER_WORKSPACE_ROOT"])
+            program_path = workspace_root / "summarize.py"
+            report_path = workspace_root / "report.json"
+            evidence["workspace_artifacts"] = {
+                "summarize.py": program_path.read_text(encoding="utf-8") if program_path.is_file() else None,
+                "report.json": json.loads(report_path.read_text(encoding="utf-8")) if report_path.is_file() else None,
+            }
         checks, failures = _evaluate_case(case, evidence)
         _write_json(artifact_dir / "evidence.json", evidence)
         _write_json(

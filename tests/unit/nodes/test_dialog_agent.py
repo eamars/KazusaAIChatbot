@@ -201,6 +201,35 @@ async def test_dialog_retry_carries_rejected_candidate_and_contract_error(
 
 
 @pytest.mark.asyncio
+async def test_inline_task_source_url_survives_dialog_normalization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Foreground DSH evidence authorizes the model's exact source citation."""
+
+    _patch_dialog_recorders(monkeypatch)
+    source_url = "https://docs.python.org/3/library/csv.html"
+    message = f"The class is csv.DictReader. Source: {source_url}"
+    fake_llm = _SequencedLLM([{"final_dialog": [message]}])
+    monkeypatch.setattr(dialog_module, "_dialog_generator_llm", fake_llm)
+    state = build_dialog_state()
+    state["text_surface_output_v2"]["resolver_result"] = {
+        "capability_kind": "task_resolution_request",
+        "status": "succeeded",
+        "semantic_result": "The CSV documentation identifies DictReader.",
+        "prompt_safe_observation_handle": "resolver_evidence_1",
+        "evidence_state": "complete",
+        "evidence_excerpts": [f"Documentation: {source_url}"],
+        "evidence_handles": ["public_csv_documentation"],
+        "remaining_needs": [],
+    }
+
+    result = await dialog_generator(state)
+
+    assert result["final_dialog"] == [message]
+    assert len(fake_llm.calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_missing_required_source_url_is_appended_without_regeneration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

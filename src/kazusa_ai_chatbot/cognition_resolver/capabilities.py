@@ -988,6 +988,9 @@ def _task_resolution_observation(
 
     validated_result = validate_task_resolution_result(result)
     _validate_task_result_request_binding(request, validated_result)
+    # Report the objective actually executed, including when cognition retries
+    # the same durable goal with newly generated wording.
+    request = {**request, "objective": validated_result["semantic_objective"]}
     status = validated_result["status"]
     if status == "deferred":
         if not durably_promoted:
@@ -1298,12 +1301,8 @@ def _validate_task_result_request_binding(
     request: ResolverCapabilityRequestV1,
     result: TaskResolutionResultV1,
 ) -> None:
-    """Keep a task result bound to the request that authorized it."""
+    """Bind evidence to its trusted goal identity across cognition retries."""
 
-    if result["semantic_objective"] != request["objective"]:
-        raise ResolverValidationError(
-            "task-resolution result objective conflicts with resolver request"
-        )
     if result["goal_continuation_ref"] != _task_continuation_ref(request):
         raise ResolverValidationError(
             "task-resolution result continuation reference conflicts with resolver request"

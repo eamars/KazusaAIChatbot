@@ -37,6 +37,16 @@ system.health is ready only when authenticated route, Standard,
 semantic-worker, web, Brain, catalog, policy, workspace, profile, release,
 and store checks agree. Build and type checking use the package-manager version
 pinned in `package.json`.
+Activation verification allows at most 50 ms of future issuance to account for
+Python/Node wall-clock precision on Windows loopback calls. Expiration has no
+grace period; MAC, scope, audience, generation, and policy checks still apply.
+
+The installed Standard profile exposes native web search. A requested source
+verification requires retrieved text; source links and prior knowledge alone
+produce a partial result with the missing verification stated explicitly.
+On Windows, confined-shell HTTPS may fail with `SEC_E_NO_CREDENTIALS`. DSH
+uses the native shell's exact-command escalation contract and Brain judgment
+for that observed failure. The approval decision controls the retry.
 
 The reusable real-process verification owner is
 `experiments/dsh_runtime_probe.py`. Its `sidecar-lifecycle` mode drives the
@@ -44,8 +54,8 @@ built Standard sidecar through authenticated semantic work, SQLite checkpoint
 restart, and exact terminal replay with a deterministic model endpoint. Use it
 to diagnose recovery after establishing real-model viability through the Brain.
 The dedicated TypeScript test suite is retired; strict production type checking
-and build remain. The whole runtime follows the single
-[completion plan](../../development_plans/active/bugfix/dsh_runtime_completion_plan_2026-09-05.md).
+and build remain. Fresh runtime repairs and verification are recorded in the
+[completion record](../../development_plans/archive/completed/bugfix/dsh_runtime_completion_plan_2026-09-05.md).
 
 `ResolutionSidecarRuntime.forProduction` is the sole executor construction
 boundary. Its injected executor and controls perform real operation joining,

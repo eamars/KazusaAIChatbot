@@ -304,13 +304,13 @@ DSH is the only production route for bounded multi-step task resolution.
 checkpoints and terminal results return through cognition, dialog, dispatcher,
 and adapter delivery. RAG3 remains the ordinary local-context evidence owner.
 
-Install, build, and test the pinned sidecar independently from the Python
+Install, build, and type-check the pinned sidecar independently from the Python
 service:
 
 ```powershell
 corepack pnpm@11.7.0 --dir sidecars/dsh_resolution install --frozen-lockfile
 corepack pnpm@11.7.0 --dir sidecars/dsh_resolution build
-corepack pnpm@11.7.0 --dir sidecars/dsh_resolution test
+corepack pnpm@11.7.0 --dir sidecars/dsh_resolution typecheck
 ```
 
 Start MongoDB and the Brain first. After `/health` is ready, start the sidecar:
@@ -1102,11 +1102,10 @@ venv\Scripts\python -m pytest tests\test_cognition_resolver_contracts.py tests\t
 
 For runtime changes, begin with a small executable probe through the actual
 integration boundary. Diagnose observed failures before adding regression
-checks. DSH uses the single
-[runtime completion plan](../development_plans/active/bugfix/dsh_runtime_completion_plan_2026-09-05.md):
-essential launch/isolation checks, real-model foreground behavior, deferred and
-internal behavior, then recovery and justified hardening. Ownership-manifest
-enforcement and dedicated non-LLM DSH suites were retired by owner direction.
+checks. The DSH
+[runtime completion record](../development_plans/archive/completed/bugfix/dsh_runtime_completion_plan_2026-09-05.md)
+contains fresh foreground, background, internal-judgment, coding and research
+evidence, followed by recovery checks and focused regressions.
 
 Live LLM tests must be run and inspected one at a time:
 
@@ -1115,12 +1114,14 @@ pytest -m live_llm tests/test_cognition_live_llm.py::test_live_msg_decontextuali
 pytest -m live_llm tests/test_dsh_behavior_live_llm.py::test_live_foreground_task_resolution_is_grounded_and_character_owned -q -s
 pytest -m live_llm tests/test_dsh_behavior_live_llm.py::test_live_deferred_task_result_recurs_and_delivers_once -q -s
 pytest -m live_llm tests/test_dsh_behavior_live_llm.py::test_live_internal_dsh_judgment_is_character_owned -q -s
+pytest -m live_llm tests/test_dsh_behavior_live_llm.py::test_live_workspace_program_runs_and_produces_verified_output -q -s
+pytest -m live_llm tests/test_dsh_behavior_live_llm.py::test_live_public_document_and_conversation_evidence -q -s
 ```
 
 Each DSH behavior case writes a guarded technical dossier and a pending
-character-review artifact under `test_artifacts/dsh_behavior_e2e/`. Final DSH
-sign-off remains withheld until all three cases run with available models and
-receive an independent character-behavior review. Live LLM cases remain
+character-review artifact under `test_artifacts/dsh_behavior_e2e/`. Review the
+actual tool evidence, character responses, durable outcomes, and cleanup before
+accepting a technical pass. Live LLM cases remain
 isolated from deterministic contract and browser checks.
 
 Set `KAZUSA_RUN_LIVE_LLM=1` for the explicit DSH live commands. Each wrapper
@@ -1129,6 +1130,10 @@ behavior rubric. Foreground coverage asks about conflicting release notes and
 then clarifies the release. Deferred coverage compares documents with a missing
 fact and checks the actual result delivery. Internal coverage pairs an
 answerable question with an unsupported success approval request.
+Workspace coverage creates and runs a Python program against a supplied CSV,
+then verifies the generated JSON and the character's reported result.
+Research coverage retrieves public Python documentation and searches scoped
+conversation history for a user preference that was never supplied.
 
 Each case uses a unique guarded `_test_kazusa_dsh_behavior_<uuid>` database.
 The harness uses public application setup APIs and a separate guarded

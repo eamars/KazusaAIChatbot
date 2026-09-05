@@ -299,10 +299,20 @@ async def test_progress_diagnostics_classify_guarded_write_outcomes(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('recent_turn_refs', 'expected_disposition'),
+    [
+        (['row:row_source_1'], 'reconciled_written'),
+        (['trace:trace_current'], 'reconciled_written'),
+        (['trace:another_turn'], 'reconciled_absent'),
+    ],
+)
 async def test_interrupted_record_does_not_publish_uncommitted_cache_state(
     monkeypatch,
+    recent_turn_refs,
+    expected_disposition,
 ):
-    """Cancellation keeps the previous cache state unpublished."""
+    """Audit the actual committed references, then propagate cancellation."""
 
     monkeypatch.setattr(
         runtime,
@@ -316,8 +326,8 @@ async def test_interrupted_record_does_not_publish_uncommitted_cache_state(
     )
     monkeypatch.setattr(
         runtime,
-        '_reconcile_after_interruption',
-        AsyncMock(return_value='reconciled_absent'),
+        'load_active_packet',
+        AsyncMock(return_value=packet(recent_turn_refs=recent_turn_refs)),
     )
     event_recorder = AsyncMock()
     monkeypatch.setattr(
@@ -326,19 +336,20 @@ async def test_interrupted_record_does_not_publish_uncommitted_cache_state(
         event_recorder,
     )
 
-    result = await runtime.ConversationProgressRuntime().record(
-        record_input=record_input(),
-    )
+    with pytest.raises(asyncio.CancelledError):
+        await runtime.ConversationProgressRuntime().record(
+            record_input=record_input(),
+        )
 
-    assert result['written'] is False
-    assert result['cache_updated'] is False
-    assert result['reconciliation_status'] == 'reconciled_absent'
     assert cache.get_cached_packet(
         scope=SCOPE,
         current_timestamp_utc='2026-07-28T09:30:00+00:00',
     ) is None
     event_recorder.assert_awaited_once()
     assert event_recorder.await_args.kwargs['status'] == 'reconciled'
+    assert event_recorder.await_args.kwargs['write_disposition'] == (
+        expected_disposition
+    )
 
 
 def test_database_wins_equal_turn_count_and_cache_wins_only_when_newer():

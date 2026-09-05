@@ -307,7 +307,8 @@ Interrupted progress writes are reconciled by deterministic source references
 and an opaque scope/source operation key. Reconciliation performs only a
 bounded packet read after interruption or a guarded-write loss; it adds no
 foreground model call or retry and does not alter the guarded replacement
-write algorithm.
+write algorithm. After reconciliation and audit, caller cancellation propagates
+to the owning worker so service shutdown can finish.
 
 ## Storage Lifecycle
 
