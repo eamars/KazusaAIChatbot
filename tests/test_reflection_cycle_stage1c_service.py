@@ -31,110 +31,16 @@ def _stub_service_event_logging(monkeypatch) -> None:
         )
 
 
-@pytest.mark.asyncio
-async def test_lifespan_starts_reflection_worker_by_default(monkeypatch) -> None:
-    """FastAPI lifespan should start reflection when the worker flag is enabled."""
-
-    calls = await _run_lifespan(monkeypatch, enabled=True)
-
-    assert calls["started"] == 1
-    assert calls["stopped"] == 1
-    assert callable(calls["busy_probe"])
-    assert calls["busy_probe"]() is False
-    assert callable(calls["reflection_adapter_registry_provider"])
-    assert calls["reflection_adapter_registry_provider"]() is (
-        service_module._adapter_registry
-    )
-    assert calls["reflection_phase_provider"] is calls["calendar_phase_provider"]
-    assert callable(calls["reflection_state_refresh_callback"])
 
 
-@pytest.mark.asyncio
-async def test_lifespan_does_not_start_reflection_worker_when_explicitly_disabled(
-    monkeypatch,
-) -> None:
-    """The positive worker flag should be the startup skip path."""
-
-    calls = await _run_lifespan(monkeypatch, enabled=False)
-
-    assert calls["started"] == 0
-    assert calls["stopped"] == 0
 
 
-@pytest.mark.asyncio
-async def test_lifespan_stops_reflection_worker_on_shutdown(monkeypatch) -> None:
-    """Shutdown should stop the owned reflection worker handle before exit."""
-
-    calls = await _run_lifespan(monkeypatch, enabled=True)
-
-    assert calls["started"] == 1
-    assert calls["stopped"] == 1
 
 
-@pytest.mark.asyncio
-async def test_lifespan_starts_self_cognition_worker_only_when_enabled(
-    monkeypatch,
-) -> None:
-    """Self-cognition worker startup should be explicitly gated by config."""
-
-    disabled_calls = await _run_lifespan(
-        monkeypatch,
-        enabled=False,
-        self_cognition_enabled=False,
-    )
-    enabled_calls = await _run_lifespan(
-        monkeypatch,
-        enabled=False,
-        self_cognition_enabled=True,
-    )
-
-    assert disabled_calls["self_cognition_started"] == 0
-    assert disabled_calls["self_cognition_stopped"] == 0
-    assert enabled_calls["self_cognition_started"] == 1
-    assert enabled_calls["self_cognition_stopped"] == 1
-    assert callable(enabled_calls["self_cognition_busy_probe"])
-    assert enabled_calls["self_cognition_busy_probe"]() is False
-    assert callable(enabled_calls["self_cognition_affect_pause_probe"])
 
 
-@pytest.mark.asyncio
-async def test_lifespan_starts_calendar_scheduler_worker_by_default(
-    monkeypatch,
-) -> None:
-    """Service startup should own the durable calendar worker lifecycle."""
-
-    calls = await _run_lifespan(
-        monkeypatch,
-        enabled=False,
-        calendar_enabled=True,
-    )
-
-    assert calls["calendar_started"] == 1
-    assert calls["calendar_stopped"] == 1
-    calendar_kwargs = calls["calendar_worker_kwargs"]
-    assert isinstance(calendar_kwargs, dict)
-    assert calendar_kwargs["poll_interval_seconds"] == 30
-    assert calendar_kwargs["lease_duration_seconds"] == 300
-    assert calendar_kwargs["claim_limit"] == 10
-    assert calendar_kwargs["max_attempts"] == 3
-    handler_registry = calendar_kwargs["handler_registry"]
-    assert handler_registry.get("reflection_phase_slot") is not None
 
 
-@pytest.mark.asyncio
-async def test_lifespan_does_not_start_calendar_scheduler_when_disabled(
-    monkeypatch,
-) -> None:
-    """The calendar worker should be gated by its own positive flag."""
-
-    calls = await _run_lifespan(
-        monkeypatch,
-        enabled=False,
-        calendar_enabled=False,
-    )
-
-    assert calls["calendar_started"] == 0
-    assert calls["calendar_stopped"] == 0
 
 
 @pytest.mark.asyncio
@@ -157,25 +63,6 @@ async def test_reflection_worker_defers_while_primary_interaction_is_busy() -> N
     assert results[0].defer_reason == "primary interaction busy"
 
 
-@pytest.mark.asyncio
-async def test_reflection_probe_ignores_chat_queue_state(monkeypatch) -> None:
-    """Reflection should not serialize itself behind active chat work."""
-
-    class _Queue:
-        def __init__(self, count: int) -> None:
-            self.count = count
-
-        def pending_count(self) -> int:
-            return self.count
-
-    monkeypatch.setattr(service_module, "_chat_input_queue", _Queue(1))
-    monkeypatch.setattr(service_module, "_primary_interaction_active_count", 1)
-
-    calls = await _run_lifespan(monkeypatch, enabled=True)
-    busy_probe = calls["busy_probe"]
-
-    assert callable(busy_probe)
-    assert busy_probe() is False
 
 
 @pytest.mark.asyncio

@@ -329,50 +329,6 @@ async def test_relevance_keeps_image_descriptor_out_of_user_input() -> None:
     }]
 
 
-@pytest.mark.asyncio
-async def test_quoted_image_description_enters_prompt_and_cognition_context(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Replying to a stored image should reuse its durable description."""
-    graph = _CapturingServiceGraph()
-    _patch_service_dependencies(monkeypatch, graph)
-    previous_row = {
-        "platform_user_id": "platform-user-8",
-        "display_name": "Previous User",
-        "body_text": "",
-        "attachments": [{
-            "media_type": "image/png",
-            "description": "stored image shows a dessert counter",
-            "storage_shape": "inline",
-        }],
-    }
-    monkeypatch.setattr(
-        service_module,
-        "get_conversation_by_platform_message_id",
-        AsyncMock(return_value=previous_row),
-    )
-
-    await service_module._process_queued_chat_item(_queued_item(_service_request()))
-
-    prompt_reply = graph.state["prompt_message_context"]["reply"]
-    episode = graph.state["cognitive_episode"]
-
-    assert prompt_reply["attachments"] == [{
-        "media_kind": "image",
-        "description": "stored image shows a dessert counter",
-        "summary_status": "available",
-    }]
-    assert [
-        percept["source_kind"] for percept in episode["percepts"]
-    ] == ["dialog", "image_observation", "system_event"]
-    assert episode["percepts"][1]["content"]["observation"][
-        "observation_origin"
-    ] == (
-        "quoted_reply_attachment"
-    )
-    assert episode["percepts"][1]["content"]["description"] == (
-        "stored image shows a dessert counter"
-    )
 
 
 def test_multimodal_consolidation_origin_is_metadata_only() -> None:

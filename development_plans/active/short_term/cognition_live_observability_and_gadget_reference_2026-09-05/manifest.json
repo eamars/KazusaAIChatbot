@@ -1,0 +1,33 @@
+{
+  "schema_version": "cognition_mockup_reference_manifest.v1",
+  "preserved_on": "2026-09-05",
+  "plan": "../cognition_live_observability_and_gadget_plan_2026-09-05.md",
+  "source_commit_at_planning": "f1c6f06f5b781391bf80d7df45b2c3b5fbda2b99",
+  "recorded_trace_id": "llmtrace_00cc86d6c36c4157ad40e59a01cd2572",
+  "recorded_trace_scope": "One cognition cycle, with two P-stage attempts. Selected accepted semantic output and existing console observations; reconstructed playback timing.",
+  "multi_cycle_scope": "Fictional three-cycle example with two evidence handoffs. All scenario content and timings are illustrative.",
+  "preservation": "Exact copies of the browser-checked HTML and screenshot files. HTML includes its CSS, avatar and scenario data; no local preview server is required.",
+  "production_playback": false,
+  "files": [
+    {
+      "path": "trace.html",
+      "bytes": 3102289,
+      "sha256": "095c04f88055db0742c7d702d618b6950d9194a720047fa447e49b642b43aa11"
+    },
+    {
+      "path": "multi-cycle.html",
+      "bytes": 3101995,
+      "sha256": "e4496571ad466be4ec9994040003e4261f6ff4c4adf57159772b5a40a9e05ed8"
+    },
+    {
+      "path": "trace-preview.png",
+      "bytes": 48165,
+      "sha256": "2ea798ab0224d98039a0b843d19f2dca5c319b18457d1100545a17c56c1e74dc"
+    },
+    {
+      "path": "multi-cycle-preview.png",
+      "bytes": 64494,
+      "sha256": "2069a2580c33f5630524ee1dd182a1fa62bbb882f68505bf5bef51132cbc27e9"
+    }
+  ]
+}

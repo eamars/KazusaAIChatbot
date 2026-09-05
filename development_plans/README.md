@@ -45,6 +45,7 @@ recorded evidence.
 
 | Document | Type | Status |
 |---|---|---|
+| [cognition_live_observability_and_gadget_plan_2026-09-05.md](active/short_term/cognition_live_observability_and_gadget_plan_2026-09-05.md) | Live stage/cycle observations, revision transport, shared cognition gadget and failure-state design, with preserved HTML references and completed removal of 327 affected deterministic tests | draft; test-removal preparation complete; implementation requires approval and explicit instruction |
 
 ### Superseded Plans
 

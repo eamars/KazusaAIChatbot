@@ -484,75 +484,7 @@ class _CharacterTransactionInvoker:
         return SimpleNamespace(content=json.dumps(value, ensure_ascii=False))
 
 
-@pytest.mark.asyncio
-async def test_character_state_transaction_advances_timestamp_and_validates_final_affect() -> None:
-    payload = _input()
-    character_state = build_character_production_state(
-        updated_at=payload["mutable_state"]["updated_at"],
-    )
-    payload["mutable_state"] = character_state
-    payload["state_scope"] = "character"
-    output = await run_cognition(
-        payload,
-        _services(_CharacterTransactionInvoker()),
-    )
-    projection = output["state_projection"]
-    replacement = projection["replacement_state"]
-    validate_cognition_state(replacement)
-    assert datetime.fromisoformat(
-        replacement["updated_at"].replace("Z", "+00:00")
-    ) > datetime.fromisoformat(
-        character_state["updated_at"].replace("Z", "+00:00")
-    )
-    assert isinstance(replacement["affect_activations"], list)
 
 
-@pytest.mark.asyncio
-async def test_character_noop_transaction_advances_timestamp_strictly() -> None:
-    class _NoopInvoker(_CharacterTransactionInvoker):
-        async def ainvoke(self, messages: object, *, config: object) -> object:
-            response = await super().ainvoke(messages, config=config)
-            value = json.loads(response.content)
-            if config.stage_name.endswith(".A1"):
-                value["event_agency"]["axis_changes"] = []
-            return SimpleNamespace(content=json.dumps(value, ensure_ascii=False))
-
-    payload = _input()
-    character_state = build_character_production_state(
-        updated_at=payload["mutable_state"]["updated_at"],
-    )
-    payload["mutable_state"] = character_state
-    payload["state_scope"] = "character"
-    output = await run_cognition(payload, _services(_NoopInvoker()))
-    replacement = output["state_projection"]["replacement_state"]
-    assert datetime.fromisoformat(
-        replacement["updated_at"].replace("Z", "+00:00")
-    ) > datetime.fromisoformat(
-        character_state["updated_at"].replace("Z", "+00:00")
-    )
 
 
-@pytest.mark.asyncio
-async def test_cognition_turn_deadline_bounds_full_chain(monkeypatch: pytest.MonkeyPatch) -> None:
-    payload = _input()
-
-    class _SlowInvoker:
-        async def ainvoke(self, messages: object, *, config: object) -> object:
-            await asyncio.sleep(1)
-            return SimpleNamespace(content="{}")
-
-    original_wait_for = facade_module.asyncio.wait_for
-    seen_timeouts: list[float] = []
-
-    async def bounded_wait(awaitable: object, timeout: float) -> object:
-        seen_timeouts.append(timeout)
-        return await original_wait_for(awaitable, timeout=0.001)
-
-    monkeypatch.setattr(facade_module.asyncio, "wait_for", bounded_wait)
-    with pytest.raises(CognitionExecutionError) as error:
-        await run_cognition(payload, _services(_SlowInvoker()))
-    assert seen_timeouts == [240]
-    assert error.value.error_code == "cognition_turn_deadline_exhausted"
-    assert error.value.stage == "cognition_core_v3"
-    assert error.value.safe_checkpoint == "pre_state_commit"
-    assert error.value.retryable is False

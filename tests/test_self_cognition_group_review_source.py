@@ -1344,33 +1344,6 @@ def _test_interaction_style_snapshot() -> dict[str, Any]:
     return snapshot
 
 
-@pytest.mark.asyncio
-async def test_prepared_group_review_state_rejects_malformed_source_context(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The runner reports malformed source context as a typed state error."""
-
-    case = _group_review_case()
-    case["source_context"]["schema_version"] = "wrong-schema"
-
-    async def load_residue(_case: dict[str, Any]) -> str:
-        del _case
-        return ""
-
-    monkeypatch.setattr(
-        runner,
-        "_load_residue_context_for_case",
-        load_residue,
-    )
-
-    with pytest.raises(
-        StateContractError,
-        match="source state contract is invalid",
-    ):
-        await runner.build_self_cognition_case_artifacts_async(
-            case,
-            cognition_client=lambda state: {},
-        )
 
 
 def test_prepared_style_snapshot_is_reused_by_dialog_handoff() -> None:

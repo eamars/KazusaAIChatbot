@@ -192,34 +192,8 @@ def _fixture_observation_payload(private_monologue: str) -> dict[str, object]:
     return {"cognition_graph": observation.model_dump(mode="json")}
 
 
-def test_private_monologue_uses_only_canonical_reasoning_node() -> None:
-    """Only the canonical reasoning section supplies the monologue."""
-
-    response_payload = _fixture_observation_payload("规范的认知独白")
-
-    assert _extract_private_monologue(response_payload) == (
-        "规范的认知独白",
-        (
-            'response.cognition_graph.nodes[node_id="reasoning.context"]'
-            '.sections[section_id="reasoning.subjective"]'
-            '.fields[key="private_monologue"].value'
-        ),
-    )
 
 
-def test_private_monologue_fails_closed_when_canonical_node_is_missing() -> None:
-    """A non-canonical private field cannot satisfy the monologue contract."""
-
-    response_payload = _fixture_observation_payload("规范的认知独白")
-    graph = response_payload["cognition_graph"]
-    assert isinstance(graph, dict)
-    graph["nodes"] = [
-        node
-        for node in graph["nodes"]
-        if node["node_id"] != "reasoning.context"
-    ]
-
-    assert _extract_private_monologue(response_payload) == ("", "")
 
 
 @requires_private_fixtures

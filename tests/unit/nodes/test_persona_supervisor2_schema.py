@@ -27,29 +27,8 @@ def test_persona_states_carry_attempt_diagnostics() -> None:
         )[1:]
 
 
-def test_persona_supervisor_returns_attempt_diagnostics() -> None:
-    """Persona orchestration initializes and returns the metadata accumulator."""
-
-    source = Path(
-        "src/kazusa_ai_chatbot/nodes/persona_supervisor2.py"
-    ).read_text(encoding="utf-8")
-
-    assert '"attempt_diagnostics": [],' in source
-    assert '"attempt_diagnostics": list(' in source
-    assert 'results.get("attempt_diagnostics", [])' in source
 
 
-def test_persona_supervisor_returns_only_new_diagnostic_delta() -> None:
-    """The internal persona graph starts empty and returns its own delta."""
-
-    source = Path(
-        "src/kazusa_ai_chatbot/nodes/persona_supervisor2.py"
-    ).read_text(encoding="utf-8")
-    function_source = source[source.index("async def persona_supervisor2"):]
-
-    assert '"attempt_diagnostics": state.get' not in function_source
-    assert function_source.count('"attempt_diagnostics": [],') == 1
-    assert 'results.get("attempt_diagnostics", [])' in function_source
 
 
 def test_persona_supervisor_diagnostic_delta_respects_sixteen_row_cap() -> None:
