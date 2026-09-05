@@ -19,22 +19,6 @@ from kazusa_ai_chatbot.brain_service.cognition_observation_projection import (
 _NOW = datetime(2026, 8, 26, 1, 2, 3, tzinfo=timezone.utc)
 
 
-def test_brain_service_exports_only_canonical_observation_wire_models() -> None:
-    """Brain exports wire DTOs while keeping projection implementation private."""
-
-    from kazusa_ai_chatbot import brain_service
-
-    assert set(brain_service.__all__) == {
-        "CognitionObservationCorrelationV1",
-        "CognitionObservationDisclosureV1",
-        "CognitionObservationEdgeV1",
-        "CognitionObservationFieldV1",
-        "CognitionObservationNodeV1",
-        "CognitionObservationRecordV1",
-        "CognitionObservationSectionV1",
-        "CognitionRunObservationV1",
-    }
-    assert "build_live_cognition_observation" not in brain_service.__all__
 
 
 def _observation_payload() -> dict[str, object]:

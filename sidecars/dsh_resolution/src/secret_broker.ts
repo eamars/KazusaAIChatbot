@@ -1,10 +1,5 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
 import { CredentialProvider, type CredentialKey, type CredentialRecord, type CredentialRecordEntry, type CredentialRef, type CredentialInfo, type CredentialRecordInfo, type ResolvedCredential } from "@deepseek-ai/dsh-credentials";
 import type { Context } from "@deepseek-ai/cordis";
-
-const execFileAsync = promisify(execFile);
 
 const PROTECTED_NAMES = [
   "AGENTIC_RESOLVER_LLM_API_KEY",
@@ -23,7 +18,6 @@ export interface SecretBroker {
   /** Resolve one named credential inside host-owned adapter/provider code. */
   resolveHostCredential(name: string): string | undefined;
   nativeEnvironment(): Record<string, string>;
-  runNativeProbe(): Promise<Record<string, string | null>>;
   resolveWebCredential(
     name: string,
     credentials?: Record<string, string | undefined>,
@@ -47,34 +41,6 @@ export function createSecretBroker(options: {
     },
     nativeEnvironment() {
       return { ...nativeEnvironment };
-    },
-    async runNativeProbe() {
-      const command = process.platform === "win32"
-        ? ["-NoLogo", "-NoProfile", "-Command", "& { $o = [ordered]@{}; "
-          + "'AGENTIC_RESOLVER_LLM_API_KEY','KAZUSA_DSH_RPC_TOKEN',"
-          + "'KAZUSA_DSH_BRAIN_SHARED_SECRET','KAZUSA_DSH_TOOL_GATEWAY_SECRET',"
-          + "'KAZUSA_DSH_CAPABILITY_TOKEN','DEEPSEEK_API_KEY' | ForEach-Object { $o[$_] = [Environment]::GetEnvironmentVariable($_) }; "
-          + "$o | ConvertTo-Json -Compress }"]
-        : ["-c", "node -e 'console.log(JSON.stringify(process.env))'"];
-      const executable = process.platform === "win32" ? "pwsh" : "bash";
-      const result = await execFileAsync(executable, command, {
-        env: nativeEnvironment,
-        windowsHide: true,
-        maxBuffer: 64 * 1024,
-      });
-      let parsed: Record<string, unknown> = {};
-      try {
-        const value: unknown = JSON.parse(result.stdout.trim());
-        if (value !== null && typeof value === "object" && !Array.isArray(value)) {
-          parsed = value as Record<string, unknown>;
-        }
-      } catch {
-        parsed = {};
-      }
-      return Object.fromEntries(PROTECTED_NAMES.map((name) => {
-        const value = parsed[name];
-        return [name, typeof value === "string" && value.length > 0 ? value : null];
-      })) as Record<string, string | null>;
     },
     resolveWebCredential(name, credentials = {}, launchEnvironment = {}) {
       const value = credentials[name] ?? launchEnvironment[name] ?? hostSecrets[name];

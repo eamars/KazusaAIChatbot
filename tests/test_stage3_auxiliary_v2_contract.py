@@ -21,16 +21,6 @@ EXPECTED_CAPABILITIES = {
 }
 
 
-def test_action_registry_contains_the_complete_native_roster() -> None:
-    """The registry includes the closed DSH accepted-task control action."""
-
-    registry_module = importlib.import_module(
-        "kazusa_ai_chatbot.action_spec.registry",
-    )
-
-    capabilities = registry_module.build_initial_action_capabilities()
-
-    assert set(capabilities) == EXPECTED_CAPABILITIES
 
 
 def test_tool_result_affordances_exclude_new_delayed_task_creation() -> None:

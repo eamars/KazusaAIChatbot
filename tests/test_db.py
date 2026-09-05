@@ -20,7 +20,6 @@ import kazusa_ai_chatbot.db.self_cognition as db_self_cognition_module
 import kazusa_ai_chatbot.db.script_operations as db_script_operations_module
 import kazusa_ai_chatbot.db.users as db_users_module
 from kazusa_ai_chatbot.db import (
-    RUNTIME_CHARACTER_STATE_FIELDS,
     build_memory_doc,
     close_db,
     compose_character_profile,
@@ -1200,13 +1199,6 @@ async def test_db_bootstrap_preserves_legacy_background_artifact_collection(
     assert "background_artifact_jobs" not in db.dropped_collections
 
 
-def test_db_facade_exports_calendar_schema_docs() -> None:
-    """Calendar schedule and run schemas should be public facade exports."""
-
-    assert db_module.CalendarScheduleDoc.__name__ == "CalendarScheduleDoc"
-    assert db_module.CalendarRunDoc.__name__ == "CalendarRunDoc"
-    assert "CalendarScheduleDoc" in db_module.__all__
-    assert "CalendarRunDoc" in db_module.__all__
 
 
 @pytest.mark.asyncio

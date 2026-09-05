@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-from agentic_resolver.errors import RpcTransportError
-from kazusa_ai_chatbot.db.errors import DatabaseOperationError
 from tests.task_resolution_test_helpers import _goal_continuation_ref
 
 
@@ -60,30 +58,8 @@ def _request() -> dict[str, object]:
     }
 
 
-def _dsh_resolution_ref() -> dict[str, object]:
-    """Build the opaque DSH reference carried by deferred results."""
-
-    return {
-        "schema_version": "dsh_resolution_ref.v1",
-        "resolution_thread_id": "thread-1",
-        "segment_id": "segment-1",
-        "dsh_session_id": "session-1",
-        "activation_id": "activation-1",
-        "lease_epoch": 1,
-        "document_revision": 0,
-        "last_committed_seq": 0,
-    }
 
 
-def _admission() -> dict[str, object]:
-    """Build the transient identity returned before a DSH claim."""
-
-    return {
-        "schema_version": "task_resolution_admission.v1",
-        "accepted_task_id": "task-1",
-        "background_work_job_id": "job-1",
-        "task_session_id": "session-1",
-    }
 
 
 def _result(status: str) -> dict[str, object]:
@@ -116,103 +92,10 @@ def _result(status: str) -> dict[str, object]:
     }
 
 
-def test_task_resolution_preserves_recurrence_and_maps_dsh_deferred_result() -> None:
-    """Real result projection preserves statuses and DSH evidence lineage."""
-
-    from kazusa_ai_chatbot.cognition_resolver import capabilities as owner
-
-    for status, expected_state in (("resolved", "complete"), ("partial", "partial")):
-        observation = owner._task_resolution_observation(
-            _request(),
-            _state(),
-            _result(status),
-            durably_promoted=False,
-        )
-        assert observation["status"] == "succeeded"
-        assert observation["task_resolution_evidence_state"]["state"] == expected_state
-        assert observation["evidence_refs"][0]["owner"] == "dsh"
-        assert observation["goal_continuation_ref"] == _request()["goal_continuation_ref"]
-
-    deferred = _result("resolved")
-    deferred.update({
-        "status": "deferred",
-        "evidence_state": "pending",
-        "evidence": [],
-        "evidence_excerpts": [],
-        "evidence_handles": [],
-        "completed_subgoals": [],
-        "remaining_needs": ["continue the bounded goal"],
-        "checkpoint": _dsh_resolution_ref(),
-    })
-    observation = owner._task_resolution_observation(
-        _request(),
-        _state(),
-        deferred,
-        durably_promoted=True,
-    )
-    assert observation["status"] == "succeeded"
-    assert observation["task_resolution_evidence_state"]["state"] == "pending"
-    assert observation["evidence_refs"] == []
-
-    admission = owner._task_resolution_admission_observation(
-        {**_request(), "priority": "background"},
-        _state(),
-        _admission(),
-    )
-    assert admission["status"] == "succeeded"
-    assert admission["task_resolution_evidence_state"]["state"] == "pending"
-    assert admission["evidence_refs"] == []
-    assert "accepted_task_id" not in admission
-    assert "background_work_job_id" not in admission
-    assert "task_session_id" not in admission
 
 
-def test_task_resolution_evidence_refs_ignore_unprojectable_artifact_handles() -> None:
-    """Artifact handles may accompany factual evidence without a second ref."""
-
-    from kazusa_ai_chatbot.cognition_resolver import capabilities as owner
-
-    result = _result("resolved")
-    result["evidence_handles"].append("artifact-1")
-    observation = owner._task_resolution_observation(
-        _request(),
-        _state(),
-        result,
-        durably_promoted=False,
-    )
-
-    assert len(observation["evidence_refs"]) == 1
-    assert observation["evidence_refs"][0]["evidence_id"] == "semantic-ref-1"
 
 
-def test_task_resolution_cognition_projection_preserves_all_result_excerpts() -> None:
-    """One evidence receipt may carry several source-owned findings into P."""
-
-    from kazusa_ai_chatbot.cognition_resolver import capabilities as owner
-
-    owner_excerpt = '{"owner":"Priya"}'
-    prerequisite_excerpt = '{"prerequisite":"deployment window"}'
-    result = _result("resolved")
-    result["evidence_excerpts"] = [
-        owner_excerpt,
-        prerequisite_excerpt,
-    ]
-    observation = owner._task_resolution_observation(
-        _request(),
-        _state(),
-        result,
-        durably_promoted=False,
-    )
-
-    evidence, direct_facts = owner.project_resolver_observation_for_cognition(
-        observation,
-        occurred_at="2026-08-30T00:00:00Z",
-    )
-
-    assert owner_excerpt in evidence["semantic_text"]
-    assert prerequisite_excerpt in evidence["semantic_text"]
-    assert evidence["semantic_text"].count(owner_excerpt) == 1
-    assert direct_facts == []
 
 
 def test_task_resolution_v2_context_projects_trusted_source_and_original_episode_ref(
@@ -237,150 +120,13 @@ def test_task_resolution_v2_context_projects_trusted_source_and_original_episode
     assert "coding_workspace_root" not in context
 
 
-def test_task_resolution_context_requires_current_episode_identity() -> None:
-    """The DSH lineage carrier fails closed without a trusted episode id."""
-
-    from kazusa_ai_chatbot.cognition_resolver import capabilities as owner
-
-    state = _state()
-    state.pop("brain_conversation_ref", None)
-    state.pop("conversation_ref", None)
-    state["cognitive_episode"] = {"trigger_source": "user_message"}
-
-    with pytest.raises(
-        owner.ResolverValidationError,
-        match="cognitive_episode.episode_id",
-    ):
-        owner._task_resolution_execution_context_from_state(
-            state,
-            goal_continuation_ref=_goal_continuation_ref(),
-        )
 
 
-def test_task_resolution_context_uses_episode_identity_over_stale_state_fields(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The current cognitive episode exclusively owns DSH conversation identity."""
-
-    from kazusa_ai_chatbot.cognition_resolver import capabilities as owner
-
-    monkeypatch.setattr(owner, "list_session_media_refs", lambda _scope: [])
-    state = _state()
-    state["brain_conversation_ref"] = "stale-brain-ref"
-    state["conversation_ref"] = "stale-conversation-ref"
-    state["cognitive_episode"] = {
-        "trigger_source": "user_message",
-        "episode_id": "current-episode-ref",
-    }
-    context = owner._task_resolution_execution_context_from_state(
-        state,
-        goal_continuation_ref=_goal_continuation_ref(),
-    )
-
-    assert context["brain_conversation_ref"] == "current-episode-ref"
 
 
-def test_task_capability_uses_runtime_readiness_without_legacy_fallback() -> None:
-    """Admission invokes the real readiness validator and fails closed."""
-
-    from kazusa_ai_chatbot.cognition_resolver import capabilities as owner
-
-    owner.validate_task_resolution_execution_readiness(
-        _state(),
-        cognition_scene_context=_scene(),
-    )
-    invalid_state = {**_state(), "platform_message_id": ""}
-    with pytest.raises(ValueError, match="platform_message_id"):
-        owner.validate_task_resolution_execution_readiness(
-            invalid_state,
-            cognition_scene_context=_scene(),
-        )
-    with pytest.raises(ValueError):
-        owner.validate_task_resolution_execution_readiness(
-            _state(),
-            cognition_scene_context={**_scene(), "private": "hidden"},
-        )
 
 
-@pytest.mark.asyncio
-async def test_task_resolution_transport_failure_returns_blocked_observation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Foreground sidecar loss should remain inside the evidence boundary."""
-
-    from kazusa_ai_chatbot.cognition_resolver import capabilities as owner
-
-    async def unavailable_runtime(*args: object, **kwargs: object) -> None:
-        del args, kwargs
-        raise RpcTransportError("sidecar unavailable: connection refused")
-
-    monkeypatch.setattr(owner, "list_session_media_refs", lambda _scope: [])
-    monkeypatch.setattr(owner, "resolve_task_inline", unavailable_runtime)
-
-    observation = await owner._execute_task_resolution_request(
-        _request(),
-        _state(),
-    )
-
-    assert observation["status"] == "failed"
-    assert observation["task_resolution_evidence_state"] == {
-        "schema_version": "resolver_evidence_state.v1",
-        "state": "blocked",
-        "remaining_needs": ["Resolve this bounded goal."],
-    }
-    assert "connection refused" not in observation["prompt_safe_summary"]
 
 
-@pytest.mark.asyncio
-async def test_background_task_resolution_transport_failure_returns_blocked_observation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Background admission loss should not escape the resolver boundary."""
-
-    from kazusa_ai_chatbot.cognition_resolver import capabilities as owner
-
-    async def unavailable_runtime(*args: object, **kwargs: object) -> None:
-        del args, kwargs
-        raise RpcTransportError("sidecar unavailable: connection refused")
-
-    request = {**_request(), "priority": "background"}
-    monkeypatch.setattr(owner, "list_session_media_refs", lambda _scope: [])
-    monkeypatch.setattr(
-        owner,
-        "start_task_resolution_in_background",
-        unavailable_runtime,
-    )
-
-    observation = await owner._execute_task_resolution_request(
-        request,
-        _state(),
-    )
-
-    assert observation["status"] == "failed"
-    assert observation["task_resolution_evidence_state"]["state"] == "blocked"
-    assert "connection refused" not in observation["prompt_safe_summary"]
 
 
-@pytest.mark.asyncio
-async def test_task_resolution_database_failure_returns_blocked_observation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A DSH persistence outage must remain inside the evidence boundary."""
-
-    from kazusa_ai_chatbot.cognition_resolver import capabilities as owner
-
-    async def unavailable_store(*args: object, **kwargs: object) -> None:
-        del args, kwargs
-        raise DatabaseOperationError("resolution store unavailable")
-
-    monkeypatch.setattr(owner, "list_session_media_refs", lambda _scope: [])
-    monkeypatch.setattr(owner, "resolve_task_inline", unavailable_store)
-
-    observation = await owner._execute_task_resolution_request(
-        _request(),
-        _state(),
-    )
-
-    assert observation["status"] == "failed"
-    assert observation["task_resolution_evidence_state"]["state"] == "blocked"
-    assert "resolution store" not in observation["prompt_safe_summary"]

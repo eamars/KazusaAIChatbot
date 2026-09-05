@@ -50,6 +50,12 @@ semantic tool choice and task judgment under the pinned Standard profile.
 This service is also the sole owner of the foreground inline timeout. It either
 returns a terminal result or commits and projects the same session's deferred
 checkpoint before control returns to cognition.
+Caller cancellation before durable background attachment settles fenced
+cancellation or an already committed terminal outcome, then joins owned local
+work. An uncertain remote outcome remains a typed fault in the binding.
+Cancellation during deferred promotion inspects the durable attachments:
+committed accepted-task/job ownership survives; partial promotion is fenced
+through the existing enqueue-failure and binding-fault boundaries.
 RAG3/local-context and its prewarm owner remain the evidence path for ordinary
 chat context; they are not replaced by task-resolution documentation.
 
@@ -59,10 +65,12 @@ through normal cognition, dialog, and dispatcher delivery.
 
 ## Verification
 
-Run the task-resolution contract, lifecycle, binding, recovery, accepted-task,
-background-work, and cognition handoff tests with venv\Scripts\python.
-Live DB and live LLM nodes are explicit, one case at a time, and require
-inspection of their saved evidence.
+Begin with the existing real-model foreground behavior case through the Brain,
+then inspect deferred delivery and internal judgment separately. Preserve all
+live LLM cases and inspect their saved evidence. The single
+[runtime completion plan](../../../development_plans/active/bugfix/dsh_runtime_completion_plan_2026-09-05.md)
+defines the retained integration checks and recovery diagnostics. Dedicated
+task-resolution suites and ownership-manifest gates are retired.
 
 The permanent non-LLM integration probes are:
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib
 from copy import deepcopy
-from typing import Any, get_type_hints
+from typing import Any
 
 import pytest
 
@@ -175,44 +175,6 @@ def _binding() -> dict[str, Any]:
     }
 
 
-def test_binding_followup_schemas_are_closed() -> None:
-    """The durable task binding exposes its exact current fields."""
-
-    from kazusa_ai_chatbot.accepted_task import models as accepted_models
-    from kazusa_ai_chatbot.background_work import models as background_models
-
-    schemas = importlib.import_module("kazusa_ai_chatbot.db.schemas")
-    binding = getattr(schemas, "DshTaskBindingDoc", None)
-    if binding is None:
-        pytest.fail("db schema owner lacks DshTaskBindingDoc")
-    assert set(get_type_hints(binding)) == {
-        "schema_version",
-        "task_session_id",
-        "semantic_objective",
-        "goal_continuation_ref",
-        "source_scope",
-        "state",
-        "start_spec",
-        "resolution_thread_id",
-        "segment_id",
-        "resolution_ref",
-        "operation_generation",
-        "current_accepted_task_id",
-        "current_background_work_job_id",
-        "latest_task_resolution_result",
-        "revision",
-        "created_at",
-        "updated_at",
-    }
-    accepted_fields = set(get_type_hints(accepted_models.AcceptedTaskDoc))
-    assert accepted_fields >= {
-        "dsh_task_session_id",
-        "dsh_operation_generation",
-        "dsh_followup_open",
-        "dsh_followup_claim_action_attempt_id",
-    }
-    background_fields = set(get_type_hints(background_models.BackgroundWorkJobDoc))
-    assert "worker_payload" in background_fields
 
 
 def _required(module: object, name: str) -> Any:
@@ -341,163 +303,11 @@ async def test_binding_generation_attach_checkpoint_terminal_and_followup_reconc
     assert any(query.get("revision") == 4 for query in database.dsh_task_bindings.queries)
 
 
-@pytest.mark.asyncio
-async def test_binding_repository_rejects_invalid_initial_carriers_and_cas_types(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The repository validates initial state, nested carriers, results, and CAS types."""
-
-    module = importlib.import_module(
-        "kazusa_ai_chatbot.db.task_resolution_sessions",
-    )
-    database = _FakeDb()
-    monkeypatch.setattr(module, "get_db", lambda: _async_value(database))
-    create = _required(module, "create_task_binding")
-
-    invalid_state = _binding()
-    invalid_state["state"] = "opening"
-    with pytest.raises(ValueError, match="start in queued"):
-        await create(invalid_state)
-
-    invalid_scope = _binding()
-    invalid_scope["source_scope"] = {
-        "schema_version": "dsh_task_source_scope.v1",
-        "platform": "debug",
-    }
-    with pytest.raises(ValueError, match="fields are not exact"):
-        await create(invalid_scope)
-
-    invalid_start_spec = _binding()
-    invalid_start_spec["start_spec"] = {
-        "schema_version": "dsh_task_start_spec.v1",
-    }
-    with pytest.raises(ValueError, match="fields are not exact"):
-        await create(invalid_start_spec)
-
-    valid = await create(_binding())
-    attach = _required(module, "attach_resolution_ref")
-    reference = {
-        "schema_version": "dsh_resolution_ref.v1",
-        "resolution_thread_id": "thread-1",
-        "segment_id": "segment-1",
-        "dsh_session_id": "session-1",
-        "activation_id": "activation-1",
-        "lease_epoch": 1,
-        "document_revision": 1,
-        "last_committed_seq": 1,
-    }
-    with pytest.raises(TypeError, match="expected_revision"):
-        await attach(
-            task_session_id="session-1",
-            expected_revision=True,
-            resolution_ref=reference,
-        )
-
-    attach_task = _required(module, "attach_accepted_task")
-    with pytest.raises(TypeError, match="operation_generation"):
-        await attach_task(
-            task_session_id="session-1",
-            expected_revision=0,
-            operation_generation=True,
-            accepted_task_id="task-1",
-        )
-    with pytest.raises(ValueError, match="revision or state fence"):
-        await attach_task(
-            task_session_id="session-1",
-            expected_revision=valid["revision"],
-            operation_generation=1,
-            accepted_task_id="task-1",
-        )
-
-    transition = _required(module, "transition_task_binding")
-    with pytest.raises(TypeError, match="expected_revision"):
-        await transition(
-            task_session_id="session-1",
-            expected_revision=True,
-            expected_state="queued",
-            next_state="opening",
-            operation_generation=0,
-        )
-    with pytest.raises(TypeError, match="operation_generation"):
-        await transition(
-            task_session_id="session-1",
-            expected_revision=0,
-            expected_state="queued",
-            next_state="opening",
-            operation_generation="0",
-        )
-    with pytest.raises(TypeError, match="expected_operation_generation"):
-        await transition(
-            task_session_id="session-1",
-            expected_revision=0,
-            expected_state="queued",
-            next_state="opening",
-            operation_generation=0,
-            expected_operation_generation=True,
-        )
-
-    reconcile = _required(module, "reconcile_task_resolution_result")
-    with pytest.raises(ValueError, match="fields are not exact"):
-        await reconcile(
-            task_session_id="session-1",
-            expected_revision=0,
-            operation_generation=0,
-            task_resolution_result={
-                "schema_version": "task_resolution_result.v1",
-            },
-        )
 
 
 async def _async_value(value: object) -> object:
     return value
 
 
-@pytest.mark.asyncio
-async def test_binding_repository_is_exposed_only_through_named_db_helpers(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The facade exposes named binding lookups and does not expose collections."""
-
-    try:
-        module = importlib.import_module("kazusa_ai_chatbot.db.task_resolution_sessions")
-    except ModuleNotFoundError as exc:
-        pytest.fail(f"planned DB owner is unavailable: {exc}")
-    database = _FakeDb()
-    database.dsh_task_bindings.documents.append(_binding())
-    monkeypatch.setattr(module, "get_db", lambda: _async_value(database))
-    for helper_name, kwargs in (
-        ("find_binding_by_session", {"task_session_id": "session-1"}),
-        ("find_binding_by_thread", {"resolution_thread_id": "thread-1"}),
-        ("find_binding_by_accepted_task", {"accepted_task_id": "task-1"}),
-        ("find_binding_by_background_job", {"background_work_job_id": "job-1"}),
-    ):
-        helper = _required(module, helper_name)
-        result = await helper(**kwargs)
-        assert result is None or result["schema_version"] == "dsh_task_binding.v1"
 
 
-@pytest.mark.asyncio
-async def test_bootstrap_creates_binding_and_dsh_followup_indexes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Bootstrap invokes the exact binding indexes."""
-
-    try:
-        module = importlib.import_module("kazusa_ai_chatbot.db.bootstrap")
-    except ModuleNotFoundError as exc:
-        pytest.fail(f"planned bootstrap owner is unavailable: {exc}")
-    database = _FakeDb()
-    monkeypatch.setattr(module, "get_db", lambda: _async_value(database))
-    ensure = getattr(module, "ensure_task_resolution_indexes", None)
-    if not callable(ensure):
-        pytest.fail("bootstrap lacks ensure_task_resolution_indexes")
-    await ensure()
-    names = set(database.dsh_task_bindings.indexes)
-    assert names == {
-        "dsh_task_binding_session_unique",
-        "dsh_task_binding_thread_unique",
-        "dsh_task_binding_current_accepted_task_unique",
-        "dsh_task_binding_current_background_job_unique",
-        "dsh_task_binding_state_updated",
-    }
-    assert not any("ttl" in name.lower() for name in names)

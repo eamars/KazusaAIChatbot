@@ -18,9 +18,26 @@ from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Thread
 from typing import Any
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from uuid import uuid4
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from experiments.dsh_process_support import (
+    RPC_TOKEN,
+    SIDECAR_ENTRY,
+    ProbeBlocked,
+    ProbeFailure,
+    SidecarProcess,
+    _free_port,
+    rpc_call,
+    start_configured_sidecar,
+)
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -28,10 +45,6 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SIDECAR_ENTRY = (
-    PROJECT_ROOT / "sidecars" / "dsh_resolution" / "dist" / "src" / "main.js"
-)
-RPC_TOKEN = "dsh-probe-rpc-token"
 SEMANTIC_SECRET = "dsh-probe-semantic-secret"
 WORKSPACE_ROOT = PROJECT_ROOT.resolve()
 PROBE_NAMES = (
@@ -42,12 +55,8 @@ PROBE_NAMES = (
 PROCESS_EXIT_TIMEOUT_SECONDS = 15.0
 
 
-class ProbeFailure(RuntimeError):
-    """Raised when an observed runtime result violates a probe contract."""
 
 
-class ProbeBlocked(RuntimeError):
-    """Raised when an external prerequisite is unavailable."""
 
 
 def _utc_now() -> str:
@@ -67,12 +76,6 @@ def _canonical_json(value: object) -> str:
     )
 
 
-def _free_port() -> int:
-    """Reserve and release one loopback port for a child process."""
-
-    with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
-        return int(listener.getsockname()[1])
 
 
 def _tested_revision() -> dict[str, object]:
@@ -331,101 +334,33 @@ class _FakeBrainHealth:
         self.thread.join(timeout=3)
 
 
-@dataclass
-class SidecarProcess:
-    """Owned real sidecar plus deterministic loopback dependencies."""
 
-    process: subprocess.Popen[str]
-    url: str
-    provider: _FakeOpenAi | None
-    brain: _FakeBrainHealth | None
-    data_root: Path
-    recorder: ProbeRecorder
-    name: str
-    process_row: dict[str, object]
-    stopped: bool = False
 
-    @property
-    def route_digest(self) -> str:
-        """Return the configured model-route digest."""
+def runtime_environment(sidecar: SidecarProcess) -> dict[str, str]:
+    """Return the parent-process environment for public runtime creation."""
 
-        if self.provider is None:
-            raise ProbeFailure(
-                "configured sidecar does not own its model provider",
-            )
-        return route_digest(self.provider.base_url)
+    if sidecar.provider is None or sidecar.brain is None:
+        raise ProbeFailure(
+            "configured sidecar does not own loopback dependencies",
+        )
+    return {
+        "KAZUSA_DSH_SIDECAR_URL": sidecar.url,
+        "KAZUSA_DSH_RPC_TOKEN": RPC_TOKEN,
+        "KAZUSA_DSH_DATA_ROOT": str(sidecar.data_root.resolve()),
+        "AGENTIC_RESOLVER_WORKSPACE_ROOT": str(WORKSPACE_ROOT),
+        "AGENTIC_RESOLVER_LLM_BASE_URL": sidecar.provider.base_url,
+        "AGENTIC_RESOLVER_LLM_API_KEY": "resolver-probe-key",
+        "AGENTIC_RESOLVER_LLM_MODEL": "qwen27b-5090",
+        "AGENTIC_RESOLVER_LLM_CONTEXT_WINDOW_TOKENS": "50176",
+        "AGENTIC_RESOLVER_LLM_MAX_COMPLETION_TOKENS": "8192",
+        "AGENTIC_RESOLVER_LLM_THINKING_ENABLED": "true",
+        "KAZUSA_DSH_BRAIN_URL": sidecar.brain.base_url,
+        "KAZUSA_DSH_BRAIN_SHARED_SECRET": "brain-probe-secret",
+        "KAZUSA_DSH_TOOL_GATEWAY_SECRET": SEMANTIC_SECRET,
+        "KAZUSA_DSH_PYTHON_EXECUTABLE": str(Path(sys.executable).resolve()),
+        "NODE_ENV": "test",
+    }
 
-    def runtime_environment(self) -> dict[str, str]:
-        """Return the parent-process environment for public runtime creation."""
-
-        if self.provider is None or self.brain is None:
-            raise ProbeFailure(
-                "configured sidecar does not own loopback dependencies",
-            )
-        return {
-            "KAZUSA_DSH_SIDECAR_URL": self.url,
-            "KAZUSA_DSH_RPC_TOKEN": RPC_TOKEN,
-            "KAZUSA_DSH_DATA_ROOT": str(self.data_root.resolve()),
-            "AGENTIC_RESOLVER_WORKSPACE_ROOT": str(WORKSPACE_ROOT),
-            "AGENTIC_RESOLVER_LLM_BASE_URL": self.provider.base_url,
-            "AGENTIC_RESOLVER_LLM_API_KEY": "resolver-probe-key",
-            "AGENTIC_RESOLVER_LLM_MODEL": "qwen27b-5090",
-            "AGENTIC_RESOLVER_LLM_CONTEXT_WINDOW_TOKENS": "50176",
-            "AGENTIC_RESOLVER_LLM_MAX_COMPLETION_TOKENS": "8192",
-            "AGENTIC_RESOLVER_LLM_THINKING_ENABLED": "true",
-            "KAZUSA_DSH_BRAIN_URL": self.brain.base_url,
-            "KAZUSA_DSH_BRAIN_SHARED_SECRET": "brain-probe-secret",
-            "KAZUSA_DSH_TOOL_GATEWAY_SECRET": SEMANTIC_SECRET,
-            "KAZUSA_DSH_PYTHON_EXECUTABLE": str(Path(sys.executable).resolve()),
-            "NODE_ENV": "test",
-        }
-
-    def wait_for_exit(
-        self,
-        *,
-        timeout_seconds: float = PROCESS_EXIT_TIMEOUT_SECONDS,
-    ) -> int:
-        """Wait for an expected owned-process exit within the probe bound."""
-
-        try:
-            return self.process.wait(timeout=timeout_seconds)
-        except subprocess.TimeoutExpired as exc:
-            raise ProbeFailure(
-                f"{self.name} did not exit within {timeout_seconds:g} seconds",
-            ) from exc
-
-    def stop(self) -> None:
-        """Stop owned processes and retain their logs."""
-
-        if self.stopped:
-            return
-        self.stopped = True
-        if self.process.poll() is None:
-            self.process.terminate()
-            try:
-                self.process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.process.kill()
-                self.process.wait(timeout=5)
-        stdout, stderr = self.process.communicate()
-        self.process_row["exit_code"] = self.process.returncode
-        stdout_path = self.recorder.artifact_dir / f"{self.name}.stdout.log"
-        stderr_path = self.recorder.artifact_dir / f"{self.name}.stderr.log"
-        stdout_path.write_text(stdout, encoding="utf-8")
-        stderr_path.write_text(stderr, encoding="utf-8")
-        self.recorder.artifacts.extend([
-            str(stdout_path.resolve()),
-            str(stderr_path.resolve()),
-        ])
-        if self.provider is not None:
-            self.provider.close()
-        if self.brain is not None:
-            self.brain.close()
-        self.recorder.cleanup.append({
-            "owner": self.name,
-            "status": "stopped",
-            "pid": self.process.pid,
-        })
 
 
 def route_digest(base_url: str) -> str:
@@ -450,35 +385,6 @@ def route_digest(base_url: str) -> str:
     return f"sha256:{digest}"
 
 
-def rpc_call(
-    url: str,
-    method: str,
-    params: dict[str, Any],
-    *,
-    token: str = RPC_TOKEN,
-) -> dict[str, Any]:
-    body = json.dumps({
-        "jsonrpc": "2.0",
-        "id": f"rpc-{time.time_ns()}",
-        "method": method,
-        "params": {
-            "protocol_version": "kazusa.dsh-resolution-rpc.v2",
-            **params,
-        },
-    }).encode("utf-8")
-    request = Request(
-        url,
-        data=body,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        },
-    )
-    with urlopen(request, timeout=5) as response:
-        value = json.loads(response.read())
-    if not isinstance(value, dict):
-        raise ProbeFailure(f"RPC {method} returned a non-object")
-    return value
 
 
 def start_sidecar(
@@ -488,6 +394,7 @@ def start_sidecar(
     name: str,
     script: list[dict[str, Any]] | None = None,
     extra_env: Mapping[str, str] | None = None,
+    require_ready: bool = True,
 ) -> SidecarProcess:
     """Start one real sidecar and require authenticated readiness."""
 
@@ -518,112 +425,18 @@ def start_sidecar(
     })
     environment.pop("KAZUSA_DSH_CAPABILITY_TOKEN", None)
     environment.update(dict(extra_env or {}))
-    process = subprocess.Popen(
-        ["node", str(SIDECAR_ENTRY)],
-        cwd=PROJECT_ROOT,
-        env=environment,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    process_row: dict[str, object] = {
-        "name": name,
-        "pid": process.pid,
-        "exit_code": None,
-    }
-    recorder.processes.append(process_row)
-    harness = SidecarProcess(
-        process=process,
-        url=url,
-        provider=provider,
-        brain=brain,
-        data_root=data_root,
-        recorder=recorder,
-        name=name,
-        process_row=process_row,
-    )
-    deadline = time.monotonic() + 10
-    while time.monotonic() < deadline:
-        if process.poll() is not None:
-            harness.stop()
-            raise ProbeFailure(f"sidecar {name} exited before readiness")
-        try:
-            health = rpc_call(url, "system.health", {}).get("result")
-            if isinstance(health, dict) and health.get("status") == "ready":
-                return harness
-        except OSError:
-            pass
-        time.sleep(0.05)
-    harness.stop()
-    raise ProbeFailure(f"sidecar {name} did not become ready")
-
-
-def start_configured_sidecar(
-    recorder: ProbeRecorder,
-    *,
-    name: str,
-    environment: Mapping[str, str],
-) -> SidecarProcess:
-    """Start a sidecar against externally configured Brain and model owners."""
-
-    if not SIDECAR_ENTRY.is_file():
-        raise ProbeBlocked(f"built sidecar entry is unavailable: {SIDECAR_ENTRY}")
-    url = environment.get("KAZUSA_DSH_SIDECAR_URL", "").strip()
-    token = environment.get("KAZUSA_DSH_RPC_TOKEN", "").strip()
-    data_root_value = environment.get("KAZUSA_DSH_DATA_ROOT", "").strip()
-    if not url or not token or not data_root_value:
-        raise ProbeFailure(
-            "configured sidecar requires URL, RPC token, and data root",
+    try:
+        harness = start_configured_sidecar(
+            recorder, name=name, environment=environment, require_ready=require_ready,
         )
-    data_root = Path(data_root_value).resolve()
-    data_root.mkdir(parents=True, exist_ok=True)
-    process = subprocess.Popen(
-        ["node", str(SIDECAR_ENTRY)],
-        cwd=PROJECT_ROOT,
-        env=dict(environment),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    process_row: dict[str, object] = {
-        "name": name,
-        "pid": process.pid,
-        "exit_code": None,
-    }
-    recorder.processes.append(process_row)
-    harness = SidecarProcess(
-        process=process,
-        url=url,
-        provider=None,
-        brain=None,
-        data_root=data_root,
-        recorder=recorder,
-        name=name,
-        process_row=process_row,
-    )
-    deadline = time.monotonic() + 15
-    while time.monotonic() < deadline:
-        if process.poll() is not None:
-            harness.stop()
-            raise ProbeFailure(f"sidecar {name} exited before readiness")
-        try:
-            health = rpc_call(
-                url,
-                "system.health",
-                {},
-                token=token,
-            ).get("result")
-            if isinstance(health, dict) and health.get("status") == "ready":
-                return harness
-        except OSError:
-            pass
-        time.sleep(0.05)
-    harness.stop()
-    raise ProbeFailure(f"sidecar {name} did not become ready")
+    except (ProbeFailure, ProbeBlocked, OSError):
+        provider.close()
+        brain.close()
+        raise
+    harness.provider = provider
+    harness.brain = brain
+    return harness
+
 
 
 def build_intake(
@@ -673,10 +486,10 @@ def build_intake(
         scope_fingerprint=content_digest(service_scope),
         audience_fingerprint="sha256:probe-audience",
         workspace_root=workspace_root,
-        route_digest=harness.route_digest,
+        route_digest=route_digest(harness.provider.base_url),
         catalog_digest=semantic_catalog_digest(),
         profile_version="kazusa-resolver-standard-v2",
-        model_route_digest=harness.route_digest,
+        model_route_digest=route_digest(harness.provider.base_url),
         workspace_fingerprint=content_digest({"workspace_root": workspace_root}),
         issued_reference_digest=content_digest({
             "resolution_thread_id": thread_id,
@@ -700,7 +513,7 @@ def build_intake(
         "segment_id": segment_id,
         "brain_conversation_ref": "chat:debug:dsh-runtime-probe",
         "workspace_root": workspace_root,
-        "route_digest": harness.route_digest,
+        "route_digest": route_digest(harness.provider.base_url),
         "semantic_tool_authority": {
             "catalog_digest": semantic_catalog_digest(),
             "token": issue_activation_token(
@@ -787,6 +600,43 @@ def _require(condition: bool, message: str) -> None:
         raise ProbeFailure(message)
 
 
+class _TerminalResponseLossRelay:
+    """Hold a complete upstream response and close its downstream connection."""
+
+    def __init__(self, upstream_url: str) -> None:
+        self.response: dict[str, Any] | None = None
+        owner = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self) -> None:
+                body = self.rfile.read(int(self.headers["Content-Length"]))
+                request = Request(upstream_url, data=body, headers={
+                    "Authorization": self.headers["Authorization"],
+                    "Content-Type": "application/json",
+                })
+                with urlopen(request, timeout=15) as response:
+                    owner.response = json.loads(response.read())
+                self.connection.shutdown(socket.SHUT_RDWR)
+                self.connection.close()
+                self.close_connection = True
+
+            def log_message(self, *_args: object) -> None:
+                return
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.thread = Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.url = f"http://127.0.0.1:{self.server.server_port}/rpc"
+
+    def close(self) -> None:
+        """Join the owned listener after completing response-loss injection."""
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=5)
+        if self.thread.is_alive():
+            raise ProbeFailure("response-loss relay did not stop")
+
+
 def _sidecar_lifecycle_probe(recorder: ProbeRecorder) -> None:
     data_root = recorder.artifact_dir / "sidecar-data"
     semantic = start_sidecar(
@@ -803,6 +653,32 @@ def _sidecar_lifecycle_probe(recorder: ProbeRecorder) -> None:
     )
     try:
         health = rpc_call(semantic.url, "system.health", {})["result"]
+        try:
+            rpc_call(semantic.url, "system.health", {}, token=RPC_TOKEN + "-wrong")
+        except HTTPError as exc:
+            _require(exc.code == 401, f"wrong RPC token returned {exc.code}")
+        else:
+            raise ProbeFailure("wrong RPC token was accepted")
+        from kazusa_ai_chatbot.dsh_tool_gateway.authority import activation_id_for
+        denied_intake = build_intake(semantic, "op-denied", "thread-denied", "segment-denied")
+        token = denied_intake["semantic_tool_authority"]["token"]
+        denied_intake["semantic_tool_authority"]["token"] = token[:-1] + ("0" if token[-1] != "0" else "1")
+        try:
+            denied_response = rpc_call(semantic.url, "resolution.open", {
+                "operation_id": "op-denied",
+                "operation_payload_digest": "sha256:op-denied",
+                "activation_id": activation_id_for("thread-denied", "segment-denied", 1),
+                "lease_epoch": 1,
+                "intake": denied_intake,
+            })
+        except HTTPError as exc:
+            _require(exc.code == 500, f"tampered authority returned {exc.code}")
+        else:
+            _require("error" in denied_response, f"tampered authority was accepted: {denied_response}")
+        denied = rpc_call(semantic.url, "resolution.inspect", {
+            "operation_id": "op-denied", "operation_payload_digest": "sha256:op-denied",
+        })["result"]
+        _require(denied["disposition"] == "not_admitted", "tampered authority admitted work")
         resolved = open_resolution(
             semantic,
             "op-probe-semantic",
@@ -824,15 +700,42 @@ def _sidecar_lifecycle_probe(recorder: ProbeRecorder) -> None:
             "kazusa_semantic_capability_result.v1" in rendered_requests,
             "semantic worker result did not return to the real sidecar",
         )
+        _require("SEMANTIC_AUTHORITY_INVALID" not in rendered_requests, "semantic forwarding lost authority")
+        second = open_resolution(semantic, "op-independent", "thread-independent", "segment-independent")["result"]
+        _require(second["disposition"] == "terminal", "second independent resolve failed")
+        _require(second["session_id"] != resolved["session_id"], "independent resolves shared a session")
+        _require(semantic.process.poll() is None, "sidecar exited between independent resolves")
+        _require(any(
+            request.get("model") == "qwen27b-5090"
+            and request.get("max_completion_tokens") == 8192
+            for request in semantic.provider.requests
+        ), "provider request mapping lost configured model or completion budget")
         recorder.observe(
             "authenticated_boot_and_semantic_worker",
             profile=health["profile"],
             store_path=health["store_path"],
             disposition=resolved["disposition"],
             provider_calls=semantic.provider.calls,
+            wrong_rpc_token_rejected=True,
+            tampered_authority_disposition=denied["disposition"],
+            independent_sessions=[resolved["session_id"], second["session_id"]],
         )
     finally:
         semantic.stop()
+
+    unavailable = start_sidecar(
+        recorder.artifact_dir / "unavailable-worker-data", recorder,
+        name="sidecar-unavailable-worker",
+        extra_env={"KAZUSA_DSH_PYTHON_EXECUTABLE": str(recorder.artifact_dir / "missing-python.exe")},
+        require_ready=False,
+    )
+    try:
+        health = rpc_call(unavailable.url, "system.health", {})["result"]
+        _require(health["status"] == "unavailable", "missing worker reported ready")
+        _require(health["readiness"]["semantic_worker"] == "unavailable", "missing worker readiness was not retained")
+        recorder.observe("unavailable_worker_readiness", status=health["status"], worker=health["worker"]["status"])
+    finally:
+        unavailable.stop()
 
     checkpointed = start_sidecar(
         data_root,
@@ -925,9 +828,11 @@ def _sidecar_lifecycle_probe(recorder: ProbeRecorder) -> None:
     crashing = start_sidecar(
         replay_root,
         recorder,
-        name="sidecar-terminal-commit-crash",
-        extra_env={"KAZUSA_DSH_TEST_EXIT_AFTER_TERMINAL_COMMIT": "1"},
+        name="sidecar-terminal-response-loss",
     )
+    relay = _TerminalResponseLossRelay(crashing.url)
+    direct_url = crashing.url
+    crashing.url = relay.url
     try:
         try:
             open_resolution(
@@ -940,8 +845,11 @@ def _sidecar_lifecycle_probe(recorder: ProbeRecorder) -> None:
             pass
         else:
             raise ProbeFailure("terminal-commit crash returned an HTTP response")
-        crashing.wait_for_exit()
+        _require(relay.response is not None, "relay received no committed response")
+        _require(relay.response["result"]["disposition"] == "terminal", "relay lost a nonterminal response")
     finally:
+        crashing.url = direct_url
+        relay.close()
         crashing.stop()
 
     replaying = start_sidecar(
@@ -1144,7 +1052,7 @@ async def _brain_task_lifecycle_async(recorder: ProbeRecorder) -> None:
         ],
     )
     environment = {
-        **sidecar.runtime_environment(),
+        **runtime_environment(sidecar),
         **_guarded_database_environment(database_name),
     }
     with _environment(environment):
@@ -1247,7 +1155,7 @@ async def _transport_loss_async(recorder: ProbeRecorder) -> None:
     sidecar = start_sidecar(data_root, recorder, name="sidecar-transport-loss")
     runtime_configured = False
     environment = {
-        **sidecar.runtime_environment(),
+        **runtime_environment(sidecar),
         **_guarded_database_environment(database_name),
     }
     with _environment(environment):

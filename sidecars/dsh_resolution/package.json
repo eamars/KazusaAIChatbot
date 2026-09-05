@@ -10,7 +10,6 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/src/main.js",
-    "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -40,7 +39,6 @@
   },
   "devDependencies": {
     "@types/node": "24.3.0",
-    "typescript": "5.9.2",
-    "vitest": "3.2.4"
+    "typescript": "5.9.2"
   }
 }

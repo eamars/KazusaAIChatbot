@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Mapping
+from collections.abc import Mapping
 from inspect import isawaitable
 
+from agentic_resolver.errors import AgenticResolverError
 from kazusa_ai_chatbot.cognition_episode import validate_goal_continuation_ref
 from kazusa_ai_chatbot.db.errors import DatabaseOperationError
 from kazusa_ai_chatbot.dsh_tool_gateway.contracts import (
@@ -35,6 +36,14 @@ _TASK_RESOLUTION_RUNTIME: object | None = None
 _TASK_RESOLUTION_BINDING_STORE: object | None = None
 _TASK_RESOLUTION_ACCEPTED_TASK_STORE: object | None = None
 _TASK_RESOLUTION_BACKGROUND_QUEUE: object | None = None
+_INLINE_OPERATION_FAILURES = (
+    AgenticResolverError,
+    DatabaseOperationError,
+    TaskResolutionContractError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
 
 
 def configure_task_resolution_runtime(
@@ -95,7 +104,15 @@ async def resolve_task_inline(
             runtime=runtime,
             binding_store=configured_store,
         )
-    except Exception:
+    except asyncio.CancelledError:
+        if configured_store is not None:
+            await _fault_unowned_canceled_binding(
+                binding_store=configured_store,
+                task_session_id=task_session_id,
+                updated_at=str(context.get("current_timestamp_utc", "")),
+            )
+        raise
+    except _INLINE_OPERATION_FAILURES:
         if configured_store is not None:
             try:
                 await fault_task_resolution_binding(
@@ -103,9 +120,10 @@ async def resolve_task_inline(
                     task_session_id=task_session_id,
                     updated_at=str(context.get("current_timestamp_utc", "")),
                 )
-            except Exception as cleanup_exc:
+            except _INLINE_OPERATION_FAILURES as cleanup_exc:
                 raise TaskResolutionContractError(
-                    "failed DSH admission could not be terminally recorded",
+                    "failed DSH admission could not be terminally recorded: "
+                    f"{cleanup_exc}",
                 ) from cleanup_exc
         raise
 
@@ -133,6 +151,7 @@ async def _resolve_task_inline_operation(
     runtime = runtime if runtime is not None else _TASK_RESOLUTION_RUNTIME
     _require_runtime(runtime)
     _require_store(binding_store, "create_task_binding")
+    _require_store(binding_store, "find_binding_by_session")
     binding: Mapping[str, object] = {
         "schema_version": "dsh_task_binding.v1",
         "task_session_id": task_session_id,
@@ -201,11 +220,14 @@ async def _resolve_task_inline_operation(
         start_spec=start_spec,
         before_resolve=before_resolve,
     )
-    deadline = asyncio.get_running_loop().time() + inline_budget_seconds
-    if isawaitable(opening):
-        opening_task = asyncio.ensure_future(opening)
+    if not isawaitable(opening):
+        raise TaskResolutionContractError(
+            "DSH runtime open must return one awaitable exhaust",
+        )
+    opening_task = asyncio.ensure_future(opening)
+    try:
         try:
-            opened = await asyncio.wait_for(
+            exhaust = await asyncio.wait_for(
                 asyncio.shield(opening_task),
                 timeout=inline_budget_seconds,
             )
@@ -217,19 +239,18 @@ async def _resolve_task_inline_operation(
                 operation_generation=0,
             )
             if _runtime_result_is_terminal(opening_task):
-                opened = await _await_value(opening_task)
-                if _is_exhaust(opened):
-                    terminal_result = project_dsh_exhaust(opened, start_spec)
-                    await _record_inline_binding_outcome(
-                        binding_store=binding_store,
-                        binding=binding,
-                        task_session_id=task_session_id,
-                        exhaust=opened,
-                        result=terminal_result,
-                    )
-                    return terminal_result
+                exhaust = await _await_value(opening_task)
+                terminal_result = _project_runtime_exhaust(exhaust, start_spec)
+                await _record_inline_binding_outcome(
+                    binding_store=binding_store,
+                    binding=binding,
+                    task_session_id=task_session_id,
+                    exhaust=exhaust,
+                    result=terminal_result,
+                )
+                return terminal_result
             if _is_terminal_mapping(checkpoint):
-                terminal_result = project_dsh_exhaust(checkpoint, start_spec)
+                terminal_result = _project_runtime_exhaust(checkpoint, start_spec)
                 await _record_inline_binding_outcome(
                     binding_store=binding_store,
                     binding=binding,
@@ -245,7 +266,7 @@ async def _resolve_task_inline_operation(
                 exhaust=checkpoint,
                 result=None,
             )
-            return _deferred_result(
+            deferred_result = _deferred_result(
                 semantic_objective,
                 context,
                 _inline_resolution_ref(
@@ -255,126 +276,38 @@ async def _resolve_task_inline_operation(
                 ),
                 start_spec,
             )
-    else:
-        opened = opening
-    if (
-        isinstance(opened, Mapping)
-        and (
-            opened.get("kind") == "checkpointed"
-            or (
-                isinstance(opened.get("exhaust"), Mapping)
-                and opened["exhaust"].get("kind") == "checkpointed"
+            return deferred_result
+        if not _is_exhaust(exhaust):
+            raise TaskResolutionContractError(
+                "DSH runtime open returned an invalid exhaust",
             )
-        )
-    ):
-        result = await _checkpoint_after_open(
-            runtime,
-            opened,
-            semantic_objective,
-            context,
-            start_spec,
-            task_session_id,
-            binding,
-        )
+        result = _project_runtime_exhaust(exhaust, start_spec)
         await _record_inline_binding_outcome(
             binding_store=binding_store,
             binding=binding,
             task_session_id=task_session_id,
-            exhaust=opened,
-            result=None,
-        )
-        return result
-    if _is_exhaust(opened):
-        result = project_dsh_exhaust(opened, start_spec)
-        await _record_inline_binding_outcome(
-            binding_store=binding_store,
-            binding=binding,
-            task_session_id=task_session_id,
-            exhaust=opened,
+            exhaust=exhaust,
             result=result,
         )
         return result
-    if isinstance(opened, Mapping):
-        result = await _checkpoint_after_open(
-            runtime,
-            opened,
-            semantic_objective,
-            context,
-            start_spec,
-            task_session_id,
-            binding,
-        )
-        await _record_inline_binding_outcome(
+    except asyncio.CancelledError:
+        await _settle_inline_cancellation(
+            runtime=runtime,
             binding_store=binding_store,
-            binding=binding,
             task_session_id=task_session_id,
-            exhaust=opened,
-            result=None,
+            start_spec=start_spec,
+            opening_task=opening_task,
         )
-        return result
-    if not isinstance(opened, Awaitable):
-        raise TaskResolutionContractError("DSH runtime open returned an invalid handle")
-
-    reasoning = asyncio.ensure_future(opened)
-    try:
-        exhaust = await asyncio.wait_for(
-            asyncio.shield(reasoning),
-            timeout=max(0.0, deadline - asyncio.get_running_loop().time()),
-        )
-    except asyncio.TimeoutError:
-        checkpoint = await _request_checkpoint(
-            runtime,
-            task_session_id=task_session_id,
-            operation_generation=0,
-        )
-        if _runtime_result_is_terminal(reasoning):
-            exhaust = await _await_value(reasoning)
-            if _is_exhaust(exhaust):
-                terminal_result = project_dsh_exhaust(exhaust, start_spec)
-                await _record_inline_binding_outcome(
-                    binding_store=binding_store,
-                    binding=binding,
-                    task_session_id=task_session_id,
-                    exhaust=exhaust,
-                    result=terminal_result,
-                )
-                return terminal_result
-        if _is_terminal_mapping(checkpoint):
-            terminal_result = project_dsh_exhaust(checkpoint, start_spec)
-            await _record_inline_binding_outcome(
-                binding_store=binding_store,
-                binding=binding,
-                task_session_id=task_session_id,
-                exhaust=checkpoint,
-                result=terminal_result,
-            )
-            return terminal_result
-        await _record_inline_binding_outcome(
+        raise
+    except _INLINE_OPERATION_FAILURES:
+        await _settle_inline_cancellation(
+            runtime=runtime,
             binding_store=binding_store,
-            binding=binding,
             task_session_id=task_session_id,
-            exhaust=checkpoint,
-            result=None,
+            start_spec=start_spec,
+            opening_task=opening_task,
         )
-        return _deferred_result(
-            semantic_objective,
-            context,
-            _inline_resolution_ref(
-                checkpoint,
-                task_session_id=task_session_id,
-                binding=binding,
-            ),
-            start_spec,
-        )
-    result = project_dsh_exhaust(exhaust, start_spec)
-    await _record_inline_binding_outcome(
-        binding_store=binding_store,
-        binding=binding,
-        task_session_id=task_session_id,
-        exhaust=exhaust,
-        result=result,
-    )
-    return result
+        raise
 
 
 def _is_exhaust(value: object) -> bool:
@@ -392,6 +325,21 @@ def _is_exhaust(value: object) -> bool:
     return hasattr(value, "kind") and hasattr(value, "to_dict")
 
 
+def _project_runtime_exhaust(
+    value: object,
+    start_spec: Mapping[str, object],
+) -> TaskResolutionResultV1:
+    """Project the typed exhaust nested in a controller control response."""
+
+    exhaust = value
+    if isinstance(value, Mapping):
+        nested = value.get("exhaust")
+        if isinstance(nested, Mapping):
+            exhaust = nested
+    result = project_dsh_exhaust(exhaust, start_spec)
+    return result
+
+
 def _is_terminal_mapping(value: object) -> bool:
     """Identify a terminal exhaust returned by a checkpoint race."""
 
@@ -406,6 +354,8 @@ def _runtime_result_is_terminal(task: asyncio.Future[object]) -> bool:
     """Check a completed shielded operation without consuming exceptions."""
 
     if not task.done() or task.cancelled():
+        return False
+    if task.exception() is not None:
         return False
     value = task.result()
     return _is_terminal_mapping(value) or (
@@ -764,34 +714,185 @@ def _consume_task_outcome(task: asyncio.Future[object]) -> None:
         return
 
 
-async def _checkpoint_after_open(
+async def _settle_inline_cancellation(
     runtime: object,
-    opened: Mapping[str, object],
-    semantic_objective: str,
-    context: Mapping[str, object],
-    start_spec: Mapping[str, object],
+    binding_store: object,
     task_session_id: str,
-    binding: Mapping[str, object],
-) -> TaskResolutionResultV1:
-    """Use the cooperative checkpoint RPC for a synchronous open response."""
+    start_spec: Mapping[str, object],
+    opening_task: asyncio.Future[object],
+) -> None:
+    """Close caller-canceled foreground work or preserve a committed owner."""
 
-    checkpoint = await _request_checkpoint(
-        runtime,
+    stored = await _store_call(
+        binding_store,
+        "find_binding_by_session",
         task_session_id=task_session_id,
-        operation_generation=0,
-        opened=opened,
     )
-    selected = checkpoint if checkpoint else opened
-    return _deferred_result(
-        semantic_objective,
-        context,
-        _inline_resolution_ref(
-            selected,
-            task_session_id=task_session_id,
+    if stored is None:
+        await _join_canceled_opening_task(opening_task)
+        return
+    if not isinstance(stored, Mapping):
+        raise TaskResolutionContractError(
+            "caller-canceled DSH operation has an invalid durable binding",
+        )
+    binding = dict(stored)
+    if _binding_has_background_owner(binding):
+        if not opening_task.done():
+            opening_task.add_done_callback(_consume_task_outcome)
+        return
+
+    if _runtime_result_is_terminal(opening_task):
+        exhaust = await _await_value(opening_task)
+        terminal_result = _project_runtime_exhaust(exhaust, start_spec)
+        await _record_inline_binding_outcome(
+            binding_store=binding_store,
             binding=binding,
-        ),
-        start_spec,
+            task_session_id=task_session_id,
+            exhaust=exhaust,
+            result=terminal_result,
+        )
+        return
+
+    outcome = await _cancel_inline_runtime(
+        runtime,
+        binding=binding,
     )
+    if _is_terminal_mapping(outcome):
+        terminal_result = _project_runtime_exhaust(outcome, start_spec)
+        await _record_inline_binding_outcome(
+            binding_store=binding_store,
+            binding=binding,
+            task_session_id=task_session_id,
+            exhaust=outcome,
+            result=terminal_result,
+        )
+    elif _inline_exhaust_kind(outcome) == "canceled":
+        await _record_inline_binding_outcome(
+            binding_store=binding_store,
+            binding=binding,
+            task_session_id=task_session_id,
+            exhaust=outcome,
+            result=None,
+        )
+    else:
+        await fault_task_resolution_binding(
+            binding_store=binding_store,
+            task_session_id=task_session_id,
+            updated_at=_binding_updated_at(binding),
+        )
+    await _join_canceled_opening_task(opening_task)
+
+
+async def _fault_unowned_canceled_binding(
+    *,
+    binding_store: object,
+    task_session_id: str,
+    updated_at: str,
+) -> None:
+    """Fault canceled foreground work only when no durable worker owns it."""
+
+    stored = await _store_call(
+        binding_store,
+        "find_binding_by_session",
+        task_session_id=task_session_id,
+    )
+    if isinstance(stored, Mapping) and _binding_has_background_owner(stored):
+        return
+    await fault_task_resolution_binding(
+        binding_store=binding_store,
+        task_session_id=task_session_id,
+        updated_at=updated_at,
+    )
+
+
+def _binding_has_background_owner(binding: Mapping[str, object]) -> bool:
+    """Return whether both durable attachments own the current generation."""
+
+    accepted_task_id = binding.get("current_accepted_task_id")
+    background_work_job_id = binding.get("current_background_work_job_id")
+    return (
+        isinstance(accepted_task_id, str)
+        and bool(accepted_task_id.strip())
+        and isinstance(background_work_job_id, str)
+        and bool(background_work_job_id.strip())
+    )
+
+
+async def _cancel_inline_runtime(
+    runtime: object,
+    *,
+    binding: Mapping[str, object],
+) -> Mapping[str, object] | None:
+    """Request one fenced cancellation and inspect an ambiguous control result."""
+
+    reference = binding.get("resolution_ref")
+    if not isinstance(reference, Mapping):
+        return None
+    validated_reference = validate_dsh_resolution_ref(reference)
+    method = getattr(runtime, "cancel", None)
+    if not callable(method):
+        return None
+    try:
+        value = await _await_value(method(
+            resolution_thread_id=validated_reference["resolution_thread_id"],
+            activation_id=validated_reference["activation_id"],
+            lease_epoch=validated_reference["lease_epoch"],
+        ))
+    except (
+        AgenticResolverError,
+        DatabaseOperationError,
+        TaskResolutionContractError,
+        RuntimeError,
+        TypeError,
+        ValueError,
+    ):
+        inspected = await _inspect_inline_runtime(runtime, validated_reference)
+        return inspected
+    if isinstance(value, Mapping):
+        return value
+    inspected = await _inspect_inline_runtime(runtime, validated_reference)
+    return inspected
+
+
+async def _inspect_inline_runtime(
+    runtime: object,
+    reference: Mapping[str, object],
+) -> Mapping[str, object] | None:
+    """Inspect a cancellation whose control response did not prove disposition."""
+
+    method = getattr(runtime, "inspect", None)
+    if not callable(method):
+        return None
+    try:
+        value = await _await_value(method(
+            resolution_thread_id=reference["resolution_thread_id"],
+        ))
+    except (
+        AgenticResolverError,
+        DatabaseOperationError,
+        TaskResolutionContractError,
+        RuntimeError,
+        TypeError,
+        ValueError,
+    ):
+        return None
+    if not isinstance(value, Mapping):
+        return None
+    disposition = value.get("disposition", value.get("state"))
+    if disposition in {"terminal", "canceled", "faulted"}:
+        inspected = dict(value)
+        return inspected
+    return None
+
+
+async def _join_canceled_opening_task(
+    opening_task: asyncio.Future[object],
+) -> None:
+    """Cancel and join the local foreground task before its caller returns."""
+
+    if not opening_task.done():
+        opening_task.cancel()
+    await asyncio.gather(opening_task, return_exceptions=True)
 
 
 async def _request_checkpoint(runtime: object, **kwargs: object) -> Mapping[str, object]:
@@ -817,11 +918,9 @@ async def start_task_resolution_in_background(
     binding_store: object | None = None,
     accepted_task_store: object | None = None,
     background_queue: object | None = None,
-    authority_broker: object | None = None,
 ) -> TaskResolutionAdmissionV1:
     """Persist a generation-zero DSH job with no queued authority token."""
 
-    del authority_broker
     _require_runtime(_TASK_RESOLUTION_RUNTIME)
     context = _context_for_service(execution_context)
     semantic_objective = _request_objective(request)
@@ -1178,7 +1277,7 @@ async def resume_task_resolution(
         start_spec=start_spec,
     ))
     if isinstance(value, Mapping) and value.get("disposition") == "terminal":
-        return project_dsh_exhaust(
+        return _project_runtime_exhaust(
             value,
             start_spec,
         )
@@ -1188,6 +1287,28 @@ async def resume_task_resolution(
 async def promote_deferred_task_resolution(
     result: Mapping[str, object],
     execution_context: Mapping[str, object],
+    **kwargs: object,
+) -> dict[str, object]:
+    """Promote a deferred operation and settle caller cancellation durably."""
+
+    promotion_state: dict[str, object] = {}
+    try:
+        promoted = await _promote_deferred_task_resolution_operation(
+            result,
+            execution_context,
+            promotion_state,
+            **kwargs,
+        )
+        return promoted
+    except asyncio.CancelledError:
+        await _settle_deferred_promotion_cancellation(promotion_state)
+        raise
+
+
+async def _promote_deferred_task_resolution_operation(
+    result: Mapping[str, object],
+    execution_context: Mapping[str, object],
+    promotion_state: dict[str, object],
     **kwargs: object,
 ) -> dict[str, object]:
     """Materialize a deferred result on its existing DSH binding."""
@@ -1212,6 +1333,8 @@ async def promote_deferred_task_resolution(
     background_queue = kwargs.get("background_queue")
     if background_queue is None:
         background_queue = _TASK_RESOLUTION_BACKGROUND_QUEUE
+    promotion_state["binding_store"] = binding_store
+    promotion_state["accepted_task_store"] = accepted_task_store
     _require_store(binding_store, "find_binding_by_session")
     _require_store(
         accepted_task_store,
@@ -1220,6 +1343,7 @@ async def promote_deferred_task_resolution(
     _require_queue(background_queue)
 
     session_id = reference["dsh_session_id"]
+    promotion_state["task_session_id"] = session_id
     binding = await _store_call(
         binding_store,
         "find_binding_by_session",
@@ -1254,14 +1378,17 @@ async def promote_deferred_task_resolution(
         source_platform_bot_id=str(kwargs.get("source_platform_bot_id", "")),
         requester_display_name=str(kwargs.get("requester_display_name", "")),
     )
-    value = await _store_call(
+    accepted_creation_task = asyncio.create_task(_store_call(
         accepted_task_store,
         "create_or_return_active_accepted_task",
         request=accepted_request,
         dsh_task_session_id=session_id,
         dsh_operation_generation=0,
         dsh_followup_open=False,
-    )
+    ))
+    promotion_state["accepted_creation_task"] = accepted_creation_task
+    value = await asyncio.shield(accepted_creation_task)
+    promotion_state.pop("accepted_creation_task", None)
     if not isinstance(value, Mapping):
         raise TaskResolutionContractError(
             "accepted-task promotion returned no durable task",
@@ -1272,6 +1399,7 @@ async def promote_deferred_task_resolution(
         accepted_task,
         "accepted_task_id",
     )
+    promotion_state["accepted_task_id"] = accepted_task_id
     state = binding_snapshot.get("state")
     revision = binding_snapshot.get("revision")
     generation = binding_snapshot.get("operation_generation", 0)
@@ -1335,7 +1463,12 @@ async def promote_deferred_task_resolution(
         payload=payload,
     )
     job_id = _required_mapping_text(queue_kwargs, "job_id")
-    queued = await _queue_payload(background_queue, payload, **queue_kwargs)
+    queue_task = asyncio.create_task(
+        _queue_payload(background_queue, payload, **queue_kwargs),
+    )
+    promotion_state["queue_task"] = queue_task
+    queued = await asyncio.shield(queue_task)
+    promotion_state.pop("queue_task", None)
     if not isinstance(queued, Mapping):
         raise TaskResolutionContractError(
             "promotion queue returned no durable job",
@@ -1344,6 +1477,7 @@ async def promote_deferred_task_resolution(
         raise TaskResolutionContractError(
             "promotion queue returned an unexpected job id",
         )
+    promotion_state["background_work_job_id"] = job_id
     attached = await _store_call(
         binding_store,
         "attach_accepted_task",
@@ -1381,6 +1515,101 @@ async def promote_deferred_task_resolution(
         job_id=job_id,
         accepted_task_id=accepted_task_id,
     ))
+
+
+async def _settle_deferred_promotion_cancellation(
+    promotion_state: dict[str, object],
+) -> None:
+    """Close a partial handoff unless both durable owner attachments committed."""
+
+    await _capture_promotion_task_outcomes(promotion_state)
+    binding_store = promotion_state.get("binding_store")
+    accepted_task_store = promotion_state.get("accepted_task_store")
+    session_id = promotion_state.get("task_session_id")
+    if (
+        binding_store is None
+        or accepted_task_store is None
+        or not isinstance(session_id, str)
+        or not session_id.strip()
+    ):
+        return
+    stored = await _store_call(
+        binding_store,
+        "find_binding_by_session",
+        task_session_id=session_id,
+    )
+    if isinstance(stored, Mapping) and _binding_has_background_owner(stored):
+        return
+    accepted_task_id = promotion_state.get("accepted_task_id")
+    if isinstance(accepted_task_id, str) and accepted_task_id.strip():
+        await _store_call(
+            accepted_task_store,
+            "mark_accepted_task_enqueue_failed",
+            accepted_task_id=accepted_task_id,
+            failure_summary="Caller canceled partial DSH task promotion.",
+            updated_at=(
+                _binding_updated_at(stored)
+                if isinstance(stored, Mapping)
+                else ""
+            ),
+        )
+    await fault_task_resolution_binding(
+        binding_store=binding_store,
+        task_session_id=session_id,
+        updated_at=(
+            _binding_updated_at(stored)
+            if isinstance(stored, Mapping)
+            else ""
+        ),
+    )
+
+
+async def _capture_promotion_task_outcomes(
+    promotion_state: dict[str, object],
+) -> None:
+    """Join shielded durable writes so cancellation can reconcile their result."""
+
+    accepted_creation_task = promotion_state.get("accepted_creation_task")
+    if isinstance(accepted_creation_task, asyncio.Future):
+        try:
+            value = await asyncio.shield(accepted_creation_task)
+        except asyncio.CancelledError:
+            value = None
+        except (
+            AgenticResolverError,
+            DatabaseOperationError,
+            TaskResolutionContractError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ):
+            value = None
+        if isinstance(value, Mapping):
+            nested = value.get("task")
+            accepted_task = nested if isinstance(nested, Mapping) else value
+            accepted_task_id = accepted_task.get("accepted_task_id")
+            if isinstance(accepted_task_id, str) and accepted_task_id.strip():
+                promotion_state["accepted_task_id"] = accepted_task_id
+
+    queue_task = promotion_state.get("queue_task")
+    if isinstance(queue_task, asyncio.Future):
+        try:
+            queued = await asyncio.shield(queue_task)
+        except asyncio.CancelledError:
+            queued = None
+        except (
+            AgenticResolverError,
+            DatabaseOperationError,
+            TaskResolutionContractError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ):
+            queued = None
+        if isinstance(queued, Mapping):
+            job_id = queued.get("job_id")
+            if isinstance(job_id, str) and job_id.strip():
+                promotion_state["background_work_job_id"] = job_id
 
 
 async def reconcile_task_resolution_result(
@@ -1470,11 +1699,9 @@ async def continue_delivered_task(
     binding_store: object | None = None,
     accepted_task_store: object | None = None,
     background_queue: object | None = None,
-    authority_broker: object | None = None,
 ) -> dict[str, object]:
     """Queue one typed next-generation follow-up on the same DSH thread."""
 
-    del authority_broker
     validated = validate_accepted_task_control(control)
     if not isinstance(action_attempt_id, str) or not action_attempt_id.strip():
         raise TaskResolutionContractError("action_attempt_id is required")

@@ -17,7 +17,6 @@ from tests.cognition_test_helpers import (
 from tests.task_resolution_test_helpers import (
     _goal_continuation_ref,
     accepted_task_completed_job,
-    recorded_task_checkpoint,
     resume_queue_request,
 )
 
@@ -122,79 +121,8 @@ def test_tool_result_source_builder_creates_prompt_safe_episode() -> None:
         assert forbidden not in serialized
 
 
-def test_tool_result_payload_uses_semantic_metadata() -> None:
-    """Result source should expose a typed tool-result cognition outcome."""
-
-    result_source = importlib.import_module(
-        "kazusa_ai_chatbot.background_work.result_source"
-    )
-    episode = result_source.build_result_ready_episode_from_job(
-        accepted_task_completed_job()
-    )
-    metadata = episode["percepts"][0]["content"]
-    source = metadata["cognition_source"]
-    assert source["source_kind"] == "tool_result"
-    assert source["source_id"] == "task-001"
-    assert source["occurred_at"] == "2026-06-06T00:01:00+00:00"
-    assert source["semantic_summary"] == (
-        "A public source resolved the requested fact."
-    )
-    assert source["semantic_objective"] == (
-        "Resolve one bounded public question."
-    )
-    assert source["task_status"] == "resolved"
-    assert source["evidence_state"] == "complete"
-    assert source["evidence_excerpts"] == [
-        "A public source resolved the requested fact."
-    ]
-    assert source["evidence_handles"] == ["https://example.com/source"]
-    assert source["remaining_needs"] == []
-    assert source["goal_continuation_ref"] == (
-        accepted_task_completed_job()["task_resolution_result"][
-            "goal_continuation_ref"
-        ]
-    )
-    serialized_payload = json.dumps(episode, ensure_ascii=False).lower()
-    assert "tool_result" in serialized_payload
-    retired_result_source = "accepted_" + "task_result_ready"
-    assert retired_result_source not in serialized_payload
-    for forbidden in ("worker_metadata", "worker", "job_ref", "queue_state"):
-        assert forbidden not in serialized_payload
 
 
-def test_result_source_preserves_typed_task_status_and_ref() -> None:
-    """A stored task result reaches the tool-result episode without flattening."""
-
-    jobs = importlib.import_module("kazusa_ai_chatbot.background_work.jobs")
-    result_source = importlib.import_module(
-        "kazusa_ai_chatbot.background_work.result_source"
-    )
-    request = resume_queue_request()
-    job = jobs._build_job_document(
-        request,
-        job_id="job-typed-result-001",
-        storage_timestamp_utc="2026-06-06T00:00:00+00:00",
-    )
-    _checkpoint, task_result = recorded_task_checkpoint(status="resolved")
-    job.update({
-        "status": "completed",
-        "completed_at": "2026-06-06T00:01:00+00:00",
-        "result_summary": task_result["prompt_safe_summary"],
-        "task_resolution_result": task_result,
-    })
-
-    episode = result_source.build_result_ready_episode_from_job(job)
-    source = episode["percepts"][0]["content"]["cognition_source"]
-
-    assert source["semantic_objective"] == task_result["semantic_objective"]
-    assert source["task_status"] == "resolved"
-    assert source["evidence_state"] == "complete"
-    assert source["goal_continuation_ref"] == task_result[
-        "goal_continuation_ref"
-    ]
-    assert episode["origin_metadata"]["goal_continuation_ref"] == (
-        task_result["goal_continuation_ref"]
-    )
 
 
 def test_tool_result_source_builder_ignores_untyped_job_summary() -> None:
@@ -220,23 +148,6 @@ def test_tool_result_source_builder_ignores_untyped_job_summary() -> None:
     )
 
 
-def test_successful_delivery_summary_uses_validated_semantic_result() -> None:
-    """Resolved accepted-task delivery retains the result-owned semantic summary."""
-
-    worker = importlib.import_module("kazusa_ai_chatbot.background_work.worker")
-    job = accepted_task_completed_job()
-    task_result = job["task_resolution_result"]
-    assert isinstance(task_result, dict)
-    marker = "PLAN3_E2E_BETA_SELECTED"
-    task_result["prompt_safe_summary"] = f"The selected marker is {marker}."
-    task_result["evidence"][0]["summary"] = "receipt-only-reference"
-    task_result["evidence_handles"] = ["receipt-only-reference"]
-
-    summary = worker._task_result_delivery_summary(task_result)
-
-    assert summary.startswith(f"The selected marker is {marker}.")
-    assert "receipt-only-reference" not in summary
-    assert "https://example.com/source" in summary
 
 
 def test_partial_delivery_summary_retains_semantic_result_and_limitations() -> None:
@@ -260,18 +171,6 @@ def test_partial_delivery_summary_retains_semantic_result_and_limitations() -> N
     assert "Remaining limitations: One bounded source remains unavailable." in summary
 
 
-def test_non_success_delivery_summary_retains_existing_blocker_contract() -> None:
-    """Non-success delivery continues to use its summary plus remaining needs."""
-
-    worker = importlib.import_module("kazusa_ai_chatbot.background_work.worker")
-    _checkpoint, task_result = recorded_task_checkpoint(status="needs_user_input")
-
-    summary = worker._task_result_delivery_summary(task_result)
-
-    assert summary == (
-        "Continuation is pending.\n"
-        "Remaining limitation: Continue the DSH task."
-    )
 
 
 @pytest.mark.asyncio

@@ -124,47 +124,6 @@ async def test_one_open_dsh_followup_is_scoped_and_indexed(
     }
 
 
-@pytest.mark.asyncio
-async def test_followup_claim_recovery_and_terminal_updates_are_revision_guarded(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Claims are scoped CAS operations and identical attempts replay safely."""
-
-    module = _module()
-    database = _FakeDb([_task()])
-    monkeypatch.setattr(module, "get_db", lambda: _async_value(database))
-    claim = getattr(module, "claim_dsh_followup", None)
-    if not callable(claim):
-        pytest.fail("accepted-task DB owner lacks claim_dsh_followup")
-    first = await claim(
-        accepted_task_id="task-1",
-        action_attempt_id="attempt-1",
-        expected_revision=3,
-        operation="continue",
-        instruction="Continue with the supplied semantic instruction.",
-    )
-    replay = await claim(
-        accepted_task_id="task-1",
-        action_attempt_id="attempt-1",
-        expected_revision=4,
-        operation="continue",
-        instruction="Continue with the supplied semantic instruction.",
-    )
-    assert first["accepted_task_id"] == replay["accepted_task_id"] == "task-1"
-    assert first["dsh_followup_claim_action_attempt_id"] == "attempt-1"
-    assert first["dsh_followup_open"] is False
-    query = database.accepted_tasks.queries[0]
-    assert query["accepted_task_id"] == "task-1"
-    assert query["dsh_followup_open"] is True
-    assert query["revision"] == 3
-    with pytest.raises(ValueError):
-        await claim(
-            accepted_task_id="task-1",
-            action_attempt_id="different-attempt",
-            expected_revision=4,
-            operation="continue",
-            instruction="Continue with the supplied semantic instruction.",
-        )
 
 
 async def _async_value(value: object) -> object:

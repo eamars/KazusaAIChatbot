@@ -35,12 +35,23 @@ is open; authority and grants bound to an earlier digest fail closed.
 
 system.health is ready only when authenticated route, Standard,
 semantic-worker, web, Brain, catalog, policy, workspace, profile, release,
-and store checks agree. Build and sidecar tests use the package-manager version
+and store checks agree. Build and type checking use the package-manager version
 pinned in `package.json`.
 
 The reusable real-process verification owner is
 `experiments/dsh_runtime_probe.py`. Its `sidecar-lifecycle` mode drives the
 built Standard sidecar through authenticated semantic work, SQLite checkpoint
-restart, and exact terminal replay with a deterministic model endpoint. Tests
-assert public behavior and compatibility; installed package file hashes and
-internal composition row counts are not release contracts.
+restart, and exact terminal replay with a deterministic model endpoint. Use it
+to diagnose recovery after establishing real-model viability through the Brain.
+The dedicated TypeScript test suite is retired; strict production type checking
+and build remain. The whole runtime follows the single
+[completion plan](../../development_plans/active/bugfix/dsh_runtime_completion_plan_2026-09-05.md).
+
+`ResolutionSidecarRuntime.forProduction` is the sole executor construction
+boundary. Its injected executor and controls perform real operation joining,
+durable inspection/replay, and fenced forwarding. Fixtures and scripted
+providers belong to verification support. The process probe injects terminal
+response loss outside the sidecar and also covers RPC authentication,
+activation authority rejection, independent sessions, and missing-worker
+readiness. Shared launch and cleanup resources live in
+`experiments/dsh_process_support.py`.

@@ -32,12 +32,6 @@ def test_production_code_does_not_import_envelope_implementation_packages() -> N
     assert violations == []
 
 
-def test_message_envelope_package_has_no_platform_normalizer_modules() -> None:
-    """Concrete platform normalizers belong to adapters, not the brain package."""
-
-    normalizer_dir = Path("src/kazusa_ai_chatbot/message_envelope/normalizers")
-
-    assert not normalizer_dir.exists()
 
 
 def test_service_does_not_import_platform_envelope_implementations() -> None:

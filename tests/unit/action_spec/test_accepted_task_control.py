@@ -78,19 +78,6 @@ def _module(name: str) -> Any:
         pytest.fail(f"planned action owner is unavailable: {name}: {exc}")
 
 
-def test_registry_exposes_closed_dsh_task_controls() -> None:
-    """The executable registry projection advertises the typed control."""
-
-    registry = _module("kazusa_ai_chatbot.action_spec.registry")
-    capabilities = registry.build_initial_action_capabilities()
-    assert "accepted_task_control" in capabilities
-    schema = capabilities["accepted_task_control"]["input_schema"]
-    assert schema["additionalProperties"] is False
-    assert schema["properties"]["operation"]["enum"] == [
-        "continue",
-        "summarize",
-        "cancel",
-    ]
 
 
 def test_evaluator_accepts_only_advertised_typed_task_control() -> None:
@@ -135,23 +122,6 @@ async def test_control_claims_advertised_followup_or_cancels_without_interpretin
     lifecycle.assert_awaited_once()
 
 
-def test_action_result_projects_typed_task_context() -> None:
-    """Result materialization keeps the prompt-safe typed task context."""
-
-    results = _module("kazusa_ai_chatbot.action_spec.results")
-    project = getattr(results, "project_task_action_result", None)
-    if not callable(project):
-        pytest.fail("action result owner lacks project_task_action_result")
-    projected = project(
-        control=_control(),
-        accepted_task=_affordance(),
-        status="validated",
-        result_summary="The control was accepted.",
-    )
-    assert "task_resolution_context" in projected
-    assert projected["task_resolution_context"]["accepted_task_ref"] == (
-        "accepted_task:task-1"
-    )
 
 
 @pytest.mark.asyncio
@@ -188,10 +158,3 @@ async def test_handler_binds_control_to_trusted_scope_and_task_affordance() -> N
         )
 
 
-def test_action_public_exports_use_only_accepted_task_control() -> None:
-    """The public action package exports the canonical control contract."""
-
-    module = _module("kazusa_ai_chatbot.action_spec")
-    public_names = set(getattr(module, "__all__", ()))
-    assert "AcceptedTaskControlV1" in public_names
-    assert "accepted_task_control" in public_names

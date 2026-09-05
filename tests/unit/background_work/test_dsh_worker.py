@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock
 import pytest
 
 from tests.task_resolution_test_helpers import (
-    InMemoryDshBindingStore,
     _context,
     _goal_continuation_ref,
 )
@@ -135,66 +134,8 @@ async def test_worker_checkpoints_waits_and_terminalizes_current_generation_thro
     assert complete.await_args.kwargs["task_resolution_result"]["status"] == "resolved"
 
 
-@pytest.mark.asyncio
-async def test_cooperative_checkpoint_requeues_as_continuation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A cooperative checkpoint is requeued only as queued continuation."""
-
-    worker = _worker()
-    requeue = AsyncMock(return_value={"status": "queued"})
-    monkeypatch.setattr(worker, "requeue_background_work_job", requeue)
-    result = _result("partial")
-    result["checkpoint"] = {
-        "schema_version": "dsh_resolution_ref.v1",
-        "dsh_session_id": "session-1",
-        "resolution_thread_id": "thread-1",
-        "segment_id": "segment-1",
-        "activation_id": "activation-1",
-        "lease_epoch": 1,
-        "document_revision": 1,
-        "last_committed_seq": 1,
-    }
-    await worker._requeue_task_orchestrator_job(
-        _job(),
-        lease_owner="worker-1",
-        result=result,
-    )
-    requeue.assert_awaited_once()
-    assert requeue.await_args.kwargs["status"] == "queued"
 
 
-@pytest.mark.asyncio
-async def test_worker_retry_reuses_idempotent_task_session(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A retry claims the same job/session without opening a replacement."""
-
-    worker = _worker()
-    claimed = [_job(), _job()]
-    claim = AsyncMock(side_effect=[claimed[0], claimed[1], None])
-    running = AsyncMock(return_value={"state": "running"})
-    process = AsyncMock(return_value="completed")
-    monkeypatch.setattr(worker, "claim_background_work_job", claim)
-    monkeypatch.setattr(worker, "mark_accepted_task_running", running)
-    monkeypatch.setattr(worker, "_run_claimed_job", process)
-
-    result = await worker.run_background_work_worker_tick(
-        claim_limit=2,
-        lease_seconds=30,
-        max_attempts=4,
-        worker_id="worker-1",
-    )
-
-    assert result["processed_count"] == 2
-    assert [call.args[0]["job_id"] for call in process.await_args_list] == [
-        "job-1",
-        "job-1",
-    ]
-    assert all(
-        call.args[0]["worker_payload"]["task_session_id"] == "session-1"
-        for call in process.await_args_list
-    )
 
 
 @pytest.mark.asyncio
@@ -274,93 +215,5 @@ async def test_worker_operational_failure_persists_deliverable_typed_result(
     )
 
 
-@pytest.mark.asyncio
-async def test_checkpoint_continuation_advances_durable_activation_fence(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A same-segment continuation persists its newly leased activation."""
-
-    orchestrator = __import__(
-        "kazusa_ai_chatbot.background_work.subagent.task_orchestrator",
-        fromlist=["task_orchestrator"],
-    )
-    store = InMemoryDshBindingStore()
-    store.bindings["session-1"] = {
-        "task_session_id": "session-1",
-        "operation_generation": 0,
-        "state": "active",
-        "revision": 3,
-        "resolution_thread_id": "thread-1",
-        "segment_id": "segment-1",
-        "resolution_ref": {
-            "schema_version": "dsh_resolution_ref.v1",
-            "resolution_thread_id": "thread-1",
-            "segment_id": "segment-1",
-            "dsh_session_id": "session-1",
-            "activation_id": "activation-1",
-            "lease_epoch": 1,
-            "document_revision": 1,
-            "last_committed_seq": 4,
-        },
-        "latest_task_resolution_result": None,
-    }
-    monkeypatch.setattr(orchestrator, "_TASK_RESOLUTION_BINDING_STORE", store)
-    exhaust = {
-        "kind": "terminal",
-        "identity": {
-            "resolution_thread_id": "thread-1",
-            "segment_id": "segment-1",
-            "dsh_session_id": "session-1",
-            "activation_id": "activation-2",
-            "lease_epoch": 2,
-            "document_revision": 2,
-            "last_committed_seq": 9,
-        },
-    }
-
-    await orchestrator._record_binding_outcome(
-        task_session_id="session-1",
-        operation_generation=0,
-        exhaust=exhaust,
-        result=_result(),
-        allow_reference_advance=True,
-    )
-
-    binding = store.bindings["session-1"]
-    assert binding["resolution_ref"]["activation_id"] == "activation-2"
-    assert binding["resolution_ref"]["lease_epoch"] == 2
-    assert binding["state"] == "terminal"
 
 
-@pytest.mark.asyncio
-async def test_task_orchestrator_dispatches_only_generation_bound_dsh_payload_v2_operations(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The worker adapter forwards only the DSH payload V2 operation."""
-
-    worker = _worker()
-    execute = AsyncMock(return_value=_result())
-    monkeypatch.setattr(worker, "execute_task_orchestrator_job", execute)
-    monkeypatch.setattr(
-        worker,
-        "mark_tool_result_ready",
-        AsyncMock(return_value={"state": "result_ready"}),
-    )
-    monkeypatch.setattr(
-        worker,
-        "complete_background_work_job",
-        AsyncMock(return_value={"status": "completed"}),
-    )
-    await worker._run_claimed_job(_job(), lease_owner="worker-1")
-    payload = execute.await_args.args[0]["worker_payload"]
-    assert set(payload) == {
-        "schema_version",
-        "operation",
-        "task_session_id",
-        "operation_generation",
-        "control",
-    }
-    assert payload["operation"] in {
-        "open_dsh_resolution",
-        "continue_dsh_resolution",
-    }

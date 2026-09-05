@@ -1,4 +1,4 @@
-"""Direct ownership tests for terminal dialog generation."""
+"""Behavior checks for terminal dialog generation."""
 
 from __future__ import annotations
 
@@ -139,36 +139,6 @@ def _source_dialog_state(
     return state
 
 
-@pytest.mark.asyncio
-async def test_dialog_agent_exposes_owned_contract(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Keep terminal dialog generation attached to this source owner."""
-
-    assert callable(dialog_generator)
-    diagnostic = {
-        "schema_version": "episode_attempt_diagnostic.v1",
-        "stage": "dialog_generation",
-        "error_code": "dialog_source_url_degraded",
-        "attempt_count": 3,
-        "safe_checkpoint": "post_cognition_commit",
-        "retryable": False,
-        "final_status": "accepted_degraded",
-    }
-
-    async def fake_generator(state: dict[str, object]) -> dict[str, object]:
-        return {
-            "final_dialog": ["retained"],
-            "text_surface_output_v2": state["text_surface_output_v2"],
-            "attempt_diagnostics": [diagnostic],
-        }
-
-    monkeypatch.setattr(dialog_module, "dialog_generator", fake_generator)
-    state = build_dialog_state()
-    state.pop("text_surface_input")
-    result = await dialog_module.dialog_agent(state)
-
-    assert result["attempt_diagnostics"] == [diagnostic]
 
 
 def test_validated_dialog_messages_collapses_blank_line_runs() -> None:

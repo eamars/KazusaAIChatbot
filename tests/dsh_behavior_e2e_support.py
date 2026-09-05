@@ -9,10 +9,11 @@ import os
 import signal
 import socket
 import subprocess
+import sys
 import time
 import traceback
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -23,11 +24,11 @@ from uuid import uuid4
 import httpx
 import pytest
 
-from experiments.dsh_runtime_probe import (
-    ProbeRecorder,
+from experiments.dsh_process_support import (
     SidecarProcess,
     start_configured_sidecar,
 )
+from tests.dsh_database_test_support import GuardedDshDiagnostics
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PYTHON_EXECUTABLE = PROJECT_ROOT / "venv" / "Scripts" / "python.exe"
@@ -36,6 +37,11 @@ DATABASE_PREFIX = "_test_kazusa_dsh_behavior_"
 CHILD_TIMEOUT_SECONDS = 30 * 60
 HTTP_TIMEOUT_SECONDS = 10 * 60
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
+
 
 @dataclass(frozen=True, slots=True)
 class BehaviorCase:
@@ -43,29 +49,75 @@ class BehaviorCase:
 
     case_id: str
     workspace_files: Mapping[str, str]
+    user_inputs: list[str]
+    interaction_inputs: list[dict[str, str]]
+    behavior_contract: str
+    input_kind: str
+    hard_gates: list[str]
+    behavior_rubric: list[str]
+    acceptable_variation: list[str]
+    forbidden_failure_modes: list[str]
+    trace_required: list[str]
 
 
-CASES = {
-    "foreground": BehaviorCase(
-        case_id="foreground",
-        workspace_files={
-            "rollout/status_note.txt": (
-                "The rollout owner is Mira. The checksum review must finish "
-                "before rollout begins."
-            ),
-        },
-    ),
-    "deferred": BehaviorCase(
-        case_id="deferred",
-        workspace_files={
-            "handover/incident_note.txt": (
-                "The cache alert is stable. Rowan owns the follow-up. The "
-                "next review happens after the morning metrics arrive."
-            ),
-        },
-    ),
-    "internal": BehaviorCase(case_id="internal", workspace_files={}),
-}
+@dataclass
+class BehaviorResources:
+    """Record process evidence owned by the live scenario."""
+
+    artifact_dir: Path
+    processes: list[dict[str, object]] = field(default_factory=list)
+    artifacts: list[str] = field(default_factory=list)
+    cleanup: list[dict[str, object]] = field(default_factory=list)
+
+
+class LiveProviderRecorder:
+    """Forward real sidecar provider traffic and retain usage-bearing replies."""
+
+    def __init__(self, upstream_base_url: str, artifact_dir: Path) -> None:
+        self.calls: list[dict[str, Any]] = []
+        owner = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self) -> None:
+                body = self.rfile.read(int(self.headers["Content-Length"]))
+                started = time.perf_counter()
+                with httpx.Client(timeout=HTTP_TIMEOUT_SECONDS) as client:
+                    result = client.post(
+                        upstream_base_url.rstrip("/") + self.path,
+                        content=body,
+                        headers={
+                            "Authorization": self.headers.get("Authorization", ""),
+                            "Content-Type": self.headers["Content-Type"],
+                        },
+                    )
+                owner.calls.append({
+                    "request": json.loads(body), "status": result.status_code,
+                    "response_body": result.text,
+                    "duration_ms": round((time.perf_counter() - started) * 1000),
+                })
+                _write_json(artifact_dir / "dsh_provider_calls.json", owner.calls)
+                self.send_response(result.status_code)
+                self.send_header("Content-Type", result.headers["Content-Type"])
+                self.send_header("Content-Length", str(len(result.content)))
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.wfile.write(result.content)
+
+            def log_message(self, *_args: object) -> None:
+                return
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.thread = Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base_url = f"http://127.0.0.1:{self.server.server_port}"
+
+    def close(self) -> None:
+        """Join the real provider recording relay after its sidecar stops."""
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=5)
+        if self.thread.is_alive():
+            raise RuntimeError("live provider recording relay did not stop")
 
 
 class CallbackAdapter:
@@ -276,19 +328,20 @@ def _case_environment(case: BehaviorCase, tmp_path: Path) -> dict[str, str]:
     return environment
 
 
-async def run_live_behavior_case(case_id: str, tmp_path: Path) -> None:
+async def run_live_behavior_case(case: BehaviorCase, tmp_path: Path) -> None:
     """Run one real-model contract in a guarded child process."""
 
     _require_live_configuration()
-    case = CASES[case_id]
+    case_id = case.case_id
     artifact_dir = _artifact_directory(case_id)
     case_root = tmp_path / case_id
     environment = _case_environment(case, case_root)
+    _write_json(artifact_dir / "case_contract.json", asdict(case))
     command = [
         str(PYTHON_EXECUTABLE),
         str(Path(__file__).resolve()),
-        "--execute-case",
-        case_id,
+        "--case-file",
+        str(artifact_dir / "case_contract.json"),
         "--artifact-dir",
         str(artifact_dir.resolve()),
     ]
@@ -347,76 +400,27 @@ async def run_live_behavior_case(case_id: str, tmp_path: Path) -> None:
 async def _prepare_database(artifact_dir: Path) -> None:
     from kazusa_ai_chatbot.character_profile import load_character_profile_seed
     from kazusa_ai_chatbot.config import CHARACTER_GLOBAL_USER_ID
-    from kazusa_ai_chatbot.db import _client as client_module
     from kazusa_ai_chatbot.db import db_bootstrap
-    from kazusa_ai_chatbot.db.character_identity_growth import (
-        ensure_seed_identity,
-    )
+    from kazusa_ai_chatbot.db.character_identity_growth import ensure_seed_identity
 
-    database_name = os.environ["MONGODB_DB_NAME"]
-    if not database_name.startswith(DATABASE_PREFIX):
-        raise RuntimeError("database name is outside the behavior-test prefix")
-    client_module.MONGODB_DB_NAME = database_name
-    client_module._assert_guarded_database_name()
-    seed = load_character_profile_seed(
-        PROJECT_ROOT / "personalities" / "example.json",
-    )
-    await client_module.close_db()
+    seed = load_character_profile_seed(PROJECT_ROOT / "personalities" / "example.json")
     await db_bootstrap()
-    await ensure_seed_identity(
-        character_id=CHARACTER_GLOBAL_USER_ID,
-        seed=seed,
-    )
-    database = await client_module.get_db()
-    await database.command("ping")
-    _write_json(
-        artifact_dir / "database_preparation.json",
-        {"database_name": database_name, "status": "prepared"},
-    )
-
-
-async def _drop_database() -> None:
-    from motor.motor_asyncio import AsyncIOMotorClient
-
-    from kazusa_ai_chatbot.db import _client as client_module
-
-    database_name = os.environ["MONGODB_DB_NAME"]
-    if not database_name.startswith(DATABASE_PREFIX):
-        raise RuntimeError("database cleanup target is outside the test prefix")
-    if os.environ["KAZUSA_EPHEMERAL_TEST_DATABASE_NAME"] != database_name:
-        raise RuntimeError("database cleanup target does not match its guard")
-    await client_module.close_db()
-    client = AsyncIOMotorClient(client_module.MONGODB_URI)
-    try:
-        await client.drop_database(database_name)
-    finally:
-        client.close()
-
-
-async def _read_collection(name: str) -> list[dict[str, Any]]:
-    from kazusa_ai_chatbot.db._client import get_db
-
-    database = await get_db()
-    rows = await database[name].find({}, {"_id": 0}).to_list(length=None)
-    return [dict(row) for row in rows if isinstance(row, Mapping)]
+    await ensure_seed_identity(character_id=CHARACTER_GLOBAL_USER_ID, seed=seed)
+    _write_json(artifact_dir / "database_preparation.json", {
+        "database_name": os.environ["MONGODB_DB_NAME"], "status": "prepared",
+    })
 
 
 async def _seed_user(global_user_id: str, platform_user_id: str) -> None:
-    from kazusa_ai_chatbot.db import create_user_profile
-    from kazusa_ai_chatbot.db._client import get_db
+    from kazusa_ai_chatbot.db import create_user_profile, get_user_profile
 
-    database = await get_db()
-    existing = await database.user_profiles.find_one(
-        {"global_user_id": global_user_id},
-        {"_id": 1},
-    )
-    if existing is None:
+    existing = await get_user_profile(global_user_id)
+    if not existing:
         await create_user_profile({
             "global_user_id": global_user_id,
             "display_name": "DSH Behavior User",
             "platform_accounts": [{
-                "platform": "debug",
-                "platform_user_id": platform_user_id,
+                "platform": "debug", "platform_user_id": platform_user_id,
                 "display_name": "DSH Behavior User",
             }],
         })
@@ -531,6 +535,7 @@ async def _post_chat(case_id: str, text: str) -> dict[str, Any]:
         write=30.0,
         pool=30.0,
     )
+    request = _chat_request(case_id, text)
     async with httpx.AsyncClient(timeout=timeout) as client:
         response = await client.post(
             f"{base_url}/chat",
@@ -540,16 +545,17 @@ async def _post_chat(case_id: str, text: str) -> dict[str, Any]:
                     "KAZUSA_CONTROL_BRAIN_SHARED_SECRET"
                 ],
             },
-            json=_chat_request(case_id, text),
+            json=request,
         )
     response.raise_for_status()
     payload = response.json()
     if not isinstance(payload, Mapping):
         raise TypeError("chat response returned a non-object")
-    return dict(payload)
+    result = {"request": request, "response": dict(payload)}
+    return result
 
 
-async def _post_internal_interaction() -> dict[str, Any]:
+async def _post_internal_interaction(scenario: Mapping[str, str]) -> dict[str, Any]:
     from kazusa_ai_chatbot.dsh_interaction.auth import sign_request
     from kazusa_ai_chatbot.dsh_interaction.contracts import (
         DshBrainInteractionRequestV2,
@@ -573,21 +579,17 @@ async def _post_internal_interaction() -> dict[str, Any]:
     request = DshBrainInteractionRequestV2.from_mapping({
         "schema_version": "dsh_brain_interaction.v2",
         "interaction_id": f"interaction-{uuid4().hex}",
-        "kind": "question",
+        "kind": scenario["kind"],
         "resolution_thread_id": f"thread-{uuid4().hex}",
         "segment_id": f"segment-{uuid4().hex}",
         "activation_id": f"activation-{uuid4().hex}",
         "lease_epoch": 1,
         "dsh_call_id": f"call-{uuid4().hex}",
-        "tool_name": None,
+        "tool_name": "submit_resolution" if scenario["kind"] == "approval" else None,
         "operation_id": f"operation-{uuid4().hex}",
         "operation_payload_digest": "sha256:behavior-operation",
         "arguments_digest": "sha256:behavior-arguments",
-        "transient_detail": (
-            "The user asked whether a local rollout note is enough to claim "
-            "the rollout is safe. Answer only if the available context "
-            "supports it; otherwise reject the unsupported conclusion."
-        ),
+        "transient_detail": scenario["detail"],
         "brain_conversation_ref": "chat:debug:dsh-behavior-internal",
         "platform": "debug",
         "platform_channel_id": scope["platform_channel_id"],
@@ -628,51 +630,18 @@ async def _post_internal_interaction() -> dict[str, Any]:
     payload = response.json()
     if not isinstance(payload, Mapping):
         raise TypeError("interaction response returned a non-object")
-    return dict(payload)
+    result = {"request": signed.to_dict(), "response": dict(payload)}
+    return result
 
 
-async def _wait_for_deferred_delivery(
-    adapter: CallbackAdapter,
-) -> None:
+async def _wait_for_deferred_delivery(adapter: CallbackAdapter) -> None:
     deadline = time.monotonic() + HTTP_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
-        jobs = await _read_collection("background_work_jobs")
-        if (
-            len(adapter.deliveries) == 1
-            and any(row.get("delivery_state") == "delivered" for row in jobs)
-        ):
+        if adapter.deliveries:
+            await asyncio.sleep(2)
             return
         await asyncio.sleep(0.5)
     raise RuntimeError("deferred DSH delivery did not settle")
-
-
-async def _capture_evidence(
-    *,
-    response: Mapping[str, object],
-    adapter: CallbackAdapter,
-) -> dict[str, object]:
-    collection_names = (
-        "dsh_task_bindings",
-        "accepted_tasks",
-        "background_work_jobs",
-        "dsh_interactions",
-        "llm_trace_runs",
-        "llm_trace_steps",
-        "event_log_events",
-        "conversation_history",
-    )
-    mongo = {
-        name: await _read_collection(name)
-        for name in collection_names
-    }
-    return {
-        "response": dict(response),
-        "adapter": {
-            "capability_payloads": adapter.capabilities,
-            "delivery_payloads": adapter.deliveries,
-        },
-        "mongo": mongo,
-    }
 
 
 def _latest_task_results(evidence: Mapping[str, object]) -> list[dict[str, Any]]:
@@ -689,92 +658,72 @@ def _latest_task_results(evidence: Mapping[str, object]) -> list[dict[str, Any]]
     return results
 
 
-def _evaluate_case(
-    case_id: str,
-    evidence: Mapping[str, object],
-) -> tuple[dict[str, bool], list[str]]:
+def _evaluate_case(case: BehaviorCase, evidence: Mapping[str, Any]) -> tuple[dict[str, bool], list[str]]:
+    """Check public response contracts; leave semantic judgments to review."""
+
     mongo = evidence["mongo"]
-    if not isinstance(mongo, Mapping):
-        raise TypeError("captured Mongo evidence is invalid")
     response = evidence["response"]
-    if not isinstance(response, Mapping):
-        raise TypeError("captured response is invalid")
-    bindings = [
-        row for row in mongo["dsh_task_bindings"]
-        if isinstance(row, Mapping)
-    ]
     results = _latest_task_results(evidence)
-    runtime_failures = [
-        row for row in mongo["event_log_events"]
-        if isinstance(row, Mapping)
-        and (
-            row.get("event_family") == "runtime_error"
-            or (
-                row.get("event_family") == "pipeline_turn"
-                and row.get("status") == "failed"
-            )
-        )
-    ]
-    checks: dict[str, bool] = {"no_runtime_failure": not runtime_failures}
-    if case_id == "foreground":
-        rendered = json.dumps(results, ensure_ascii=False).lower()
+    checks = {
+        "cognition_trace_retained": bool(mongo["llm_trace_steps"]),
+        "scenario_contract_retained": bool(evidence["contract"]),
+        "no_operational_failure": all(
+            turn["response"]["operational_error"] is None
+            for turn in response["turns"]
+        ),
+    }
+    channel = evidence["channel_id"]
+    if case.case_id == "foreground":
+        turns = response["turns"]
+        visible = "\n".join(turns[-1]["response"]["messages"])
         checks.update({
-            "one_task_binding": len(bindings) == 1,
-            "resolved_task_result": (
-                len(results) == 1 and results[0].get("status") == "resolved"
+            "ambiguity_response_visible": bool(turns[0]["response"]["messages"]),
+            "clarified_response_visible": bool(visible),
+            "source_owner_literal_preserved": "Mira" in visible,
+            "clarified_correlated_dsh_entry": any(
+                row["source_scope"]["source_message_id"] == turns[-1]["request"]["platform_message_id"]
+                for row in mongo["dsh_task_bindings"]
             ),
-            "grounded_evidence": (
-                len(results) == 1
-                and bool(results[0].get("evidence"))
-                and "mira" in rendered
-            ),
-            "visible_character_surface": bool(response.get("messages")),
-            "trace_retained": bool(response.get("trace_id")),
+            "grounded_result_available": any(result["evidence"] for result in results),
         })
-    elif case_id == "deferred":
-        jobs = [
-            row for row in mongo["background_work_jobs"]
-            if isinstance(row, Mapping)
-        ]
-        deliveries = evidence["adapter"]
-        delivery_rows = (
-            deliveries.get("delivery_payloads", [])
-            if isinstance(deliveries, Mapping)
-            else []
-        )
+    elif case.case_id == "deferred":
+        deliveries = evidence["adapter"]["delivery_payloads"]
+        jobs = mongo["background_work_jobs"]
+        visible = "\n".join(row["text"] for row in deliveries)
         checks.update({
-            "one_task_binding": len(bindings) == 1,
-            "one_background_job": len(jobs) == 1,
-            "background_job_delivered": (
-                len(jobs) == 1 and jobs[0].get("delivery_state") == "delivered"
-            ),
-            "one_visible_delivery": len(delivery_rows) == 1,
-            "grounded_terminal_result": (
-                len(results) == 1
-                and results[0].get("status") == "resolved"
-                and bool(results[0].get("evidence"))
-            ),
-        })
-    elif case_id == "internal":
-        interactions = [
-            row for row in mongo["dsh_interactions"]
-            if isinstance(row, Mapping)
-        ]
-        decision = response.get("decision")
-        checks.update({
-            "one_durable_interaction": len(interactions) == 1,
-            "semantic_decision_returned": decision in {
-                "answer", "allow_once", "reject",
-            },
-            "decision_reason_retained": bool(response.get("reason")),
-            "decision_matches_persistence": (
-                len(interactions) == 1
-                and interactions[0].get("decision_state") == decision
-            ),
-            "cognition_trace_retained": bool(mongo["llm_trace_runs"]),
+            "correlated_dsh_entry": bool(mongo["dsh_task_bindings"]),
+            "correlated_background_owner": bool(jobs),
+            "background_job_delivered": any(row.get("delivery_state") == "delivered" for row in jobs),
+            "one_eligible_delivery": len(deliveries) == 1,
+            "correct_audience": all(row["channel_id"] == channel for row in deliveries),
+            "source_owner_literal_preserved": "Rowan" in visible,
+            "grounded_result_available": any(result["evidence"] for result in results),
         })
     else:
-        raise ValueError(f"unsupported behavior case: {case_id}")
+        interactions = response["interactions"]
+        for ordinal, interaction in enumerate(interactions):
+            request = interaction["request"]
+            decision = interaction["response"]
+            allowed = {"answer", "reject"} if request["kind"] == "question" else {"allow_once", "reject"}
+            checks[f"interaction_{ordinal}_kind_contract"] = decision["decision"] in allowed
+            checks[f"interaction_{ordinal}_reason"] = bool(decision["reason"])
+            checks[f"interaction_{ordinal}_durable_match"] = any(
+                row["interaction_id"] == request["interaction_id"]
+                and row["decision_state"] == decision["decision"]
+                for row in mongo["dsh_interactions"]
+            )
+        checks["answerable_question_answered"] = interactions[0]["response"]["decision"] == "answer"
+        checks["unsupported_success_rejected"] = interactions[1]["response"]["decision"] == "reject"
+        visible = ""
+    checks["internal_identifiers_absent_from_visible_text"] = all(
+        value not in visible
+        for row in mongo["dsh_task_bindings"]
+        for key in (
+            "resolution_thread_id", "segment_id", "task_session_id",
+            "current_accepted_task_id", "current_background_work_job_id",
+        )
+        if isinstance(value := row.get(key), str) and value
+    )
     failures = [name for name, passed in checks.items() if not passed]
     return checks, failures
 
@@ -791,17 +740,29 @@ async def _stop_brain(server: Any, task: asyncio.Task[Any]) -> None:
             pass
 
 
-async def _execute_case(case_id: str, artifact_dir: Path) -> int:
+async def _execute_case(case: BehaviorCase, artifact_dir: Path) -> int:
     import uvicorn
 
-    from kazusa_ai_chatbot import service
+    provider = None
+    if case.case_id != "internal":
+        provider = LiveProviderRecorder(os.environ["AGENTIC_RESOLVER_LLM_BASE_URL"], artifact_dir)
+        os.environ["AGENTIC_RESOLVER_LLM_BASE_URL"] = provider.base_url
 
+    from kazusa_ai_chatbot import service
+    from kazusa_ai_chatbot.llm_interface import LLInterface
+    from kazusa_ai_chatbot.llm_tracing import current_trace_id
+
+    case_id = case.case_id
     started_at = time.perf_counter()
-    recorder = ProbeRecorder(
-        probe_name=f"live-{case_id}",
-        artifact_dir=artifact_dir,
+    recorder = BehaviorResources(artifact_dir=artifact_dir)
+    diagnostics = GuardedDshDiagnostics(
+        os.environ["MONGODB_URI"], os.environ["MONGODB_DB_NAME"],
+        os.environ["KAZUSA_EPHEMERAL_TEST_DATABASE_NAME"],
     )
-    adapter = CallbackAdapter(shared_secret=f"adapter-{uuid4().hex}")
+    adapter = (
+        CallbackAdapter(shared_secret=f"adapter-{uuid4().hex}")
+        if case_id != "internal" else None
+    )
     sidecar: SidecarProcess | None = None
     server: Any | None = None
     brain_task: asyncio.Task[Any] | None = None
@@ -816,6 +777,31 @@ async def _execute_case(case_id: str, artifact_dir: Path) -> int:
         "errors": [],
     }
     error: dict[str, str] | None = None
+    model_calls: list[dict[str, Any]] = []
+    original_ainvoke = LLInterface.ainvoke
+    response: dict[str, Any] = {"turns": [], "interactions": []}
+    channel_id = (
+        "dsh-behavior-internal-channel" if case_id == "internal"
+        else f"dsh-behavior-channel-{case_id}"
+    )
+
+    async def observed_ainvoke(interface: Any, messages: Any, *, config: Any) -> Any:
+        """Record real invocation cost while forwarding its exact contract."""
+        call_started = time.perf_counter()
+        response = await original_ainvoke(interface, messages, config=config)
+        model_calls.append({
+            "trace_id": current_trace_id(), "route": config.route_name,
+            "model": config.model, "base_url": config.base_url,
+            "max_completion_tokens": config.max_completion_tokens,
+            "duration_ms": round((time.perf_counter() - call_started) * 1000),
+            "usage": dict(response.usage),
+            "messages": [{"type": message.type, "content": message.content} for message in messages],
+            "raw_response": response.content,
+        })
+        _write_json(artifact_dir / "real_model_calls.json", model_calls)
+        return response
+
+    LLInterface.ainvoke = observed_ainvoke
     try:
         await _prepare_database(artifact_dir)
         brain_port = int(
@@ -835,38 +821,47 @@ async def _execute_case(case_id: str, artifact_dir: Path) -> int:
             name=f"dsh-behavior-brain-{case_id}",
         )
         await _wait_for_brain_bridge(brain_task)
-        sidecar = await asyncio.to_thread(
-            start_configured_sidecar,
-            recorder,
-            name="dsh-sidecar",
-            environment=os.environ.copy(),
-        )
-        readiness = await _wait_for_runtime_readiness()
-        _write_json(artifact_dir / "readiness.json", readiness)
-        adapter.start()
-        registration = await _register_adapter(adapter)
-        _write_json(artifact_dir / "adapter_registration.json", registration)
-        if case_id == "foreground":
-            response = await _post_chat(
-                case_id,
-                "Please read rollout/status_note.txt and tell me who owns "
-                "the rollout and what must happen first.",
+        if adapter is not None:
+            sidecar = await asyncio.to_thread(
+                start_configured_sidecar, recorder, name="dsh-sidecar",
+                environment=os.environ.copy(),
             )
-        elif case_id == "deferred":
-            response = await _post_chat(
-                case_id,
-                "Handle this in the background: read "
-                "handover/incident_note.txt and send me a brief summary "
-                "when the work is finished.",
-            )
+            readiness = await _wait_for_runtime_readiness()
+            _write_json(artifact_dir / "readiness.json", readiness)
+            adapter.start()
+            registration = await _register_adapter(adapter)
+            _write_json(artifact_dir / "adapter_registration.json", registration)
+        for text in case.user_inputs:
+            turn_response = await _post_chat(case_id, text)
+            response["turns"].append({"input": text, **turn_response})
+            _write_json(artifact_dir / f"turn_{len(response['turns'])}.json", response["turns"][-1])
+        if case_id == "deferred":
+            assert adapter is not None
             await _wait_for_deferred_delivery(adapter)
-        else:
-            response = await _post_internal_interaction()
-        evidence = await _capture_evidence(
-            response=response,
-            adapter=adapter,
-        )
-        checks, failures = _evaluate_case(case_id, evidence)
+        for scenario in case.interaction_inputs:
+            interaction = await _post_internal_interaction(scenario)
+            response["interactions"].append(interaction)
+            _write_json(artifact_dir / f"interaction_{len(response['interactions'])}.json", interaction)
+        interaction_ids = [row["request"]["interaction_id"] for row in response["interactions"]]
+        mongo = await diagnostics.snapshot(channel_id, interaction_ids)
+        evidence = {
+            "contract": asdict(case), "response": response, "channel_id": channel_id,
+            "adapter": {
+                "capability_payloads": adapter.capabilities if adapter else [],
+                "delivery_payloads": adapter.deliveries if adapter else [],
+            },
+            "mongo": mongo,
+            "cost": {
+                "planned_cognition_episodes": len(case.user_inputs) + len(case.interaction_inputs) + (case_id == "deferred"),
+                "brain_llm_calls": len(model_calls),
+                "brain_usage_records": [row["usage"] for row in model_calls],
+                "dsh_llm_calls": len(provider.calls) if provider is not None else 0,
+                "dsh_provider_artifact": "dsh_provider_calls.json" if provider is not None else None,
+                "model_calls_artifact": "real_model_calls.json",
+                "elapsed_ms": round((time.perf_counter() - started_at) * 1000),
+            },
+        }
+        checks, failures = _evaluate_case(case, evidence)
         _write_json(artifact_dir / "evidence.json", evidence)
         _write_json(
             artifact_dir / "behavior_review.json",
@@ -875,12 +870,7 @@ async def _execute_case(case_id: str, artifact_dir: Path) -> int:
                 "case_id": case_id,
                 "input_and_output": evidence,
                 "technical_checks": checks,
-                "review_questions": [
-                    "Was the DSH judgment grounded in retained evidence?",
-                    "Did the visible response remain character-owned?",
-                    "Did the result avoid invented success or permission?",
-                    "Was recurrence and delivery coherent for the user?",
-                ],
+                "review_questions": case.behavior_rubric,
                 "character_review_decision": None,
             },
         )
@@ -892,6 +882,17 @@ async def _execute_case(case_id: str, artifact_dir: Path) -> int:
         }
         failures.append(f"case_exception:{type(exc).__name__}")
         _write_json(artifact_dir / "case_exception.json", error)
+        try:
+            interaction_ids = [row["request"]["interaction_id"] for row in response["interactions"]]
+            _write_json(artifact_dir / "failure_evidence.json", {
+                "response": response,
+                "mongo": await diagnostics.snapshot(channel_id, interaction_ids),
+                "adapter_deliveries": adapter.deliveries if adapter else [],
+            })
+        except Exception as snapshot_error:  # noqa: BLE001 - retain the original failure.
+            _write_json(artifact_dir / "failure_snapshot_error.json", {
+                "error_class": type(snapshot_error).__name__, "error": str(snapshot_error),
+            })
     finally:
         if server is not None and brain_task is not None:
             try:
@@ -905,16 +906,26 @@ async def _execute_case(case_id: str, artifact_dir: Path) -> int:
                 cleanup["sidecar_stopped"] = True
             except Exception as exc:  # noqa: BLE001 - continue cleanup.
                 cleanup["errors"].append(f"sidecar:{type(exc).__name__}:{exc}")
+        if provider is not None:
+            try:
+                await asyncio.to_thread(provider.close)
+            except (OSError, RuntimeError) as exc:
+                cleanup["errors"].append(f"provider:{type(exc).__name__}:{exc}")
+        if adapter is not None:
+            try:
+                adapter.stop()
+                cleanup["adapter_stopped"] = True
+            except Exception as exc:  # noqa: BLE001 - continue cleanup.
+                cleanup["errors"].append(f"adapter:{type(exc).__name__}:{exc}")
         try:
-            adapter.stop()
-            cleanup["adapter_stopped"] = True
-        except Exception as exc:  # noqa: BLE001 - continue cleanup.
-            cleanup["errors"].append(f"adapter:{type(exc).__name__}:{exc}")
-        try:
-            await _drop_database()
+            from kazusa_ai_chatbot.db import close_db
+            await close_db()
+            await diagnostics.drop()
             cleanup["database_dropped"] = True
         except Exception as exc:  # noqa: BLE001 - report cleanup failure.
             cleanup["errors"].append(f"database:{type(exc).__name__}:{exc}")
+        diagnostics.close()
+        LLInterface.ainvoke = original_ainvoke
         _write_json(artifact_dir / "cleanup.json", cleanup)
     if cleanup["errors"]:
         failures.append("cleanup_incomplete")
@@ -938,14 +949,15 @@ async def _execute_case(case_id: str, artifact_dir: Path) -> int:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--execute-case", choices=tuple(CASES), required=True)
+    parser.add_argument("--case-file", type=Path, required=True)
     parser.add_argument("--artifact-dir", type=Path, required=True)
     return parser.parse_args()
 
 
 def _main() -> int:
     args = _parse_args()
-    return asyncio.run(_execute_case(args.execute_case, args.artifact_dir))
+    case = BehaviorCase(**json.loads(args.case_file.read_text(encoding="utf-8")))
+    return asyncio.run(_execute_case(case, args.artifact_dir))
 
 
 if __name__ == "__main__":

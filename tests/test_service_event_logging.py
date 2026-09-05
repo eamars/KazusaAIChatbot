@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
@@ -277,14 +276,6 @@ async def test_progress_disposition_telemetry_is_trace_linked_and_sanitized(
     assert "residue_text" not in serialized
 
 
-def test_post_turn_continuity_ownership_is_documented() -> None:
-    """Brain-service ICD keeps post-turn telemetry text-free and best effort."""
-
-    readme = Path("src/kazusa_ai_chatbot/brain_service/README.md")
-    text = readme.read_text(encoding="utf-8")
-    assert "Post-turn continuity instrumentation is text-free" in text
-    assert "record_continuity_boundary_event" in text
-    assert "cannot interrupt post-turn persistence" in text
 
 
 @pytest.mark.asyncio

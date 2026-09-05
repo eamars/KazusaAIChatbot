@@ -4,10 +4,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-import kazusa_ai_chatbot.conversation_progress as conversation_progress
 from kazusa_ai_chatbot.conversation_progress import (
     assemble_logical_turns,
-    logical_turns_as_history_rows,
     select_recent_logical_turns,
 )
 from kazusa_ai_chatbot.conversation_progress.history import (
@@ -29,18 +27,6 @@ from tests.fixtures.conversation_progress_v2_asuna_houjing_regression import (
 )
 
 
-def test_logical_history_helpers_are_available_from_public_facade():
-    """Raw-list consumers can reuse canonical logical-turn behavior."""
-
-    assert conversation_progress.assemble_logical_turns is assemble_logical_turns
-    assert (
-        conversation_progress.select_recent_logical_turns
-        is select_recent_logical_turns
-    )
-    assert (
-        conversation_progress.logical_turns_as_history_rows
-        is logical_turns_as_history_rows
-    )
 
 
 def _participant_rows() -> list[dict]:

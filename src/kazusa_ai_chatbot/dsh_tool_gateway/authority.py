@@ -7,7 +7,7 @@ import binascii
 import hashlib
 import hmac
 import json
-from collections.abc import Callable, Mapping, MutableSet
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol
@@ -338,24 +338,6 @@ class SemanticAuthorityReplayOwner(Protocol):
         """Consume one complete call identity or raise a replay fault."""
 
 
-class InMemorySemanticAuthorityReplayOwner:
-    """In-memory replay owner injected only by deterministic tests."""
-
-    def __init__(self, backing: MutableSet[tuple[str, str, str]] | None = None) -> None:
-        self._used = backing if backing is not None else set()
-
-    def consume(self, authority: SemanticActivationAuthorityV1, call_id: str) -> None:
-        """Consume a call identity once or raise a replay fault."""
-
-        identity = (authority.token_id, authority.nonce, call_id)
-        if identity in self._used:
-            raise ValueError("semantic call was replayed")
-        self._used.add(identity)
-
-    def snapshot(self) -> set[tuple[str, str, str]]:
-        """Return the durable-test backing state for restart simulation."""
-
-        return set(self._used)
 
 
 class DurableSemanticAuthorityReplayOwner:

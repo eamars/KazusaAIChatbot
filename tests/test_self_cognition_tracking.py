@@ -2156,31 +2156,6 @@ def test_topic_followup_contact_decision_writes_action_candidate(
     assert action_candidate["text"] == "Want to continue the GraphRAG thread?"
 
 
-def test_scheduled_future_cognition_starts_without_preloaded_rag(
-    tmp_path,
-) -> None:
-    """Scheduled follow-up cognition lets resolver decide retrieval needs."""
-
-    case = _scheduled_future_cognition_case()
-
-    def cognition_client(state: dict[str, Any]) -> dict[str, Any]:
-        assert "rag_result" not in state
-        output = _silent_cognition_output()
-        output["resolver_observations"] = [
-            {
-                "capability_kind": "task_resolution_request",
-            }
-        ]
-        return output
-
-    paths = _build_tracking_records(
-        case,
-        tmp_path,
-        cognition_client=cognition_client,
-    )
-    run_record = _read_json(paths[models.ARTIFACT_RUN_RECORD])
-
-    assert run_record["budget"]["rag_calls"] == 1
 
 
 def test_cognition_state_keeps_source_packet_inside_internal_percept(

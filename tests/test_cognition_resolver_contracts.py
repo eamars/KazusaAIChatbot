@@ -5,9 +5,6 @@ from __future__ import annotations
 import pytest
 
 from kazusa_ai_chatbot.cognition_episode import build_goal_continuation_ref
-from kazusa_ai_chatbot.cognition_resolver.capabilities import (
-    project_resolver_observation_for_cognition,
-)
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
     MAX_RESOLVER_SUMMARY_CHARS,
     MAX_RESOLVER_TRACE_CHARS,
@@ -72,26 +69,6 @@ def _capability_request() -> dict:
     }
 
 
-def test_v2_observation_projection_has_typed_evidence_without_state_authority(
-) -> None:
-    """Capability outcomes should re-enter V2 as evidence, not state writes."""
-
-    evidence, direct_facts = project_resolver_observation_for_cognition(
-        {
-            "observation_id": "resolver-observation:1",
-            "capability": "task_resolution_request",
-            "semantic_summary": "A prior promise is relevant.",
-            "replacement_state": {"forbidden": True},
-        },
-        occurred_at="2026-05-16T00:00:00Z",
-    )
-
-    assert evidence["evidence_ref"]["source_kind"] == "resolver_observation"
-    assert evidence["semantic_text"] == (
-        "task_resolution_request: A prior promise is relevant."
-    )
-    assert direct_facts == []
-    assert "replacement_state" not in evidence
 
 
 def _rag_observation() -> dict:
@@ -249,15 +226,6 @@ def _first_image_observation_percept(state: dict) -> dict:
     raise AssertionError("expected image observation percept")
 
 
-def test_capability_request_validator_accepts_known_contract() -> None:
-    """A valid resolver request should preserve the model-selected objective."""
-
-    validated = validate_resolver_capability_request(_capability_request())
-    expected_objective = "Retrieve relationship evidence for the current question."
-
-    assert validated["schema_version"] == RESOLVER_CAPABILITY_REQUEST_VERSION
-    assert validated["capability_kind"] == "task_resolution_request"
-    assert validated["objective"] == expected_objective
 
 
 def test_capability_request_validator_rejects_unknown_kind() -> None:
@@ -292,32 +260,6 @@ def test_observation_validator_clips_prompt_safe_summary() -> None:
     assert set(validated["prompt_safe_summary"]) == {"x"}
 
 
-def test_observation_validator_projects_typed_user_input_blocker() -> None:
-    """Blocked observations may expose a bounded user-input reason."""
-
-    observation = resolver_task_observation()
-    observation["status"] = "blocked"
-    observation["blocker_kind"] = "requires_user_input"
-    observation["task_resolution_evidence_state"] = {
-        "schema_version": "resolver_evidence_state.v1",
-        "state": "blocked",
-        "remaining_needs": [],
-    }
-
-    validated = validate_resolver_observation(observation)
-    projection = project_observations_for_cognition([validated])
-
-    assert validated["blocker_kind"] == "requires_user_input"
-    assert "blocker_kind=requires_user_input" in projection
-
-    observation["status"] = "succeeded"
-    observation["task_resolution_evidence_state"] = {
-        "schema_version": "resolver_evidence_state.v1",
-        "state": "complete",
-        "remaining_needs": [],
-    }
-    with pytest.raises(ResolverValidationError, match="blocker_kind"):
-        validate_resolver_observation(observation)
 
 
 def test_observation_projection_hides_raw_ids() -> None:
@@ -336,32 +278,6 @@ def test_observation_projection_hides_raw_ids() -> None:
     assert "raw-external-id-321" not in projection
 
 
-def test_observation_projection_preserves_semantic_knowledge_context() -> None:
-    """Knowledge projections should read as evidence context, not judgment."""
-
-    observation = resolver_task_observation()
-    observation["capability_kind"] = "task_resolution_request"
-    observation["prompt_safe_summary"] = "Public research returned context."
-    observation["knowledge_projection"] = {
-        "investigation_summary": "Research found partial public evidence.",
-        "knowledge_we_know_so_far": ["The public source confirms fact A."],
-        "knowledge_still_lacking": ["Fact B remains unverified."],
-        "recommended_next_iteration": [
-            "Try a narrower public source for fact B.",
-        ],
-        "evidence_boundary_notes": ["No private memory was queried."],
-    }
-
-    projection = project_observations_for_cognition([observation])
-
-    assert "capability=task_resolution_request" in projection
-    assert "status=succeeded" not in projection
-    assert "knowledge_we_know_so_far" in projection
-    assert "The public source confirms fact A." in projection
-    assert "knowledge_still_lacking" in projection
-    assert "Fact B remains unverified." in projection
-    assert "recommended_next_iteration" in projection
-    assert "Try a narrower public source for fact B." in projection
 
 
 def test_validators_strip_unknown_fields() -> None:

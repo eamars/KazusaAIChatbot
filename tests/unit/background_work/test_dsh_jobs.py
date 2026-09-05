@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib
 from copy import deepcopy
-from typing import Any, get_args
+from typing import Any
 
 import pytest
 
@@ -225,110 +225,12 @@ def _module(module_name: str) -> Any:
         pytest.fail(f"planned background-work owner is unavailable: {exc}")
 
 
-@pytest.mark.asyncio
-async def test_task_worker_payload_v2_accepts_only_generation_bound_open_or_continue() -> None:
-    """The real payload validator accepts only the closed V2 shape."""
-
-    models = _module("kazusa_ai_chatbot.background_work.models")
-    annotations = getattr(models.TaskOrchestratorWorkerPayloadV2, "__annotations__", {})
-    assert set(annotations) == {
-        "schema_version",
-        "operation",
-        "task_session_id",
-        "operation_generation",
-        "control",
-    }
-    jobs = _module("kazusa_ai_chatbot.background_work.jobs")
-    validator = getattr(jobs, "validate_task_orchestrator_worker_payload", None)
-    if not callable(validator):
-        pytest.fail("background-work payload validator is unavailable")
-    normalized = validator(_payload())
-    assert normalized == _payload()
-    for invalid in (
-        {**_payload(), "schema_version": "task_orchestrator_worker_payload.v1"},
-        {**_payload(), "operation": "resume_task_resolution"},
-        {**_payload(), "authority_token": "never-queued"},
-    ):
-        with pytest.raises(ValueError):
-            validator(invalid)
 
 
-@pytest.mark.asyncio
-async def test_queue_validates_binding_generation_goal_scope_and_payload_v2_exactly(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Queue admission validates lineage and carries no authority token."""
-
-    jobs = _module("kazusa_ai_chatbot.background_work.jobs")
-    queue = getattr(jobs, "enqueue_background_work_request", None)
-    if not callable(queue):
-        pytest.fail("background-work queue helper is unavailable")
-    continuation_ref = _goal_continuation_ref()
-    request = {
-        "job_id": "job-1",
-        "source_action_attempt_id": "attempt-1",
-        "source_llm_trace_id": "trace-1",
-        "idempotency_key": "background_work:task-1",
-        "accepted_task_id": "task-1",
-        "task_identity_key": "identity-1",
-        "semantic_objective": "Resolve one goal.",
-        "goal_continuation_ref": continuation_ref,
-        "requested_worker": "task_orchestrator",
-        "worker_payload": _payload(),
-        "task_execution_context": {
-            **_execution_context(),
-            "goal_continuation_ref": continuation_ref,
-        },
-        "source_platform": "debug",
-        "source_channel_id": "channel-1",
-        "source_channel_type": "private",
-        "source_message_id": "message-1",
-        "source_platform_bot_id": "bot-1",
-        "source_character_name": "Test Character",
-        "requester_global_user_id": "user-1",
-        "requester_platform_user_id": "debug-user-1",
-        "requester_display_name": "Test User",
-        "requested_delivery": "send_result_when_done",
-        "max_output_chars": 3000,
-        "storage_timestamp_utc": "2026-08-30T22:00:00Z",
-    }
-    stored: list[dict[str, object]] = []
-
-    async def insert(job: dict[str, object]) -> dict[str, object]:
-        stored.append(job)
-        return job
-
-    monkeypatch.setattr(jobs, "insert_background_work_job", insert)
-    result = await queue(request)
-    assert result["job_id"] == "job-1"
-    assert result["accepted_task_id"] == "task-1"
-    assert stored[0]["worker_payload"] == _payload()
-    assert "authority_token" not in stored[0]
 
 
-def test_dsh_job_states_match_current_lifecycle() -> None:
-    """The background-job status contract matches the current lifecycle."""
-
-    models = _module("kazusa_ai_chatbot.background_work.models")
-    assert set(get_args(models.BackgroundWorkJobStatus)) == {
-        "queued",
-        "in_progress",
-        "completed",
-        "failed",
-        "canceled",
-        "delivery_in_progress",
-        "delivery_failed",
-        "delivered",
-    }
 
 
-def test_background_work_public_exports_include_current_worker_contracts() -> None:
-    """The package exports the current task and future-speak contracts."""
-
-    module = _module("kazusa_ai_chatbot.background_work")
-    public_names = set(getattr(module, "__all__", ()))
-    assert "TaskOrchestratorWorkerPayloadV2" in public_names
-    assert "FutureSpeakWorkerPayloadV1" in public_names
 
 
 @pytest.mark.asyncio

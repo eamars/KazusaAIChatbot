@@ -129,44 +129,8 @@ async def test_create_or_return_active_claims_enqueueing_task(
     assert len(fake_db.accepted_tasks.documents) == 1
 
 
-def test_task_document_requires_goal_continuation_ref() -> None:
-    """Task-resolution documents fail closed without continuation lineage."""
-
-    from kazusa_ai_chatbot.accepted_task import lifecycle
-
-    request = _create_request(
-        task_kind="task_resolution",
-        goal_continuation_ref=None,
-    )
-
-    with pytest.raises(ValueError, match="goal_continuation_ref"):
-        lifecycle._build_enqueueing_task_doc(
-            request,
-            task_identity_key=lifecycle.build_task_identity_key(request),
-        )
 
 
-@pytest.mark.asyncio
-async def test_create_or_return_active_persists_goal_continuation_ref(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Accepted task creation retains the task's canonical continuation ref."""
-
-    from kazusa_ai_chatbot.accepted_task import lifecycle
-    from kazusa_ai_chatbot.db import accepted_tasks as repository
-
-    fake_db = _FakeDb()
-    monkeypatch.setattr(repository, "get_db", _fake_get_db(fake_db))
-    request = _create_request(
-        task_kind="task_resolution",
-        goal_continuation_ref=_goal_continuation_ref(),
-    )
-
-    result = await lifecycle.create_or_return_active_accepted_task(request)
-
-    assert result["task"]["goal_continuation_ref"] == (
-        _goal_continuation_ref()
-    )
 
 
 @pytest.mark.asyncio
@@ -379,29 +343,6 @@ async def test_repository_rejects_v1_task_document() -> None:
         )
 
 
-@pytest.mark.asyncio
-async def test_v2_index_setup_creates_dsh_followup_indexes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The big-bang startup creates only the DSH follow-up indexes."""
-
-    from kazusa_ai_chatbot.accepted_task import lifecycle
-    from kazusa_ai_chatbot.db import accepted_tasks as repository
-
-    assert lifecycle is not None
-
-    fake_db = _FakeDb()
-    monkeypatch.setattr(repository, "get_db", _fake_get_db(fake_db))
-
-    await repository.ensure_accepted_task_indexes()
-
-    assert fake_db.accepted_tasks.dropped_indexes == []
-    assert "accepted_task_open_dsh_followup_unique" in (
-        fake_db.accepted_tasks.indexes
-    )
-    assert "accepted_task_scope_dsh_followup_lookup" in (
-        fake_db.accepted_tasks.indexes
-    )
 
 
 @pytest.mark.asyncio

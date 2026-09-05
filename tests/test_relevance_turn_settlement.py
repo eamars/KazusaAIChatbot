@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-from importlib import import_module
 from pathlib import Path
 
 import pytest
 
-from kazusa_ai_chatbot import relevance as relevance_public
 from kazusa_ai_chatbot.brain_service.post_turn import settle_episode_trace
 from kazusa_ai_chatbot.brain_service.turn_settlement import (
     PersistedChatFragment,
@@ -163,33 +161,6 @@ def _coordinator(clock: _FakeClock, *, settled=None):
     )
 
 
-def test_relevance_exports_canonical_decision_types_without_producer_duplicates() -> None:
-    """All relevance producers use the one canonical decision definitions."""
-
-    contracts_module = import_module(
-        "kazusa_ai_chatbot.relevance.contracts"
-    )
-    frontline_module = import_module(
-        "kazusa_ai_chatbot.relevance.frontline_relevance_agent"
-    )
-    settled_module = import_module(
-        "kazusa_ai_chatbot.relevance.persona_relevance_agent"
-    )
-
-    assert relevance_public.FrontlineDecision is contracts_module.FrontlineDecision
-    assert relevance_public.SettledRelevanceDecision is (
-        contracts_module.SettledRelevanceDecision
-    )
-    assert frontline_module.FrontlineDecision is contracts_module.FrontlineDecision
-    assert settled_module.SettledRelevanceDecision is (
-        contracts_module.SettledRelevanceDecision
-    )
-    assert "class FrontlineDecision" not in Path(
-        frontline_module.__file__
-    ).read_text(encoding="utf-8")
-    assert "class SettledRelevanceDecision" not in Path(
-        settled_module.__file__
-    ).read_text(encoding="utf-8")
 
 
 def test_relevance_evaluation_envelope_has_nested_decision_and_diagnostics_only() -> None:

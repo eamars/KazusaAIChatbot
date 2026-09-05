@@ -2,8 +2,11 @@
 
 ## Document Control
 
-- **Status:** in_progress; execution explicitly authorized on 2026-09-05,
-  including real LLM testing and closure after all acceptance gates pass.
+- **Status:** superseded by explicit owner direction on 2026-09-05.
+- **Successor:** [DSH runtime completion](../../../active/bugfix/dsh_runtime_completion_plan_2026-09-05.md).
+  The successor covers the entire existing and new DSH codebase. Historical
+  test matrices and readiness-before-live gates below are retired; functional
+  obligations and evidence continue under the successor.
 - **Created:** 2026-09-05.
 - **Parent:** [DSH cleanup and final sign-off plan](dsh_probe_first_architecture_cleanup_and_final_signoff_plan_2026-09-04.md).
 - **Direction:** retain the DSH integration architecture, correct cancellation
@@ -605,6 +608,67 @@ models in the plan.
 
 ## Review Evidence And Progress
 
+### Execution checkpoint — 2026-09-05
+
+- Execution owner: parent `/root`, inherited session model/configuration.
+  Lifecycle slice: `/root/dsh_lifecycle_implementation`, dynamically selected
+  default agent with inherited model/configuration for senior asyncio, HTTP,
+  and lease-fencing work. It owns the four named Python lifecycle/transport/
+  repository/controller sources and their mapped tests; parent owns sidecar,
+  interaction test isolation, process/live support, manifest, docs, and plans.
+  Review and behavior sign-off will use a separate read-only executor.
+- The original cancellation reproduction again observed unowned pending work.
+  The initial sidecar baseline passed semantic execution and checkpoint restart
+  but failed its test-exit-hook phase; evidence is under
+  `test_artifacts/dsh_execution_20260905/baseline_sidecar/`.
+- External terminal-response-loss injection subsequently passed; public replay
+  preserved the exact exhaust. The consolidated probe also passed wrong-token,
+  invalid-signature, independent-session, and missing-worker checks; see
+  `relay_probe_4/result.json` under the execution artifact root. The CLI pytest
+  wrapper passed in 13.95 seconds in `process_retry.log`.
+- Guarded Mongo Brain/task and transport-loss probes passed together in
+  11.40 seconds (`mongo_probe_checks.log`), including exact database cleanup.
+- Revised runtime, receipt, profile, RPC, credential, catalog, and Brain bridge
+  checks passed 40 native Vitest cases; TypeScript build/typecheck passed.
+  Interaction/authority consumers passed 23 checks and framed-worker checks
+  passed 5. These are intermediate evidence, preceding the lifecycle slice's
+  final changes and the final mapped/full non-live run.
+- Live wrappers now expose the planned input partitions and rubrics and all
+  three collect. Raw diagnostics use a separate exact-guarded client; the
+  internal case uses its Brain collaborators only. Real invocation recording
+  forwards the unchanged model call and stores actual usage. The DSH recorder
+  forwards real HTTP provider traffic and retains usage-bearing responses;
+  it supplies no model output or semantic decision.
+- Concurrent repository activity advanced HEAD from the captured baseline
+  `210cdb8f` to `4dedce3b`; baseline artifacts remain intact and each probe
+  records its actual revision/worktree fingerprint. Parent has issued no git
+  commit or worktree reset.
+
+### Historical review evidence
+
+### Current readiness handoff — 2026-09-05
+
+- The lifecycle executor completed its final slice with 90 passing checks in
+  `test_artifacts/dsh_execution_20260905/lifecycle_slice_final_recheck.txt`,
+  including cancellation after a remote terminal commit. Its scoped Ruff,
+  compilation, and whitespace checks pass in `lifecycle_slice_static_recheck.txt`.
+- The combined ownership gate collected and ran 496 exact nodes successfully
+  (`combined_impact_gate.log`). The full native sidecar suite passed 53 tests
+  in 11 files (`final_vitest.log`). The post-hardening public sidecar probe
+  passed in 14.51 seconds (`final_runtime_probe.log`). These results establish
+  their exercised boundaries; real-model behavior remains unverified.
+- Independent readiness reviewer: `/root/dsh_readiness_review`, dynamically
+  resolved as a default full-context agent with inherited session model and
+  configuration. The role has read-only access to the full implementation,
+  original baseline, plans, and evidence. It is independent of both production
+  authors; full context reduces reconstruction while retaining the required
+  lifecycle and false-green analysis capability. Its acceptance output is a
+  severity-ranked review and explicit Gate 6 decision. The full non-live run
+  is pending in `final_nonlive_suite.log`; individual live cases follow only
+  after readiness passes and receive independent behavioral review.
+
+### Historical review evidence (continued)
+
 - Baseline: HEAD `210cdb8f381f116afb437b42472eb6bf88a75142` with the existing
   DSH worktree changes recorded before review; this review changes plans only,
   plus ignored diagnostic artifacts.
@@ -646,4 +710,5 @@ models in the plan.
 - [x] Receive explicit implementation instruction and approve execution scope.
 - [ ] Implement and verify lifecycle and test-isolation corrections.
 - [ ] Complete independent non-E2E readiness review.
-- [ ] Obtain future live execution instruction and behavior sign-off.
+- [x] Receive explicit real LLM execution instruction on 2026-09-05.
+- [ ] Complete independent live behavior sign-off.

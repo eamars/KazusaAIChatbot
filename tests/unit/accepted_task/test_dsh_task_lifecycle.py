@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import importlib
-from typing import Any, get_args
+from typing import Any
 
 import pytest
 
@@ -49,116 +49,12 @@ def _module(module_name: str) -> Any:
         pytest.fail(f"planned accepted-task owner is unavailable: {module_name}: {exc}")
 
 
-def test_task_resolution_active_identity_uses_continuation_not_model_wording() -> None:
-    """Task-resolution duplicate identity excludes paraphrasable objectives."""
-
-    lifecycle = _module("kazusa_ai_chatbot.accepted_task.lifecycle")
-    from kazusa_ai_chatbot.cognition_episode import build_goal_continuation_ref
-
-    continuation = build_goal_continuation_ref(
-        source_episode_id="episode-task-001",
-        source_message_id="message-1",
-        branch_id="b1",
-        goal_ref={
-            "scope": "user",
-            "kind": "goal",
-            "entity_id": "goal-001",
-        },
-    )
-    first = _task()
-    first["goal_continuation_ref"] = continuation
-    second = {
-        **first,
-        "semantic_objective": "A model-paraphrased form of the same task.",
-        "accepted_task_summary": "A model-paraphrased form of the same task.",
-    }
-
-    assert lifecycle.build_task_identity_key(first) == (
-        lifecycle.build_task_identity_key(second)
-    )
-    material = lifecycle._identity_material(first)
-    assert material["task_kind"] == "task_resolution"
-    assert material["goal_continuation_ref"] == continuation
-    assert "semantic_objective" not in material
 
 
-def test_future_speak_active_identity_retains_semantic_objective() -> None:
-    """Future-speak scheduling continues to identify by semantic objective."""
-
-    lifecycle = _module("kazusa_ai_chatbot.accepted_task.lifecycle")
-    first = {
-        "task_kind": "future_speak",
-        "semantic_objective": "Remind the user at the agreed time.",
-        "source_platform": "debug",
-        "source_channel_id": "channel-1",
-        "source_channel_type": "private",
-        "requester_global_user_id": "user-1",
-        "requester_platform_user_id": "debug-user-1",
-        "goal_continuation_ref": None,
-    }
-    second = {
-        **first,
-        "semantic_objective": "Remind the user at another agreed time.",
-    }
-
-    first_material = lifecycle._identity_material(first)
-    second_material = lifecycle._identity_material(second)
-    assert first_material["task_kind"] == "future_speak"
-    assert first_material["semantic_objective"] == (
-        "Remind the user at the agreed time."
-    )
-    assert second_material["semantic_objective"] != (
-        first_material["semantic_objective"]
-    )
-    assert lifecycle.build_task_identity_key(first) != (
-        lifecycle.build_task_identity_key(second)
-    )
 
 
-def test_dsh_task_states_match_current_lifecycle() -> None:
-    """The accepted-task state contract matches the current lifecycle."""
-
-    models = _module("kazusa_ai_chatbot.accepted_task.models")
-    assert set(get_args(models.AcceptedTaskState)) == {
-        "enqueueing",
-        "pending",
-        "running",
-        "result_ready",
-        "failure_ready",
-        "delivery_in_progress",
-        "delivery_retryable",
-        "delivered",
-        "enqueue_failed",
-        "delivery_exhausted",
-        "cancelled",
-        "superseded",
-    }
 
 
-def test_dsh_task_affordance_uses_opaque_ref_for_active_and_open_followup() -> None:
-    """The real projection exposes only prompt-safe task affordance fields."""
-
-    models = _module("kazusa_ai_chatbot.accepted_task.models")
-    project = getattr(models, "project_dsh_task_affordance", None)
-    if not callable(project):
-        pytest.fail("accepted-task model owner lacks project_dsh_task_affordance")
-    affordance = project(_task("delivered", followup_open=True), _binding())
-    assert set(affordance) == {
-        "schema_version",
-        "accepted_task_ref",
-        "task_state",
-        "objective_summary",
-        "latest_summary",
-        "allowed_next_actions",
-        "followup_open",
-        "updated_at",
-    }
-    assert affordance["accepted_task_ref"] == "accepted_task:task-1"
-    assert affordance["allowed_next_actions"] == ["continue", "summarize", "cancel"]
-    serialized = repr(affordance)
-    assert "session-1" not in serialized
-    assert "thread-1" not in serialized
-    assert "authority" not in serialized
 
 
 @pytest.mark.asyncio

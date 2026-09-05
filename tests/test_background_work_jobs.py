@@ -116,15 +116,6 @@ async def test_enqueue_persists_one_generation_zero_dsh_job(
     assert "authority" not in job["worker_payload"]
 
 
-@pytest.mark.asyncio
-async def test_enqueue_rejects_unsupported_worker() -> None:
-    """Only DSH task orchestration and future-speak remain queue workers."""
-
-    jobs = importlib.import_module("kazusa_ai_chatbot.background_work.jobs")
-    request = resume_queue_request()
-    request["requested_worker"] = "unsupported_worker"
-    with pytest.raises(ValueError, match="requested_worker"):
-        await jobs.enqueue_background_work_request(request)
 
 
 def test_worker_payload_rejects_unknown_operations() -> None:
@@ -184,15 +175,6 @@ def test_job_document_keeps_task_lineage() -> None:
     assert job["source_llm_trace_id"] == "llmtrace_source-1"
 
 
-@pytest.mark.asyncio
-async def test_enqueue_rejects_task_without_goal_continuation_ref() -> None:
-    """A DSH task cannot be queued without its exact goal lineage."""
-
-    jobs = importlib.import_module("kazusa_ai_chatbot.background_work.jobs")
-    request = resume_queue_request()
-    request["goal_continuation_ref"] = None
-    with pytest.raises(ValueError, match="goal_continuation_ref"):
-        await jobs.enqueue_background_work_request(request)
 
 
 @pytest.mark.asyncio

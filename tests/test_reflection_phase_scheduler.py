@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import inspect
 
 from kazusa_ai_chatbot.reflection_cycle import phase_scheduler
 from kazusa_ai_chatbot.reflection_cycle.models import ReflectionScopeInput
@@ -167,22 +166,6 @@ def test_phase_run_intent_shape_maps_to_calendar_run_fields() -> None:
     assert intent["run_id"] == intent["idempotency_key"]
 
 
-def test_phase_scheduler_module_stays_pure() -> None:
-    """The phase materializer should not own runtime side effects."""
-
-    source = inspect.getsource(phase_scheduler)
-
-    forbidden_terms = [
-        "event_logging",
-        "get_db",
-        "asyncio",
-        "sleep",
-        "lease",
-        "retry",
-        "AdapterRegistry",
-    ]
-    for forbidden_term in forbidden_terms:
-        assert forbidden_term not in source
 
 
 def _scope(

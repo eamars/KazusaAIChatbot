@@ -3,354 +3,93 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
-from copy import deepcopy
-from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
 from pymongo.errors import AutoReconnect
 
-from agentic_resolver.contracts import (
-    DSH_RELEASE,
-    SESSION_STORE_EPOCH,
-    THREAD_SCHEMA_VERSION,
-    ResolutionThreadRecordV2,
-)
-from agentic_resolver.errors import (
-    DuplicateActivationError,
-    OperationIdReuseMismatchError,
-    ResolutionPersistenceError,
-    StaleActivationOrLeaseError,
-)
+from agentic_resolver.contracts import ResolutionThreadRecordV2
+from agentic_resolver.errors import ResolutionPersistenceError
 from kazusa_ai_chatbot.db import resolution_threads
 from kazusa_ai_chatbot.db.errors import DatabaseOperationError
 
 _INDEX_RETRY_DELAYS_SECONDS = (0.05, 0.1)
 
 
-def _future(now: str, days: int = 1) -> str:
-    parsed = datetime.fromisoformat(now.replace("Z", "+00:00"))
-    return (parsed + timedelta(days=days)).astimezone(UTC).isoformat().replace(
-        "+00:00", "Z"
-    )
-
-
 class ResolutionThreadRepository(Protocol):
-    """Durable lifecycle operations required by the V2 controller."""
+    """Durable async lifecycle operations required by the V2 controller."""
 
-    def get_thread(
+    async def get_thread(
         self, resolution_thread_id: str
     ) -> ResolutionThreadRecordV2 | None:
         """Return one validated V2 thread record."""
 
-    def get_operation(
+        ...
+
+    async def get_operation(
         self, resolution_thread_id: str, operation_id: str
     ) -> dict[str, Any] | None:
         """Return one durable operation when present."""
 
+        ...
 
-class InMemoryResolutionThreadRepository:
-    """Deterministic injected repository used by resolver unit tests."""
-
-    def __init__(self) -> None:
-        self._threads: dict[str, dict[str, Any]] = {}
-
-    def create_thread_v2(
-        self,
-        *,
-        resolution_thread_id: str,
-        brain_conversation_ref: str,
-        root_goal_ref: str,
-        priority: str,
-        workspace_root: str,
-        workspace_fingerprint: str,
-        route_digest: str,
-        profile_version: str,
-        standard_catalog_digest: str,
-        semantic_catalog_digest: str,
-        scope_fingerprint: str,
-        audience_fingerprint: str,
-        policy_epoch: str,
-        interaction_id: str,
-        segment: Mapping[str, Any],
-        now: str,
+    async def create_thread_v2(
+        self, *args: Any, **kwargs: Any
     ) -> ResolutionThreadRecordV2:
-        if resolution_thread_id in self._threads:
-            existing = self._threads[resolution_thread_id]
-            if existing.get("schema_version") != THREAD_SCHEMA_VERSION:
-                raise ResolutionPersistenceError(
-                    "historical thread rows cannot be resumed as V2"
-                )
-            raise ResolutionPersistenceError("resolution thread already exists")
-        persisted_segment = deepcopy(dict(segment))
-        segment_id = str(persisted_segment.get("segment_id", ""))
-        document = {
-            "schema_version": THREAD_SCHEMA_VERSION,
-            "resolution_thread_id": resolution_thread_id,
-            "brain_conversation_ref": brain_conversation_ref,
-            "root_goal_ref": root_goal_ref,
-            "current_segment_id": segment_id,
-            "state": "active",
-            "priority": priority,
-            "workspace_root": workspace_root,
-            "workspace_fingerprint": workspace_fingerprint,
-            "route_digest": route_digest,
-            "profile_version": profile_version,
-            "dsh_release": DSH_RELEASE,
-            "session_store_epoch": SESSION_STORE_EPOCH,
-            "standard_catalog_digest": standard_catalog_digest,
-            "semantic_catalog_digest": semantic_catalog_digest,
-            "policy_epoch": policy_epoch,
-            "scope_fingerprint": scope_fingerprint,
-            "audience_fingerprint": audience_fingerprint,
-            "interaction_id": interaction_id,
-            "created_at": now,
-            "updated_at": now,
-            "last_terminal_status": None,
-            "continuation_eligible_until": _future(now),
-            "document_revision": 1,
-            "lease_epoch": 0,
-            "current_lease": None,
-            "segments": [persisted_segment],
-            "operations": [],
-        }
-        validated = ResolutionThreadRecordV2.from_mapping(document)
-        self._threads[resolution_thread_id] = validated.to_dict()
-        return validated
+        """Create one V2 thread and its first segment."""
 
-    def seed_historical(self, document: dict[str, Any]) -> None:
-        """Seed an explicitly historical row for rejection tests."""
+        ...
 
-        resolution_thread_id = document.get("resolution_thread_id")
-        if not isinstance(resolution_thread_id, str) or not resolution_thread_id:
-            raise ResolutionPersistenceError("historical row requires a thread id")
-        self._threads[resolution_thread_id] = deepcopy(document)
-
-    def resume_v2(self, resolution_thread_id: str) -> ResolutionThreadRecordV2:
-        document = self._threads.get(resolution_thread_id)
-        if document is None:
-            raise ResolutionPersistenceError("resolution thread does not exist")
-        if document.get("schema_version") != THREAD_SCHEMA_VERSION:
-            raise ResolutionPersistenceError(
-                "historical thread rows cannot be resumed as V2"
-            )
-        return ResolutionThreadRecordV2.from_mapping(deepcopy(document))
-
-    def get_thread(
-        self, resolution_thread_id: str
-    ) -> ResolutionThreadRecordV2 | None:
-        document = self._threads.get(resolution_thread_id)
-        if document is None or document.get("schema_version") != THREAD_SCHEMA_VERSION:
-            return None
-        return ResolutionThreadRecordV2.from_mapping(deepcopy(document))
-
-    def get_operation(
-        self, resolution_thread_id: str, operation_id: str
-    ) -> dict[str, Any] | None:
-        document = self._threads.get(resolution_thread_id)
-        if document is None or document.get("schema_version") != THREAD_SCHEMA_VERSION:
-            return None
-        for operation in document["operations"]:
-            if operation["operation_id"] == operation_id:
-                return deepcopy(operation)
-        return None
-
-    def prepare_operation(
-        self,
-        resolution_thread_id: str,
-        operation_id: str,
-        payload_digest: str,
-        method: str,
-        segment_id: str,
-        activation_id: str | None = None,
-        lease_epoch: int | None = None,
+    async def prepare_operation(
+        self, *args: Any, **kwargs: Any
     ) -> dict[str, Any]:
-        document = self._required(resolution_thread_id)
-        for operation in document["operations"]:
-            if operation["operation_id"] != operation_id:
-                continue
-            if operation["operation_payload_digest"] != payload_digest:
-                raise OperationIdReuseMismatchError(
-                    "operation id was reused with a different digest"
-                )
-            return deepcopy(operation)
-        operation = {
-            "operation_id": operation_id,
-            "operation_payload_digest": payload_digest,
-            "method": method,
-            "resolution_thread_id": resolution_thread_id,
-            "segment_id": segment_id,
-            "activation_id": activation_id,
-            "lease_epoch": lease_epoch,
-            "dsh_message_source_id": None,
-            "disposition": "prepared",
-            "last_committed_seq": None,
-            "outcome_digest": None,
-            "fault_code": None,
-        }
-        document["operations"].append(operation)
-        self._touch(document)
-        return deepcopy(operation)
+        """Create or return one operation under its identity fence."""
 
-    def update_operation(
-        self,
-        resolution_thread_id: str,
-        operation_id: str,
-        *,
-        disposition: str,
-        dsh_message_source_id: str | None = None,
-        last_committed_seq: int | None = None,
-        outcome_digest: str | None = None,
-        fault_code: str | None = None,
+        ...
+
+    async def update_operation(
+        self, *args: Any, **kwargs: Any
     ) -> dict[str, Any]:
-        document = self._required(resolution_thread_id)
-        operation = self._operation(document, operation_id)
-        operation.update({
-            "disposition": disposition,
-            "dsh_message_source_id": dsh_message_source_id,
-            "last_committed_seq": last_committed_seq,
-            "outcome_digest": outcome_digest,
-            "fault_code": fault_code,
-        })
-        self._touch(document)
-        return deepcopy(operation)
+        """Persist one operation outcome."""
 
-    def acquire_lease(
-        self,
-        resolution_thread_id: str,
-        activation_id: str,
-        owner_id: str,
-        expires_at: str,
-        now: str,
+        ...
+
+    async def acquire_lease(
+        self, *args: Any, **kwargs: Any
     ) -> dict[str, Any]:
-        document = self._required(resolution_thread_id)
-        current = document["current_lease"]
-        if current is not None and current["expires_at"] > now:
-            if current["activation_id"] != activation_id:
-                raise DuplicateActivationError("segment already has a live lease")
-            return deepcopy(current)
-        document["lease_epoch"] += 1
-        lease = {
-            "activation_id": activation_id,
-            "lease_epoch": document["lease_epoch"],
-            "owner_id": owner_id,
-            "expires_at": expires_at,
-        }
-        document["current_lease"] = lease
-        self._touch(document, now)
-        return deepcopy(lease)
+        """Acquire one fenced activation lease."""
 
-    def renew_lease(
-        self,
-        resolution_thread_id: str,
-        activation_id: str,
-        lease_epoch: int,
-        expires_at: str,
+        ...
+
+    async def renew_lease(
+        self, *args: Any, **kwargs: Any
     ) -> dict[str, Any]:
-        document = self._required(resolution_thread_id)
-        lease = self._fenced_lease(document, activation_id, lease_epoch)
-        lease["expires_at"] = expires_at
-        self._touch(document)
-        return deepcopy(lease)
+        """Renew one current activation lease."""
 
-    def release_lease(
-        self,
-        resolution_thread_id: str,
-        activation_id: str,
-        lease_epoch: int,
-    ) -> None:
-        document = self._required(resolution_thread_id)
-        self._fenced_lease(document, activation_id, lease_epoch)
-        document["current_lease"] = None
-        self._touch(document)
+        ...
 
-    def rotate_segment(
-        self,
-        resolution_thread_id: str,
-        segment: dict[str, Any],
-        *,
-        reason: str,
+    async def release_lease(self, *args: Any, **kwargs: Any) -> None:
+        """Release one current activation lease."""
+
+        ...
+
+    async def rotate_segment(
+        self, *args: Any, **kwargs: Any
     ) -> ResolutionThreadRecordV2:
-        document = self._required(resolution_thread_id)
-        new_segment = deepcopy(segment)
-        new_segment["rotation_reason"] = reason
-        new_segment["parent_segment_id"] = document["current_segment_id"]
-        document["segments"].append(new_segment)
-        document["current_segment_id"] = new_segment["segment_id"]
-        document["current_lease"] = None
-        self._touch(document)
-        return ResolutionThreadRecordV2.from_mapping(deepcopy(document))
+        """Rotate the current thread segment under compatibility fencing."""
 
-    def update_segment(
-        self,
-        resolution_thread_id: str,
-        segment_id: str,
-        **changes: Any,
+        ...
+
+    async def update_segment(
+        self, *args: Any, **kwargs: Any
     ) -> ResolutionThreadRecordV2:
-        document = self._required(resolution_thread_id)
-        segment = next(
-            (
-                item
-                for item in document["segments"]
-                if item["segment_id"] == segment_id
-            ),
-            None,
-        )
-        if segment is None:
-            raise ResolutionPersistenceError("segment does not exist")
-        allowed = {"dsh_session_id", "last_committed_seq", "state", "last_used_at"}
-        if set(changes) - allowed:
-            raise ResolutionPersistenceError("unsupported segment update")
-        segment.update(changes)
-        self._touch(document)
-        return ResolutionThreadRecordV2.from_mapping(deepcopy(document))
+        """Persist one segment lifecycle update."""
 
-    def validate_fence(
-        self,
-        resolution_thread_id: str,
-        activation_id: str,
-        lease_epoch: int,
-    ) -> dict[str, Any]:
-        document = self._required(resolution_thread_id)
-        return deepcopy(self._fenced_lease(document, activation_id, lease_epoch))
+        ...
 
-    def _required(self, resolution_thread_id: str) -> dict[str, Any]:
-        document = self._threads.get(resolution_thread_id)
-        if document is None:
-            raise ResolutionPersistenceError("resolution thread does not exist")
-        if document.get("schema_version") != THREAD_SCHEMA_VERSION:
-            raise ResolutionPersistenceError(
-                "historical thread rows cannot be resumed as V2"
-            )
-        return document
+    async def validate_fence(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        """Validate the current activation and lease epoch."""
 
-    @staticmethod
-    def _operation(document: dict[str, Any], operation_id: str) -> dict[str, Any]:
-        for operation in document["operations"]:
-            if operation["operation_id"] == operation_id:
-                return operation
-        raise ResolutionPersistenceError("operation does not exist")
-
-    @staticmethod
-    def _fenced_lease(
-        document: dict[str, Any], activation_id: str, lease_epoch: int
-    ) -> dict[str, Any]:
-        lease = document["current_lease"]
-        if (
-            lease is None
-            or lease["activation_id"] != activation_id
-            or lease["lease_epoch"] != lease_epoch
-        ):
-            raise StaleActivationOrLeaseError(
-                "activation id or lease epoch is stale"
-            )
-        return lease
-
-    @staticmethod
-    def _touch(document: dict[str, Any], now: str | None = None) -> None:
-        document["document_revision"] += 1
-        if now is not None:
-            document["updated_at"] = now
+        ...
 
 
 class MongoResolutionThreadRepository:
@@ -378,9 +117,7 @@ class MongoResolutionThreadRepository:
                         raise ResolutionPersistenceError(
                             "failed to ensure resolution thread indexes",
                         ) from exc
-                    await asyncio.sleep(
-                        _INDEX_RETRY_DELAYS_SECONDS[attempt]
-                    )
+                    await asyncio.sleep(_INDEX_RETRY_DELAYS_SECONDS[attempt])
                 else:
                     self._indexes_ready = True
                     return
@@ -390,11 +127,12 @@ class MongoResolutionThreadRepository:
 
         method = getattr(self._db, name)
         try:
-            return await method(*args, **kwargs)
+            value = await method(*args, **kwargs)
         except DatabaseOperationError as exc:
             raise ResolutionPersistenceError(
                 f"resolution repository operation failed: {name}",
             ) from exc
+        return value
 
     async def get_thread(
         self, resolution_thread_id: str
@@ -402,16 +140,18 @@ class MongoResolutionThreadRepository:
         value = await self._call("get_thread", resolution_thread_id)
         if value is None:
             return None
-        return ResolutionThreadRecordV2.from_mapping(value)
+        record = ResolutionThreadRecordV2.from_mapping(value)
+        return record
 
     async def get_operation(
         self, resolution_thread_id: str, operation_id: str
     ) -> dict[str, Any] | None:
-        return await self._call(
+        operation = await self._call(
             "get_operation",
             resolution_thread_id,
             operation_id,
         )
+        return operation
 
     async def create_thread_v2(
         self,
@@ -419,21 +159,25 @@ class MongoResolutionThreadRepository:
         **kwargs: Any,
     ) -> ResolutionThreadRecordV2:
         await self.ensure_indexes()
-        return ResolutionThreadRecordV2.from_mapping(
-            await self._call("create_thread_v2", *args, **kwargs)
-        )
+        value = await self._call("create_thread_v2", *args, **kwargs)
+        record = ResolutionThreadRecordV2.from_mapping(value)
+        return record
 
     async def prepare_operation(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return await self._call("prepare_operation", *args, **kwargs)
+        operation = await self._call("prepare_operation", *args, **kwargs)
+        return operation
 
     async def update_operation(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return await self._call("update_operation", *args, **kwargs)
+        operation = await self._call("update_operation", *args, **kwargs)
+        return operation
 
     async def acquire_lease(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return await self._call("acquire_lease", *args, **kwargs)
+        lease = await self._call("acquire_lease", *args, **kwargs)
+        return lease
 
     async def renew_lease(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return await self._call("renew_lease", *args, **kwargs)
+        lease = await self._call("renew_lease", *args, **kwargs)
+        return lease
 
     async def release_lease(self, *args: Any, **kwargs: Any) -> None:
         await self._call("release_lease", *args, **kwargs)
@@ -441,16 +185,17 @@ class MongoResolutionThreadRepository:
     async def rotate_segment(
         self, *args: Any, **kwargs: Any
     ) -> ResolutionThreadRecordV2:
-        return ResolutionThreadRecordV2.from_mapping(
-            await self._call("rotate_segment", *args, **kwargs)
-        )
+        value = await self._call("rotate_segment", *args, **kwargs)
+        record = ResolutionThreadRecordV2.from_mapping(value)
+        return record
 
     async def update_segment(
         self, *args: Any, **kwargs: Any
     ) -> ResolutionThreadRecordV2:
-        return ResolutionThreadRecordV2.from_mapping(
-            await self._call("update_segment", *args, **kwargs)
-        )
+        value = await self._call("update_segment", *args, **kwargs)
+        record = ResolutionThreadRecordV2.from_mapping(value)
+        return record
 
     async def validate_fence(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return await self._call("validate_fence", *args, **kwargs)
+        fence = await self._call("validate_fence", *args, **kwargs)
+        return fence

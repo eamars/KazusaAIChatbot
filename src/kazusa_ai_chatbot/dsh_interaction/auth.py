@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-from collections.abc import MutableSet
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Protocol
@@ -24,24 +23,6 @@ class InteractionNonceReplayOwner(Protocol):
         """Consume an issuer/nonce pair or raise a replay fault."""
 
 
-class InteractionNonceReplayStore:
-    """In-memory nonce owner injected only by deterministic tests."""
-
-    def __init__(self, backing: MutableSet[tuple[str, str]] | None = None) -> None:
-        self._nonces = backing if backing is not None else set()
-
-    def consume(self, issuer: str, nonce: str) -> None:
-        """Consume one issuer/nonce pair exactly once."""
-
-        identity = (issuer, nonce)
-        if identity in self._nonces:
-            raise ValueError("interaction nonce was replayed")
-        self._nonces.add(identity)
-
-    def snapshot(self) -> set[tuple[str, str]]:
-        """Return a copy suitable for a deterministic restart test."""
-
-        return set(self._nonces)
 
 
 def sign_request(

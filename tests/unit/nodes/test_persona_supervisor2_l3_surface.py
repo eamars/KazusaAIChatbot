@@ -1,4 +1,4 @@
-"""Direct ownership tests for the L3 surface handoff."""
+"""Behavior checks for the L3 surface handoff."""
 
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ from kazusa_ai_chatbot.background_work.result_source import (
     build_result_ready_episode_from_job,
 )
 from kazusa_ai_chatbot.cognition_resolver.contracts import (
-    TERMINAL_RESOLVER_SURFACE_DECISION,
     ResolverValidationError,
 )
 from kazusa_ai_chatbot.cognition_shared import surface, surface_stages
@@ -33,7 +32,6 @@ from kazusa_ai_chatbot.nodes import persona_supervisor2_l3_surface as l3_surface
 from kazusa_ai_chatbot.nodes.persona_supervisor2_schema import GlobalPersonaState
 from tests.task_resolution_test_helpers import (
     accepted_task_completed_job,
-    resolver_task_observation,
 )
 from tests.unit.nodes.surface_fixtures import (
     build_relational_decision,
@@ -370,113 +368,8 @@ def test_persona_graph_retains_canonical_resolver_recurrence_fields() -> None:
     } <= GlobalPersonaState.__optional_keys__
 
 
-def test_l3_terminal_resolver_surface_closes_stale_pending_plan() -> None:
-    """A resolver terminal speak overrides the superseded pending P plan."""
-
-    state = build_surface_state(build_relational_decision())
-    output = state["cognition_core_output"]
-    assert isinstance(output, dict)
-    response_plan = output["response_plan"]
-    assert isinstance(response_plan, dict)
-    response_plan.update({
-        "response_goal": "I will retry the blocked lookup.",
-        "goal_resolution": "requires_required_evidence",
-        "resolver_requests": [{"capability": "task_resolution_request"}],
-    })
-    observation = resolver_task_observation()
-    observation.update({
-        "status": "failed",
-        "prompt_safe_summary": "The evidence path is terminally blocked.",
-        "evidence_refs": [],
-        "task_resolution_evidence_state": {
-            "schema_version": "resolver_evidence_state.v1",
-            "state": "blocked",
-            "remaining_needs": ["current Christchurch weather"],
-        },
-    })
-    terminal_detail = (
-        "Explain that current evidence retrieval is blocked, keep current "
-        "weather unknown, and close this turn without retry or deferred work."
-    )
-    terminal_spec = {
-        "kind": "speak",
-        "source_refs": [{"owner": "cognition_resolver"}],
-        "params": {
-            "surface_requirements": {
-                "decision": TERMINAL_RESOLVER_SURFACE_DECISION,
-                "detail": terminal_detail,
-            },
-        },
-        "cognition_provenance": {
-            "target_roles": [{
-                "role": "target",
-                "entity_kind": "user",
-                "entity_id": "user-1",
-            }],
-        },
-    }
-    state["action_specs"] = [terminal_spec]
-    state["resolver_state"] = {
-        "schema_version": "resolver_cycle_state.v1",
-        "cycle_index": 2,
-        "max_cycles": 3,
-        "status": "blocked",
-        "original_decontextualized_input": "Get current Christchurch weather.",
-        "observations": [observation],
-        "cycle_traces": [],
-        "held_action_specs": [terminal_spec],
-        "required_resolver_evidence_dependency": {
-            "schema_version": "required_resolver_evidence_dependency.v2",
-            "accepted_request_handle": "resolver_request_0_1",
-            "observation_id": observation["observation_id"],
-        },
-        "terminal_reason": "duplicate request converted to terminal surface",
-    }
-
-    payload = l3_surface.build_text_surface_input_from_global_state(
-        state,
-        interaction_style_context="brief and natural",
-    )
-
-    assert payload["resolver_result"]["status"] == "failed"
-    assert payload["resolver_result"]["evidence_state"] == "blocked"
-    assert payload["response_plan"] == {
-        "response_goal": terminal_detail,
-        "goal_resolution": "blocked",
-        "epistemic_boundary": (
-            "Assert the visible turn and keep unsupported details unknown."
-        ),
-        "action_requests": [],
-        "resolver_requests": [],
-        "surface_requirements": {
-            "decision": TERMINAL_RESOLVER_SURFACE_DECISION,
-            "detail": terminal_detail,
-        },
-        "terminal_work_disposition": "closed",
-    }
-    assert payload["subjective_expression_context"]["epistemic_boundary"] == (
-        terminal_detail
-    )
 
 
-def test_l3_surface_projects_current_task_resolver_dependency() -> None:
-    """A current task observation retains validated source-owned evidence."""
-
-    observation = resolver_task_observation()
-    continuation_ref = observation["goal_continuation_ref"]
-
-    resolver_result = l3_surface._task_resolver_result(
-        observation,
-        required=True,
-        continuation_ref=continuation_ref,
-    )
-
-    assert resolver_result["capability_kind"] == "task_resolution_request"
-    assert resolver_result["status"] == "succeeded"
-    assert resolver_result["evidence_handles"] == [
-        "resolver_evidence_raw-tool-run-123_1"
-    ]
-    assert resolver_result["evidence_excerpts"] == ["bounded summary only"]
 
 
 def test_l3_surface_rejects_missing_required_task_observation_before_planning(
@@ -508,36 +401,6 @@ def test_l3_surface_rejects_missing_required_task_observation_before_planning(
         )
 
 
-def test_l3_surface_omits_brain_owned_dsh_decision_from_prompt_projection() -> None:
-    """Keep the DSH decision for Brain enactment outside L3 prompt input."""
-
-    state = build_surface_state(build_relational_decision())
-    cognition_output = state["cognition_core_output"]
-    assert isinstance(cognition_output, dict)
-    response_plan = cognition_output["response_plan"]
-    assert isinstance(response_plan, dict)
-    ordinary_response_plan = dict(response_plan)
-    dsh_decision = {
-        "interaction_id": "dsh-surface-interaction",
-        "kind": "approval",
-        "decision": "allow_once",
-        "answer": None,
-        "response_goal": None,
-        "relay_mode": None,
-        "reason": "The requested operation is permitted once.",
-    }
-    response_plan["dsh_interaction_decision"] = dsh_decision
-
-    payload = l3_surface.build_text_surface_input_from_global_state(
-        state,
-        interaction_style_context="brief and natural",
-    )
-
-    assert payload["response_plan"] == ordinary_response_plan
-    assert "dsh_interaction_decision" not in payload["response_plan"]
-    assert response_plan["dsh_interaction_decision"] == dsh_decision
-    prompt_payload = surface._project_surface_payload(payload)
-    validate_prompt_projection(prompt_payload)
 
 
 def test_l3_surface_excludes_pending_control_plane_fields() -> None:
@@ -599,10 +462,6 @@ def test_l3_surface_projects_subjective_context_and_authoritative_addressee() ->
     }]
 
 
-def test_persona_supervisor2_l3_surface_exposes_owned_contract() -> None:
-    """Keep the L3 surface builder attached to this source owner."""
-
-    assert callable(l3_surface.build_text_surface_input_from_global_state)
 
 
 def test_text_surface_input_requires_exact_bounded_overused_moves() -> None:

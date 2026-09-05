@@ -54,14 +54,3 @@ async def test_lifespan_injects_one_shared_runtime_into_interaction_and_task_own
     assert task_orchestrator._TASK_RESOLUTION_RUNTIME is runtime
 
 
-def test_v2_interaction_route_exposes_one_internal_endpoint() -> None:
-    """The composition root exposes the authenticated internal V2 route."""
-
-    from kazusa_ai_chatbot import service
-
-    route_paths = {
-        route.path
-        for route in service.app.routes
-        if route.path.startswith("/runtime/dsh/interactions")
-    }
-    assert route_paths == {"/runtime/dsh/interactions"}

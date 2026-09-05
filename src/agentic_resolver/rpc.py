@@ -1,16 +1,14 @@
-"""Authenticated loopback JSON-RPC client and deterministic test server."""
+"""Authenticated loopback JSON-RPC client and operation reconciliation."""
 
 from __future__ import annotations
 
-import asyncio
 import json
-from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass
+from collections.abc import Mapping
 from secrets import token_hex
 from typing import Any, Protocol
-from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
+
+import httpx
 
 from agentic_resolver.contracts import RPC_PROTOCOL_VERSION_V2
 from agentic_resolver.errors import (
@@ -26,36 +24,6 @@ _METHODS = frozenset({
     "resolution.amend", "resolution.request_checkpoint", "resolution.cancel",
     "resolution.inspect", "resolution.dispose_activation",
 })
-_ALLOWED_PARAMS: dict[str, frozenset[str]] = {
-    "system.health": frozenset(),
-    "resolution.open": frozenset({
-        "operation_id", "operation_payload_digest", "activation_id",
-        "lease_epoch", "intake",
-    }),
-    "resolution.continue": frozenset({
-        "operation_id", "operation_payload_digest", "activation_id",
-        "lease_epoch", "intake",
-    }),
-    "resolution.amend": frozenset({
-        "operation_id", "operation_payload_digest", "resolution_thread_id",
-        "segment_id", "activation_id", "lease_epoch", "amendment",
-    }),
-    "resolution.request_checkpoint": frozenset({
-        "operation_id", "operation_payload_digest", "resolution_thread_id",
-        "segment_id", "activation_id", "lease_epoch",
-    }),
-    "resolution.cancel": frozenset({
-        "operation_id", "operation_payload_digest", "resolution_thread_id",
-        "segment_id", "activation_id", "lease_epoch",
-    }),
-    "resolution.inspect": frozenset({
-        "operation_id", "operation_payload_digest",
-    }),
-    "resolution.dispose_activation": frozenset({
-        "operation_id", "operation_payload_digest", "resolution_thread_id",
-        "segment_id", "activation_id", "lease_epoch",
-    }),
-}
 _MUTATING = _METHODS - {"system.health", "resolution.inspect"}
 _LONG_RUNNING = frozenset({"resolution.open", "resolution.continue"})
 _COMMITTED = frozenset({"checkpointed", "terminal", "canceled", "faulted"})
@@ -68,236 +36,9 @@ class RpcTransport(Protocol):
         """Send one JSON-RPC frame and return one response frame."""
 
 
-@dataclass(slots=True)
-class _Operation:
-    operation_id: str
-    payload_digest: str
-    method: str
-    disposition: str = "admitted_active"
-    result: dict[str, Any] | None = None
-    admissions: int = 1
-    executions: int = 0
-
-
-class _OperationRegistry:
-    def __init__(self) -> None:
-        self._operations: dict[str, _Operation] = {}
-
-    def admit(self, operation_id: str, digest: str, method: str) -> _Operation:
-        existing = self._operations.get(operation_id)
-        if existing is not None:
-            if existing.payload_digest != digest:
-                raise OperationIdReuseMismatchError(
-                    "OPERATION_ID_REUSE_MISMATCH"
-                )
-            return existing
-        operation = _Operation(operation_id, digest, method)
-        self._operations[operation_id] = operation
-        return operation
-
-    def inspect(self, operation_id: str) -> dict[str, Any]:
-        operation = self._operations.get(operation_id)
-        if operation is None:
-            return {"disposition": "not_admitted"}
-        result: dict[str, Any] = {"disposition": operation.disposition}
-        if operation.result is not None:
-            result.update(operation.result)
-        return result
-
-    def admission_count(self, operation_id: str) -> int:
-        operation = self._operations.get(operation_id)
-        return operation.admissions if operation else 0
-
-    def execution_count(self, operation_id: str) -> int:
-        operation = self._operations.get(operation_id)
-        return operation.executions if operation else 0
-
-
-class DSHRpcServer:
-    """In-memory strict dispatcher used for transport unit tests."""
-
-    def __init__(
-        self,
-        *,
-        token: str,
-        handlers: Mapping[
-            str, Callable[[dict[str, Any]], Mapping[str, Any] | Awaitable[Mapping[str, Any]]]
-        ] | None = None,
-    ) -> None:
-        if not token:
-            raise RpcAuthenticationError("RPC token must be non-empty")
-        self._token = token
-        self._handlers = dict(handlers or {})
-        self.operations = _OperationRegistry()
-
-    def dispatch(
-        self, frame: object, *, authorization: str
-    ) -> dict[str, Any]:
-        if authorization != f"Bearer {self._token}":
-            raise RpcAuthenticationError("RPC authentication failed")
-        if not isinstance(frame, Mapping):
-            raise RpcContractError("RPC frame must be an object")
-        if frame.get("jsonrpc") != "2.0":
-            raise RpcContractError("jsonrpc must be 2.0")
-        if set(frame) != {"jsonrpc", "id", "method", "params"}:
-            raise RpcContractError("RPC request has unknown or missing fields")
-        method = frame.get("method")
-        params = frame.get("params")
-        if not isinstance(method, str) or method not in _METHODS:
-            raise RpcContractError("RPC method is unsupported")
-        if not isinstance(params, Mapping):
-            raise RpcContractError("RPC params must be an object")
-        if params.get("protocol_version") != RPC_PROTOCOL_VERSION_V2:
-            raise RpcContractError("RPC protocol version is unsupported")
-        payload = dict(params)
-        del payload["protocol_version"]
-        if set(payload) != _ALLOWED_PARAMS[method]:
-            raise RpcContractError("RPC method params are invalid")
-        result = self._dispatch_method(method, payload)
-        return {
-            "jsonrpc": "2.0",
-            "id": frame.get("id"),
-            "protocol_version": RPC_PROTOCOL_VERSION_V2,
-            "result": result,
-        }
-
-    def _dispatch_method(
-        self, method: str, params: dict[str, Any]
-    ) -> dict[str, Any]:
-        if method == "system.health":
-            return {"protocol_version": RPC_PROTOCOL_VERSION_V2, "status": "ok"}
-        if method == "resolution.inspect":
-            operation_id = params.get("operation_id")
-            if not isinstance(operation_id, str):
-                raise RpcContractError("operation_id is required")
-            return {
-                "protocol_version": RPC_PROTOCOL_VERSION_V2,
-                **self.operations.inspect(operation_id),
-            }
-        operation_id = params.get("operation_id")
-        digest = params.get("operation_payload_digest")
-        if not isinstance(operation_id, str) or not isinstance(digest, str):
-            raise RpcContractError("semantic operation identity is required")
-        operation = self.operations.admit(operation_id, digest, method)
-        if operation.result is not None:
-            return operation.result
-        operation.executions += 1
-        handler = self._handlers.get(method)
-        if handler is not None:
-            candidate = handler(params)
-            if isinstance(candidate, Awaitable):
-                raise RpcContractError("sync test server cannot await handler")
-            result = dict(candidate)
-        elif method in {"resolution.open", "resolution.continue"}:
-            intake = params.get("intake")
-            if not isinstance(intake, Mapping):
-                raise RpcContractError("intake is required")
-            if intake.get("schema_version") != "dsh_resolution_intake.v2":
-                raise RpcContractError("V2 intake is required")
-            terminal = {
-                "status": "resolved",
-                "summary": "resolved by deterministic RPC fixture",
-                "findings": [],
-                "completed_subgoals": [],
-                "remaining_needs": [],
-                "clarification_request": None,
-                "approval_request": None,
-                "artifact_refs": [],
-                "warnings": [],
-            }
-            result = {
-                "protocol_version": RPC_PROTOCOL_VERSION_V2,
-                "disposition": "terminal",
-                "intake": dict(intake),
-                "exhaust": {
-                    "kind": "terminal",
-                    "terminal": terminal,
-                    "evidence": [],
-                    "identity": {
-                        key: intake[key]
-                        for key in (
-                            "operation_id", "operation_payload_digest",
-                            "request_id", "resolution_thread_id", "segment_id",
-                            "brain_conversation_ref", "workspace_root",
-                            "route_digest",
-                        )
-                    }
-                    | {
-                        "scope_fingerprint": intake[
-                            "interaction_authority"
-                        ]["scope_fingerprint"],
-                        "audience_fingerprint": intake[
-                            "interaction_authority"
-                        ]["audience_fingerprint"],
-                        "catalog_digest": intake[
-                            "semantic_tool_authority"
-                        ]["catalog_digest"],
-                        "interaction_issuer": intake[
-                            "interaction_authority"
-                        ]["issuer"],
-                        "policy_epoch": "dsh-standard-policy-v2",
-                        "activation_id": params.get("activation_id", "act_1"),
-                        "lease_epoch": params.get("lease_epoch", 1),
-                    },
-                    "usage": {},
-                    "last_committed_seq": 1,
-                },
-            }
-        else:
-            disposition = {
-                "resolution.request_checkpoint": "checkpointed",
-                "resolution.cancel": "canceled",
-                "resolution.dispose_activation": "canceled",
-            }.get(method, "admitted_active")
-            result = {
-                "protocol_version": RPC_PROTOCOL_VERSION_V2,
-                "disposition": disposition,
-            }
-        operation.disposition = str(result.get("disposition", "admitted_active"))
-        operation.result = result
-        return result
-
-
-class InMemoryRpcTransport:
-    """Fault-injectable transport for semantic reconciliation tests."""
-
-    def __init__(self, server: DSHRpcServer) -> None:
-        self._server = server
-        self.fail_next_before_dispatch = False
-        self.fail_next_after_admission = False
-        self.fail_next_after_commit = False
-        self.return_unknown_inspection = False
-
-    async def send(
-        self, frame: Mapping[str, Any], authorization: str
-    ) -> Mapping[str, Any]:
-        method = frame.get("method")
-        if self.return_unknown_inspection:
-            if method == "resolution.inspect":
-                return {
-                    "jsonrpc": "2.0",
-                    "id": frame.get("id"),
-                    "protocol_version": RPC_PROTOCOL_VERSION_V2,
-                    "result": {
-                        "protocol_version": RPC_PROTOCOL_VERSION_V2,
-                        "disposition": "unknown",
-                    },
-                }
-            raise RpcTransportError("injected ambiguous transport failure")
-        if self.fail_next_before_dispatch:
-            self.fail_next_before_dispatch = False
-            raise RpcTransportError("injected pre-admission transport failure")
-        response = self._server.dispatch(frame, authorization=authorization)
-        if self.fail_next_after_admission:
-            self.fail_next_after_admission = False
-            raise RpcTransportError("injected post-admission transport failure")
-        if self.fail_next_after_commit:
-            self.fail_next_after_commit = False
-            raise RpcTransportError("injected post-commit transport failure")
-        return response
-
-
 class _HttpRpcTransport:
+    """Own one cancellable HTTP request and its connection lifetime."""
+
     def __init__(self, endpoint: str, timeout: float) -> None:
         self._endpoint = endpoint
         self._control_timeout = timeout
@@ -305,35 +46,36 @@ class _HttpRpcTransport:
     async def send(
         self, frame: Mapping[str, Any], authorization: str
     ) -> Mapping[str, Any]:
-        return await asyncio.to_thread(self._send_sync, frame, authorization)
-
-    def _send_sync(
-        self, frame: Mapping[str, Any], authorization: str
-    ) -> Mapping[str, Any]:
-        request = Request(
-            self._endpoint,
-            data=json.dumps(frame, separators=(",", ":")).encode("utf-8"),
-            headers={
-                "Authorization": authorization,
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
         timeout = (
             None
             if frame.get("method") in _LONG_RUNNING
             else self._control_timeout
         )
         try:
-            with urlopen(request, timeout=timeout) as response:
-                value = json.loads(response.read())
-        except (HTTPError, URLError, TimeoutError, OSError) as exc:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.post(
+                    self._endpoint,
+                    content=json.dumps(frame, separators=(",", ":")),
+                    headers={
+                        "Authorization": authorization,
+                        "Content-Type": "application/json",
+                    },
+                )
+                response.raise_for_status()
+                value = response.json()
+        except httpx.HTTPError as exc:
+            detail = str(exc) or type(exc).__name__
             raise RpcTransportError(
-                f"sidecar loopback transport failed: {exc}"
+                f"sidecar loopback transport failed: {detail}",
+            ) from exc
+        except json.JSONDecodeError as exc:
+            raise RpcContractError(
+                f"sidecar returned invalid JSON: {exc}",
             ) from exc
         if not isinstance(value, Mapping):
             raise RpcContractError("RPC response must be an object")
-        return value
+        response_frame = dict(value)
+        return response_frame
 
 
 class DSHRpcClient:
@@ -387,29 +129,31 @@ class DSHRpcClient:
         }
         try:
             response = await self._transport.send(
-                frame, f"Bearer {self._token}"
+                frame, f"Bearer {self._token}",
             )
         except RpcTransportError:
             if method not in _MUTATING:
                 raise
-            return await self._reconcile_after_disconnect(
-                frame, operation_id, operation_payload_digest
+            reconciled = await self._reconcile_after_disconnect(
+                frame,
+                operation_id,
+                operation_payload_digest,
             )
-        return self._validate_response(response, frame["id"])
-
-    def call_sync(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return asyncio.run(self.call(*args, **kwargs))
+            return reconciled
+        result = self._validate_response(response, frame["id"])
+        return result
 
     async def inspect_operation(
         self, operation_id: str, payload_digest: str
     ) -> dict[str, Any]:
-        return await self.call(
+        inspected = await self.call(
             "resolution.inspect",
             {
                 "operation_id": operation_id,
                 "operation_payload_digest": payload_digest,
             },
         )
+        return inspected
 
     async def reconcile(
         self, operation_id: str, payload_digest: str
@@ -418,7 +162,7 @@ class DSHRpcClient:
         disposition = inspected.get("disposition")
         if disposition == "unknown":
             raise OperationOutcomeUncertainError(
-                "operation outcome remains unknown"
+                "operation outcome remains unknown",
             )
         if disposition == "not_admitted":
             raise OperationOutcomeUncertainError("operation was not admitted")
@@ -426,27 +170,26 @@ class DSHRpcClient:
             return inspected
         raise RpcContractError("inspection disposition is unsupported")
 
-    def reconcile_sync(
-        self, operation_id: str, payload_digest: str
-    ) -> dict[str, Any]:
-        return asyncio.run(self.reconcile(operation_id, payload_digest))
-
     async def _reconcile_after_disconnect(
         self,
         original_frame: Mapping[str, Any],
-        operation_id: str,
-        payload_digest: str,
+        operation_id: str | None,
+        payload_digest: str | None,
     ) -> dict[str, Any]:
+        if operation_id is None or payload_digest is None:
+            raise RpcContractError("mutating RPC requires semantic identity")
         inspected = await self.inspect_operation(operation_id, payload_digest)
         disposition = inspected.get("disposition")
         if disposition == "not_admitted":
             response = await self._transport.send(
-                original_frame, f"Bearer {self._token}"
+                original_frame,
+                f"Bearer {self._token}",
             )
-            return self._validate_response(response, original_frame["id"])
+            retried = self._validate_response(response, original_frame["id"])
+            return retried
         if disposition == "unknown":
             raise OperationOutcomeUncertainError(
-                "operation outcome remains unknown"
+                "operation outcome remains unknown",
             )
         if disposition in _COMMITTED or disposition == "admitted_active":
             return inspected
@@ -466,10 +209,11 @@ class DSHRpcClient:
                 "OPERATION_ID_REUSE_MISMATCH"
             ):
                 raise OperationIdReuseMismatchError(
-                    "operation id reuse mismatch"
+                    "operation id reuse mismatch",
                 )
             raise RpcContractError("sidecar returned a bounded RPC error")
         result = response.get("result")
         if not isinstance(result, Mapping):
             raise RpcContractError("RPC result must be an object")
-        return dict(result)
+        validated_result = dict(result)
+        return validated_result

@@ -292,7 +292,6 @@ Collect deterministic evidence with the exact commands below:
 
 ```powershell
 venv\Scripts\python -m pytest -q tests/integration/cognition_core_v3/test_chain_observability.py::test_protected_and_sanitized_records_share_exact_service_console_correlation
-venv\Scripts\python -m scripts.validate_test_impact --base-ref HEAD
 ```
 
 The brain endpoint and control console pair each graph with its exact chain
@@ -1101,17 +1100,13 @@ pytest -m "not live_db and not live_llm" -q
 venv\Scripts\python -m pytest tests\test_cognition_resolver_contracts.py tests\test_cognition_resolver_loop.py tests\test_cognition_resolver_persona_graph.py tests\test_cognition_resolver_l2d_contract.py -q
 ```
 
-For a production change under cognition, cognition-resolver, or a named
-direct-node ownership boundary, run the manifest-backed exact impact command
-from the captured baseline:
-
-```powershell
-venv\Scripts\python -m scripts.validate_test_impact --base-ref HEAD --run
-```
-
-This command fails for an unmapped source, stale node, or omitted collected
-node. Deterministic owner tests live under `tests/unit/` with source-mirrored
-module names; integration and live-LLM tests provide additional evidence.
+For runtime changes, begin with a small executable probe through the actual
+integration boundary. Diagnose observed failures before adding regression
+checks. DSH uses the single
+[runtime completion plan](../development_plans/active/bugfix/dsh_runtime_completion_plan_2026-09-05.md):
+essential launch/isolation checks, real-model foreground behavior, deferred and
+internal behavior, then recovery and justified hardening. Ownership-manifest
+enforcement and dedicated non-LLM DSH suites were retired by owner direction.
 
 Live LLM tests must be run and inspected one at a time:
 
@@ -1127,6 +1122,20 @@ character-review artifact under `test_artifacts/dsh_behavior_e2e/`. Final DSH
 sign-off remains withheld until all three cases run with available models and
 receive an independent character-behavior review. Live LLM cases remain
 isolated from deterministic contract and browser checks.
+
+Set `KAZUSA_RUN_LIVE_LLM=1` for the explicit DSH live commands. Each wrapper
+declares its supplied documents, natural inputs, hard gates, and independent
+behavior rubric. Foreground coverage asks about conflicting release notes and
+then clarifies the release. Deferred coverage compares documents with a missing
+fact and checks the actual result delivery. Internal coverage pairs an
+answerable question with an unsupported success approval request.
+
+Each case uses a unique guarded `_test_kazusa_dsh_behavior_<uuid>` database.
+The harness uses public application setup APIs and a separate guarded
+diagnostic client, then drops that exact database. Process resources are shared
+through `experiments/dsh_process_support.py`; the internal case starts only its
+Brain collaborators. Protected artifacts include actual Brain model calls,
+provider-reported usage, and the real DSH provider traffic where applicable.
 
 Live DB tests can be run explicitly when MongoDB is available:
 

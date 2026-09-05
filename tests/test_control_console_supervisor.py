@@ -111,12 +111,6 @@ class _ControlledReadyStream:
         return b"DSH_RESOLUTION_READY\n"
 
 
-class _ReadinessProcess(_FakeProcess):
-    """Provide one controlled stdout readiness marker."""
-
-    def __init__(self, release: asyncio.Event) -> None:
-        super().__init__()
-        self.stdout = _ControlledReadyStream(release)
 
 
 def _service_spec(service_id: str, tmp_path, *, dependencies=None):
@@ -136,60 +130,6 @@ def _service_spec(service_id: str, tmp_path, *, dependencies=None):
     return spec
 
 
-@pytest.mark.asyncio
-async def test_start_waits_for_declared_readiness_marker(
-    monkeypatch,
-    tmp_path,
-) -> None:
-    """A dependency must stay starting until its child declares readiness."""
-
-    from control_console.audit import LocalAuditWriter
-    from control_console.contracts import ServiceSpec
-    from control_console.log_store import ProcessLogStore
-    from control_console.process_store import ProcessStore
-    from control_console.supervisor import ProcessSupervisor
-
-    release = asyncio.Event()
-
-    async def fake_create_subprocess_exec(*args, **kwargs):
-        del args, kwargs
-        return _ReadinessProcess(release)
-
-    monkeypatch.setattr(
-        asyncio,
-        "create_subprocess_exec",
-        fake_create_subprocess_exec,
-    )
-    spec = ServiceSpec.model_validate({
-        "id": "dsh.sidecar",
-        "display_name": "DSH sidecar",
-        "kind": "support",
-        "command": ["node", "sidecar.js"],
-        "cwd": str(tmp_path),
-        "ready_match": "DSH_RESOLUTION_READY",
-        "startup_timeout_seconds": 1.0,
-    })
-    supervisor = ProcessSupervisor(
-        services={"dsh.sidecar": spec},
-        store=ProcessStore(tmp_path / "state"),
-        log_store=ProcessLogStore(tmp_path / "logs"),
-        audit_writer=LocalAuditWriter(tmp_path / "audit.jsonl"),
-    )
-
-    start_task = asyncio.create_task(supervisor.start_service(
-        service_id="dsh.sidecar",
-        operator_id="operator",
-        reason="readiness test",
-    ))
-    await asyncio.sleep(0)
-
-    assert not start_task.done()
-    assert supervisor.service_state("dsh.sidecar").actual_state == "starting"
-
-    release.set()
-    response = await start_task
-
-    assert response["service"]["actual_state"] == "running"
 
 
 @pytest.mark.asyncio

@@ -421,43 +421,6 @@ def test_relationship_maintenance_rotates_same_day_source_ids() -> None:
     assert processed[0] == "episode:old-1"
 
 
-def test_continuation_goal_admission_is_exact_for_task_control_and_resolution() -> None:
-    payload = _input()
-    evidence = payload["evidence"]
-    for action_requests, resolver_requests, expected_continuation in (
-        ([{"action_kind": "accepted_task_control", "decision": "continue"}], [], True),
-        ([{"action_kind": "accepted_task_control", "decision": "summarize"}], [], True),
-        ([{"action_kind": "accepted_task_control", "decision": "cancel"}], [], True),
-        ([], [{"capability": "task_resolution_request"}], True),
-        ([], [{"capability": "human_clarification"}], False),
-        ([], [{"capability": "approval_preparation"}], False),
-        ([], [{"capability": "self_goal_resolution"}], False),
-    ):
-        metadata: dict[str, object] = {}
-        updated, _transitions, _receipts, _provenance = bind_axis_changes(
-            {
-                "episode": payload["episode"],
-                "mutable_state": deepcopy(payload["mutable_state"]),
-                "state_scope": "user",
-                "evidence": evidence,
-            },
-            (),
-            goal={"intent": "continue the accepted work", "cause_summary": "the request"},
-            action_requests=action_requests,
-            resolver_requests=resolver_requests,
-            binding_metadata=metadata,
-        )
-        validate_cognition_state(updated)
-        if expected_continuation:
-            assert len(updated["goals"]) == 1
-            assert metadata["continuation_goal_ref"] == {
-                "scope": "user",
-                "kind": "goal",
-                "entity_id": updated["goals"][0]["entity_id"],
-            }
-        else:
-            assert updated["goals"] == []
-            assert "continuation_goal_ref" not in metadata
 
 
 class _CharacterTransactionInvoker:

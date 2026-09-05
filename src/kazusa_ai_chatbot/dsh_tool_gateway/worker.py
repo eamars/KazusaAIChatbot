@@ -32,7 +32,7 @@ WORKER_HEALTH_SCHEMA_VERSION = "kazusa_semantic_worker_health.v1"
 
 @dataclass(frozen=True, slots=True)
 class SemanticWorkerCall:
-    """Minimal worker call shape for injected deterministic handlers."""
+    """Authenticated call identity and payload passed to semantic handlers."""
 
     call_id: str
     payload: dict[str, Any]
@@ -60,37 +60,6 @@ class SemanticOutcomeOwner(Protocol):
         """Persist that a mutation outcome cannot be safely replayed."""
 
 
-class InMemorySemanticOutcomeOwner:
-    """Explicit test-only outcome owner used by deterministic worker tests."""
-
-    def __init__(self) -> None:
-        self._rows: dict[str, tuple[str, str, dict[str, Any] | None]] = {}
-
-    async def lookup(
-        self,
-        call_id: str,
-        payload_digest: str,
-    ) -> tuple[Literal["missing", "committed", "uncertain", "mismatch"], dict[str, Any] | None]:
-        row = self._rows.get(call_id)
-        if row is None:
-            return "missing", None
-        stored_digest, status, result = row
-        if stored_digest != payload_digest:
-            return "mismatch", None
-        if status == "committed":
-            return "committed", None if result is None else dict(result)
-        return "uncertain", None
-
-    async def commit(
-        self,
-        call_id: str,
-        payload_digest: str,
-        result: dict[str, Any],
-    ) -> None:
-        self._rows[call_id] = (payload_digest, "committed", dict(result))
-
-    async def mark_uncertain(self, call_id: str, payload_digest: str) -> None:
-        self._rows[call_id] = (payload_digest, "uncertain", None)
 
 
 class SQLiteSemanticOutcomeOwner:

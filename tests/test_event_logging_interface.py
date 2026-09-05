@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import json
 from datetime import datetime, timezone
 
@@ -30,21 +29,8 @@ _RECORDER_NAMES = [
 ]
 
 
-def test_public_recorders_are_async_keyword_only() -> None:
-    for name in _RECORDER_NAMES:
-        recorder = getattr(event_logging, name)
-        assert inspect.iscoroutinefunction(recorder)
-        assert "payload" not in inspect.signature(recorder).parameters
-        assert all(
-            parameter.kind is inspect.Parameter.KEYWORD_ONLY
-            for parameter in inspect.signature(recorder).parameters.values()
-        )
 
 
-def test_continuity_boundary_recorder_is_keyword_only_and_exported() -> None:
-    recorder = event_logging.record_continuity_boundary_event
-    assert inspect.iscoroutinefunction(recorder)
-    assert "record_continuity_boundary_event" in event_logging.__all__
 
 
 @pytest.mark.asyncio
@@ -117,8 +103,6 @@ async def test_process_event_records_sanitized_scope(monkeypatch) -> None:
     assert "raw-channel-1" not in serialized
 
 
-def test_public_module_does_not_export_generic_record_event() -> None:
-    assert not hasattr(event_logging, "record_event")
 
 
 def test_public_types_are_exported() -> None:

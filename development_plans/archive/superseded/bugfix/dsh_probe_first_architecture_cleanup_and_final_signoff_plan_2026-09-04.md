@@ -2,10 +2,11 @@
 
 ## Document Control
 
-- **Status:** in_progress; Gates 3, 5, and 6 reopened by the 2026-09-05
-  architecture/test review; remediation implementation and subsequent real LLM
-  execution explicitly authorized by the current user instruction. Final
-  sign-off requires the remaining gates and independent behavior review.
+- **Status:** superseded by explicit owner direction on 2026-09-05.
+- **Successor:** [DSH runtime completion](../../../active/bugfix/dsh_runtime_completion_plan_2026-09-05.md).
+  The successor covers the entire existing and new DSH codebase. Historical
+  test matrices and readiness-before-live gates below are retired; functional
+  obligations and evidence continue under the successor.
 - **Created:** 2026-09-04.
 - **Historical execution authority:** the earlier user request covered this
   plan's then-reviewed implementation cleanup through the real-LLM hold point.
@@ -14,13 +15,14 @@
 - **Supersedes:**
   `dsh_operational_e2e_quality_signoff_and_transport_failure_remediation_plan_2026-08-31.md`.
 - **Implementation boundary:** production, test, experiment, documentation, and
-  plan-lifecycle changes named here. Real-LLM execution, environment-file
-  inspection, production data mutation, and deployment remain outside the
-  current execution slice.
+  plan-lifecycle changes named here and in the approved remediation plan.
+  The current user instruction includes real LLM execution after readiness
+  review. Environment-file inspection, production data mutation, and deployment
+  remain outside the execution slice.
 - **Current sign-off state:** withheld. The next work is the bounded
   [integration-boundary and test-contract remediation](dsh_integration_boundary_and_test_contract_remediation_plan_2026-09-05.md).
-  Actual E2E execution is excluded by the user's 2026-09-05 instruction;
-  model availability alone supplies no execution authority.
+  The latest 2026-09-05 user instruction explicitly authorizes actual E2E
+  execution and closure after the remaining acceptance gates pass.
 - **Historical plan review:** passed on 2026-09-04 with zero blocker/high findings after
   three bounded review rounds; Gate 0 may close.
 - **Historical implementation review:** passed on 2026-09-04 with zero blocker,
@@ -524,15 +526,15 @@ defect and source/test amendment is reviewed in this plan.
 | `cognition_resolver/capabilities.py::_execute_task_resolution_request` | Typed task/infrastructure outcome | Deterministic capability integration | `tests/unit/cognition_resolver/test_capabilities.py::test_task_resolution_transport_failure_returns_blocked_observation`; `tests/unit/cognition_resolver/test_capabilities.py::test_background_task_resolution_transport_failure_returns_blocked_observation`; `tests/unit/cognition_resolver/test_capabilities.py::test_task_resolution_database_failure_returns_blocked_observation` | `tests/test_dsh_behavior_live_llm.py::test_live_foreground_task_resolution_is_grounded_and_character_owned`; `tests/test_dsh_behavior_live_llm.py::test_live_deferred_task_result_recurs_and_delivers_once` | Infrastructure exception escapes the resolver or becomes false task success. |
 | `cognition_shared/contracts.py` dependency import/dead comparison removal | L3 input contract | Deterministic contract | `tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_l3_surface_projects_current_task_resolver_dependency`; `tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_l3_terminal_resolver_surface_closes_stale_pending_plan` | `tests/test_dsh_behavior_live_llm.py::test_live_foreground_task_resolution_is_grounded_and_character_owned`; `tests/test_dsh_behavior_live_llm.py::test_live_deferred_task_result_recurs_and_delivers_once` | A dead copied-field validator remains as parallel authority. |
 | `nodes/persona_supervisor2_l3_surface.py::_resolver_result_continuation_ref`; `nodes/persona_supervisor2_l3_surface.py::_resolver_result`; `nodes/persona_supervisor2_l3_surface.py::_task_resolver_result` | L3 evidence input | Deterministic node integration | `tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_l3_surface_projects_current_task_resolver_dependency`; `tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_l3_surface_rejects_missing_required_task_observation_before_planning`; `tests/unit/nodes/test_persona_supervisor2_l3_surface.py::test_l3_surface_rejects_mismatched_tool_result_speak_continuation` | `tests/test_dsh_behavior_live_llm.py::test_live_foreground_task_resolution_is_grounded_and_character_owned`; `tests/test_dsh_behavior_live_llm.py::test_live_deferred_task_result_recurs_and_delivers_once` | L3 consumes copied dependency semantics or detached continuation. |
-| Real sidecar boot/readiness/semantic worker | Sidecar process boundary | Real process with deterministic provider | `tests/test_agentic_resolver_sidecar_process.py::test_sidecar_requires_loopback_auth_data_root_model_and_versioned_store_path`; `tests/test_agentic_resolver_sidecar_process.py::test_real_sidecar_worker_accepts_python_semantic_call_contract`; `tests/integration/test_dsh_runtime_probe.py::test_sidecar_lifecycle_probe` | `tests/test_dsh_behavior_live_llm.py::test_live_foreground_task_resolution_is_grounded_and_character_owned` | Unit doubles mask boot or worker wiring failure. |
-| SQLite checkpoint/restart/replay | DSH session persistence | Real process with deterministic provider | `tests/test_agentic_resolver_sidecar_process.py::test_sidecar_restart_preserves_checkpoint_and_cold_resumes`; `tests/test_agentic_resolver_sidecar_process.py::test_kill_after_terminal_commit_before_http_response_replays_exact_exhaust`; `tests/integration/test_dsh_runtime_probe.py::test_sidecar_lifecycle_probe` | — | Green in-memory lifecycle loses state across a real process restart. |
+| Real sidecar boot/readiness/semantic worker | Sidecar process boundary | Real process with deterministic provider | `tests/integration/test_dsh_runtime_probe.py::test_sidecar_lifecycle_probe` | `tests/test_dsh_behavior_live_llm.py::test_live_foreground_task_resolution_is_grounded_and_character_owned` | Public auth rejection, independent sessions, missing-worker readiness, and semantic forwarding remain covered. |
+| SQLite checkpoint/restart/replay | DSH session persistence | Real process with deterministic provider | `tests/integration/test_dsh_runtime_probe.py::test_sidecar_lifecycle_probe` | — | Green in-memory lifecycle loses state across a real process restart. |
 | Public controller plus guarded Mongo task binding | Controller/task service/persistence | Guarded live DB plus real process | `tests/integration/test_dsh_runtime_probe.py::test_brain_task_lifecycle_probe`; `tests/unit/task_resolution/test_service.py::test_inline_checkpoint_promotes_same_bound_dsh_session_without_canceling_reasoning`; `tests/test_agentic_resolver_controller.py::test_controller_restart_reconciles_terminal_projection_and_lease` | `tests/test_dsh_behavior_live_llm.py::test_live_deferred_task_result_recurs_and_delivers_once` | Sidecar proof omits the Brain binding and Mongo reconciliation boundary. |
 | Actual sidecar loss | RPC/capability readiness and failure projection | Real process fault injection | `tests/integration/test_dsh_runtime_probe.py::test_transport_loss_probe`; `tests/unit/agentic_resolver/test_rpc_readiness.py::test_transport_error_preserves_low_level_cause`; `tests/unit/agentic_resolver/test_rpc_readiness.py::test_runtime_readiness_delegates_to_authenticated_sidecar_health` | `tests/test_dsh_behavior_live_llm.py::test_live_foreground_task_resolution_is_grounded_and_character_owned` | Transport loss escapes as an untyped graph crash. |
 | Control-console dependency order | Local process lifecycle | Deterministic supervisor integration | `tests/test_control_console_service_registry.py::test_default_registry_manages_dsh_between_brain_and_adapters`; `tests/test_control_console_supervisor.py::test_dependency_order_requires_brain_before_adapter_and_stops_dependents` | — | Adapter starts while the managed DSH dependency is unavailable. |
 | Trigger-source deterministic eligibility | Source owners | Deterministic source integration | `tests/test_self_cognition_integration.py::test_internal_latch_case_hydrates_bound_user_profile`; `tests/test_self_cognition_integration.py::test_collect_scheduled_future_cognition_cases_preserves_source_scope`; `tests/test_self_cognition_integration.py::test_collect_commitment_due_cognition_cases_projects_calendar_runs`; `tests/unit/background_work/test_result_source.py::test_dsh_result_reenters_cognition_with_exact_goal_and_evidence_provenance`; `tests/unit/cognition_resolver/test_capabilities.py::test_task_capability_uses_runtime_readiness_without_legacy_fallback` | — | A stochastic model is used to prove deterministic source identity/readiness. |
 | Character-owned internal DSH judgment | Brain interaction cognition | Deterministic enactment plus real LLM judgment | `tests/test_dsh_brain_interaction_decision.py::test_brain_semantic_decision_is_enacted_without_keyword_or_post_llm_reclassification`; `tests/test_dsh_brain_interaction_service.py::test_service_returns_internal_decision_without_checkpoint_or_delivery` | `tests/test_dsh_behavior_live_llm.py::test_live_internal_dsh_judgment_is_character_owned` | Deterministic code rewrites the character decision. |
 | `sidecars/dsh_resolution/tests/profile.spec.ts` public profile behavior | Sidecar profile boundary | TypeScript component integration | `sidecars/dsh_resolution/tests/profile.spec.ts > profile > builds only the resolver profile through the strict profile factory`; `sidecars/dsh_resolution/tests/profile.spec.ts > profile > fails startup for an incompatible DSH dependency graph`; `sidecars/dsh_resolution/tests/profile.spec.ts > profile > rejects an intake whose route digest differs before session creation`; `sidecars/dsh_resolution/tests/profile.spec.ts > V2 profile invariants > rejects V1 epoch while accepting the installed compatible dependency graph` | — | Compatibility remains behavioral while installed package file digests cease to be a release oracle. |
-| `sidecars/dsh_resolution/tests/standard_profile.spec.ts` public Standard composition behavior | Sidecar Standard composition | TypeScript component integration | `sidecars/dsh_resolution/tests/standard_profile.spec.ts > official Standard profile > mounts installed Standard without a copied preset`; `sidecars/dsh_resolution/tests/standard_profile.spec.ts > official Standard profile > adds Kazusa semantic tools without colliding with official Standard capabilities`; `sidecars/dsh_resolution/tests/standard_profile.spec.ts > official Standard profile > publishes the Kazusa semantic capability catalog` | — | Internal Standard row counts and tool ordering cease to substitute for boot, collision, and capability behavior. |
+| `sidecars/dsh_resolution/tests/standard_profile.spec.ts` public Standard composition behavior | Sidecar Standard composition | TypeScript component integration | `sidecars/dsh_resolution/tests/standard_profile.spec.ts > official Standard profile > adds Kazusa semantic tools without colliding with official Standard capabilities`; `sidecars/dsh_resolution/tests/standard_profile.spec.ts > official Standard profile > publishes the Kazusa semantic capability catalog` | — | Internal Standard row counts and tool ordering cease to substitute for boot, collision, and capability behavior. |
 | Changed-source mapping fail-closed | Test-impact owner | Static impact validation | `tests/test_test_impact_manifest.py::test_unmapped_changed_source_fails_closed`; `tests/test_test_impact_manifest.py::test_stale_required_node_fails_closed` | — | Removing the sign-off manifest weakens production test ownership. |
 
 The other two live behavior contracts are
@@ -608,11 +610,11 @@ npm test -- tests/profile.spec.ts tests/standard_profile.spec.ts
 - Obtain independent implementation review.
 - Record the exact tested commit/worktree fingerprint and all residual risks.
 
-### Gate 7 — Real-LLM hold point
+### Gate 7 — Real-LLM behavior sign-off
 
 The 2026-09-05 review reopens Gates 3, 5, and 6. Complete the linked remediation
-scope and independent non-E2E readiness review first. Actual E2E remains
-excluded until a subsequent user command authorizes it. Then run each selected
+scope and independent non-E2E readiness review first. The latest user command
+authorizes actual E2E execution. Run each selected
 live behavior scenario individually, inspect its raw trace/durable evidence
 and visible behavior, obtain independent character review, and either close
 the plan or return a demonstrated defect to its non-LLM owner probe. Availability
@@ -674,7 +676,8 @@ of models alone cannot advance this gate.
   `Documentation`, this plan, and its registry row.
 - **Authority:** edit owned files; create/drop only a guarded unique test DB;
   create/remove only probe-owned temporary roots; start/stop only probe-owned
-  child processes; run non-LLM commands through Gate 6.
+  child processes; run non-LLM commands through Gate 6 and individually inspect
+  the user-authorized real-model cases after independent readiness review.
 - **Applicable skills:** `development-plan`, `probe-first-engineering`,
   `local-llm-architecture`, `py-style`, `test-style-and-execution`, and
   `cjk-safety` when triggered.

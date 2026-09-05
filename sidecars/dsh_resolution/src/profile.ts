@@ -859,13 +859,6 @@ export async function buildProfile(
         intake.operation_id,
         intake.operation_payload_digest,
       );
-      if (
-        result.disposition === "terminal"
-        && process.env.NODE_ENV === "test"
-        && process.env.KAZUSA_DSH_TEST_EXIT_AFTER_TERMINAL_COMMIT === "1"
-      ) {
-        process.exit(97);
-      }
       return result;
     },
     async checkpoint(threadId, segmentId, activationId, leaseEpoch) {

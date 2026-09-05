@@ -7,7 +7,6 @@ import hashlib
 from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from inspect import isawaitable
 from typing import Any, Protocol
 from uuid import uuid4
 
@@ -1362,8 +1361,8 @@ class ResolutionController:
 
     async def _repository_call(self, name: str, *args: Any, **kwargs: Any) -> Any:
         method = getattr(self._repository, name)
-        value = method(*args, **kwargs)
-        return await value if isawaitable(value) else value
+        value = await method(*args, **kwargs)
+        return value
 
     async def _health_identity(self) -> dict[str, str]:
         """Read the actual mounted Standard identity before thread admission."""

@@ -1,4 +1,4 @@
-"""Deterministic ownership checks for Brain cognition observations."""
+"""Behavior checks for Brain cognition observations."""
 
 from __future__ import annotations
 
@@ -285,20 +285,6 @@ async def test_failed_run_uses_current_attempt_prewarm_checkpoint(monkeypatch) -
     await _reset_queue_state()
 
 
-def test_legacy_cognition_graph_projection_symbols_are_absent_from_production() -> None:
-    """Service no longer owns the removed graph projection vocabulary."""
-
-    source = Path(service.__file__).read_text(encoding="utf-8")
-    frozen_symbols = (
-        "_build_response_cognition_graph",
-        "_build_self_cognition_cognition_graph",
-        "_graph_cognition_nodes",
-        "_graph_memory_detail",
-        "_graph_visual_node",
-        "_GRAPH_EVIDENCE_FIELDS",
-    )
-    for symbol in frozen_symbols:
-        assert symbol not in source
 
 
 def test_cognition_contract_exhaustion_preserves_typed_error_code() -> None:
